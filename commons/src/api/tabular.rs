@@ -34,3 +34,28 @@ pub trait FlightConnector: Send + Sync {
     fn provider(&self) -> String;
     async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ApiError>;
 }
+
+#[cfg(test)]
+mod tests {
+    use arrow::datatypes::{DataType, Field};
+
+    use super::*;
+
+    #[test]
+    fn test_tabular_state_new() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let state = TabularState::new("SELECT * FROM users".to_string(), schema.clone());
+
+        assert_eq!(state.query, "SELECT * FROM users");
+        assert_eq!(state.schema.fields().len(), 2);
+        assert_eq!(state.schema.field(0).name(), "id");
+        assert_eq!(*state.schema.field(0).data_type(), DataType::Int64);
+        assert!(!state.schema.field(0).is_nullable());
+        assert_eq!(state.schema.field(1).name(), "name");
+        assert_eq!(*state.schema.field(1).data_type(), DataType::Utf8);
+        assert!(state.schema.field(1).is_nullable());
+    }
+}

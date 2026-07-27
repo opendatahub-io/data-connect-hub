@@ -37,3 +37,34 @@ impl MetaStore for PgMetaStore {
         serde_json::from_value(json_value).map_err(|e| MetaStoreError::Serialization(e.to_string()))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_database_config_deserialize_json() {
+        let json = r#"{"url": "postgresql://user:pass@localhost:5432/testdb"}"#;
+        let config: DatabaseConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(config.url, "postgresql://user:pass@localhost:5432/testdb");
+    }
+
+    #[test]
+    fn test_database_config_deserialize_missing_url() {
+        let json = r#"{}"#;
+        let result = serde_json::from_str::<DatabaseConfig>(json);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("url"), "expected error about 'url', got: {err}");
+    }
+
+    #[test]
+    fn test_database_config_debug() {
+        let config = DatabaseConfig {
+            url: "postgresql://localhost/db".to_string(),
+        };
+        let debug = format!("{:?}", config);
+        assert!(debug.contains("DatabaseConfig"));
+        assert!(debug.contains("postgresql://localhost/db"));
+    }
+}

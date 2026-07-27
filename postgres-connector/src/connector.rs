@@ -148,6 +148,73 @@ fn pg_type_to_arrow(pg_type: &str) -> DataType {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pg_type_to_arrow_bool() {
+        assert_eq!(pg_type_to_arrow("BOOL"), DataType::Boolean);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_int16() {
+        assert_eq!(pg_type_to_arrow("INT2"), DataType::Int16);
+        assert_eq!(pg_type_to_arrow("SMALLINT"), DataType::Int16);
+        assert_eq!(pg_type_to_arrow("SMALLSERIAL"), DataType::Int16);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_int32() {
+        assert_eq!(pg_type_to_arrow("INT4"), DataType::Int32);
+        assert_eq!(pg_type_to_arrow("INT"), DataType::Int32);
+        assert_eq!(pg_type_to_arrow("INTEGER"), DataType::Int32);
+        assert_eq!(pg_type_to_arrow("SERIAL"), DataType::Int32);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_int64() {
+        assert_eq!(pg_type_to_arrow("INT8"), DataType::Int64);
+        assert_eq!(pg_type_to_arrow("BIGINT"), DataType::Int64);
+        assert_eq!(pg_type_to_arrow("BIGSERIAL"), DataType::Int64);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_float32() {
+        assert_eq!(pg_type_to_arrow("FLOAT4"), DataType::Float32);
+        assert_eq!(pg_type_to_arrow("REAL"), DataType::Float32);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_float64() {
+        assert_eq!(pg_type_to_arrow("FLOAT8"), DataType::Float64);
+        assert_eq!(pg_type_to_arrow("DOUBLE PRECISION"), DataType::Float64);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_binary() {
+        assert_eq!(pg_type_to_arrow("BYTEA"), DataType::Binary);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_fallback() {
+        assert_eq!(pg_type_to_arrow("TEXT"), DataType::Utf8);
+        assert_eq!(pg_type_to_arrow("VARCHAR"), DataType::Utf8);
+        assert_eq!(pg_type_to_arrow("TIMESTAMP"), DataType::Utf8);
+        assert_eq!(pg_type_to_arrow("UUID"), DataType::Utf8);
+    }
+
+    #[test]
+    fn test_pg_connector_new() {
+        let connector = PgConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+        );
+        assert_eq!(connector.provider(), "postgres");
+    }
+}
+
 fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> ArrayRef {
     match pg_type {
         "BOOL" => {
