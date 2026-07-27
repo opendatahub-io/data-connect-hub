@@ -69,5 +69,38 @@ For each DCH tenant, an instance of Postgresql is expected to be **pre-installed
 
 ## Verify REST Connection Service
 REST connection service is only available from within the cluster, i.e., there's no public route to the service.
+- Forward REST service to local host:
+  ```console
+  ```
+
+- Get all connections:
+  ```
+  curl -s http://localhost:8080/v1/data/connections
+  ```
+
+  You should see:
+  ```
+  TODO
+  ```
+  
+- Get all connections in a namespace, for example, `dch-tenant-1`:
+  ```
+  curl -s http://localhost:8080/v1/data/connections/dch-tenant-1
+  ```
+
+  You should see:
+  ```
+  TODO
+  ```
+
+- Get a connection in a namespace, for example, `dch-tenant-1`:
+  ```
+  curl -s http://localhost:8080/v1/data/connections/dch-tenant-1/test-name
+  ```
+
+  You should see:
+  ```
+  TODO
+  ```
 
 ## Verify Flight Service
