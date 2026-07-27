@@ -5,8 +5,8 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - You have an OpenShift cluster on version `4.20` or later.
 - You have installed the OpenShift CLI (`oc`).
 - You have logged in as a user with cluster-admin privileges.
-
-
+- `curl`: you will use `curl` to test REST connection service.
+- `grpcurl`: you will use `grpcurl` to test flight service.
 
 ## Installation & Verification Steps
   - Create Tenants & Namespaces
@@ -104,3 +104,42 @@ REST connection service is only available from within the cluster, i.e., there's
   ```
 
 ## Verify Flight Service
+Flight service is only available from within the cluster, i.e., there's no public route to the service.
+- Forward service to local host:
+  ```console
+  ```
+
+- Download `Flight.proto` so `grpcurl` can construct and send valid requests.
+  ```console
+  curl -sL -o /tmp/Flight.proto https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto
+  ```
+
+- List services:
+  ```console
+  grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:50051 list
+  ```
+  You should see:
+  ```
+  arrow.flight.protocol.FlightService
+  ```
+- Describe service:
+  ```console
+  grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:50051 describe arrow.flight.protocol.FlightService
+  ```
+  You should see:
+  ```console
+  // PollFlightInfo() with PollInfo.flight_descriptor. A server
+  // should not respond until the result would be different from last
+  // time. That way, the client can "long poll" for updates
+  // without constantly making requests. Clients can set a short timeout
+  // to avoid blocking calls if desired.
+  ```
+
+- List flights:
+  ```console
+  grpcurl -plaintext -import-path /tmp -proto Flight.proto -d '{}' localhost:50051 arrow.flight.protocol.FlightService/ListFlights
+  ```
+  You should see:
+  ```console
+  TODO
+  ```
