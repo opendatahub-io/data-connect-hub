@@ -27,7 +27,7 @@ mod tests {
             address = "127.0.0.1"
             port = 8080
 
-            [_database]
+            [database]
             url = "postgresql://user:pass@localhost:5432/testdb"
         "#;
 
@@ -51,7 +51,7 @@ mod tests {
             [server]
             address = "127.0.0.1"
 
-            [_database]
+            [database]
             url = "postgresql://user:pass@localhost:5432/testdb"
         "#;
 
@@ -61,7 +61,10 @@ mod tests {
             .unwrap();
 
         let err = config.try_deserialize::<ServerConfig>().unwrap_err();
-        assert!(err.to_string().contains("port"), "expected error about 'port', got: {err}");
+        assert!(
+            err.to_string().contains("port"),
+            "expected error about 'port', got: {err}"
+        );
     }
 
     #[test]
@@ -78,7 +81,10 @@ mod tests {
             .unwrap();
 
         let err = config.try_deserialize::<ServerConfig>().unwrap_err();
-        assert!(err.to_string().contains("_database"), "expected error about '_database', got: {err}");
+        assert!(
+            err.to_string().contains("database"),
+            "expected error about 'database', got: {err}"
+        );
     }
 
     #[test]
@@ -87,7 +93,7 @@ mod tests {
             [server]
             port = 8080
 
-            [_database]
+            [database]
             url = "postgresql://user:pass@localhost:5432/testdb"
         "#;
 
@@ -97,6 +103,9 @@ mod tests {
             .unwrap();
 
         let err = config.try_deserialize::<ServerConfig>().unwrap_err();
-        assert!(err.to_string().contains("address"), "expected error about 'address', got: {err}");
+        assert!(
+            err.to_string().contains("address"),
+            "expected error about 'address', got: {err}"
+        );
     }
 }
