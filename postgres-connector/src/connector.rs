@@ -148,6 +148,44 @@ fn pg_type_to_arrow(pg_type: &str) -> DataType {
     }
 }
 
+fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> ArrayRef {
+    match pg_type {
+        "BOOL" => {
+            let vals: Vec<Option<bool>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(BooleanArray::from(vals))
+        },
+        "INT2" | "SMALLINT" | "SMALLSERIAL" => {
+            let vals: Vec<Option<i16>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(Int16Array::from(vals))
+        },
+        "INT4" | "INT" | "INTEGER" | "SERIAL" => {
+            let vals: Vec<Option<i32>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(Int32Array::from(vals))
+        },
+        "INT8" | "BIGINT" | "BIGSERIAL" => {
+            let vals: Vec<Option<i64>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(Int64Array::from(vals))
+        },
+        "FLOAT4" | "REAL" => {
+            let vals: Vec<Option<f32>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(Float32Array::from(vals))
+        },
+        "FLOAT8" | "DOUBLE PRECISION" => {
+            let vals: Vec<Option<f64>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(Float64Array::from(vals))
+        },
+        "BYTEA" => {
+            let vals: Vec<Option<Vec<u8>>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            let vals: Vec<Option<&[u8]>> = vals.iter().map(|v| v.as_deref()).collect();
+            Arc::new(BinaryArray::from(vals))
+        },
+        _ => {
+            let vals: Vec<Option<String>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            Arc::new(StringArray::from(vals))
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -206,49 +244,7 @@ mod tests {
 
     #[test]
     fn test_pg_connector_new() {
-        let connector = PgConnector::new(
-            Duration::from_secs(300),
-            Duration::from_secs(60),
-            100,
-        );
+        let connector = PgConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
         assert_eq!(connector.provider(), "postgres");
-    }
-}
-
-fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> ArrayRef {
-    match pg_type {
-        "BOOL" => {
-            let vals: Vec<Option<bool>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(BooleanArray::from(vals))
-        },
-        "INT2" | "SMALLINT" | "SMALLSERIAL" => {
-            let vals: Vec<Option<i16>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int16Array::from(vals))
-        },
-        "INT4" | "INT" | "INTEGER" | "SERIAL" => {
-            let vals: Vec<Option<i32>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int32Array::from(vals))
-        },
-        "INT8" | "BIGINT" | "BIGSERIAL" => {
-            let vals: Vec<Option<i64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int64Array::from(vals))
-        },
-        "FLOAT4" | "REAL" => {
-            let vals: Vec<Option<f32>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Float32Array::from(vals))
-        },
-        "FLOAT8" | "DOUBLE PRECISION" => {
-            let vals: Vec<Option<f64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Float64Array::from(vals))
-        },
-        "BYTEA" => {
-            let vals: Vec<Option<Vec<u8>>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            let vals: Vec<Option<&[u8]>> = vals.iter().map(|v| v.as_deref()).collect();
-            Arc::new(BinaryArray::from(vals))
-        },
-        _ => {
-            let vals: Vec<Option<String>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(StringArray::from(vals))
-        },
     }
 }

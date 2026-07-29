@@ -1,0 +1,4 @@
+[advisories]
+# Marvin Attack (timing sidechannel) in the `rsa` crate — transitive dep via sqlx,
+# no upstream fix available as of 2026-07.
+ignore = ["RUSTSEC-2023-0071"]

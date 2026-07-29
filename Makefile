@@ -16,7 +16,7 @@ endif
 
 .PHONY: all build release check clean \
 	test test-unit test-integration \
-	lint fmt doc audit \
+	lint fmt doc audit check-dco \
 	require-container-engine \
 	container-flight container-rest container-all \
 	container-run-flight container-run-rest \
@@ -103,6 +103,9 @@ doc:
 
 audit:
 	cargo audit
+
+check-dco:
+	@bash scripts/check-dco.sh
 
 # -------------------------------------------------------------------
 # Dev Setup

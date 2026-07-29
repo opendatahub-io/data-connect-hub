@@ -48,9 +48,7 @@ mod tests {
     #[actix_web::test]
     async fn test_list_connections_no_namespace() {
         let app = test::init_service(App::new().configure(test_app_config)).await;
-        let req = test::TestRequest::get()
-            .uri("/v1/data/connections")
-            .to_request();
+        let req = test::TestRequest::get().uri("/v1/data/connections").to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 200);
@@ -68,10 +66,7 @@ mod tests {
 
         assert_eq!(resp.status(), 200);
         let body = test::read_body(resp).await;
-        assert_eq!(
-            body,
-            "Listing connections for namespace: Some(\"my-namespace\")"
-        );
+        assert_eq!(body, "Listing connections for namespace: Some(\"my-namespace\")");
     }
 
     #[actix_web::test]

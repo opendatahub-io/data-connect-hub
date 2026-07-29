@@ -99,3 +99,26 @@ make container-flight   # flight-service image
 make container-rest     # rest-service image
 make container-all      # both
 ```
+
+## CI (GitHub Actions)
+
+Four workflows under `.github/workflows/`:
+
+- **`build-and-test.yml`** — runs on every PR and push
+  to `main`. Build, clippy, rustfmt check, unit tests,
+  rustdoc warnings, and `cargo audit`. Uses
+  `Swatinem/rust-cache` for dependency caching.
+- **`container-publish.yml`** — runs on push to `main`
+  and version tags (`v*.*.*`). Builds multi-arch
+  container images and pushes to `ghcr.io`. Images are
+  tagged with the short commit SHA and either `latest`
+  (main) or the version tag.
+- **`ci-dco-signoff.yml`** — runs on PRs. Verifies all
+  commits have a `Signed-off-by:` trailer (DCO). Use
+  `git commit -s` to sign off.
+- **`ci-signed-commits.yml`** — runs on PRs. Verifies
+  all commits have a valid GPG/SSH signature.
+
+```console
+make check-dco   # run DCO check locally
+```
