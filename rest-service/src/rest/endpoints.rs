@@ -1,6 +1,10 @@
 use actix_web::{HttpResponse, Responder, web};
 use commons::api::connections::{DataConnection, DataConnectionType};
 
+pub async fn health() -> impl Responder {
+    HttpResponse::Ok().finish()
+}
+
 pub async fn list_connections(path: Option<web::Path<String>>) -> impl Responder {
     let namespace = path.map(|p| p.into_inner());
     HttpResponse::Ok().body(format!("Listing connections for namespace: {:?}", namespace))
@@ -67,6 +71,15 @@ mod tests {
                 .route("/connection_types/{id}", web::get().to(get_connection_type))
                 .default_service(web::route().to(not_found)),
         );
+    }
+
+    #[actix_web::test]
+    async fn test_health() {
+        let app = test::init_service(App::new().route("/health", web::get().to(health))).await;
+        let req = test::TestRequest::get().uri("/health").to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
     }
 
     #[actix_web::test]

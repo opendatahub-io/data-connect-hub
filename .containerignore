@@ -1,0 +1,9 @@
+# Locally-generated Postgres credentials (see config/db/postgres/generate-secrets.sh)
+# must never be uploaded into a build context, even though the Containerfiles
+# don't COPY the whole tree.
+config/db/postgres/postgres-credentials.env
+config/db/postgres/secret-config.toml
+
+# Not needed in the build context either way.
+target/
+.git/

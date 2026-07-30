@@ -1,0 +1,31 @@
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: flight-service-ubi9
+  labels:
+    app.kubernetes.io/name: flight-service
+    app.kubernetes.io/part-of: data-connect-hub
+spec:
+  # cargo build --release for this workspace is memory-hungry (arrow, sqlx,
+  # actix-web, etc. compiling in parallel) — 2Gi caused local OOM kills.
+  resources:
+    requests:
+      cpu: "1"
+      memory: 2Gi
+    limits:
+      cpu: "4"
+      memory: 6Gi
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: flight-service/Containerfile
+  output:
+    to:
+      kind: DockerImage
+      # Not ready to use as-is: replace with your own registry/tag, and
+      # update pushSecret to a secret that can actually push there.
+      name: <put your image here>
+    pushSecret:
+      name: <put your push secret here>

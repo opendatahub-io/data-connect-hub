@@ -4,9 +4,17 @@
 # Stage 1: Build
 # ------------------------------------------------------------------------------
 
-FROM rust:1.96-alpine AS builder
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0 AS builder
 
-RUN apk add --no-cache musl-dev pkgconf
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+    && microdnf clean all
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --profile minimal --default-toolchain 1.96.0
 
 WORKDIR /src
 
@@ -17,18 +25,18 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY commons/Cargo.toml ./commons/Cargo.toml
 COPY postgres-connector/Cargo.toml ./postgres-connector/Cargo.toml
+COPY sqlite-connector/Cargo.toml ./sqlite-connector/Cargo.toml
 COPY flight-service/Cargo.toml ./flight-service/Cargo.toml
 COPY rest-service/Cargo.toml ./rest-service/Cargo.toml
 COPY pg-meta-store/Cargo.toml ./pg-meta-store/Cargo.toml
-COPY sqlite-connector/Cargo.toml ./sqlite-connector/Cargo.toml
 
-RUN mkdir -p commons/src postgres-connector/src flight-service/src rest-service/src pg-meta-store/src sqlite-connector/src \
+RUN mkdir -p commons/src postgres-connector/src sqlite-connector/src flight-service/src rest-service/src pg-meta-store/src \
     && echo '//! stub' > commons/src/lib.rs \
     && echo '//! stub' > postgres-connector/src/lib.rs \
+    && echo '//! stub' > sqlite-connector/src/lib.rs \
     && echo '//! stub' > flight-service/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > flight-service/src/main.rs \
     && echo '//! stub' > pg-meta-store/src/lib.rs \
-    && echo '//! stub' > sqlite-connector/src/lib.rs \
     && echo '//! stub' > rest-service/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > rest-service/src/main.rs
 
@@ -42,11 +50,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 COPY commons/src ./commons/src
 COPY postgres-connector/src ./postgres-connector/src
-COPY pg-meta-store/src ./pg-meta-store/src
 COPY sqlite-connector/src ./sqlite-connector/src
+COPY pg-meta-store/src ./pg-meta-store/src
 COPY rest-service/src ./rest-service/src
 
-RUN find commons/src postgres-connector/src pg-meta-store/src sqlite-connector/src rest-service/src \
+RUN find commons/src postgres-connector/src sqlite-connector/src pg-meta-store/src rest-service/src \
     -name '*.rs' -exec touch {} +
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -58,13 +66,14 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Stage 2: Runtime
 # ------------------------------------------------------------------------------
 
-FROM alpine:3.23
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0
 
 LABEL org.opencontainers.image.description="Data Connection Hub — REST Service (HTTP/actix-web)"
 
-RUN apk add --no-cache ca-certificates \
-    && addgroup -S dch \
-    && adduser -S -G dch -h /nonexistent -s /sbin/nologin dch
+RUN microdnf install -y shadow-utils ca-certificates curl-minimal \
+    && microdnf clean all \
+    && groupadd -r dch \
+    && useradd -r -g dch -d /nonexistent -s /sbin/nologin dch
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /usr/local/bin/rest-service
@@ -74,6 +83,6 @@ USER dch:dch
 EXPOSE 8080
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=2s \
-    CMD wget -qO- http://127.0.0.1:8080/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
 
 ENTRYPOINT ["rest-service"]

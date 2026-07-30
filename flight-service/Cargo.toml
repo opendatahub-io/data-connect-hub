@@ -23,6 +23,7 @@ pg-meta-store = { workspace = true }
 arrow = { workspace = true }
 arrow-flight = { workspace = true, features = ["flight-sql"] }
 tonic = { workspace = true }
+tonic-health = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "signal"] }
 futures = { workspace = true }
 prost = { workspace = true }

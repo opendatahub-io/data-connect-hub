@@ -36,3 +36,11 @@ coverage.json
 docs/**/
 !docs/
 !docs/proposals/
+!docs/user-guide/
+!docs/user-guide/**
+!docs/dev-guide/
+!docs/dev-guide/**
+
+# Generated Postgres credentials (run config/db/postgres/generate-secrets.sh)
+config/db/postgres/postgres-credentials.env
+config/db/postgres/secret-config.toml

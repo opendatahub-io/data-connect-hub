@@ -28,6 +28,11 @@ struct CommandLineArgs {
     /// Config file for this server
     #[arg(short, long, default_value = "config/config.toml")]
     config: String,
+
+    /// Optional additional config file (e.g. a mounted Secret) merged on top
+    /// of `config`; missing values here fall back to `config`.
+    #[arg(long, default_value = "/secrets/secret-config.toml")]
+    secret_config: String,
 }
 
 pub async fn shutdown_signal() {
@@ -53,9 +58,10 @@ pub async fn shutdown_signal() {
     }
 }
 
-fn load_config(config_file: String) -> Result<ServerConfig> {
+fn load_config(config_file: String, secret_config_file: String) -> Result<ServerConfig> {
     let config = Config::builder()
         .add_source(File::with_name(config_file.as_str()))
+        .add_source(File::with_name(secret_config_file.as_str()).required(false))
         .build()?;
 
     let config: ServerConfig = config.try_deserialize()?;
@@ -65,7 +71,7 @@ fn load_config(config_file: String) -> Result<ServerConfig> {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
-    let config = load_config(args.config)?;
+    let config = load_config(args.config, args.secret_config)?;
     commons::utils::init_tracing(args.json_logs);
 
     tracing::info!("Starting DataConnectorHub Flight service");
@@ -96,7 +102,13 @@ async fn main() -> Result<()> {
         Arc::new(secret_store),
     );
 
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<FlightServiceServer<TabularDataService>>()
+        .await;
+
     tonic::transport::Server::builder()
+        .add_service(health_service)
         .add_service(FlightServiceServer::new(service))
         .serve_with_shutdown(addr, shutdown_signal())
         .await?;

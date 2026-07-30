@@ -20,6 +20,11 @@ struct CommandLineArgs {
     /// Config file for this server
     #[arg(short, long, default_value = "config/config.toml")]
     config: String,
+
+    /// Optional additional config file (e.g. a mounted Secret) merged on top
+    /// of `config`; missing values here fall back to `config`.
+    #[arg(long, default_value = "/secrets/secret-config.toml")]
+    secret_config: String,
 }
 
 fn api_routes(cfg: &mut web::ServiceConfig) {
@@ -39,9 +44,10 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
     .default_service(web::route().to(not_found));
 }
 
-fn load_config(config_file: String) -> Result<ServerConfig> {
+fn load_config(config_file: String, secret_config_file: String) -> Result<ServerConfig> {
     let config = Config::builder()
         .add_source(File::with_name(config_file.as_str()))
+        .add_source(File::with_name(secret_config_file.as_str()).required(false))
         .build()?;
 
     let config: ServerConfig = config.try_deserialize()?;
@@ -51,7 +57,7 @@ fn load_config(config_file: String) -> Result<ServerConfig> {
 #[actix_web::main]
 async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
-    let config = load_config(args.config)?;
+    let config = load_config(args.config, args.secret_config)?;
 
     commons::utils::init_tracing(args.json_logs);
     tracing::info!("Starting DataConnectorHub API service");
@@ -63,7 +69,10 @@ async fn main() -> Result<()> {
             .allow_any_method()
             .allow_any_header();
 
-        App::new().wrap(cors).configure(api_routes)
+        App::new()
+            .wrap(cors)
+            .route("/health", web::get().to(health))
+            .configure(api_routes)
     })
     .bind((config.server.address, config.server.port))?
     .run()
