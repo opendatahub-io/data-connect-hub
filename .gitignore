@@ -1,6 +1,9 @@
 # Cargo build output
 target/
 
+#local dev
+.local/
+
 # Rustfmt backup files
 **/*.rs.bk
 

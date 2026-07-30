@@ -1,5 +1,7 @@
 name: DCO Sign-off Check
-on: pull_request
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 concurrency:
   group: dco-signoff-${{ github.event.pull_request.number }}

@@ -1,0 +1,17 @@
+[package]
+name = "sqlite-connector"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+commons = { workspace = true }
+sqlx = { workspace = true }
+arrow = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+async-stream = { workspace = true }
+moka = { workspace = true, features = ["future"] }

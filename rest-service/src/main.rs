@@ -2,7 +2,7 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, web};
 use clap::Parser;
 
-use crate::rest::endpoints::{get_connection, list_connections, not_found};
+use crate::rest::endpoints::*;
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use config::{Config, File};
@@ -20,6 +20,23 @@ struct CommandLineArgs {
     /// Config file for this server
     #[arg(short, long, default_value = "config/config.toml")]
     config: String,
+}
+
+fn api_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/api/v1/data")
+            .route("/connections", web::get().to(list_connections))
+            .route("/connections", web::post().to(create_connection))
+            .route("/connections/{id}", web::get().to(get_connection))
+            .route("/connections/{id}", web::patch().to(patch_connection))
+            .route("/connections/{id}", web::delete().to(delete_connection))
+            .route("/connection-types", web::get().to(list_connection_types))
+            .route("/connection-types", web::post().to(create_connection_type))
+            .route("/connection-types/{id}", web::get().to(get_connection_type))
+            .route("/connection-types/{id}", web::patch().to(patch_connection_type))
+            .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
+    )
+    .default_service(web::route().to(not_found));
 }
 
 fn load_config(config_file: String) -> Result<ServerConfig> {
@@ -46,15 +63,7 @@ async fn main() -> Result<()> {
             .allow_any_method()
             .allow_any_header();
 
-        App::new()
-            .wrap(cors)
-            .service(
-                web::scope("/v1/data")
-                    .service(web::resource("/connections").to(list_connections))
-                    .service(web::resource("/connections/{namespace}").to(list_connections))
-                    .service(web::resource("/connections/{namespace}/{name}").to(get_connection)),
-            )
-            .default_service(web::route().to(not_found))
+        App::new().wrap(cors).configure(api_routes)
     })
     .bind((config.server.address, config.server.port))?
     .run()

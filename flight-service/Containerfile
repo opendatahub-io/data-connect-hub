@@ -20,13 +20,15 @@ COPY postgres-connector/Cargo.toml ./postgres-connector/Cargo.toml
 COPY flight-service/Cargo.toml ./flight-service/Cargo.toml
 COPY rest-service/Cargo.toml ./rest-service/Cargo.toml
 COPY pg-meta-store/Cargo.toml ./pg-meta-store/Cargo.toml
+COPY sqlite-connector/Cargo.toml ./sqlite-connector/Cargo.toml
 
-RUN mkdir -p commons/src postgres-connector/src flight-service/src rest-service/src pg-meta-store/src \
+RUN mkdir -p commons/src postgres-connector/src flight-service/src rest-service/src pg-meta-store/src sqlite-connector/src \
     && echo '//! stub' > commons/src/lib.rs \
     && echo '//! stub' > postgres-connector/src/lib.rs \
     && echo '//! stub' > rest-service/src/lib.rs \
     && echo '//! stub' > flight-service/src/lib.rs \
     && echo '//! stub' > pg-meta-store/src/lib.rs \
+    && echo '//! stub' > sqlite-connector/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > flight-service/src/main.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -40,9 +42,10 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 COPY commons/src ./commons/src
 COPY postgres-connector/src ./postgres-connector/src
 COPY pg-meta-store/src ./pg-meta-store/src
+COPY sqlite-connector/src ./sqlite-connector/src
 COPY flight-service/src ./flight-service/src
 
-RUN find commons/src postgres-connector/src pg-meta-store/src flight-service/src \
+RUN find commons/src postgres-connector/src pg-meta-store/src sqlite-connector/src flight-service/src \
     -name '*.rs' -exec touch {} +
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \

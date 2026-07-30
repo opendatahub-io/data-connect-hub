@@ -1,7 +1,7 @@
 use commons::api::connections::DataConnection;
-
+use commons::api::connections::DataConnectionType;
 use commons::api::connections::MetaStore;
-use commons::errors::metastore::MetaStoreError;
+use commons::errors::MetaStoreError;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
 
@@ -26,9 +26,23 @@ impl PgMetaStore {
 
 #[async_trait::async_trait]
 impl MetaStore for PgMetaStore {
-    async fn get_connection(&self, uid: &str) -> Result<DataConnection, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM data_connections WHERE data->>'id' = $1")
+    async fn get_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnection, MetaStoreError> {
+        let row = sqlx::query("SELECT data FROM data_connections WHERE data->>'id' = $1 AND data->>'tenant_id' = $2")
             .bind(uid)
+            .bind(tenant_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        let json_value: serde_json::Value = row.get("data");
+        serde_json::from_value(json_value).map_err(|e| MetaStoreError::Serialization(e.to_string()))
+    }
+
+    async fn get_data_connection_type(&self, _tenant_id: &str, id: &str) -> Result<DataConnectionType, MetaStoreError> {
+        // TODO: add tenant_id filter when we have a way to store data connection types per tenant
+
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->>'id' = $1")
+            .bind(id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| MetaStoreError::Query(e.to_string()))?;

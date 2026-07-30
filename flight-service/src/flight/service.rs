@@ -9,22 +9,28 @@ use arrow_flight::{
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
-use commons::api::connections::MetaStore;
+use commons::api::connections::{DataConnection, SecretStore};
+use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID, connections::MetaStore};
 use futures::TryStreamExt;
-use log::info;
 use prost::Message;
 use prost::bytes::Bytes;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use tracing::info;
 
 pub struct TabularDataService {
     connectors_registry: Arc<ConnectorsRegistry>,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
 }
 
 impl TabularDataService {
-    pub fn new(connectors_registry: Arc<ConnectorsRegistry>, meta_store: Arc<dyn MetaStore + Send + Sync>) -> Self {
+    pub fn new(
+        connectors_registry: Arc<ConnectorsRegistry>,
+        meta_store: Arc<dyn MetaStore + Send + Sync>,
+        secret_store: Arc<dyn SecretStore + Send + Sync>,
+    ) -> Self {
         let mut builder = SqlInfoDataBuilder::new();
         builder.append(SqlInfo::FlightSqlServerName, "Data Connect Hub");
         builder.append(SqlInfo::FlightSqlServerVersion, env!("CARGO_PKG_VERSION"));
@@ -36,6 +42,7 @@ impl TabularDataService {
         Self {
             connectors_registry,
             meta_store,
+            secret_store,
             sql_info: builder.build().expect("valid sql info"),
         }
     }
@@ -50,6 +57,29 @@ impl TabularDataService {
                     .unwrap_or_else(|_| format!("Unknown({id})"))
             })
             .collect()
+    }
+
+    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnection, Status> {
+        let r = self
+            .meta_store
+            .get_connection(tenant_id, connection_id)
+            .await
+            .map_err(|e| Status::internal(e.to_string()));
+
+        if let Ok(mut r) = r {
+            let secret_ref = &r.admin.secret_ref;
+
+            // Hydrate the connection with the secret credentials
+            let secret = self
+                .secret_store
+                .get_secret(tenant_id, secret_ref)
+                .await
+                .map_err(|e| Status::internal(e.to_string()))?;
+            r.credentials = secret.properties.clone();
+            return Ok(r);
+        }
+
+        r
     }
 }
 
@@ -115,20 +145,28 @@ impl FlightSqlService for TabularDataService {
 
         let metadata = request.metadata();
         let connection_id = metadata
-            .get("x-dch-connection-id")
-            .ok_or(Status::internal("x-dch-connection-id is required"))?
+            .get(X_DATA_CONNECTION_ID)
+            .ok_or(Status::internal("x-data-connection-id header is required"))?
             .to_str()
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        let connection = self
+        let tenant_id = metadata
+            .get(X_TENANT_ID)
+            .ok_or(Status::internal("x-tenant-id header is required"))?
+            .to_str()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let connection = self.get_connection(tenant_id, connection_id).await?;
+
+        let data_connection_type = self
             .meta_store
-            .get_connection(connection_id)
+            .get_data_connection_type(tenant_id, connection.data_connection_type_id.as_str())
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let connector = self
             .connectors_registry
-            .get_connector(connection.provider.as_str())
+            .get_connector(data_connection_type.provider.as_str())
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let reader = connector
@@ -171,20 +209,28 @@ impl FlightSqlService for TabularDataService {
 
         let metadata = request.metadata();
         let connection_id = metadata
-            .get("x-dch-connection-id")
-            .ok_or(Status::internal("x-dch-connection-id is required"))?
+            .get(X_DATA_CONNECTION_ID)
+            .ok_or(Status::internal(format!("{X_DATA_CONNECTION_ID} header is required")))?
             .to_str()
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        let connection = self
+        let tenant_id = metadata
+            .get(X_TENANT_ID)
+            .ok_or(Status::internal("x-tenant-id header is required"))?
+            .to_str()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let connection = self.get_connection(tenant_id, connection_id).await?;
+
+        let data_connection_type = self
             .meta_store
-            .get_connection(connection_id)
+            .get_data_connection_type(tenant_id, connection.data_connection_type_id.as_str())
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let connector = self
             .connectors_registry
-            .get_connector(connection.provider.as_str())
+            .get_connector(data_connection_type.provider.as_str())
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let reader = connector
