@@ -1,0 +1,36 @@
+name: Dismiss Stale Reviews
+
+on:
+  pull_request:
+    types: [synchronize]
+
+jobs:
+  dismiss-stale-reviews:
+    name: Dismiss stale approvals
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Dismiss approved reviews on new commits
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          reviews=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/reviews" \
+            --jq '.[] | select(.state == "APPROVED") | .id')
+
+          if [ -z "$reviews" ]; then
+            echo "No approved reviews to dismiss."
+            exit 0
+          fi
+
+          for review_id in $reviews; do
+            echo "Dismissing review ${review_id}..."
+            gh api -X PUT "repos/${REPO}/pulls/${PR_NUMBER}/reviews/${review_id}/dismissals" \
+              -f message="New commits were pushed. Re-approval is required." \
+              -f event="DISMISS"
+            echo "Dismissed review ${review_id}."
+          done
+
+          echo "All stale approvals dismissed."
