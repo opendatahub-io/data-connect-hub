@@ -17,18 +17,20 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY commons/Cargo.toml ./commons/Cargo.toml
 COPY postgres-connector/Cargo.toml ./postgres-connector/Cargo.toml
+COPY sqlite-connector/Cargo.toml ./sqlite-connector/Cargo.toml
 COPY flight-service/Cargo.toml ./flight-service/Cargo.toml
 COPY rest-service/Cargo.toml ./rest-service/Cargo.toml
 COPY pg-meta-store/Cargo.toml ./pg-meta-store/Cargo.toml
 
-RUN mkdir -p commons/src postgres-connector/src flight-service/src rest-service/src pg-meta-store/src \
+RUN mkdir -p commons/src postgres-connector/src sqlite-connector/src flight-service/src rest-service/src pg-meta-store/src \
     && echo '//! stub' > commons/src/lib.rs \
     && echo '//! stub' > postgres-connector/src/lib.rs \
+    && echo '//! stub' > sqlite-connector/src/lib.rs \
     && echo '//! stub' > flight-service/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > flight-service/src/main.rs \
-    && echo '//! stub' > pg-meta-store/src/lib.rs \
     && echo '//! stub' > rest-service/src/lib.rs \
-    && printf '//! stub\nfn main() {}\n' > rest-service/src/main.rs
+    && printf '//! stub\nfn main() {}\n' > rest-service/src/main.rs \
+    && echo '//! stub' > pg-meta-store/src/lib.rs
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
