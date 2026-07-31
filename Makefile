@@ -16,7 +16,7 @@ endif
 
 .PHONY: all build release check clean \
 	test test-unit test-integration \
-	lint fmt doc audit check-dco \
+	lint fmt doc audit check-dco check-containerfiles \
 	require-container-engine \
 	container-flight container-rest container-all \
 	container-run-flight container-run-rest \
@@ -107,6 +107,9 @@ audit:
 check-dco:
 	@bash hack/check-dco.sh
 
+check-containerfiles:
+	@bash hack/check-containerfiles.sh
+
 # -------------------------------------------------------------------
 # Dev Setup
 # -------------------------------------------------------------------
@@ -143,6 +146,7 @@ help:
 	@echo "  fmt                  format all crates"
 	@echo "  doc                  rustdoc with warnings"
 	@echo "  audit                cargo audit"
+	@echo "  check-containerfiles validate Containerfiles include all workspace crates"
 	@echo ""
 	@echo "Container:"
 	@echo "  container-flight     build flight-service image"
