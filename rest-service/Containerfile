@@ -29,14 +29,16 @@ COPY sqlite-connector/Cargo.toml ./sqlite-connector/Cargo.toml
 COPY flight-service/Cargo.toml ./flight-service/Cargo.toml
 COPY rest-service/Cargo.toml ./rest-service/Cargo.toml
 COPY pg-meta-store/Cargo.toml ./pg-meta-store/Cargo.toml
+COPY kube-utils/Cargo.toml ./kube-utils/Cargo.toml
 
-RUN mkdir -p commons/src postgres-connector/src sqlite-connector/src flight-service/src rest-service/src pg-meta-store/src \
+RUN mkdir -p commons/src postgres-connector/src sqlite-connector/src flight-service/src rest-service/src pg-meta-store/src kube-utils/src \
     && echo '//! stub' > commons/src/lib.rs \
     && echo '//! stub' > postgres-connector/src/lib.rs \
     && echo '//! stub' > sqlite-connector/src/lib.rs \
     && echo '//! stub' > flight-service/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > flight-service/src/main.rs \
     && echo '//! stub' > pg-meta-store/src/lib.rs \
+    && echo '//! stub' > kube-utils/src/lib.rs \
     && echo '//! stub' > rest-service/src/lib.rs \
     && printf '//! stub\nfn main() {}\n' > rest-service/src/main.rs
 
