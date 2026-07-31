@@ -50,10 +50,10 @@ make lint
 
 ```sh
 # REST service (default: 127.0.0.1:8080)
-cargo run -p rest-service -- --port 8080
+cargo run -p rest-service -- --config services/rest-service/samples/config.toml
 
 # Flight service (default: 127.0.0.1:50051)
-cargo run -p flight-service
+cargo run -p flight-service -- --config services/flight-service/samples/config.toml
 ```
 
 ## REST API
