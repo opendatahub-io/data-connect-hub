@@ -46,11 +46,11 @@ hack/             scripts and Python tooling
 **Crate dependency flow:**
 
 ```text
-services/flight-service (binary, gRPC :50051)
+services/flight (binary, gRPC :50051)
   -> libs/commons
   -> connectors/postgres-connector -> libs/commons
 
-services/rest-service (binary, HTTP :8080)
+services/rest (binary, HTTP :8080)
   -> libs/commons
   -> connectors/postgres-connector -> libs/commons
 ```
@@ -60,10 +60,10 @@ services/rest-service (binary, HTTP :8080)
 - **connectors/postgres-connector**: library that executes SQL
   queries against PostgreSQL via SQLx and streams
   results as Arrow `RecordBatch`es
-- **services/flight-service**: Apache Arrow Flight gRPC server
+- **services/flight**: Apache Arrow Flight gRPC server
   built with tonic; implements `FlightService` trait
   for columnar data transfer
-- **services/rest-service**: HTTP API built with actix-web for
+- **services/rest**: HTTP API built with actix-web for
   connection metadata listing and data access
 
 ## Key Patterns

@@ -20,7 +20,7 @@ spec:
   strategy:
     type: Docker
     dockerStrategy:
-      dockerfilePath: flight-service/Containerfile
+      dockerfilePath: services/flight/Containerfile
   output:
     to:
       kind: DockerImage

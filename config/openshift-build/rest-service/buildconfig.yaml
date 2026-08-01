@@ -20,7 +20,7 @@ spec:
   strategy:
     type: Docker
     dockerStrategy:
-      dockerfilePath: rest-service/Containerfile
+      dockerfilePath: services/rest/Containerfile
   output:
     to:
       kind: DockerImage
