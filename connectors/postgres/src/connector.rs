@@ -5,7 +5,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnection;
+use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::TabularState;
 use commons::api::tabular::{QueryOutput, TabularReader};
@@ -40,8 +40,12 @@ impl FlightConnector for PgConnector {
         "postgres".to_string()
     }
 
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    async fn get_reader(
+        &self,
+        data_connection: &DataConnectionResource,
+    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let url = data_connection
+            .resource
             .credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;

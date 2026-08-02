@@ -18,6 +18,8 @@ pub enum ConnectorError {
 pub enum MetaStoreError {
     #[error("Connection error: {0}")]
     Connection(String),
+    #[error("Not found: {0}")]
+    ResourceNotFound(String),
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
     #[error("Config error: {0}")]

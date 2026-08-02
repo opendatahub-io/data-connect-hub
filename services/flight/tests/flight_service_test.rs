@@ -2,7 +2,11 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray};
 use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
-use commons::api::connections::{Admin, DataConnection, DataConnectionType, MetaStore, Secret};
+use commons::api::ResourceMetadata;
+use commons::api::connections::DataConnectionResource;
+use commons::api::connections::{
+    Admin, DataConnection, DataConnectionType, DataConnectionTypeResource, MetaStore, Secret,
+};
 use commons::api::errors::MetaStoreError;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::service::TabularDataService;
@@ -13,47 +17,64 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tonic::transport::{Channel, Server};
-
 struct TestMetaStore;
 
 #[async_trait::async_trait]
 impl MetaStore for TestMetaStore {
-    async fn get_connection(&self, _tenant_id: &str, _connection_id: &str) -> Result<DataConnection, MetaStoreError> {
-        Ok(DataConnection {
-            id: "1234".to_string(),
-            name: "test-db".to_string(),
-            data_connection_type_id: "sqlite".to_string(),
-            format: "tabular".to_string(),
-            tenant_id: "default".to_string(),
-            admin: Admin {
-                secret_ref: "sqlite_creds".to_string(),
+    async fn get_connection(
+        &self,
+        _tenant_id: &str,
+        _connection_id: &str,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        Ok(DataConnectionResource {
+            metadata: ResourceMetadata {
+                id: "1234".to_string(),
+                tenant_id: "default".to_string(),
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
             },
-            created_at: "2026-07-21T00:00:00Z".to_string(),
-            updated_at: "2026-07-21T00:00:00Z".to_string(),
-            properties: HashMap::new(),
-            credentials: HashMap::new(),
+            resource: DataConnection {
+                name: "test-db".to_string(),
+                data_connection_type_id: "sqlite".to_string(),
+                format: "tabular".to_string(),
+                admin: Admin {
+                    secret_ref: "sqlite_creds".to_string(),
+                },
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+                properties: HashMap::new(),
+                credentials: HashMap::new(),
+            },
         })
     }
     async fn get_data_connection_type(
         &self,
         _tenant_id: &str,
         _id: &str,
-    ) -> Result<DataConnectionType, MetaStoreError> {
-        Ok(DataConnectionType {
-            id: "sqlite".to_string(),
-            tenant_id: Some("default".to_string()),
-            name: "SQLite".to_string(),
-            provider: "sqlite".to_string(),
-            description: None,
-            credentials_fields: vec![commons::api::connections::Field {
-                name: "url".to_string(),
-                label: "Url".to_string(),
-                d_type: "string".to_string(),
-                description: Some("SQLite connection URL".to_string()),
-                required: true,
-                enum_values: None,
-                default_value: None,
-            }],
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        Ok(DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: "sqlite".to_string(),
+                tenant_id: "default".to_string(),
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+            },
+            resource: DataConnectionType {
+                id: "sqlite".to_string(),
+                tenant_id: Some("default".to_string()),
+                name: "SQLite".to_string(),
+                provider: "sqlite".to_string(),
+                description: None,
+                credentials_fields: vec![commons::api::connections::Field {
+                    name: "url".to_string(),
+                    label: "Url".to_string(),
+                    d_type: "string".to_string(),
+                    description: Some("SQLite connection URL".to_string()),
+                    required: true,
+                    enum_values: None,
+                    default_value: None,
+                }],
+            },
         })
     }
 }

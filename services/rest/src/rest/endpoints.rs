@@ -1,7 +1,13 @@
+use super::errors::EndpointError;
+use super::errors::RestError;
+use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::{DataConnection, DataConnectionType};
 
-use super::errors::RestError;
+#[derive(Clone)]
+pub struct AppData {
+    pub tenant_id: String,
+}
 
 pub async fn health() -> Result<HttpResponse, RestError> {
     Ok(HttpResponse::Ok().finish())
@@ -26,8 +32,11 @@ pub async fn get_connection_type(path: web::Path<String>) -> Result<HttpResponse
     Ok(HttpResponse::Ok().body(id))
 }
 
-pub async fn create_connection(_body: web::Json<DataConnection>) -> Result<HttpResponse, RestError> {
-    Ok(HttpResponse::Ok().body("Creating connection"))
+pub async fn create_connection(app_data: web::ReqData<AppData>, body: Bytes) -> Result<HttpResponse, RestError> {
+    let _tenant_id = app_data.tenant_id.clone();
+    let connection: DataConnection = serde_json::from_slice(&body).map_err(|_| EndpointError::InvalidPayload)?;
+
+    Ok(HttpResponse::Ok().json(connection))
 }
 
 pub async fn patch_connection(
@@ -61,11 +70,7 @@ pub async fn delete_connection_type(path: web::Path<String>) -> Result<HttpRespo
 }
 
 pub async fn not_found() -> Result<HttpResponse, RestError> {
-    Err(RestError{
-        code: "not_found".to_string(),
-        message: "Not Found".to_string(),
-        status: 404,
-    })
+    Err(EndpointError::PathNotFound.into())
 }
 
 #[cfg(test)]
@@ -106,8 +111,9 @@ mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 404);
-        let body = test::read_body(resp).await;
-        assert_eq!(body, "Not Found");
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "path_not_found");
+        assert_eq!(body["message"], "Path not found");
     }
 
     #[actix_web::test]

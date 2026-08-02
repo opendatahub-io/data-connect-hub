@@ -9,7 +9,7 @@ use arrow_flight::{
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
-use commons::api::connections::{DataConnection, SecretStore};
+use commons::api::connections::{DataConnectionResource, SecretStore};
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID, connections::MetaStore};
 use futures::TryStreamExt;
 use prost::Message;
@@ -59,7 +59,7 @@ impl TabularDataService {
             .collect()
     }
 
-    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnection, Status> {
+    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnectionResource, Status> {
         tracing::info!(
             "get_connection: tenant_id: {}, connection_id: {}",
             tenant_id,
@@ -72,7 +72,7 @@ impl TabularDataService {
             .map_err(|e| Status::internal(e.to_string()));
 
         if let Ok(mut r) = r {
-            let secret_ref = &r.admin.secret_ref;
+            let secret_ref = &r.resource.admin.secret_ref;
             tracing::info!("Getting credentials for secret: {}", secret_ref);
             // Hydrate the connection with the secret credentials
             let secret = self
@@ -80,7 +80,7 @@ impl TabularDataService {
                 .get_secret(tenant_id, secret_ref)
                 .await
                 .map_err(|e| Status::internal(e.to_string()))?;
-            r.credentials = secret.properties;
+            r.resource.credentials = secret.properties;
             return Ok(r);
         }
 
@@ -165,13 +165,13 @@ impl FlightSqlService for TabularDataService {
 
         let data_connection_type = self
             .meta_store
-            .get_data_connection_type(tenant_id, connection.data_connection_type_id.as_str())
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let connector = self
             .connectors_registry
-            .get_connector(data_connection_type.provider.as_str())
+            .get_connector(data_connection_type.resource.provider.as_str())
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let reader = connector
@@ -229,13 +229,13 @@ impl FlightSqlService for TabularDataService {
 
         let data_connection_type = self
             .meta_store
-            .get_data_connection_type(tenant_id, connection.data_connection_type_id.as_str())
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
             .await
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let connector = self
             .connectors_registry
-            .get_connector(data_connection_type.provider.as_str())
+            .get_connector(data_connection_type.resource.provider.as_str())
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let reader = connector

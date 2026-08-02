@@ -1,4 +1,4 @@
-use crate::api::connections::DataConnection;
+use crate::api::connections::DataConnectionResource;
 use crate::api::errors::ConnectorError;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -32,7 +32,10 @@ pub trait TabularReader: Send + Sync {
 #[async_trait::async_trait]
 pub trait FlightConnector: Send + Sync {
     fn provider(&self) -> String;
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ConnectorError>;
+    async fn get_reader(
+        &self,
+        data_connection: &DataConnectionResource,
+    ) -> Result<Arc<dyn TabularReader>, ConnectorError>;
 }
 
 #[cfg(test)]

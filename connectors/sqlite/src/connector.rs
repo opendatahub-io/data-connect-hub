@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnection;
+use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::TabularState;
 use commons::api::tabular::{QueryOutput, TabularReader};
@@ -39,8 +39,12 @@ impl FlightConnector for SqliteConnector {
         "sqlite".to_string()
     }
 
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    async fn get_reader(
+        &self,
+        data_connection: &DataConnectionResource,
+    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let url = data_connection
+            .resource
             .credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
