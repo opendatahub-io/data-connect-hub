@@ -179,7 +179,7 @@ help:
 	@echo "  container-run-flight run flight-service container (host network)"
 	@echo "  container-run-rest   run rest-service container (host network)"
 	@echo ""
-	@echo "OpenShift Builds (OC_NAMESPACE=marius):"
+	@echo "OpenShift Builds (OC_NAMESPACE=default):"
 	@echo "  oc-setup-flight      apply flight-service BuildConfig overlay"
 	@echo "  oc-setup-rest        apply rest-service BuildConfig overlay"
 	@echo "  oc-setup-all         apply all BuildConfig overlays"
