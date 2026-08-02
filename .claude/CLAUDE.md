@@ -56,7 +56,7 @@ services/rest (binary, HTTP :8080)
 ```
 
 - **libs/commons**: shared traits (`SQLReader`), types
-  (`OutputStream`), and error definitions (`ApiError`)
+  (`OutputStream`), and error definitions (`ConnectorError`)
 - **connectors/postgres-connector**: library that executes SQL
   queries against PostgreSQL via SQLx and streams
   results as Arrow `RecordBatch`es

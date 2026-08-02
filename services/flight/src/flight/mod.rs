@@ -2,7 +2,7 @@ pub mod registry;
 pub mod service;
 
 use commons::api::connections::{Secret, SecretStore};
-use commons::errors::SecretStoreError;
+use commons::api::errors::SecretStoreError;
 pub use service::*;
 use std::collections::HashMap;
 

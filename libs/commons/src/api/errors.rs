@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum ApiError {
+pub enum ConnectorError {
     #[error("SQL error: {0}")]
     SQLError(String),
     #[error("Connection error: {0}")]

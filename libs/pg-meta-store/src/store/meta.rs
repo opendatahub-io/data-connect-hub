@@ -1,7 +1,7 @@
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionType;
 use commons::api::connections::MetaStore;
-use commons::errors::MetaStoreError;
+use commons::api::errors::MetaStoreError;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
 

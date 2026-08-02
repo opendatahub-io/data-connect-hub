@@ -1,5 +1,5 @@
 use commons::api::connections::{Secret, SecretStore};
-use commons::errors::SecretStoreError;
+use commons::api::errors::SecretStoreError;
 use k8s_openapi::api::core::v1::Secret as K8sSecret;
 use kube::{Api, Client};
 use std::collections::HashMap;

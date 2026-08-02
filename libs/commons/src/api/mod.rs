@@ -1,4 +1,5 @@
 pub mod connections;
+pub mod errors;
 pub mod tabular;
 
 pub static X_DATA_CONNECTION_ID: &str = "x-data-connection-id";

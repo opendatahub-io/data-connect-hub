@@ -1,13 +1,13 @@
 use crate::api::connections::DataConnection;
-use crate::errors::ApiError;
+use crate::api::errors::ConnectorError;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use futures::Stream;
 use std::pin::Pin;
 use std::sync::Arc;
 
-pub type OutputStream = Pin<Box<dyn Stream<Item = Result<RecordBatch, ApiError>> + Send>>;
-pub type QueryOutput = Result<OutputStream, ApiError>;
+pub type OutputStream = Pin<Box<dyn Stream<Item = Result<RecordBatch, ConnectorError>> + Send>>;
+pub type QueryOutput = Result<OutputStream, ConnectorError>;
 
 pub struct TabularState {
     pub query: String,
@@ -24,7 +24,7 @@ impl TabularState {
 pub trait TabularReader: Send + Sync {
     fn provider(&self) -> String;
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ApiError>;
+    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError>;
 
     async fn read(&self, state: Arc<TabularState>, batch_size: usize) -> QueryOutput;
 }
@@ -32,7 +32,7 @@ pub trait TabularReader: Send + Sync {
 #[async_trait::async_trait]
 pub trait FlightConnector: Send + Sync {
     fn provider(&self) -> String;
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ApiError>;
+    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ConnectorError>;
 }
 
 #[cfg(test)]

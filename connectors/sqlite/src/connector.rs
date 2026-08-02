@@ -4,9 +4,9 @@ use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnection;
+use commons::api::errors::ConnectorError;
 use commons::api::tabular::TabularState;
 use commons::api::tabular::{QueryOutput, TabularReader};
-use commons::errors::ApiError;
 
 use futures::StreamExt;
 
@@ -39,20 +39,20 @@ impl FlightConnector for SqliteConnector {
         "sqlite".to_string()
     }
 
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ApiError> {
+    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let url = data_connection
             .credentials
             .get("url")
-            .ok_or_else(|| ApiError::ConnectionError("SQLite URL is required".to_string()))?;
+            .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
                 SqlitePool::connect(url.as_str())
                     .await
-                    .map_err(|e| ApiError::ConnectionError(e.to_string()))
+                    .map_err(|e| ConnectorError::ConnectionError(e.to_string()))
             })
             .await
-            .map_err(|e| ApiError::ConnectionError(e.to_string()))?;
+            .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
 
         Ok(Arc::new(SqliteReader { pool }))
     }
@@ -68,12 +68,12 @@ impl TabularReader for SqliteReader {
         "sqlite".to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ApiError> {
+    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
         let statement = self
             .pool
             .prepare(query)
             .await
-            .map_err(|e| ApiError::SQLError(e.to_string()))?;
+            .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
 
         let fields: Vec<Field> = statement
             .columns()
@@ -97,7 +97,7 @@ impl TabularReader for SqliteReader {
             let mut chunk = Vec::with_capacity(batch_size);
 
             while let Some(row) = rows.next().await {
-                chunk.push(row.map_err(|e| ApiError::SQLError(e.to_string()))?);
+                chunk.push(row.map_err(|e| ConnectorError::SQLError(e.to_string()))?);
                 if chunk.len() >= batch_size {
                     yield rows_to_batch(&schema, &chunk)?;
                     chunk.clear();
@@ -113,7 +113,7 @@ impl TabularReader for SqliteReader {
     }
 }
 
-fn rows_to_batch(schema: &Arc<Schema>, rows: &[SqliteRow]) -> Result<RecordBatch, ApiError> {
+fn rows_to_batch(schema: &Arc<Schema>, rows: &[SqliteRow]) -> Result<RecordBatch, ConnectorError> {
     let columns = rows[0].columns();
     let arrays: Vec<ArrayRef> = (0..columns.len())
         .map(|col_idx| {
@@ -122,7 +122,7 @@ fn rows_to_batch(schema: &Arc<Schema>, rows: &[SqliteRow]) -> Result<RecordBatch
         })
         .collect();
 
-    RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ApiError::SQLError(e.to_string()))
+    RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
 
 fn sqlite_type_to_arrow(sqlite_type: &str) -> DataType {

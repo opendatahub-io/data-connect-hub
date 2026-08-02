@@ -1,4 +1,4 @@
-use crate::errors::{MetaStoreError, SecretStoreError};
+use crate::api::errors::{MetaStoreError, SecretStoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
