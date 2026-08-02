@@ -7,8 +7,8 @@ Data Connect Hub (DCH) is a middleware service that provides a single integratio
 ```
 data-connect-hub/
 ├── services/
-│   ├── flight-service/        Arrow Flight gRPC service (binary)
-│   └── rest-service/          HTTP REST service (binary)
+│   ├── flight/                Arrow Flight gRPC service (binary)
+│   └── rest/                  HTTP REST service (binary)
 ├── connectors/
 │   ├── postgres/              PostgreSQL data reader (library)
 │   └── sqlite/                SQLite data reader (library)
@@ -29,7 +29,7 @@ data-connect-hub/
 ## Prerequisites
 
 - Rust 1.96+
-- PostgreSQL (for integration testing, for `make container-run-flight`). The default URL in `services/flight-service/samples/config.toml` is `"postgresql://dch_user:dch_password@localhost:5432/dch_db"`, so you need to create a user `dch_user`, with `dch_password` as password, and `dch_db` database.
+- PostgreSQL (for integration testing, for `make container-run-flight`). The default URL in `services/flight/samples/config.toml` is `"postgresql://dch_user:dch_password@localhost:5432/dch_db"`, so you need to create a user `dch_user`, with `dch_password` as password, and `dch_db` database.
 - Podman or Docker (for container builds)
 
 ## Getting Started

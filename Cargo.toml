@@ -5,8 +5,8 @@ members = [
     "libs/pg-meta-store",
     "connectors/postgres",
     "connectors/sqlite",
-    "services/flight-service",
-    "services/rest-service",
+    "services/flight",
+    "services/rest",
 ]
 resolver = "2"
 

@@ -74,7 +74,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: services/flight-service/Containerfile
+          file: services/flight/Containerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
@@ -94,7 +94,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: services/rest-service/Containerfile
+          file: services/rest/Containerfile
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
