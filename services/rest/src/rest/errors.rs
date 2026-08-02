@@ -22,6 +22,8 @@ pub enum EndpointError {
     HeaderNotFound(String),
     #[error("Invalid header value: {0}")]
     InvalidHeaderValue(String),
+    #[error("Unimplemented")]
+    Unimplemented,
 }
 
 impl fmt::Display for RestError {
@@ -98,6 +100,11 @@ impl From<EndpointError> for RestError {
                 code: "invalid_header_value".to_string(),
                 message: format!("Header '{}' has an invalid value", header),
                 status: 400,
+            },
+            EndpointError::Unimplemented => RestError {
+                code: "unimplemented".to_string(),
+                message: "Unimplemented".to_string(),
+                status: 501,
             },
         }
     }
