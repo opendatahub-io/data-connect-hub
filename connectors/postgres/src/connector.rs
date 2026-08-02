@@ -54,10 +54,10 @@ impl FlightConnector for PgConnector {
             .try_get_with(url.clone(), async {
                 PgPool::connect(url.as_str())
                     .await
-                    .map_err(|e| ConnectorError::ConnectionError(e.to_string()))
+                    .map_err(|e| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
+            .map_err(|e| ConnectorError::ConnectionError("Failed to get PostgreSQL reader".to_string()))?;
 
         Ok(Arc::new(PgReader { pool }))
     }
