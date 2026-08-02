@@ -2,7 +2,7 @@ use super::errors::EndpointError;
 use super::errors::RestError;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
-use commons::api::connections::{DataConnection, DataConnectionType};
+use commons::api::connections::DataConnection;
 
 #[derive(Clone)]
 pub struct AppData {
@@ -53,7 +53,7 @@ pub async fn patch_connection(
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn create_connection_type(_body: web::Json<DataConnectionType>) -> Result<HttpResponse, RestError> {
+pub async fn create_connection_type(_app_data: web::ReqData<AppData>, _body: Bytes) -> Result<HttpResponse, RestError> {
     Err(EndpointError::Unimplemented.into())
 }
 
@@ -85,13 +85,15 @@ pub async fn not_found() -> Result<HttpResponse, RestError> {
 
 #[cfg(test)]
 mod tests {
-    use actix_web::{App, test, web};
+    use actix_web::{App, middleware, test, web};
 
     use super::*;
+    use crate::rest::middleware::validate_headers;
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
         cfg.service(
             web::scope("/v1/data")
+                .wrap(middleware::from_fn(validate_headers))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connection_types", web::get().to(list_connection_types))
@@ -127,13 +129,29 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_list_connections_no_namespace() {
+    async fn test_list_connections_unimplemented() {
         let app = test::init_service(App::new().configure(test_app_config)).await;
-        let req = test::TestRequest::get().uri("/v1/data/connections").to_request();
+        let req = test::TestRequest::get()
+            .uri("/v1/data/connections")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
         let resp = test::call_service(&app, req).await;
 
-        assert_eq!(resp.status(), 200);
-        let body = test::read_body(resp).await;
-        assert_eq!(body, "Listing connections for namespace: None");
+        assert_eq!(resp.status(), 501);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unimplemented");
+    }
+
+    #[actix_web::test]
+    async fn test_missing_tenant_header() {
+        let app = test::init_service(App::new().configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/v1/data/connections")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "header_not_found");
     }
 }

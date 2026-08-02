@@ -53,10 +53,10 @@ impl FlightConnector for SqliteConnector {
             .try_get_with(url.clone(), async {
                 SqlitePool::connect(url.as_str())
                     .await
-                    .map_err(|e| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError("Failed to get SQLite reader".to_string()))?;
+            .map_err(|_| ConnectorError::ConnectionError("Failed to get SQLite reader".to_string()))?;
 
         Ok(Arc::new(SqliteReader { pool }))
     }
