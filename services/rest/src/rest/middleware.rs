@@ -8,23 +8,37 @@ use super::errors::EndpointError;
 use super::errors::RestError;
 use commons::api::X_TENANT_ID;
 
+fn error_response(err: EndpointError) -> HttpResponse {
+    let error: RestError = err.into();
+    HttpResponse::BadRequest().json(&error)
+}
+
 pub async fn validate_headers(
     req: ServiceRequest,
     next: Next<impl MessageBody + 'static>,
 ) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
     let tenant_id = match req.headers().get(X_TENANT_ID) {
         Some(value) => match value.to_str() {
-            Ok(v) => v.to_string(),
+            Ok(v) if !v.is_empty() => v.to_string(),
+            Ok(_) => {
+                return Ok(req
+                    .into_response(error_response(EndpointError::InvalidHeaderValue(
+                        X_TENANT_ID.to_string(),
+                    )))
+                    .map_into_right_body());
+            },
             Err(_) => {
-                let error: RestError = EndpointError::InvalidHeaderValue(X_TENANT_ID.to_string()).into();
-                let response = HttpResponse::BadRequest().json(&error);
-                return Ok(req.into_response(response).map_into_right_body());
+                return Ok(req
+                    .into_response(error_response(EndpointError::InvalidHeaderValue(
+                        X_TENANT_ID.to_string(),
+                    )))
+                    .map_into_right_body());
             },
         },
         None => {
-            let error: RestError = EndpointError::HeaderNotFound(X_TENANT_ID.to_string()).into();
-            let response = HttpResponse::BadRequest().json(&error);
-            return Ok(req.into_response(response).map_into_right_body());
+            return Ok(req
+                .into_response(error_response(EndpointError::HeaderNotFound(X_TENANT_ID.to_string())))
+                .map_into_right_body());
         },
     };
 

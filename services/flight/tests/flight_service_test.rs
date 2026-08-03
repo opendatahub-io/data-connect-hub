@@ -60,8 +60,6 @@ impl MetaStore for TestMetaStore {
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
             },
             resource: DataConnectionType {
-                id: "sqlite".to_string(),
-                tenant_id: Some("default".to_string()),
                 name: "SQLite".to_string(),
                 provider: "sqlite".to_string(),
                 description: None,

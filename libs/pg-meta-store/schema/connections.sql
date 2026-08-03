@@ -34,7 +34,6 @@ CREATE INDEX idx_data_connections_name ON data_connections ((data->'resource'->>
 --     created_at            string          — ISO 8601 creation timestamp
 --     updated_at            string          — ISO 8601 last-update timestamp
 --   resource                object          — DataConnectionType
---     id                    string          — type identifier--     tenant_id             string | null   — optional tenant scope (null = global)
 --     name                  string          — display name
 --     provider              string          — connector provider key
 --     description           string | null   — optional description

@@ -78,8 +78,6 @@ impl std::fmt::Debug for Secret {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConnectionType {
-    pub id: String,
-    pub tenant_id: Option<String>,
     pub name: String,
     pub provider: String,
     pub description: Option<String>,
@@ -197,9 +195,7 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
             resource: DataConnectionType {
-                id: "postgres".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                name: "PostgreSQL".to_string(),
+                 name: "PostgreSQL".to_string(),
                 provider: "postgres".to_string(),
                 description: Some("PostgreSQL database connection".to_string()),
                 credentials_fields: vec![Field {
@@ -258,7 +254,6 @@ mod tests {
 
         let res: DataConnectionTypeResource = serde_json::from_value(json).unwrap();
         assert!(res.resource.description.is_none());
-        assert!(res.resource.tenant_id.is_none());
         assert!(res.resource.credentials_fields.is_empty());
     }
 
@@ -268,7 +263,6 @@ mod tests {
         let cloned = res.clone();
 
         assert_eq!(cloned.metadata.id, res.metadata.id);
-        assert_eq!(cloned.resource.id, res.resource.id);
         assert_eq!(cloned.resource.name, res.resource.name);
         assert_eq!(cloned.resource.provider, res.resource.provider);
         assert_eq!(cloned.resource.description, res.resource.description);
