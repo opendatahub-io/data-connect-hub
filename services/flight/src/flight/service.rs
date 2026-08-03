@@ -73,7 +73,7 @@ impl TabularDataService {
 
         if let Ok(mut r) = r {
             let secret_ref = &r.resource.admin.secret_ref;
-            tracing::info!("Getting credentials for secret: {}", secret_ref);
+            tracing::info!("Resolving credentials");
             // Hydrate the connection with the secret credentials
             let secret = self
                 .secret_store
