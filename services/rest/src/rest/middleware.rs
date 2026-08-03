@@ -5,11 +5,11 @@ use actix_web::{HttpMessage, HttpResponse};
 
 use super::endpoints::AppData;
 use super::errors::EndpointError;
-use super::errors::RestError;
+use super::errors::RestErrorResponse;
 use commons::api::X_TENANT_ID;
 
 fn error_response(err: EndpointError) -> HttpResponse {
-    let error: RestError = err.into();
+    let error: RestErrorResponse = err.into();
     HttpResponse::BadRequest().json(&error)
 }
 

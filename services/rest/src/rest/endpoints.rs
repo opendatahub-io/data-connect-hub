@@ -1,5 +1,5 @@
 use super::errors::EndpointError;
-use super::errors::RestError;
+use super::errors::RestErrorResponse;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
@@ -9,36 +9,36 @@ pub struct AppData {
     pub tenant_id: String,
 }
 
-pub async fn health() -> Result<HttpResponse, RestError> {
+pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
     Ok(HttpResponse::Ok().finish())
 }
 
 pub async fn list_connections(
     _app_data: web::ReqData<AppData>,
     _path: Option<web::Path<String>>,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn get_connection(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<(String, String)>,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn list_connection_types(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestError> {
+pub async fn list_connection_types(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn get_connection_type(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<String>,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn create_connection(app_data: web::ReqData<AppData>, body: Bytes) -> Result<HttpResponse, RestError> {
+pub async fn create_connection(app_data: web::ReqData<AppData>, body: Bytes) -> Result<HttpResponse, RestErrorResponse> {
     let _tenant_id = app_data.tenant_id.clone();
     let connection: DataConnection = serde_json::from_slice(&body).map_err(|_| EndpointError::InvalidPayload)?;
 
@@ -49,11 +49,11 @@ pub async fn patch_connection(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<String>,
     _body: Bytes,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn create_connection_type(_app_data: web::ReqData<AppData>, _body: Bytes) -> Result<HttpResponse, RestError> {
+pub async fn create_connection_type(_app_data: web::ReqData<AppData>, _body: Bytes) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
@@ -61,25 +61,25 @@ pub async fn patch_connection_type(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<String>,
     _body: Bytes,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<String>,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection_type(
     _app_data: web::ReqData<AppData>,
     _path: web::Path<String>,
-) -> Result<HttpResponse, RestError> {
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn not_found() -> Result<HttpResponse, RestError> {
+pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
 

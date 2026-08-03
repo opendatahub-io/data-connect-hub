@@ -8,7 +8,7 @@ use thiserror::Error;
 use tracing::error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct RestError {
+pub struct RestErrorResponse {
     pub code: String,
     pub message: String,
     #[serde(skip)]
@@ -29,13 +29,13 @@ pub enum EndpointError {
     Unimplemented,
 }
 
-impl fmt::Display for RestError {
+impl fmt::Display for RestErrorResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl ResponseError for RestError {
+impl ResponseError for RestErrorResponse {
     fn status_code(&self) -> StatusCode {
         StatusCode::from_u16(self.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
     }
@@ -45,7 +45,7 @@ impl ResponseError for RestError {
     }
 }
 
-impl From<ConnectorError> for RestError {
+impl From<ConnectorError> for RestErrorResponse {
     fn from(err: ConnectorError) -> Self {
         let (code, status) = match &err {
             ConnectorError::InvalidRequest(_) => ("invalid_request", 400),
@@ -54,7 +54,7 @@ impl From<ConnectorError> for RestError {
             ConnectorError::ConnectionError(_) => ("connection", 503),
             ConnectorError::SQLError(_) => ("sql_error", 400),
         };
-        RestError {
+        RestErrorResponse {
             code: code.to_string(),
             message: err.to_string(),
             status,
@@ -62,7 +62,7 @@ impl From<ConnectorError> for RestError {
     }
 }
 
-impl From<MetaStoreError> for RestError {
+impl From<MetaStoreError> for RestErrorResponse {
     fn from(err: MetaStoreError) -> Self {
         let (code, status) = match &err {
             MetaStoreError::ResourceNotFound(_) => ("not_found", 404),
@@ -73,7 +73,7 @@ impl From<MetaStoreError> for RestError {
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
         };
-        RestError {
+        RestErrorResponse {
             code: code.to_string(),
             message: err.to_string(),
             status,
@@ -95,7 +95,7 @@ pub fn default_error_handler<B: 'static>(res: ServiceResponse<B>) -> actix_web::
     let status = res.status();
     error!("Unhandled error: {}", status);
 
-    let error = RestError {
+    let error = RestErrorResponse {
         code: "unknown_error".to_string(),
         message: status.to_string(),
         status: status.as_u16(),
@@ -107,30 +107,30 @@ pub fn default_error_handler<B: 'static>(res: ServiceResponse<B>) -> actix_web::
     ))
 }
 
-impl From<EndpointError> for RestError {
+impl From<EndpointError> for RestErrorResponse {
     fn from(err: EndpointError) -> Self {
         match err {
-            EndpointError::PathNotFound => RestError {
+            EndpointError::PathNotFound => RestErrorResponse {
                 code: "path_not_found".to_string(),
                 message: "Path not found".to_string(),
                 status: 404,
             },
-            EndpointError::InvalidPayload => RestError {
+            EndpointError::InvalidPayload => RestErrorResponse {
                 code: "invalid_payload".to_string(),
                 message: "Invalid payload".to_string(),
                 status: 400,
             },
-            EndpointError::HeaderNotFound(header) => RestError {
+            EndpointError::HeaderNotFound(header) => RestErrorResponse {
                 code: "header_not_found".to_string(),
                 message: format!("Header '{}' not found", header),
                 status: 400,
             },
-            EndpointError::InvalidHeaderValue(header) => RestError {
+            EndpointError::InvalidHeaderValue(header) => RestErrorResponse {
                 code: "invalid_header_value".to_string(),
                 message: format!("Header '{}' has an invalid value", header),
                 status: 400,
             },
-            EndpointError::Unimplemented => RestError {
+            EndpointError::Unimplemented => RestErrorResponse {
                 code: "unimplemented".to_string(),
                 message: "Unimplemented".to_string(),
                 status: 501,
