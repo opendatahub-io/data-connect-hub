@@ -4,6 +4,7 @@ use super::errors::RestErrorResponse;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
+use serde::Serialize;
 use tracing::info;
 
 #[derive(Clone)]
@@ -11,8 +12,15 @@ pub struct AppData {
     pub tenant_id: String,
 }
 
+#[derive(Serialize)]
+struct HealthResponse {
+    service: String,
+}
+
 pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
-    Ok(HttpResponse::Ok().finish())
+    Ok(HttpResponse::Ok().json(HealthResponse {
+        service: "Data Connect Hub".to_string(),
+    }))
 }
 
 pub async fn list_connections(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestErrorResponse> {
