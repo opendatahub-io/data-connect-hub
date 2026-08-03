@@ -162,12 +162,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_invalid_json_body() {
-        let app = test::init_service(
-            App::new()
-                .app_data(json_config())
-                .configure(test_app_config),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(json_config()).configure(test_app_config)).await;
         let req = test::TestRequest::post()
             .uri("/v1/data/connections")
             .insert_header(("x-tenant-id", "test-tenant"))

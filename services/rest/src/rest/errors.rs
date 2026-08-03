@@ -17,8 +17,6 @@ pub struct RestErrorResponse {
 pub enum EndpointError {
     #[error("Path not found")]
     PathNotFound,
-    #[error("Invalid payload")]
-    InvalidPayload,
     #[error("Header not found: {0}")]
     HeaderNotFound(String),
     #[error("Invalid header value: {0}")]
@@ -107,11 +105,6 @@ impl From<EndpointError> for RestErrorResponse {
                 code: "path_not_found".to_string(),
                 message: "Path not found".to_string(),
                 status: 404,
-            },
-            EndpointError::InvalidPayload => RestErrorResponse {
-                code: "invalid_payload".to_string(),
-                message: "Invalid payload".to_string(),
-                status: 400,
             },
             EndpointError::HeaderNotFound(header) => RestErrorResponse {
                 code: "header_not_found".to_string(),

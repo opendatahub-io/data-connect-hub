@@ -195,7 +195,7 @@ mod tests {
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
             resource: DataConnectionType {
-                 name: "PostgreSQL".to_string(),
+                name: "PostgreSQL".to_string(),
                 provider: "postgres".to_string(),
                 description: Some("PostgreSQL database connection".to_string()),
                 credentials_fields: vec![Field {

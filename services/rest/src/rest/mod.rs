@@ -1,8 +1,8 @@
 pub mod endpoints;
 pub mod errors;
 pub mod middleware;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct JsonPatch {
@@ -10,4 +10,3 @@ pub struct JsonPatch {
     pub path: String,
     pub value: Option<Value>,
 }
-
