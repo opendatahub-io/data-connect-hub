@@ -1,8 +1,10 @@
+use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
+use tracing::info;
 
 #[derive(Clone)]
 pub struct AppData {
@@ -13,16 +15,13 @@ pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
     Ok(HttpResponse::Ok().finish())
 }
 
-pub async fn list_connections(
-    _app_data: web::ReqData<AppData>,
-    _path: Option<web::Path<String>>,
-) -> Result<HttpResponse, RestErrorResponse> {
+pub async fn list_connections(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn get_connection(
     _app_data: web::ReqData<AppData>,
-    _path: web::Path<(String, String)>,
+    _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
@@ -33,27 +32,33 @@ pub async fn list_connection_types(_app_data: web::ReqData<AppData>) -> Result<H
 
 pub async fn get_connection_type(
     _app_data: web::ReqData<AppData>,
-    _path: web::Path<String>,
+    _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn create_connection(app_data: web::ReqData<AppData>, body: Bytes) -> Result<HttpResponse, RestErrorResponse> {
+pub async fn create_connection(
+    app_data: web::ReqData<AppData>,
+    connection: web::Json<DataConnection>,
+) -> Result<HttpResponse, RestErrorResponse> {
     let _tenant_id = app_data.tenant_id.clone();
-    let connection: DataConnection = serde_json::from_slice(&body).map_err(|_| EndpointError::InvalidPayload)?;
 
     Ok(HttpResponse::Ok().json(connection))
 }
 
 pub async fn patch_connection(
     _app_data: web::ReqData<AppData>,
-    _path: web::Path<String>,
-    _body: Bytes,
+    _id: web::Path<String>,
+    body: web::Json<Vec<JsonPatch>>,
 ) -> Result<HttpResponse, RestErrorResponse> {
+    info!("Received JSON patch request: {:?}", body);
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn create_connection_type(_app_data: web::ReqData<AppData>, _body: Bytes) -> Result<HttpResponse, RestErrorResponse> {
+pub async fn create_connection_type(
+    _app_data: web::ReqData<AppData>,
+    _body: Bytes,
+) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
@@ -88,6 +93,7 @@ mod tests {
     use actix_web::{App, middleware, test, web};
 
     use super::*;
+    use crate::rest::errors::json_config;
     use crate::rest::middleware::validate_headers;
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
@@ -95,6 +101,7 @@ mod tests {
             web::scope("/v1/data")
                 .wrap(middleware::from_fn(validate_headers))
                 .route("/connections", web::get().to(list_connections))
+                .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connection_types", web::get().to(list_connection_types))
                 .route("/connection_types/{id}", web::get().to(get_connection_type))
@@ -145,13 +152,32 @@ mod tests {
     #[actix_web::test]
     async fn test_missing_tenant_header() {
         let app = test::init_service(App::new().configure(test_app_config)).await;
-        let req = test::TestRequest::get()
-            .uri("/v1/data/connections")
-            .to_request();
+        let req = test::TestRequest::get().uri("/v1/data/connections").to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "header_not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_invalid_json_body() {
+        let app = test::init_service(
+            App::new()
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/v1/data/connections")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_payload("not json")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_json");
     }
 }

@@ -1,10 +1,9 @@
 use actix_cors::Cors;
-use actix_web::middleware::ErrorHandlers;
 use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
 use crate::rest::endpoints::*;
-use crate::rest::errors::default_error_handler;
+use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
 use anyhow::Result;
@@ -34,7 +33,6 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/v1/data")
             .wrap(middleware::from_fn(validate_headers))
-            .wrap(ErrorHandlers::new().default_handler(default_error_handler))
             .route("/connections", web::get().to(list_connections))
             .route("/connections", web::post().to(create_connection))
             .route("/connections/{id}", web::get().to(get_connection))
@@ -76,6 +74,9 @@ async fn main() -> Result<()> {
 
         App::new()
             .wrap(cors)
+            .app_data(json_config())
+            .app_data(query_config())
+            .app_data(path_config())
             .route("/health", web::get().to(health))
             .configure(api_routes)
     })

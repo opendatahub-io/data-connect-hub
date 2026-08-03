@@ -1,11 +1,9 @@
-use actix_web::dev::ServiceResponse;
-use actix_web::middleware::ErrorHandlerResponse;
+use actix_web::web::{JsonConfig, PathConfig, QueryConfig};
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use commons::api::errors::{ConnectorError, MetaStoreError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
-use tracing::error;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RestErrorResponse {
@@ -81,30 +79,25 @@ impl From<MetaStoreError> for RestErrorResponse {
     }
 }
 
-pub fn default_error_handler<B: 'static>(res: ServiceResponse<B>) -> actix_web::Result<ErrorHandlerResponse<B>> {
-    let is_json = res
-        .headers()
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(|v| v.starts_with("application/json"));
-
-    if is_json {
-        return Ok(ErrorHandlerResponse::Response(res.map_into_left_body()));
+fn extraction_error(code: &str, err: actix_web::Error) -> actix_web::Error {
+    RestErrorResponse {
+        code: code.to_string(),
+        message: err.to_string(),
+        status: 400,
     }
+    .into()
+}
 
-    let status = res.status();
-    error!("Unhandled error: {}", status);
+pub fn json_config() -> JsonConfig {
+    JsonConfig::default().error_handler(|err, _req| extraction_error("invalid_json", err.into()))
+}
 
-    let error = RestErrorResponse {
-        code: "unknown_error".to_string(),
-        message: status.to_string(),
-        status: status.as_u16(),
-    };
-    let (req, _) = res.into_parts();
-    let response = HttpResponse::build(status).json(&error);
-    Ok(ErrorHandlerResponse::Response(
-        ServiceResponse::new(req, response).map_into_right_body(),
-    ))
+pub fn query_config() -> QueryConfig {
+    QueryConfig::default().error_handler(|err, _req| extraction_error("invalid_query", err.into()))
+}
+
+pub fn path_config() -> PathConfig {
+    PathConfig::default().error_handler(|err, _req| extraction_error("invalid_path", err.into()))
 }
 
 impl From<EndpointError> for RestErrorResponse {
