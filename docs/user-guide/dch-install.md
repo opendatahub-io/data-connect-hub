@@ -13,6 +13,7 @@ The purpose of this document is to provide **end-users** steps to install, confi
   NAME           AGE   PHASE   CREATED AT
   default-dsci   83d   Ready   2026-05-08T12:41:52Z
   ```
+- A `Gateway` which will be referred to by `DataConnectService` CR. You can use `data-science-gateway` in `openshift-ingress` namespace, or point to an existing `Gateway`. `data-science-gateway` is automatically created when RHOAI operator is installed. For the purpose of this demo, we will use `data-science-gateway`.
 
 ## Install DCH Operator
 ### Install Manually
