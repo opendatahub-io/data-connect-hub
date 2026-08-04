@@ -39,4 +39,10 @@ EOF
 ```
 ### Verify `DataConnectService`
 You can verify the `DataConnectService` as follows:
-- TODO
+  ```
+  $ oc get po -n dch-tenant-1 -l app.kubernetes.io/part-of=data-connect-hub
+  NAME                              READY   STATUS    RESTARTS   AGE
+  flight-service-789d77c878-m94nh   1/1     Running   0          46m
+  postgres-7f46bcbd7b-77t5h         1/1     Running   0          67m
+  rest-service-7f4cc4948b-n6llb     1/1     Running   0          73m
+  ```
