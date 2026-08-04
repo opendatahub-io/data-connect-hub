@@ -6,6 +6,7 @@ use commons::api::connections::{
 use commons::api::errors::MetaStoreError;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
@@ -75,9 +76,10 @@ impl MetaStore for PgMetaStore {
         &self,
         tenant_id: &str,
         uid: &str,
-        data_connection: DataConnection,
+        update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         let existing = self.get_data_connection(tenant_id, uid).await?;
+        let data_connection = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
         let resource = DataConnectionResource {
@@ -173,9 +175,10 @@ impl MetaStore for PgMetaStore {
         &self,
         tenant_id: &str,
         uid: &str,
-        data_connection_type: DataConnectionType,
+        update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         let existing = self.get_data_connection_type(tenant_id, uid).await?;
+        let data_connection_type = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
         let resource = DataConnectionTypeResource {

@@ -59,7 +59,7 @@ impl MetaStore for TestMetaStore {
         &self,
         _tenant_id: &str,
         _uid: &str,
-        _data_connection: DataConnection,
+        _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }
@@ -80,7 +80,7 @@ impl MetaStore for TestMetaStore {
         &self,
         _tenant_id: &str,
         _uid: &str,
-        _data_connection_type: DataConnectionType,
+        _update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         unimplemented!()
     }

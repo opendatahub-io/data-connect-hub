@@ -2,6 +2,7 @@ use crate::api::ResourceMetadata;
 use crate::api::errors::{MetaStoreError, SecretStoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Admin {
     pub secret_ref: String,
@@ -108,7 +109,7 @@ pub trait MetaStore {
         &self,
         tenant_id: &str,
         uid: &str,
-        data_connection: DataConnection,
+        update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError>;
 
     /// Deletes the data connection identified by `uid`.
@@ -133,7 +134,7 @@ pub trait MetaStore {
         &self,
         tenant_id: &str,
         uid: &str,
-        data_connection_type: DataConnectionType,
+        update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionTypeResource, MetaStoreError>;
 
     /// Deletes the data connection type identified by `uid`.
