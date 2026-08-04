@@ -56,7 +56,7 @@ You can verify the `DataConnectService` as follows:
 - Verify the flight service in the pod is responding by running the following script:
   ```bash
   #!/bin/bash
-  flight_pod=$(oc get po -n dh-dev -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}')
+  flight_pod=$(oc get po -n dch-tenant-1 -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}')
 
   curl -sL -o /tmp/Flight.proto https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto
   
