@@ -50,19 +50,26 @@ make lint
 
 ```sh
 # REST service (default: 127.0.0.1:8080)
-cargo run -p rest-service -- --config services/rest-service/samples/config.toml
+cargo run -p rest-service -- --config {your local path}/config.toml
 
 # Flight service (default: 127.0.0.1:50051)
-cargo run -p flight-service -- --config services/flight-service/samples/config.toml
+cargo run -p flight-service -- --config {your local path}/config.toml
 ```
 
 ## REST API
 
-| Method | Path                                       | Description              |
-| ------ | ------------------------------------------ | ------------------------ |
-| GET    | `/v1/data/connections`                     | List all connections     |
-| GET    | `/v1/data/connections/{namespace}`          | List by namespace        |
-| GET    | `/v1/data/connections/{namespace}/{name}`   | Get a specific connection|
+| Method | Path                                | Description                  |
+| ------ | ----------------------------------- | ---------------------------- |
+| GET    | `/api/v1/data/connections`          | List all connections         |
+| POST   | `/api/v1/data/connections`          | Create a connection          |
+| GET    | `/api/v1/data/connections/{id}`     | Get a connection             |
+| PATCH  | `/api/v1/data/connections/{id}`     | Update a connection          |
+| DELETE | `/api/v1/data/connections/{id}`     | Delete a connection          |
+| GET    | `/api/v1/data/connection-types`     | List all connection types    |
+| POST   | `/api/v1/data/connection-types`     | Create a connection type     |
+| GET    | `/api/v1/data/connection-types/{id}`| Get a connection type        |
+| PATCH  | `/api/v1/data/connection-types/{id}`| Update a connection type     |
+| DELETE | `/api/v1/data/connection-types/{id}`| Delete a connection type     |
 
 ## Container Images
 
@@ -85,17 +92,33 @@ make container-run-rest
 
 Run `make help` for the full list. Key targets:
 
-| Target              | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| `build`             | `cargo build --workspace`                        |
-| `release`           | `cargo build --workspace --release`              |
-| `test`              | Run all tests                                    |
-| `test-unit`         | Unit tests (commons, postgres-connector, rest)   |
-| `test-integration`  | Integration tests (flight-service)               |
-| `lint`              | Clippy + rustfmt check                           |
-| `fmt`               | Format all crates                                |
-| `audit`             | `cargo audit`                                    |
-| `container-all`     | Build all container images                       |
+| Target                | Description                                        |
+| --------------------- | -------------------------------------------------- |
+| `all`                 | Build + fmt + lint + test + audit                  |
+| `build`               | `cargo build --workspace`                          |
+| `release`             | `cargo build --workspace --release`                |
+| `check`               | `cargo check --workspace`                          |
+| `clean`               | `cargo clean`                                      |
+| `test`                | Run all tests                                      |
+| `test-unit`           | Unit tests (commons, postgres-connector, pg-meta-store, rest) |
+| `test-integration`    | Integration tests (flight-service)                 |
+| `lint`                | Clippy + rustfmt check                             |
+| `fmt`                 | Format all crates                                  |
+| `doc`                 | Rustdoc with `-D warnings`                         |
+| `audit`               | `cargo audit`                                      |
+| `check-dco`           | Verify DCO sign-off on commits                     |
+| `container-flight`    | Build flight-service container image               |
+| `container-rest`      | Build rest-service container image                 |
+| `container-all`       | Build all container images                         |
+| `container-run-flight`| Run flight-service container (host network)        |
+| `container-run-rest`  | Run rest-service container (host network)          |
+| `setup-hooks`         | Install git pre-commit hooks                       |
+| `oc-setup-flight`     | Apply OpenShift build config for flight-service    |
+| `oc-setup-rest`       | Apply OpenShift build config for rest-service      |
+| `oc-setup-all`        | Apply OpenShift build configs for all services     |
+| `oc-build-flight`     | Start OpenShift build for flight-service           |
+| `oc-build-rest`       | Start OpenShift build for rest-service             |
+| `oc-build-all`        | Start OpenShift builds for all services            |
 
 ## Key Open Source Crates
 
