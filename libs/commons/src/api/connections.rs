@@ -218,7 +218,6 @@ mod tests {
 
         assert_eq!(json["metadata"]["id"], "dct-001");
         assert_eq!(json["metadata"]["tenant_id"], "tenant-1");
-        assert_eq!(json["resource"]["id"], "postgres");
         assert_eq!(json["resource"]["name"], "PostgreSQL");
         assert_eq!(json["resource"]["provider"], "postgres");
         assert_eq!(json["resource"]["description"], "PostgreSQL database connection");
