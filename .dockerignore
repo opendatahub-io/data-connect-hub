@@ -4,13 +4,68 @@
 config/db/postgres/postgres-credentials.env
 config/db/postgres/secret-config.toml
 
-# Not needed in the build context either way.
-target/
-.git/
-docs/
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+*.md
+LICENSE
+OWNERS
+
+# CI/CD
+.github
+.tekton
+
+# Local dev and AI config
 .local/
 .claude/
-.github/
-**/*.md
+docs/
 
+# IDE and editor files
+.vscode
+.idea
+*.swp
+*.swo
+*~
 
+# Build artifacts
+target/
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Test data
+testdata/
+
+# Coverage reports
+coverage.out
+coverage.html
+*.coverprofile
+
+# Helm charts
+hack/
+
+# Docker files themselves
+Dockerfile*
+Containerfile*
+.dockerignore
+docker/
+
+# Development tools
+Makefile
+_typos.toml
+
+# Temporary files
+*.tmp
+*.log
+tmp/
+temp/
+
+# OS files
+.DS_Store
+Thumbs.db
