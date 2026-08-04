@@ -18,3 +18,25 @@ The purpose of this document is to provide **end-users** steps to install, confi
 ## Install DCH Operator
 ### Install Manually
 ### Install with `DataScienceCluster` (DSC)
+### Install `DataConnectService`
+Once the DCH operator is running and there's an available `Gateway`, the next step is to create a `DataConnectService` which will create a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. You can create a `DataConnectService` in a namespace for a tenant as follows:
+
+```bash
+oc apply -f - <<'EOF'
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+  kind: DataConnectService
+  metadata:
+    name: tenant-1-data-connect
+    namespace: dch-tenant-1
+  spec:
+    description: "Data Connect Hub for the ML platform"
+    restApiReplicas: 2
+    flightApiReplicas: 3
+    gateway:
+      name: data-science-gateway
+      namespace: openshift-ingress
+EOF
+```
+### Verify `DataConnectService`
+You can verify the `DataConnectService` as follows:
+- TODO
