@@ -1,8 +1,8 @@
-use tonic::{Request, Status};
 use tonic::service::Interceptor;
+use tonic::{Request, Status};
 use tracing::info;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct AuthInterceptor;
 
 impl AuthInterceptor {

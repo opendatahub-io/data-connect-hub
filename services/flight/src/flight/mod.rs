@@ -1,6 +1,6 @@
+pub mod auth;
 pub mod registry;
 pub mod service;
-pub mod auth;
 
 use commons::api::connections::{Secret, SecretStore};
 use commons::api::errors::SecretStoreError;

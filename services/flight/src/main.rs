@@ -5,6 +5,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use config::{Config, File};
 use flight_service::flight::TabularDataService;
+use flight_service::flight::auth::AuthInterceptor;
 use flight_service::flight::registry::ConnectorsRegistry;
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
@@ -13,7 +14,6 @@ use sqlite_connector::SqliteConnector;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
-use flight_service::flight::auth::AuthInterceptor;
 
 mod utils;
 
@@ -92,10 +92,8 @@ async fn main() -> Result<()> {
         Arc::new(secret_store),
     );
 
-
     let auth_interceptor = AuthInterceptor::new();
-    let service  = FlightServiceServer::with_interceptor(service, auth_interceptor);
-
+    let service = FlightServiceServer::with_interceptor(service, auth_interceptor);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
