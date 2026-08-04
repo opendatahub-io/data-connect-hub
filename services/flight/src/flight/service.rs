@@ -16,7 +16,7 @@ use prost::Message;
 use prost::bytes::Bytes;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use tracing::{info, debug};
+use tracing::{debug, info};
 
 pub struct TabularDataService {
     connectors_registry: Arc<ConnectorsRegistry>,
