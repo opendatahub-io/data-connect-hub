@@ -110,6 +110,8 @@ test:
 test-unit:
 	cargo test -p commons $(_NOCAPTURE)
 	cargo test -p postgres-connector $(_NOCAPTURE)
+	cargo test -p sqlite-connector $(_NOCAPTURE)
+	cargo test -p kube-utils $(_NOCAPTURE)
 	cargo test -p pg-meta-store $(_NOCAPTURE)
 	cargo test -p rest-service $(_NOCAPTURE)
 
@@ -164,7 +166,7 @@ help:
 	@echo ""
 	@echo "Test:"
 	@echo "  test                 run all tests"
-	@echo "  test-unit            unit tests (commons, postgres-connector, rest-service)"
+	@echo "  test-unit            unit tests (commons, connectors, kube-utils, pg-meta-store, rest-service)"
 	@echo "  test-integration     integration tests (flight-service)"
 	@echo ""
 	@echo "Quality:"
