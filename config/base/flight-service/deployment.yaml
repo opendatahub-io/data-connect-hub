@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flight-service
+  labels:
+    app.kubernetes.io/name: flight-service
+    app.kubernetes.io/part-of: data-connect-hub
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: flight-service
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flight-service
+        app.kubernetes.io/part-of: data-connect-hub
+    spec:
+      serviceAccountName: flight-service-sa
+      automountServiceAccountToken: false
+      containers:
+        - name: flight-service
+          image: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+          imagePullPolicy: Always
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          args:
+            - --config
+            - /config/config.toml
+          ports:
+            - name: grpc
+              containerPort: 50051
+          env:
+            - name: RUST_LOG
+              value: info
+          volumeMounts:
+            - name: config
+              mountPath: /config
+            - name: db-secret
+              mountPath: /secrets
+              readOnly: true
+          readinessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            grpc:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 15
+      volumes:
+        - name: config
+          configMap:
+            name: flight-service-config
+        - name: db-secret
+          secret:
+            secretName: postgres-credentials
+            items:
+              - key: secret-config.toml
+                path: secret-config.toml

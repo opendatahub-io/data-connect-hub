@@ -1,0 +1,58 @@
+# syntax=docker/dockerfile:1
+
+# ------------------------------------------------------------------------------
+# Stage 1: Build
+# ------------------------------------------------------------------------------
+
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0 AS builder
+
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+    && microdnf clean all
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --profile minimal --default-toolchain 1.96.0
+
+WORKDIR /src
+
+# ------------------------------------------------------------------------------
+# Source
+# ------------------------------------------------------------------------------
+
+COPY Cargo.toml Cargo.lock ./
+COPY libs/ ./libs/
+COPY connectors/ ./connectors/
+COPY services/ ./services/
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p rest-service \
+    && cp target/release/rest-service /usr/local/bin/rest-service
+
+# ------------------------------------------------------------------------------
+# Stage 2: Runtime
+# ------------------------------------------------------------------------------
+
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0
+
+LABEL org.opencontainers.image.description="Data Connection Hub — REST Service (HTTP/actix-web)"
+
+RUN microdnf install -y shadow-utils ca-certificates curl-minimal \
+    && microdnf clean all \
+    && groupadd -r dch \
+    && useradd -r -g dch -d /nonexistent -s /sbin/nologin dch
+
+COPY --from=builder --chown=root:root --chmod=0555 \
+    /usr/local/bin/rest-service /usr/local/bin/rest-service
+
+USER dch:dch
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=2s \
+    CMD curl -fsS http://127.0.0.1:8080/health || exit 1
+
+ENTRYPOINT ["rest-service"]

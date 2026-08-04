@@ -6,24 +6,30 @@ Data Connect Hub (DCH) is a middleware service that provides a single integratio
 
 ```
 data-connect-hub/
-├── commons/               Shared types and traits
-├── postgres-connector/    PostgreSQL data reader (library)
-├── pg-meta-store/         PostgreSQL metadata store
-├── flight-service/        Arrow Flight gRPC service (binary)
-├── rest-service/          HTTP REST service (binary)
-├── py-tools/              Python tooling and scripts
-├── docs/                  Documentation and proposals
-├── Cargo.toml             Workspace manifest
-├── Makefile               Build, test, lint, container targets
-├── clippy.toml            Clippy configuration
-├── rustfmt.toml           Rustfmt configuration
-└── rust-toolchain.toml    Rust toolchain pinning
+├── services/
+│   ├── flight/                Arrow Flight gRPC service (binary)
+│   └── rest/                  HTTP REST service (binary)
+├── connectors/
+│   ├── postgres/              PostgreSQL data reader (library)
+│   └── sqlite/                SQLite data reader (library)
+├── libs/
+│   ├── commons/               Shared types and traits
+│   ├── pg-meta-store/         PostgreSQL metadata store
+│   └── kube-utils/            Kubernetes utility helpers
+├── config/                    Kustomize deployment configs
+├── hack/                      Scripts and Python tooling
+├── docs/                      Documentation and proposals
+├── Cargo.toml                 Workspace manifest
+├── Makefile                   Build, test, lint, container targets
+├── clippy.toml                Clippy configuration
+├── rustfmt.toml               Rustfmt configuration
+└── rust-toolchain.toml        Rust toolchain pinning
 ```
 
 ## Prerequisites
 
 - Rust 1.96+
-- PostgreSQL (for integration testing, for `make container-run-flight`). The default URL in `flight-service/sample/config.toml` is `"postgresql://dch_user:dch_password@localhost:5432/dch_db"`, so you need to create a user `dch_user`, with `dch_password` as password, and `dch_db` database.
+- PostgreSQL (for integration testing, for `make container-run-flight`). The default URL in `services/flight/samples/config.toml` is `"postgresql://dch_user:dch_password@localhost:5432/dch_db"`, so you need to create a user `dch_user`, with `dch_password` as password, and `dch_db` database.
 - Podman or Docker (for container builds)
 
 ## Getting Started
@@ -44,19 +50,26 @@ make lint
 
 ```sh
 # REST service (default: 127.0.0.1:8080)
-cargo run -p rest-service -- --port 8080
+cargo run -p rest-service -- --config {your local path}/config.toml
 
 # Flight service (default: 127.0.0.1:50051)
-cargo run -p flight-service
+cargo run -p flight-service -- --config {your local path}/config.toml
 ```
 
 ## REST API
 
-| Method | Path                                       | Description              |
-| ------ | ------------------------------------------ | ------------------------ |
-| GET    | `/v1/data/connections`                     | List all connections     |
-| GET    | `/v1/data/connections/{namespace}`          | List by namespace        |
-| GET    | `/v1/data/connections/{namespace}/{name}`   | Get a specific connection|
+| Method | Path                                | Description                  |
+| ------ | ----------------------------------- | ---------------------------- |
+| GET    | `/api/v1/data/connections`          | List all connections         |
+| POST   | `/api/v1/data/connections`          | Create a connection          |
+| GET    | `/api/v1/data/connections/{id}`     | Get a connection             |
+| PATCH  | `/api/v1/data/connections/{id}`     | Update a connection          |
+| DELETE | `/api/v1/data/connections/{id}`     | Delete a connection          |
+| GET    | `/api/v1/data/connection-types`     | List all connection types    |
+| POST   | `/api/v1/data/connection-types`     | Create a connection type     |
+| GET    | `/api/v1/data/connection-types/{id}`| Get a connection type        |
+| PATCH  | `/api/v1/data/connection-types/{id}`| Update a connection type     |
+| DELETE | `/api/v1/data/connection-types/{id}`| Delete a connection type     |
 
 ## Container Images
 
@@ -79,17 +92,33 @@ make container-run-rest
 
 Run `make help` for the full list. Key targets:
 
-| Target              | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| `build`             | `cargo build --workspace`                        |
-| `release`           | `cargo build --workspace --release`              |
-| `test`              | Run all tests                                    |
-| `test-unit`         | Unit tests (commons, postgres-connector, rest)   |
-| `test-integration`  | Integration tests (flight-service)               |
-| `lint`              | Clippy + rustfmt check                           |
-| `fmt`               | Format all crates                                |
-| `audit`             | `cargo audit`                                    |
-| `container-all`     | Build all container images                       |
+| Target                | Description                                        |
+| --------------------- | -------------------------------------------------- |
+| `all`                 | Build + fmt + lint + test + audit                  |
+| `build`               | `cargo build --workspace`                          |
+| `release`             | `cargo build --workspace --release`                |
+| `check`               | `cargo check --workspace`                          |
+| `clean`               | `cargo clean`                                      |
+| `test`                | Run all tests                                      |
+| `test-unit`           | Unit tests (commons, postgres-connector, pg-meta-store, rest) |
+| `test-integration`    | Integration tests (flight-service)                 |
+| `lint`                | Clippy + rustfmt check                             |
+| `fmt`                 | Format all crates                                  |
+| `doc`                 | Rustdoc with `-D warnings`                         |
+| `audit`               | `cargo audit`                                      |
+| `check-dco`           | Verify DCO sign-off on commits                     |
+| `container-flight`    | Build flight-service container image               |
+| `container-rest`      | Build rest-service container image                 |
+| `container-all`       | Build all container images                         |
+| `container-run-flight`| Run flight-service container (host network)        |
+| `container-run-rest`  | Run rest-service container (host network)          |
+| `setup-hooks`         | Install git pre-commit hooks                       |
+| `oc-setup-flight`     | Apply OpenShift build config for flight-service    |
+| `oc-setup-rest`       | Apply OpenShift build config for rest-service      |
+| `oc-setup-all`        | Apply OpenShift build configs for all services     |
+| `oc-build-flight`     | Start OpenShift build for flight-service           |
+| `oc-build-rest`       | Start OpenShift build for rest-service             |
+| `oc-build-all`        | Start OpenShift builds for all services            |
 
 ## Key Open Source Crates
 

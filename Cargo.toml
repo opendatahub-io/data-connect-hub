@@ -1,11 +1,12 @@
 [workspace]
 members = [
-    "commons",
-    "flight-service",
-    "pg-meta-store",
-    "postgres-connector",
-    "rest-service",
-    "sqlite-connector",
+    "libs/commons",
+    "libs/kube-utils",
+    "libs/pg-meta-store",
+    "connectors/postgres",
+    "connectors/sqlite",
+    "services/flight",
+    "services/rest",
 ]
 resolver = "2"
 
@@ -16,13 +17,15 @@ version = "0.1.0"
 unsafe_code = "deny"
 
 [workspace.dependencies]
-commons = { path = "commons" }
-postgres-connector = { path = "postgres-connector" }
-sqlite-connector = { path = "sqlite-connector" }
-pg-meta-store = { path = "pg-meta-store" }
+commons = { path = "libs/commons" }
+postgres-connector = { path = "connectors/postgres" }
+sqlite-connector = { path = "connectors/sqlite" }
+kube-utils = { path = "libs/kube-utils" }
+pg-meta-store = { path = "libs/pg-meta-store" }
 arrow = "59.1.0"
 arrow-flight = { version = "59.1.0", features = ["flight-sql"] }
 tonic = "0.14"
+tonic-health = "0.14"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal"] }
 tokio-stream = "0.1"
 futures = "0.3"
@@ -44,4 +47,6 @@ async-trait = "0.1"
 async-stream = "0.3"
 bytes = "1.0"
 config = "0.15"
+kube = { version = "3.1.0", features = ["client", "runtime"] }
+k8s-openapi = { version = "0.27.0", features = ["latest"] }
 moka = "0.12"

@@ -1,0 +1,43 @@
+[package]
+name = "flight-service"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[lib]
+name = "flight_service"
+path = "src/lib.rs"
+
+[[bin]]
+name = "flight-service"
+path = "src/main.rs"
+
+[dependencies]
+postgres-connector = { workspace = true }
+sqlite-connector = { workspace = true }
+async-trait = { workspace = true }
+commons = { workspace = true }
+pg-meta-store = { workspace = true }
+arrow = { workspace = true }
+arrow-flight = { workspace = true, features = ["flight-sql"] }
+tonic = { workspace = true }
+tonic-health = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "signal"] }
+futures = { workspace = true }
+prost = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+bytes = { workspace = true }
+tokio-stream = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+config = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+kube-utils = { workspace = true }
+
+[dev-dependencies]
+sqlx = { workspace = true }

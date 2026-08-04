@@ -33,27 +33,37 @@ cargo test -p rest-service -- test_name
 
 ## Architecture
 
+**Directory layout:**
+
+```text
+services/         binary crates (flight-service, rest-service)
+connectors/       data source connectors (postgres-connector, sqlite-connector)
+libs/             shared libraries (commons, pg-meta-store, kube-utils)
+config/           Kustomize deployment configs
+hack/             scripts and Python tooling
+```
+
 **Crate dependency flow:**
 
 ```text
-flight-service (binary, gRPC :50051)
-  -> commons
-  -> postgres-connector -> commons
+services/flight (binary, gRPC :50051)
+  -> libs/commons
+  -> connectors/postgres-connector -> libs/commons
 
-rest-service (binary, HTTP :8080)
-  -> commons
-  -> postgres-connector -> commons
+services/rest (binary, HTTP :8080)
+  -> libs/commons
+  -> connectors/postgres-connector -> libs/commons
 ```
 
-- **commons**: shared traits (`SQLReader`), types
+- **libs/commons**: shared traits (`SQLReader`), types
   (`OutputStream`), and error definitions (`ApiError`)
-- **postgres-connector**: library that executes SQL
+- **connectors/postgres-connector**: library that executes SQL
   queries against PostgreSQL via SQLx and streams
   results as Arrow `RecordBatch`es
-- **flight-service**: Apache Arrow Flight gRPC server
+- **services/flight**: Apache Arrow Flight gRPC server
   built with tonic; implements `FlightService` trait
   for columnar data transfer
-- **rest-service**: HTTP API built with actix-web for
+- **services/rest**: HTTP API built with actix-web for
   connection metadata listing and data access
 
 ## Key Patterns
@@ -65,14 +75,14 @@ rest-service (binary, HTTP :8080)
 - **Arrow as the interchange format**: all tabular
   data flows through `arrow::record_batch::RecordBatch`.
   PostgreSQL types are mapped to Arrow types in
-  `postgres-connector/src/reader.rs`.
+  `connectors/postgres-connector/src/reader.rs`.
 - **Trait-based data access**: data source connectors
   implement the `SQLReader<RecordBatch>` trait from
   commons. New connectors follow this pattern.
 
 ## Adding a Data Connector
 
-1. Create a new crate under the workspace root
+1. Create a new crate under `connectors/`
 2. Add it to `Cargo.toml` workspace members
 3. Implement `SQLReader<RecordBatch>` from `commons::api`
 4. Map source-specific types to Arrow `DataType`
@@ -90,9 +100,10 @@ All routes are under `/v1/data`:
 
 ## Container Builds
 
-Each service has its own `Containerfile` with
-multi-stage Alpine builds and dependency caching.
-Build context is the workspace root.
+Each service has its own `Containerfile` under
+`services/` with multi-stage UBI9-minimal builds
+and dependency caching. Build context is the
+workspace root.
 
 ```console
 make container-flight   # flight-service image

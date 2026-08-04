@@ -1,0 +1,70 @@
+# syntax=docker/dockerfile:1
+
+# ------------------------------------------------------------------------------
+# Stage 1: Build
+# ------------------------------------------------------------------------------
+
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0 AS builder
+
+RUN microdnf install -y gcc pkgconf tar gzip unzip findutils ca-certificates curl-minimal \
+    && microdnf clean all
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --profile minimal --default-toolchain 1.96.0
+
+# protoc isn't available via microdnf on UBI9-minimal's unentitled repos, so fetch
+# the upstream release binary directly (arrow-flight's build script needs it).
+ARG PROTOC_VERSION=35.1
+RUN case "$(uname -m)" in \
+        x86_64) PROTOC_ARCH=x86_64 ;; \
+        aarch64) PROTOC_ARCH=aarch_64 ;; \
+        *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
+    esac \
+    && curl -fsSL -o /tmp/protoc.zip \
+        "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${PROTOC_ARCH}.zip" \
+    && unzip -q /tmp/protoc.zip -d /usr/local -x readme.txt \
+    && rm /tmp/protoc.zip
+
+ENV PROTOC=/usr/local/bin/protoc
+
+WORKDIR /src
+
+# ------------------------------------------------------------------------------
+# Source
+# ------------------------------------------------------------------------------
+
+COPY Cargo.toml Cargo.lock ./
+COPY libs/ ./libs/
+COPY connectors/ ./connectors/
+COPY services/ ./services/
+
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/src/target \
+    cargo build --release -p flight-service \
+    && cp target/release/flight-service /usr/local/bin/flight-service
+
+# ------------------------------------------------------------------------------
+# Stage 2: Runtime
+# ------------------------------------------------------------------------------
+
+FROM registry.access.redhat.com/ubi9-minimal@sha256:17fd831ced9434de0a984d60b3fbe61008308261ba98bbc348d6fbdef05fa7c0
+
+LABEL org.opencontainers.image.description="Data Connection Hub — Flight Service (gRPC/Arrow Flight)"
+
+RUN microdnf install -y shadow-utils ca-certificates \
+    && microdnf clean all \
+    && groupadd -r dch \
+    && useradd -r -g dch -d /nonexistent -s /sbin/nologin dch
+
+COPY --from=builder --chown=root:root --chmod=0555 \
+    /usr/local/bin/flight-service /usr/local/bin/flight-service
+
+USER dch:dch
+
+EXPOSE 50051
+
+ENTRYPOINT ["flight-service"]

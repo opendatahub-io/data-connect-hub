@@ -1,0 +1,82 @@
+use actix_cors::Cors;
+use actix_web::{App, HttpServer, web};
+use clap::Parser;
+
+use crate::rest::endpoints::*;
+use crate::utils::ServerConfig;
+use anyhow::Result;
+use config::{Config, File};
+
+mod rest;
+mod utils;
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct CommandLineArgs {
+    /// Enable JSON logs
+    #[arg(short, long, default_value = "false")]
+    json_logs: bool,
+
+    /// Config file for this server
+    #[arg(short, long, default_value = "config/config.toml")]
+    config: String,
+
+    /// Optional additional config file (e.g. a mounted Secret) merged on top
+    /// of `config`; missing values here fall back to `config`.
+    #[arg(long, default_value = "/secrets/secret-config.toml")]
+    secret_config: String,
+}
+
+fn api_routes(cfg: &mut web::ServiceConfig) {
+    cfg.service(
+        web::scope("/api/v1/data")
+            .route("/connections", web::get().to(list_connections))
+            .route("/connections", web::post().to(create_connection))
+            .route("/connections/{id}", web::get().to(get_connection))
+            .route("/connections/{id}", web::patch().to(patch_connection))
+            .route("/connections/{id}", web::delete().to(delete_connection))
+            .route("/connection-types", web::get().to(list_connection_types))
+            .route("/connection-types", web::post().to(create_connection_type))
+            .route("/connection-types/{id}", web::get().to(get_connection_type))
+            .route("/connection-types/{id}", web::patch().to(patch_connection_type))
+            .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
+    )
+    .default_service(web::route().to(not_found));
+}
+
+fn load_config(config_file: String, secret_config_file: String) -> Result<ServerConfig> {
+    let config = Config::builder()
+        .add_source(File::with_name(config_file.as_str()))
+        .add_source(File::with_name(secret_config_file.as_str()).required(false))
+        .build()?;
+
+    let config: ServerConfig = config.try_deserialize()?;
+    Ok(config)
+}
+
+#[actix_web::main]
+async fn main() -> Result<()> {
+    let args = CommandLineArgs::parse();
+    let config = load_config(args.config, args.secret_config)?;
+
+    commons::utils::init_tracing(args.json_logs);
+    tracing::info!("Starting DataConnectorHub API service");
+
+    HttpServer::new(|| {
+        let cors = Cors::default()
+            .allow_any_origin()
+            .send_wildcard()
+            .allow_any_method()
+            .allow_any_header();
+
+        App::new()
+            .wrap(cors)
+            .route("/health", web::get().to(health))
+            .configure(api_routes)
+    })
+    .bind((config.server.address, config.server.port))?
+    .run()
+    .await?;
+
+    Ok(())
+}
