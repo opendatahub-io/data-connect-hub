@@ -109,8 +109,8 @@ mod tests {
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))
-                .route("/connection_types", web::get().to(list_connection_types))
-                .route("/connection_types/{id}", web::get().to(get_connection_type))
+                .route("/connection-types", web::get().to(list_connection_types))
+                .route("/connection-types/{id}", web::get().to(get_connection_type))
                 .default_service(web::route().to(not_found)),
         );
     }
