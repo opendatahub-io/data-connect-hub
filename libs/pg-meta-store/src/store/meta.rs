@@ -1,9 +1,12 @@
-use commons::api::connections::DataConnectionResource;
-use commons::api::connections::DataConnectionTypeResource;
-use commons::api::connections::MetaStore;
+use chrono::Utc;
+use commons::api::ResourceMetadata;
+use commons::api::connections::{
+    DataConnection, DataConnectionResource, DataConnectionType, DataConnectionTypeResource, MetaStore,
+};
 use commons::api::errors::MetaStoreError;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
+use uuid::Uuid;
 
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
@@ -26,7 +29,7 @@ impl PgMetaStore {
 
 #[async_trait::async_trait]
 impl MetaStore for PgMetaStore {
-    async fn get_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError> {
+    async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError> {
         let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2")
             .bind(uid)
             .bind(tenant_id)
@@ -39,6 +42,82 @@ impl MetaStore for PgMetaStore {
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
         serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+    }
+
+    async fn create_data_connection(
+        &self,
+        tenant_id: &str,
+        data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = DataConnectionResource {
+            metadata: ResourceMetadata {
+                id: Uuid::new_v4().to_string(),
+                tenant_id: tenant_id.to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resource: data_connection,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+
+        sqlx::query("INSERT INTO data_connections (data) VALUES ($1)")
+            .bind(&json_value)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        Ok(resource)
+    }
+
+    async fn update_data_connection(
+        &self,
+        tenant_id: &str,
+        uid: &str,
+        data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        let existing = self.get_data_connection(tenant_id, uid).await?;
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+        let resource = DataConnectionResource {
+            metadata: ResourceMetadata {
+                updated_at: now,
+                ..existing.metadata
+            },
+            resource: data_connection,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+
+        sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
+            .bind(&json_value)
+            .bind(uid)
+            .bind(tenant_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        Ok(resource)
+    }
+
+    async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
+        let result = sqlx::query(
+            "DELETE FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",
+        )
+        .bind(uid)
+        .bind(tenant_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(MetaStoreError::ResourceNotFound(format!(
+                "Data connection '{uid}' not found for tenant '{tenant_id}'"
+            )));
+        }
+
+        Ok(())
     }
 
     async fn get_data_connection_type(
@@ -61,6 +140,82 @@ impl MetaStore for PgMetaStore {
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
         serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+    }
+
+    async fn create_data_connection_type(
+        &self,
+        tenant_id: &str,
+        data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: Uuid::new_v4().to_string(),
+                tenant_id: tenant_id.to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resource: data_connection_type,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+
+        sqlx::query("INSERT INTO data_connection_types (data) VALUES ($1)")
+            .bind(&json_value)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        Ok(resource)
+    }
+
+    async fn update_data_connection_type(
+        &self,
+        tenant_id: &str,
+        uid: &str,
+        data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        let existing = self.get_data_connection_type(tenant_id, uid).await?;
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+
+        let resource = DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                updated_at: now,
+                ..existing.metadata
+            },
+            resource: data_connection_type,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+
+        sqlx::query("UPDATE data_connection_types SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
+            .bind(&json_value)
+            .bind(uid)
+            .bind(tenant_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        Ok(resource)
+    }
+
+    async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
+        let result = sqlx::query(
+            "DELETE FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",
+        )
+        .bind(uid)
+        .bind(tenant_id)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(MetaStoreError::ResourceNotFound(format!(
+                "Connection type '{uid}' not found for tenant '{tenant_id}'"
+            )));
+        }
+
+        Ok(())
     }
 }
 

@@ -21,7 +21,7 @@ struct TestMetaStore;
 
 #[async_trait::async_trait]
 impl MetaStore for TestMetaStore {
-    async fn get_connection(
+    async fn get_data_connection(
         &self,
         _tenant_id: &str,
         _connection_id: &str,
@@ -47,6 +47,48 @@ impl MetaStore for TestMetaStore {
             },
         })
     }
+    async fn create_data_connection(
+        &self,
+        _tenant_id: &str,
+        _data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn delete_data_connection(&self, _tenant_id: &str, _uid: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn create_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn delete_data_connection_type(&self, _tenant_id: &str, _uid: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+
     async fn get_data_connection_type(
         &self,
         _tenant_id: &str,

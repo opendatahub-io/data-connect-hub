@@ -5,7 +5,6 @@ use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
 use serde::Serialize;
-use tracing::info;
 
 #[derive(Clone)]
 pub struct AppData {

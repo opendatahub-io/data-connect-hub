@@ -90,14 +90,54 @@ pub struct DataConnectionTypeResource {
     pub resource: DataConnectionType,
 }
 
+/// Persistent store for data connection and data connection type metadata.
 #[async_trait::async_trait]
 pub trait MetaStore {
-    async fn get_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError>;
+    /// Retrieves a data connection by tenant and unique identifier.
+    async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError>;
+
+    /// Creates a new data connection for the given tenant.
+    async fn create_data_connection(
+        &self,
+        tenant_id: &str,
+        data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError>;
+
+    /// Replaces the data connection identified by `uid` with the provided value.
+    async fn update_data_connection(
+        &self,
+        tenant_id: &str,
+        uid: &str,
+        data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError>;
+
+    /// Deletes the data connection identified by `uid`.
+    async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
+
+    /// Retrieves a data connection type by tenant and unique identifier.
     async fn get_data_connection_type(
         &self,
         tenant_id: &str,
         id: &str,
     ) -> Result<DataConnectionTypeResource, MetaStoreError>;
+
+    /// Creates a new data connection type for the given tenant.
+    async fn create_data_connection_type(
+        &self,
+        tenant_id: &str,
+        data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
+
+    /// Replaces the data connection type identified by `uid` with the provided value.
+    async fn update_data_connection_type(
+        &self,
+        tenant_id: &str,
+        uid: &str,
+        data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
+
+    /// Deletes the data connection type identified by `uid`.
+    async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
 }
 
 #[async_trait::async_trait]

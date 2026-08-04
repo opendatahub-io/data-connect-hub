@@ -67,7 +67,7 @@ impl TabularDataService {
         );
         let r = self
             .meta_store
-            .get_connection(tenant_id, connection_id)
+            .get_data_connection(tenant_id, connection_id)
             .await
             .map_err(|e| Status::internal(e.to_string()));
 
