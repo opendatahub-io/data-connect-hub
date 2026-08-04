@@ -11,4 +11,5 @@ async-trait = { workspace = true }
 commons = { workspace = true }
 kube = { workspace = true }
 k8s-openapi = { workspace = true }
+moka = { workspace = true, features = ["future"] }
 tracing = { workspace = true }

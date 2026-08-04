@@ -83,7 +83,7 @@ async fn main() -> Result<()> {
         )))
         .with_connector(Arc::new(SqliteConnector::new()));
 
-    let secret_store = KubeSecretStore::try_default().await?;
+    let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
 
     let addr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let service = TabularDataService::new(
