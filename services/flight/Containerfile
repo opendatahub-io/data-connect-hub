@@ -20,8 +20,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
 # the upstream release binary directly (arrow-flight's build script needs it).
 ARG PROTOC_VERSION=35.1
 RUN case "$(uname -m)" in \
-        x86_64) PROTOC_ARCH=x86_64 ;; \
+        x86_64)  PROTOC_ARCH=x86_64 ;; \
         aarch64) PROTOC_ARCH=aarch_64 ;; \
+        ppc64le) PROTOC_ARCH=ppcle_64 ;; \
+        s390x)   PROTOC_ARCH=s390_64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac \
     && curl -fsSL -o /tmp/protoc.zip \
