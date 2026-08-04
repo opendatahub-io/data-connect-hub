@@ -6,4 +6,14 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - You have installed the OpenShift CLI (`oc`).
 - You have logged in as a user with cluster-admin privileges.
 - You have installed {productname-long} {vernum}.
-- A `DataScienceClusterInitialization` (DSCI) exists in your cluster. The `DataScienceClusterInitialization` gets created by the Red Hat OpenShift-AI operator out of the box.
+- A `DataScienceClusterInitialization` (DSCI) exists in your cluster. The `DataScienceClusterInitialization` gets created by the Red Hat OpenShift-AI operator out of the box. Verify DSCI as follows:
+  ```
+  $ oc get dsci -A
+
+  NAME           AGE   PHASE   CREATED AT
+  default-dsci   83d   Ready   2026-05-08T12:41:52Z
+  ```
+
+## Install DCH Operator
+### Install Manually
+### Install with `DataScienceCluster` (DSC)
