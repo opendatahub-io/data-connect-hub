@@ -37,5 +37,5 @@ pub enum SecretStoreError {
     #[error("Secret not found: {0}")]
     SecretNotFound(String),
     #[error("Access denied: {0}")]
-    Forbidded(String),
+    Forbidden(String),
 }
