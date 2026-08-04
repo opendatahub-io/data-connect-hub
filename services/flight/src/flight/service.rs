@@ -151,13 +151,13 @@ impl FlightSqlService for TabularDataService {
         let metadata = request.metadata();
         let connection_id = metadata
             .get(X_DATA_CONNECTION_ID)
-            .ok_or(Status::internal("x-data-connection-id header is required"))?
+            .ok_or(Status::internal(format!("{X_DATA_CONNECTION_ID} header is required")))?
             .to_str()
             .map_err(|e| Status::internal(e.to_string()))?;
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
-            .ok_or(Status::internal("x-tenant-id header is required"))?
+            .ok_or(Status::internal(format!("{X_TENANT_ID} header is required")))?
             .to_str()
             .map_err(|e| Status::internal(e.to_string()))?;
 
@@ -221,7 +221,7 @@ impl FlightSqlService for TabularDataService {
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
-            .ok_or(Status::internal("x-tenant-id header is required"))?
+            .ok_or(Status::internal(format!("{X_TENANT_ID} header is required")))?
             .to_str()
             .map_err(|e| Status::internal(e.to_string()))?;
 
