@@ -20,6 +20,8 @@ endif
 	require-container-engine \
 	container-flight container-rest container-all \
 	container-run-flight container-run-rest \
+	oc-setup-flight oc-setup-rest oc-setup-all \
+	oc-build-flight oc-build-rest oc-build-all \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -70,6 +72,33 @@ container-run-rest: | require-container-engine
 	"$(CONTAINER_ENGINE)" run --rm --network=host \
 		-v "$(CURDIR)/services/rest/samples/config.toml:/config/config.toml:ro" \
 		"$(IMAGE)-rest:$(VERSION)" 2>&1
+
+# -------------------------------------------------------------------
+# OpenShift Builds
+# -------------------------------------------------------------------
+
+OC_NAMESPACE          ?= default
+OC_EXCLUDE_SERVICES   ?= (^|/)(\.git|target|dc-controller|docs|\.local|\.claude|\.github)(/|$$)
+OC_EXCLUDE_CONTROLLER ?= (^|/)(\.git|target|libs|connectors|services|docs|\.local|\.claude|\.github)(/|$$)
+export OC_NAMESPACE OC_EXCLUDE_SERVICES OC_EXCLUDE_CONTROLLER
+
+oc-setup-flight:
+	oc apply -k .local/openshift-build/flight-service -n "$${OC_NAMESPACE}"
+
+oc-setup-rest:
+	oc apply -k .local/openshift-build/rest-service -n "$${OC_NAMESPACE}"
+
+oc-setup-all: oc-setup-flight oc-setup-rest
+
+oc-build-flight:
+	oc start-build flight-service-ubi9 --from-dir=. --follow -n "$${OC_NAMESPACE}" \
+		--exclude="$${OC_EXCLUDE_SERVICES}"
+
+oc-build-rest:
+	oc start-build rest-service-ubi9 --from-dir=. --follow -n "$${OC_NAMESPACE}" \
+		--exclude="$${OC_EXCLUDE_SERVICES}"
+
+oc-build-all: oc-build-flight oc-build-rest
 
 # -------------------------------------------------------------------
 # Test
@@ -150,3 +179,11 @@ help:
 	@echo "  container-all        build all service images"
 	@echo "  container-run-flight run flight-service container (host network)"
 	@echo "  container-run-rest   run rest-service container (host network)"
+	@echo ""
+	@echo "OpenShift Builds (OC_NAMESPACE=default):"
+	@echo "  oc-setup-flight      apply flight-service BuildConfig overlay"
+	@echo "  oc-setup-rest        apply rest-service BuildConfig overlay"
+	@echo "  oc-setup-all         apply all BuildConfig overlays"
+	@echo "  oc-build-flight      start flight-service build on cluster"
+	@echo "  oc-build-rest        start rest-service build on cluster"
+	@echo "  oc-build-all         build all services on cluster"

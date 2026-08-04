@@ -210,7 +210,7 @@ impl FlightSqlService for TabularDataService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let query = String::from_utf8(ticket.statement_handle.to_vec())
             .map_err(|_| Status::invalid_argument("Invalid statement handle"))?;
-        debug!("do_get_statement: '{}'", query);
+        debug!("Retrieving data with SQL query: '{}'", query);
 
         let metadata = request.metadata();
         let connection_id = metadata
