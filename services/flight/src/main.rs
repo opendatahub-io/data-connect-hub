@@ -13,6 +13,7 @@ use sqlite_connector::SqliteConnector;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
+use flight_service::flight::auth::AuthInterceptor;
 
 mod utils;
 
@@ -91,6 +92,11 @@ async fn main() -> Result<()> {
         Arc::new(secret_store),
     );
 
+
+    let auth_interceptor = AuthInterceptor::new();
+    let service  = FlightServiceServer::with_interceptor(service, auth_interceptor);
+
+
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_serving::<FlightServiceServer<TabularDataService>>()
@@ -98,7 +104,7 @@ async fn main() -> Result<()> {
 
     tonic::transport::Server::builder()
         .add_service(health_service)
-        .add_service(FlightServiceServer::new(service))
+        .add_service(service)
         .serve_with_shutdown(addr, shutdown_signal())
         .await?;
 
