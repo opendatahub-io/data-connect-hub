@@ -80,22 +80,23 @@ container-run-rest: | require-container-engine
 OC_NAMESPACE          ?= default
 OC_EXCLUDE_SERVICES   ?= (^|/)(\.git|target|dc-controller|docs|\.local|\.claude|\.github)(/|$$)
 OC_EXCLUDE_CONTROLLER ?= (^|/)(\.git|target|libs|connectors|services|docs|\.local|\.claude|\.github)(/|$$)
+export OC_NAMESPACE OC_EXCLUDE_SERVICES OC_EXCLUDE_CONTROLLER
 
 oc-setup-flight:
-	oc apply -k .local/openshift-build/flight-service -n $(OC_NAMESPACE)
+	oc apply -k .local/openshift-build/flight-service -n "$${OC_NAMESPACE}"
 
 oc-setup-rest:
-	oc apply -k .local/openshift-build/rest-service -n $(OC_NAMESPACE)
+	oc apply -k .local/openshift-build/rest-service -n "$${OC_NAMESPACE}"
 
 oc-setup-all: oc-setup-flight oc-setup-rest
 
 oc-build-flight:
-	oc start-build flight-service-ubi9 --from-dir=. --follow -n $(OC_NAMESPACE) \
-		--exclude='$(OC_EXCLUDE_SERVICES)'
+	oc start-build flight-service-ubi9 --from-dir=. --follow -n "$${OC_NAMESPACE}" \
+		--exclude="$${OC_EXCLUDE_SERVICES}"
 
 oc-build-rest:
-	oc start-build rest-service-ubi9 --from-dir=. --follow -n $(OC_NAMESPACE) \
-		--exclude='$(OC_EXCLUDE_SERVICES)'
+	oc start-build rest-service-ubi9 --from-dir=. --follow -n "$${OC_NAMESPACE}" \
+		--exclude="$${OC_EXCLUDE_SERVICES}"
 
 oc-build-all: oc-build-flight oc-build-rest
 
