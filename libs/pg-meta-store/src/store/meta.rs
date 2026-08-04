@@ -92,13 +92,19 @@ impl MetaStore for PgMetaStore {
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
 
-        sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
+        let result = sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
             .bind(&json_value)
             .bind(uid)
             .bind(tenant_id)
             .execute(&self.pool)
             .await
             .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(MetaStoreError::ResourceNotFound(format!(
+                "Data connection '{uid}' not found for tenant '{tenant_id}'"
+            )));
+        }
 
         Ok(resource)
     }
@@ -191,13 +197,19 @@ impl MetaStore for PgMetaStore {
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
 
-        sqlx::query("UPDATE data_connection_types SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
+        let result = sqlx::query("UPDATE data_connection_types SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
             .bind(&json_value)
             .bind(uid)
             .bind(tenant_id)
             .execute(&self.pool)
             .await
             .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        if result.rows_affected() == 0 {
+            return Err(MetaStoreError::ResourceNotFound(format!(
+                "Connection type '{uid}' not found for tenant '{tenant_id}'"
+            )));
+        }
 
         Ok(resource)
     }
@@ -214,7 +226,7 @@ impl MetaStore for PgMetaStore {
 
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(
-                "Connection type '{uid}' not found for tenant '{tenant_id}'"
+                "Data connection type '{uid}' not found for tenant '{tenant_id}'"
             )));
         }
 
