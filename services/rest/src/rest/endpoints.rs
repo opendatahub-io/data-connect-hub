@@ -57,9 +57,8 @@ pub async fn create_connection(
 pub async fn patch_connection(
     _app_data: web::ReqData<AppData>,
     _id: web::Path<String>,
-    body: web::Json<Vec<JsonPatch>>,
+    _body: web::Json<Vec<JsonPatch>>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("Received JSON patch request: {:?}", body);
     Err(EndpointError::Unimplemented.into())
 }
 
