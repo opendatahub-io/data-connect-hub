@@ -1,0 +1,86 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - ../../db/postgres
+  - ../../gateway
+
+# -- Images --
+# Override container images for all services.
+# Change newName/newTag per environment (e.g., pin a SHA or use a private registry).
+images:
+  - name: ghcr.io/opendatahub-io/data-connect-hub/rest-service
+    newTag: latest
+  - name: ghcr.io/opendatahub-io/data-connect-hub/flight-service
+    newTag: latest
+
+patches:
+  # -- ImagePullSecrets --
+  # Add pull secrets to both service deployments.
+  # The base ServiceAccounts already reference dch-pull-secret;
+  # this ensures the Deployment pod specs also carry it.
+  - target:
+      kind: Deployment
+      name: rest-service
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: rest-service
+      spec:
+        template:
+          spec:
+            imagePullSecrets:
+              - name: dch-pull-secret
+  - target:
+      kind: Deployment
+      name: flight-service
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: flight-service
+      spec:
+        template:
+          spec:
+            imagePullSecrets:
+              - name: dch-pull-secret
+
+  # -- Environment variables --
+  # Add or override env vars on each service container.
+  # Uncomment and modify as needed.
+  #
+  # - target:
+  #     kind: Deployment
+  #     name: rest-service
+  #   patch: |
+  #     apiVersion: apps/v1
+  #     kind: Deployment
+  #     metadata:
+  #       name: rest-service
+  #     spec:
+  #       template:
+  #         spec:
+  #           containers:
+  #             - name: rest-service
+  #               env:
+  #                 - name: RUST_LOG
+  #                   value: debug
+  #
+  # - target:
+  #     kind: Deployment
+  #     name: flight-service
+  #   patch: |
+  #     apiVersion: apps/v1
+  #     kind: Deployment
+  #     metadata:
+  #       name: flight-service
+  #     spec:
+  #       template:
+  #         spec:
+  #           containers:
+  #             - name: flight-service
+  #               env:
+  #                 - name: RUST_LOG
+  #                   value: debug

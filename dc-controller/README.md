@@ -1,135 +1,205 @@
-# dch-operator
-// TODO(user): Add simple overview of use/purpose
+# Data Connect Hub Controller
 
-## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+Kubernetes operator for deploying and managing Data Connect Hub services
+(rest-service, flight-service) on OpenShift / RHOAI clusters.
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-- go version v1.24.6+
-- docker version 17.03+.
-- kubectl version v1.11.3+.
-- Access to a Kubernetes v1.11.3+ cluster.
+- Go 1.24+
+- Access to an OpenShift 4.20+ cluster (Kubernetes 1.33+)
+- `kubectl` or `oc` CLI
+- Gateway API CRDs installed (present by default on RHOAI clusters)
 
-### To Deploy on the cluster
-**Build and push your image to the location specified by `IMG`:**
+## Quick Start — Local Development
 
-```sh
-make docker-build docker-push IMG=<some-registry>/dch-operator:tag
-```
-
-**NOTE:** This image ought to be published in the personal registry you specified.
-And it is required to have access to pull the image from the working environment.
-Make sure you have the proper permission to the registry if the above commands don’t work.
-
-**Install the CRDs into the cluster:**
-
-```sh
+```console
+# Install the CRD
 make install
+
+# Run the controller locally against your cluster
+make run
+
+# In another terminal, apply a sample CR
+kubectl apply -f config/samples/dataconnecthub_v1alpha1_dataconnectservice.yaml
 ```
 
-**Deploy the Manager to the cluster with the image specified by `IMG`:**
+## Deploying to a Cluster
 
-```sh
-make deploy IMG=<some-registry>/dch-operator:tag
+Build, push, and deploy the controller as an in-cluster workload:
+
+```console
+make docker-build docker-push IMG=<your-registry>/dcc-controller:tag
+make install
+make deploy IMG=<your-registry>/dcc-controller:tag
 ```
 
-> **NOTE**: If you encounter RBAC errors, you may need to grant yourself cluster-admin
-privileges or be logged in as admin.
+Then create a `DataConnectService` CR:
 
-**Create instances of your solution**
-You can apply the samples (examples) from the config/sample:
-
-```sh
-kubectl apply -k config/samples/
+```console
+kubectl apply -f config/samples/dataconnecthub_v1alpha1_dataconnectservice.yaml
 ```
 
->**NOTE**: Ensure that the samples has default values to test it out.
+## Custom Resource
 
-### To Uninstall
-**Delete the instances (CRs) from the cluster:**
+The `DataConnectService` CR controls what gets deployed. A minimal spec:
 
-```sh
-kubectl delete -k config/samples/
+```yaml
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
+metadata:
+  name: my-dch
+spec:
+  description: "My Data Connect Hub instance"
 ```
 
-**Delete the APIs(CRDs) from the cluster:**
+This deploys rest-service, flight-service, and a dev Postgres instance with
+default settings, plus an HTTPRoute targeting the default ODH gateway.
 
-```sh
+### Full spec reference
+
+```yaml
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
+metadata:
+  name: my-dch
+spec:
+  description: "My Data Connect Hub instance"
+
+  restService:
+    image: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: "1"
+        memory: 512Mi
+    env:
+      - name: RUST_LOG
+        value: debug
+    imagePullSecrets:
+      - name: my-registry-secret
+
+  flightService:
+    image: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+    replicas: 2
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+    imagePullSecrets:
+      - name: my-registry-secret
+
+  database:
+    devMode: true                    # default: true — deploys a single Postgres instance
+    # externalSecret: my-db-secret   # when devMode: false, name of Secret with DB credentials
+
+  gateway:
+    name: data-science-gateway       # default: odh-gateway
+    namespace: openshift-ingress     # default: opendatahub
+```
+
+### Gateway configuration
+
+The controller creates an HTTPRoute for the rest-service, routing
+`/v1/data/*` through the specified gateway.
+
+| Platform | Gateway name | Namespace |
+|----------|-------------|-----------|
+| ODH | `odh-gateway` | `opendatahub` |
+| RHOAI | `data-science-gateway` | `openshift-ingress` |
+
+The HTTPRoute is only accepted if it's deployed in a namespace allowed by
+the gateway's `allowedRoutes` selector. On RHOAI, this is typically
+`redhat-ods-applications` and `openshift-ingress`.
+
+### What gets created
+
+For each `DataConnectService` CR, the controller creates:
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| Deployment | `rest-service` | HTTP API on port 8080 |
+| Deployment | `flight-service` | Arrow Flight gRPC on port 50051 |
+| Deployment | `postgres` | Only when `database.devMode: true` |
+| Service | `rest-service` | ClusterIP, port 8080 |
+| Service | `flight-service` | ClusterIP, port 50051 |
+| Service | `postgres` | ClusterIP, port 5432 |
+| ServiceAccount | `data-connect-hub-sa` | For rest-service |
+| ServiceAccount | `flight-service-sa` | For flight-service |
+| ConfigMap | `rest-service-config` | Server config (config.toml) |
+| ConfigMap | `flight-service-config` | Server config (config.toml) |
+| Secret | `postgres-credentials` | Auto-generated DB credentials |
+| PVC | `postgres-data` | 5Gi, ReadWriteOnce |
+| NetworkPolicy | `rest-service` | Ingress/egress rules |
+| NetworkPolicy | `flight-service` | Ingress/egress rules |
+| HTTPRoute | `data-connect-hub` | Routes /v1/data to rest-service |
+
+All resources have owner references back to the CR, so deleting the CR
+cleans up everything.
+
+## Status
+
+The CR status reports the reconciliation state:
+
+```yaml
+status:
+  phase: Ready
+  httpRoute: data-connect-hub
+  gateway:
+    name: data-science-gateway
+    namespace: openshift-ingress
+  conditions:
+    - type: Available
+      status: "True"
+    - type: Progressing
+      status: "False"
+    - type: Degraded
+      status: "False"
+```
+
+## Verification
+
+```console
+# Check the CR status
+kubectl get dataconnectservice my-dch -o yaml
+
+# Check pods
+kubectl get pods -l app.kubernetes.io/part-of=data-connect-hub
+
+# Test rest-service health
+kubectl exec deploy/rest-service -- curl -s http://localhost:8080/health
+
+# Test via gateway (RHOAI — requires auth token)
+TOKEN=$(oc whoami -t)
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  https://<gateway-domain>/v1/data/connections
+```
+
+## Uninstall
+
+```console
+# Delete CR (cleans up all managed resources)
+kubectl delete dataconnectservice my-dch
+
+# Remove the controller
+make undeploy
+
+# Remove the CRD
 make uninstall
 ```
 
-**UnDeploy the controller from the cluster:**
+## Development
 
-```sh
-make undeploy
+```console
+make build          # compile
+make test           # unit + controller tests (envtest)
+make lint           # clippy + fmt check
+make generate       # regenerate deepcopy
+make manifests      # regenerate CRD + RBAC
 ```
-
-## Project Distribution
-
-Following the options to release and provide this solution to the users.
-
-### By providing a bundle with all YAML files
-
-1. Build the installer for the image built and published in the registry:
-
-```sh
-make build-installer IMG=<some-registry>/dch-operator:tag
-```
-
-**NOTE:** The makefile target mentioned above generates an 'install.yaml'
-file in the dist directory. This file contains all the resources built
-with Kustomize, which are necessary to install this project without its
-dependencies.
-
-2. Using the installer
-
-Users can just run 'kubectl apply -f <URL for YAML BUNDLE>' to install
-the project, i.e.:
-
-```sh
-kubectl apply -f https://raw.githubusercontent.com/<org>/dch-operator/<tag or branch>/dist/install.yaml
-```
-
-### By providing a Helm Chart
-
-1. Build the chart using the optional helm plugin
-
-```sh
-kubebuilder edit --plugins=helm/v2-alpha
-```
-
-2. See that a chart was generated under 'dist/chart', and users
-can obtain this solution from there.
-
-**NOTE:** If you change the project, you need to update the Helm Chart
-using the same command above to sync the latest changes. Furthermore,
-if you create webhooks, you need to use the above command with
-the '--force' flag and manually ensure that any custom configuration
-previously added to 'dist/chart/values.yaml' or 'dist/chart/manager/manager.yaml'
-is manually re-applied afterwards.
-
-## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
-
-**NOTE:** Run `make help` for more information on all potential `make` targets
-
-More information can be found via the [Kubebuilder Documentation](https://book.kubebuilder.io/introduction.html)
 
 ## License
 
-Copyright 2026.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
+Apache License 2.0
