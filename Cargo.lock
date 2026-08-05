@@ -1412,6 +1412,9 @@ dependencies = [
  "commons",
  "config",
  "futures",
+ "http 1.4.2",
+ "http-body",
+ "http-body-util",
  "kube-utils",
  "pg-meta-store",
  "postgres-connector",
@@ -1425,6 +1428,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tonic-health",
+ "tower",
  "tracing",
  "tracing-subscriber",
 ]
@@ -2292,6 +2296,8 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "moka",
+ "sha2",
+ "thiserror",
  "tracing",
 ]
 

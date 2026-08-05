@@ -38,6 +38,10 @@ config = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 kube-utils = { workspace = true }
+tower = { workspace = true }
+http = { workspace = true }
+http-body = { workspace = true }
+http-body-util = { workspace = true }
 
 [dev-dependencies]
 sqlx = { workspace = true }

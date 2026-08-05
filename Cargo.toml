@@ -50,6 +50,11 @@ config = "0.15"
 kube = { version = "3.1.0", features = ["client", "runtime"] }
 k8s-openapi = { version = "0.27.0", features = ["latest"] }
 moka = "0.12"
+sha2 = "0.10"
+tower = "0.5"
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 serde_yaml = "0.9"
