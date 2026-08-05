@@ -63,23 +63,23 @@ var _ = Describe("DataConnectService Controller", func() {
 	// cleanupOperatorResources removes all resources the operator creates.
 	// envtest has no garbage collector, so owner-referenced resources persist.
 	cleanupOperatorResources := func() {
-		for _, name := range []string{"rest-service", "flight-service", "postgres"} {
+		for _, name := range []string{nameRestService, nameFlightService, namePostgres} {
 			_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}})
 			_ = k8sClient.Delete(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}})
 		}
-		for _, name := range []string{"rest-service-config", "flight-service-config"} {
+		for _, name := range []string{nameRestService + "-config", nameFlightService + "-config"} {
 			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}})
 		}
-		for _, name := range []string{"data-connect-hub-sa", "flight-service-sa"} {
+		for _, name := range []string{nameDataConnectHub + "-sa", nameFlightService + "-sa"} {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}})
 		}
-		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "postgres-credentials", Namespace: resourceNamespace}})
-		_ = k8sClient.Delete(ctx, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "postgres-data", Namespace: resourceNamespace}})
-		for _, name := range []string{"rest-service", "flight-service", "postgres"} {
+		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: namePostgresCreds, Namespace: resourceNamespace}})
+		_ = k8sClient.Delete(ctx, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: namePostgres + "-data", Namespace: resourceNamespace}})
+		for _, name := range []string{nameRestService, nameFlightService, namePostgres} {
 			np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}}
 			_ = k8sClient.Delete(ctx, np)
 		}
-		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: "data-connect-hub", Namespace: resourceNamespace}}
+		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: nameDataConnectHub, Namespace: resourceNamespace}}
 		_ = k8sClient.Delete(ctx, route)
 	}
 
@@ -100,7 +100,7 @@ var _ = Describe("DataConnectService Controller", func() {
 		r := reconciler()
 		req := reconcile.Request{NamespacedName: typeNamespacedName}
 
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
@@ -111,7 +111,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			}
 
 			// Simulate readiness for all deployments that exist
-			for _, name := range []string{"postgres", "rest-service", "flight-service"} {
+			for _, name := range []string{namePostgres, nameRestService, nameFlightService} {
 				deploy := &appsv1.Deployment{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: resourceNamespace}, deploy); err == nil {
 					simulateDeploymentReady(name)
@@ -155,12 +155,12 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			restDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restDeploy)).To(Succeed())
 			Expect(restDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultRestImage))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
 			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultFlightImage))
 		})
 
@@ -168,11 +168,11 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			restSvc := &corev1.Service{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restSvc)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restSvc)).To(Succeed())
 			Expect(restSvc.Spec.Ports[0].Port).To(Equal(int32(8080)))
 
 			flightSvc := &corev1.Service{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightSvc)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightSvc)).To(Succeed())
 			Expect(flightSvc.Spec.Ports[0].Port).To(Equal(int32(50051)))
 		})
 
@@ -180,25 +180,25 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			pgDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "postgres", Namespace: resourceNamespace}, pgDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: resourceNamespace}, pgDeploy)).To(Succeed())
 
 			pgSvc := &corev1.Service{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "postgres", Namespace: resourceNamespace}, pgSvc)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: resourceNamespace}, pgSvc)).To(Succeed())
 			Expect(pgSvc.Spec.Ports[0].Port).To(Equal(int32(5432)))
 
 			pgSecret := &corev1.Secret{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "postgres-credentials", Namespace: resourceNamespace}, pgSecret)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgresCreds, Namespace: resourceNamespace}, pgSecret)).To(Succeed())
 			Expect(pgSecret.Data).To(HaveKey("secret-config.toml"))
 
 			pgPVC := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "postgres-data", Namespace: resourceNamespace}, pgPVC)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres + "-data", Namespace: resourceNamespace}, pgPVC)).To(Succeed())
 		})
 
 		It("should create HTTPRoute with default ODH gateway", func() {
 			reconcileUntilReady()
 
 			route := &gatewayv1.HTTPRoute{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "data-connect-hub", Namespace: resourceNamespace}, route)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameDataConnectHub, Namespace: resourceNamespace}, route)).To(Succeed())
 			Expect(route.Spec.ParentRefs).To(HaveLen(1))
 			Expect(string(route.Spec.ParentRefs[0].Name)).To(Equal("odh-gateway"))
 			Expect(string(*route.Spec.ParentRefs[0].Namespace)).To(Equal("opendatahub"))
@@ -228,12 +228,12 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(available.Status).To(Equal(metav1.ConditionFalse))
 
 			// Now simulate all deployments becoming ready and reconcile again
-			simulateDeploymentReady("postgres")
+			simulateDeploymentReady(namePostgres)
 			result, err = r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
 			// Services deployed but not ready yet
-			for _, name := range []string{"rest-service", "flight-service"} {
+			for _, name := range []string{nameRestService, nameFlightService} {
 				simulateDeploymentReady(name)
 			}
 			result, err = r.Reconcile(ctx, req)
@@ -264,26 +264,26 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			// Postgres deployment should exist
 			pgDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "postgres", Namespace: resourceNamespace}, pgDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: resourceNamespace}, pgDeploy)).To(Succeed())
 
 			// But rest-service and flight-service should NOT exist yet
 			restDeploy := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restDeploy)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restDeploy)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			flightDeploy := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightDeploy)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			// Simulate postgres becoming ready
-			simulateDeploymentReady("postgres")
+			simulateDeploymentReady(namePostgres)
 
 			// Second reconcile: now services should be created
 			_, err = r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restDeploy)).To(Succeed())
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
 		})
 	})
 
@@ -332,7 +332,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			deploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, deploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, deploy)).To(Succeed())
 			Expect(deploy.Spec.Template.Spec.Containers[0].Image).To(Equal("custom-rest:v2"))
 			Expect(*deploy.Spec.Replicas).To(Equal(int32(3)))
 		})
@@ -341,7 +341,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			deploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, deploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, deploy)).To(Succeed())
 			Expect(deploy.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String()).To(Equal("200m"))
 		})
 
@@ -349,7 +349,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			deploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, deploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, deploy)).To(Succeed())
 
 			envNames := make(map[string]string)
 			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
@@ -396,12 +396,12 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			restDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restDeploy)).To(Succeed())
 			Expect(restDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(1))
 			Expect(restDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("my-registry-secret"))
 
 			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("flight-pull-secret"))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[1].Name).To(Equal("shared-secret"))
@@ -436,10 +436,10 @@ var _ = Describe("DataConnectService Controller", func() {
 
 		It("should not create postgres resources", func() {
 			for _, obj := range []client.Object{
-				&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "postgres", Namespace: resourceNamespace}},
-				&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: "postgres", Namespace: resourceNamespace}},
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "postgres-credentials", Namespace: resourceNamespace}},
-				&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: "postgres-data", Namespace: resourceNamespace}},
+				&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: resourceNamespace}},
+				&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: resourceNamespace}},
+				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: namePostgresCreds, Namespace: resourceNamespace}},
+				&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: namePostgres + "-data", Namespace: resourceNamespace}},
 			} {
 				_ = k8sClient.Delete(ctx, obj)
 			}
@@ -447,11 +447,11 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			pgDeploy := &appsv1.Deployment{}
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: "postgres", Namespace: resourceNamespace}, pgDeploy)
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: resourceNamespace}, pgDeploy)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			pgSecret := &corev1.Secret{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: "postgres-credentials", Namespace: resourceNamespace}, pgSecret)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: namePostgresCreds, Namespace: resourceNamespace}, pgSecret)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 
@@ -459,10 +459,10 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			restDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "rest-service", Namespace: resourceNamespace}, restDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: resourceNamespace}, restDeploy)).To(Succeed())
 
 			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "flight-service", Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
 		})
 	})
 
@@ -496,7 +496,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			route := &gatewayv1.HTTPRoute{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "data-connect-hub", Namespace: resourceNamespace}, route)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameDataConnectHub, Namespace: resourceNamespace}, route)).To(Succeed())
 			Expect(string(route.Spec.ParentRefs[0].Name)).To(Equal("my-gateway"))
 			Expect(string(*route.Spec.ParentRefs[0].Namespace)).To(Equal("my-namespace"))
 		})
@@ -509,7 +509,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(cr.Status.Gateway).NotTo(BeNil())
 			Expect(cr.Status.Gateway.Name).To(Equal("my-gateway"))
 			Expect(cr.Status.Gateway.Namespace).To(Equal("my-namespace"))
-			Expect(cr.Status.HttpRoute).To(Equal("data-connect-hub"))
+			Expect(cr.Status.HttpRoute).To(Equal(nameDataConnectHub))
 		})
 	})
 

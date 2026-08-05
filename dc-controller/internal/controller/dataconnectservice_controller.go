@@ -53,6 +53,12 @@ const (
 	requeueWaitingForReady = 10 * time.Second
 	requeueOnError         = 30 * time.Second
 	requeueWhenReady       = 5 * time.Minute
+
+	nameRestService    = "rest-service"
+	nameFlightService  = "flight-service"
+	namePostgres       = "postgres"
+	nameDataConnectHub = "data-connect-hub"
+	namePostgresCreds  = "postgres-credentials"
 )
 
 // DataConnectServiceReconciler reconciles a DataConnectService object
@@ -94,7 +100,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 				r.setCondition(cr, conditionTypeProgressing, metav1.ConditionFalse, "DatabaseError", "Reconciliation failed")
 			})
 		}
-		if pgReady, err := r.isDeploymentReady(ctx, cr.Namespace, "postgres"); err != nil {
+		if pgReady, err := r.isDeploymentReady(ctx, cr.Namespace, namePostgres); err != nil {
 			log.Error(err, "failed to check postgres readiness")
 			return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectService) {
 				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseError", err.Error())
@@ -112,7 +118,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Services (only after database is ready)
-	if err := r.reconcileService(ctx, &cr, "rest-service", cr.Spec.RestService); err != nil {
+	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
 		log.Error(err, "failed to reconcile RestService")
 		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
@@ -121,7 +127,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	if err := r.reconcileService(ctx, &cr, "flight-service", cr.Spec.FlightService); err != nil {
+	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
 		log.Error(err, "failed to reconcile FlightService")
 		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
@@ -252,7 +258,7 @@ func (r *DataConnectServiceReconciler) gatewayStatus(cr *dataconnecthubv1alpha1.
 		gwName = cr.Spec.Gateway.Name
 		gwNamespace = cr.Spec.Gateway.Namespace
 	}
-	cr.Status.HttpRoute = "data-connect-hub"
+	cr.Status.HttpRoute = nameDataConnectHub
 	cr.Status.Gateway = &dataconnecthubv1alpha1.Gateway{
 		Name:      gwName,
 		Namespace: gwNamespace,
@@ -276,9 +282,9 @@ func (r *DataConnectServiceReconciler) isDeploymentReady(ctx context.Context, na
 
 // pendingDeployments returns the names of deployments that are not yet ready.
 func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string, includePostgres bool) ([]string, error) {
-	names := []string{"rest-service", "flight-service"}
+	names := []string{nameRestService, nameFlightService}
 	if includePostgres {
-		names = append(names, "postgres")
+		names = append(names, namePostgres)
 	}
 	var pending []string
 	for _, name := range names {

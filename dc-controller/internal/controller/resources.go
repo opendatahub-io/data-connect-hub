@@ -135,7 +135,7 @@ func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Pa
 		return fmt.Errorf("reading kustomization: %w", err)
 	}
 
-	var kust map[string]interface{}
+	var kust map[string]any
 	if err := sigyaml.Unmarshal(data, &kust); err != nil {
 		return fmt.Errorf("parsing kustomization: %w", err)
 	}
@@ -145,11 +145,11 @@ func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Pa
 		if err != nil {
 			return err
 		}
-		var patchSlice []interface{}
+		var patchSlice []any
 		if err := json.Unmarshal(patchBytes, &patchSlice); err != nil {
 			return err
 		}
-		existing, _ := kust["patches"].([]interface{})
+		existing, _ := kust["patches"].([]any)
 		kust["patches"] = append(existing, patchSlice...)
 	}
 
@@ -158,11 +158,11 @@ func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Pa
 		if err != nil {
 			return err
 		}
-		var imgSlice []interface{}
+		var imgSlice []any
 		if err := json.Unmarshal(imgBytes, &imgSlice); err != nil {
 			return err
 		}
-		existing, _ := kust["images"].([]interface{})
+		existing, _ := kust["images"].([]any)
 		kust["images"] = append(existing, imgSlice...)
 	}
 
@@ -180,7 +180,7 @@ func stripSecretGenerator(fs filesys.FileSystem, dir string) error {
 		return fmt.Errorf("reading kustomization: %w", err)
 	}
 
-	var kust map[string]interface{}
+	var kust map[string]any
 	if err := sigyaml.Unmarshal(data, &kust); err != nil {
 		return fmt.Errorf("parsing kustomization: %w", err)
 	}
@@ -332,8 +332,6 @@ spec:
 
 // --- Apply resources with SSA and owner references ---
 
-const specHashAnnotation = "dataconnecthub.opendatahub.io/spec-hash"
-
 func (r *DataConnectServiceReconciler) applyResources(
 	ctx context.Context,
 	cr *dataconnecthubv1alpha1.DataConnectService,
@@ -344,25 +342,16 @@ func (r *DataConnectServiceReconciler) applyResources(
 	for _, obj := range resources {
 		obj.SetNamespace(cr.Namespace)
 
-		hash := specHash(obj)
-
 		if err := controllerutil.SetControllerReference(cr, obj, r.Scheme); err != nil {
 			return fmt.Errorf("setting owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
-		annotations := obj.GetAnnotations()
-		if annotations == nil {
-			annotations = map[string]string{}
-		}
-		annotations[specHashAnnotation] = hash
-		obj.SetAnnotations(annotations)
-
 		existing := &unstructured.Unstructured{}
 		existing.SetGroupVersionKind(obj.GroupVersionKind())
-		err := r.Client.Get(ctx, client.ObjectKeyFromObject(obj), existing)
+		err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 
 		if apierrors.IsNotFound(err) {
-			if err := r.Client.Create(ctx, obj); err != nil {
+			if err := r.Create(ctx, obj); err != nil {
 				if apierrors.IsAlreadyExists(err) {
 					continue
 				}
@@ -375,20 +364,17 @@ func (r *DataConnectServiceReconciler) applyResources(
 			return fmt.Errorf("getting %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
-		// PVCs are immutable after creation — never update them.
 		if obj.GetKind() == "PersistentVolumeClaim" {
 			continue
 		}
 
-		existingHash := existing.GetAnnotations()[specHashAnnotation]
-		if existingHash == hash {
+		if specHash(obj) == specHash(existing) {
 			continue
 		}
 
-		// Hash missing or differs — apply the desired state.
 		obj.SetResourceVersion("")
 		obj.SetManagedFields(nil)
-		if err := r.Client.Patch(ctx, obj, client.Apply, client.FieldOwner(fieldManager), client.ForceOwnership); err != nil {
+		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner(fieldManager), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
 			return fmt.Errorf("updating %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 		log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
@@ -399,16 +385,14 @@ func (r *DataConnectServiceReconciler) applyResources(
 func specHash(obj *unstructured.Unstructured) string {
 	content := obj.DeepCopy().UnstructuredContent()
 	delete(content, "status")
-	if md, ok := content["metadata"].(map[string]interface{}); ok {
+	if md, ok := content["metadata"].(map[string]any); ok {
 		delete(md, "resourceVersion")
 		delete(md, "uid")
 		delete(md, "creationTimestamp")
 		delete(md, "generation")
 		delete(md, "managedFields")
 		delete(md, "ownerReferences")
-		if ann, ok := md["annotations"].(map[string]interface{}); ok {
-			delete(ann, specHashAnnotation)
-		}
+		delete(md, "annotations")
 	}
 	b, _ := json.Marshal(content)
 	h := sha256.Sum256(b)
@@ -420,7 +404,7 @@ func specHash(obj *unstructured.Unstructured) string {
 func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectService) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "postgres-credentials",
+			Name:      namePostgresCreds,
 			Namespace: cr.Namespace,
 		},
 	}
@@ -429,8 +413,8 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 		if secret.Labels == nil {
 			secret.Labels = map[string]string{}
 		}
-		secret.Labels["app.kubernetes.io/name"] = "postgres"
-		secret.Labels["app.kubernetes.io/part-of"] = "data-connect-hub"
+		secret.Labels["app.kubernetes.io/name"] = namePostgres
+		secret.Labels["app.kubernetes.io/part-of"] = nameDataConnectHub
 
 		requiredKeys := []string{"POSTGRESQL_USER", "POSTGRESQL_PASSWORD", "POSTGRESQL_DATABASE", "secret-config.toml"}
 		hasAllKeys := len(secret.Data) >= len(requiredKeys)
@@ -452,7 +436,7 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 				"POSTGRESQL_DATABASE": dbName,
 			}
 			secret.Data = map[string][]byte{
-				"secret-config.toml": []byte(fmt.Sprintf("[database]\nurl = \"%s\"\n", connURL)),
+				"secret-config.toml": fmt.Appendf(nil, "[database]\nurl = \"%s\"\n", connURL),
 			}
 		}
 
@@ -471,7 +455,7 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 
 func defaultImageForService(name string) string {
 	img := defaultFlightImage
-	if name == "rest-service" {
+	if name == nameRestService {
 		img = defaultRestImage
 	}
 	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
