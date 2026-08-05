@@ -30,7 +30,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -79,8 +78,6 @@ var _ = Describe("DataConnectService Controller", func() {
 			np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: resourceNamespace}}
 			_ = k8sClient.Delete(ctx, np)
 		}
-		route := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Name: nameDataConnectHub, Namespace: resourceNamespace}}
-		_ = k8sClient.Delete(ctx, route)
 	}
 
 	// simulateDeploymentReady sets the status fields that isDeploymentReady checks.
@@ -192,16 +189,6 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			pgPVC := &corev1.PersistentVolumeClaim{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres + "-data", Namespace: resourceNamespace}, pgPVC)).To(Succeed())
-		})
-
-		It("should create HTTPRoute with default ODH gateway", func() {
-			reconcileUntilReady()
-
-			route := &gatewayv1.HTTPRoute{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameDataConnectHub, Namespace: resourceNamespace}, route)).To(Succeed())
-			Expect(route.Spec.ParentRefs).To(HaveLen(1))
-			Expect(string(route.Spec.ParentRefs[0].Name)).To(Equal("odh-gateway"))
-			Expect(string(*route.Spec.ParentRefs[0].Namespace)).To(Equal("opendatahub"))
 		})
 
 		It("should only set Ready when all deployments are available", func() {
@@ -463,53 +450,6 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: resourceNamespace}, flightDeploy)).To(Succeed())
-		})
-	})
-
-	Context("When custom gateway is specified", func() {
-		BeforeEach(func() {
-			cr := &dataconnecthubv1alpha1.DataConnectService{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      resourceName,
-					Namespace: resourceNamespace,
-				},
-				Spec: dataconnecthubv1alpha1.DataConnectServiceSpec{
-					Gateway: &dataconnecthubv1alpha1.Gateway{
-						Name:      "my-gateway",
-						Namespace: "my-namespace",
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			cleanupOperatorResources()
-			cr := &dataconnecthubv1alpha1.DataConnectService{}
-			err := k8sClient.Get(ctx, typeNamespacedName, cr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
-			}
-		})
-
-		It("should create HTTPRoute targeting the custom gateway", func() {
-			reconcileUntilReady()
-
-			route := &gatewayv1.HTTPRoute{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameDataConnectHub, Namespace: resourceNamespace}, route)).To(Succeed())
-			Expect(string(route.Spec.ParentRefs[0].Name)).To(Equal("my-gateway"))
-			Expect(string(*route.Spec.ParentRefs[0].Namespace)).To(Equal("my-namespace"))
-		})
-
-		It("should update status with custom gateway info", func() {
-			reconcileUntilReady()
-
-			cr := &dataconnecthubv1alpha1.DataConnectService{}
-			Expect(k8sClient.Get(ctx, typeNamespacedName, cr)).To(Succeed())
-			Expect(cr.Status.Gateway).NotTo(BeNil())
-			Expect(cr.Status.Gateway.Name).To(Equal("my-gateway"))
-			Expect(cr.Status.Gateway.Namespace).To(Equal("my-namespace"))
-			Expect(cr.Status.HttpRoute).To(Equal(nameDataConnectHub))
 		})
 	})
 

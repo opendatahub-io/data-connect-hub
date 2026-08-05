@@ -136,14 +136,18 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	// Phase 3: Gateway
+	// Phase 3: Gateway (skipped if Gateway API CRDs are not installed)
 	if err := r.reconcileHTTPRoute(ctx, &cr); err != nil {
-		log.Error(err, "failed to reconcile HTTPRoute")
-		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
-			r.setCondition(cr, conditionTypeAvailable, metav1.ConditionFalse, "HTTPRouteError", err.Error())
-			r.setCondition(cr, conditionTypeProgressing, metav1.ConditionFalse, "HTTPRouteError", "Reconciliation failed")
-		})
+		if meta.IsNoMatchError(err) {
+			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
+		} else {
+			log.Error(err, "failed to reconcile HTTPRoute")
+			return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectService) {
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
+				r.setCondition(cr, conditionTypeAvailable, metav1.ConditionFalse, "HTTPRouteError", err.Error())
+				r.setCondition(cr, conditionTypeProgressing, metav1.ConditionFalse, "HTTPRouteError", "Reconciliation failed")
+			})
+		}
 	}
 
 	// Phase 4: Check all deployments are ready before declaring Available
