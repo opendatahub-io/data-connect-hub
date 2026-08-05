@@ -61,7 +61,8 @@ class DCHConfigError(DCHError):
 def map_http_error(response: httpx.Response) -> DCHHTTPError:
     """Convert an httpx error response to a typed exception."""
     body = response.text
-    msg = f"HTTP {response.status_code}: {body}"
+    truncated = body[:200] + "…" if len(body) > 200 else body
+    msg = f"HTTP {response.status_code}: {truncated}"
 
     match response.status_code:
         case 400 | 422:

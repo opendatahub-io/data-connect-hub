@@ -184,7 +184,7 @@ class DataConnectClient:
     ) -> DataConnection:
         if all(v is None for v in (name, namespace, provider, data_format, location_url, properties)):
             raise DCHConfigError("at least one field must be provided for update")
-        location = DataLocation(url=location_url) if location_url else None
+        location = DataLocation(url=location_url) if location_url is not None else None
         req = UpdateConnectionRequest(
             name=name,
             namespace=namespace,
@@ -239,7 +239,7 @@ class DataConnectClient:
     ) -> DataConnection:
         if all(v is None for v in (name, namespace, provider, data_format, location_url, properties)):
             raise DCHConfigError("at least one field must be provided for update")
-        location = DataLocation(url=location_url) if location_url else None
+        location = DataLocation(url=location_url) if location_url is not None else None
         req = UpdateConnectionRequest(
             name=name,
             namespace=namespace,

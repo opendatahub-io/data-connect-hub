@@ -71,7 +71,7 @@ client.ingest(connection_id) -> bytes
 ## Development
 
 A virtual environment at `sdk/python/.venv` is created automatically on first run.
-In CI (where `VIRTUAL_ENV` is already set by `actions/setup-python`), the system Python is used directly.
+If `VIRTUAL_ENV` is already set (e.g. a manually activated venv), the Makefile uses the system Python directly.
 
 ```bash
 make sdk-install     # install in editable mode with dev deps

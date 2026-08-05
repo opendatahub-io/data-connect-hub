@@ -146,17 +146,19 @@ check-dco:
 PYTHON_SDK_DIR := sdk/python
 
 ifdef VIRTUAL_ENV
-  SDK_PYTHON := python3
-  SDK_BIN    :=
+  SDK_PYTHON       := python3
+  SDK_BIN          :=
+  SDK_VENV_PREREQ  :=
 else
-  SDK_PYTHON := $(PYTHON_SDK_DIR)/.venv/bin/python3
-  SDK_BIN    := .venv/bin/
+  SDK_PYTHON       := $(PYTHON_SDK_DIR)/.venv/bin/python3
+  SDK_BIN          := .venv/bin/
+  SDK_VENV_PREREQ  := $(SDK_PYTHON)
 endif
 
 $(PYTHON_SDK_DIR)/.venv/bin/python3:
 	python3 -m venv $(PYTHON_SDK_DIR)/.venv
 
-sdk-venv: $(SDK_PYTHON)
+sdk-venv: $(SDK_VENV_PREREQ)
 
 sdk-install: sdk-venv
 	$(SDK_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[dev]"
@@ -239,4 +241,4 @@ help:
 	@echo "  sdk-fmt              format SDK code"
 	@echo "  sdk-typecheck        run mypy on SDK"
 	@echo "  sdk-build            build SDK distribution"
-	@echo "  sdk-all              lint + test SDK"
+	@echo "  sdk-all              lint + typecheck + test SDK"

@@ -40,6 +40,7 @@ coverage.json
 sdk/python/dist/
 sdk/python/src/*.egg-info/
 sdk/python/.coverage
+sdk/python/htmlcov/
 
 # Docs are markdown only
 docs/**/

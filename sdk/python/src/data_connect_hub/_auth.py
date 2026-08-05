@@ -19,10 +19,9 @@ def _normalize_token(token: str) -> str:
     while token.startswith(_BEARER_PREFIX):
         token = token[len(_BEARER_PREFIX) :]
 
-    if token.lower().startswith(("basic ", "digest ")):
-        raise DCHConfigError(
-            f"Unsupported auth scheme in token: {token[:20]!r}... — pass only the raw Bearer token value"
-        )
+    detected_scheme = token.split(None, 1)[0] if token else ""
+    if detected_scheme.lower() in ("basic", "digest"):
+        raise DCHConfigError(f"Unsupported auth scheme {detected_scheme!r} — pass only the raw Bearer token value")
 
     return f"{_BEARER_PREFIX}{token}"
 
