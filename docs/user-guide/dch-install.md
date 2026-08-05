@@ -1,6 +1,18 @@
 # Data Connect Hub (DCH) - Installation
 The purpose of this document is to provide **end-users** steps to install, configure, verify DCH as such this document can be used by doc team to build official doc. This approach is similar to other services.
 
+## Content
+- Prerequisites
+- Install DCH Operator
+- Install `DataConnectService`
+- Verify `DataConnectService`
+- DCH Rest Swagger
+- Verify DCH REST Service
+- Verify Flight Service
+- Verify S3 Data Connection
+- DCH Python SDK
+- Trouble Shooting
+
 ## Prerequisites
 - You have an OpenShift cluster on version `4.20` or higher.
 - You have installed the OpenShift CLI (`oc`).
@@ -154,15 +166,38 @@ You can verify the `DataConnectService` as follows:
     ```
     $ oc port-forward svc/dch-gateway-data-science-gateway-class -n openshift-ingress 8443:443 &
     ```
-  -
+  - Test using `curl`:
     ```
     $ user_token=$(oc whoami -t 2>/dev/null)
     $ curl -sk -H "Authorization: Bearer $user_token" -H 'x-tenant-id: dch-example' https://localhost:8443/api/v1/data/connections
 
+  - You should see:
+    ```
     {"code":"unimplemented","message":"Unimplemented"}
     ```
 ### Verify Flight Service
+ - Get the gateway service:
+    ```
+    $ oc get service -n openshift-ingress dch-gateway-data-science-gateway-class
+    NAME                                              TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)             AGE
+    dch-gateway-data-science-gateway-class   ClusterIP   172.30.67.2   <none>        15021/TCP,443/TCP   88d
+    ```
+  - Forward gateway service to local:
+    ```
+    $ oc port-forward svc/dch-gateway-data-science-gateway-class -n openshift-ingress 9443:443 &
+    ```
+  - Test using `grpcurl`:
+    ```
+    $ user_token=$(oc whoami -t 2>/dev/null)
+    $ grpcurl -insecure -import-path /tmp -proto Flight.proto -H 'Authorization: Bearer <token>' -d '{}' localhost:9443 arrow.flight.protocol.FlightService/ListFlights
+    ```
+  - You should see:
+    ```console
+    Unimplemented
+    ```
 
 ### Verify S3 Data Connection
 
 ### Verify Python SDK
+
+## Trouble Shooting
