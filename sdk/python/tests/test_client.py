@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -24,41 +24,37 @@ class TestContextManager:
         with DataConnectClient(rest_url="http://localhost") as client:
             assert client is not None
 
-    async def test_async_context_manager(self) -> None:
-        async with DataConnectClient(rest_url="http://localhost") as client:
-            assert client is not None
-
 
 class TestConnectionsDelegation:
-    async def test_list_connections_async(self) -> None:
+    def test_list_connections(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.list_connections = AsyncMock(return_value=[])  # type: ignore[method-assign]
+        client._rest.list_connections = MagicMock(return_value=[])  # type: ignore[method-assign]
 
-        result = await client.list_connections_async()
+        result = client.list_connections()
         assert result == []
-        client._rest.list_connections.assert_awaited_once()
+        client._rest.list_connections.assert_called_once()
 
-    async def test_get_connection_async(self) -> None:
+    def test_get_connection(self) -> None:
         from data_connect_hub.models import DataConnection
 
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.get_connection = AsyncMock(return_value=conn)  # type: ignore[method-assign]
+        client._rest.get_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
 
-        result = await client.get_connection_async("123")
+        result = client.get_connection("123")
         assert result.id == "123"
 
-    async def test_create_connection_async(self) -> None:
+    def test_create_connection(self) -> None:
         from data_connect_hub.models import DataConnection
 
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.create_connection = AsyncMock(return_value=conn)  # type: ignore[method-assign]
+        client._rest.create_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
 
-        result = await client.create_connection_async(
+        result = client.create_connection(
             name="test-conn",
             namespace="test-ns",
             provider="postgres",
@@ -67,13 +63,13 @@ class TestConnectionsDelegation:
         )
         assert result.id == "123"
 
-    async def test_delete_connection_async(self) -> None:
+    def test_delete_connection(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.delete_connection = AsyncMock(return_value=None)  # type: ignore[method-assign]
+        client._rest.delete_connection = MagicMock(return_value=None)  # type: ignore[method-assign]
 
-        await client.delete_connection_async("123")
-        client._rest.delete_connection.assert_awaited_once_with("123")
+        client.delete_connection("123")
+        client._rest.delete_connection.assert_called_once_with("123")
 
 
 class TestEmptyUpdateGuards:
@@ -82,27 +78,30 @@ class TestEmptyUpdateGuards:
         with pytest.raises(DCHConfigError, match="at least one field"):
             client.update_connection("123")
 
-    async def test_update_connection_async_no_fields_raises(self) -> None:
-        client = DataConnectClient(rest_url="http://localhost")
-        with pytest.raises(DCHConfigError, match="at least one field"):
-            await client.update_connection_async("123")
-
     def test_update_connection_type_no_fields_raises(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         with pytest.raises(DCHConfigError, match="at least one field"):
             client.update_connection_type("ct-1")
 
-    async def test_update_connection_type_async_no_fields_raises(self) -> None:
+    def test_update_connection_empty_location_url(self) -> None:
+        from data_connect_hub.models import DataConnection
+
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         client = DataConnectClient(rest_url="http://localhost")
-        with pytest.raises(DCHConfigError, match="at least one field"):
-            await client.update_connection_type_async("ct-1")
+        assert client._rest is not None
+        client._rest.update_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
+
+        client.update_connection("123", location_url="")
+        req = client._rest.update_connection.call_args[0][1]
+        assert req.location is not None
+        assert req.location.url == ""
 
 
 class TestIngestDelegation:
-    async def test_ingest_async(self) -> None:
+    def test_ingest(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.ingest = AsyncMock(return_value=b"data")  # type: ignore[method-assign]
+        client._rest.ingest = MagicMock(return_value=b"data")  # type: ignore[method-assign]
 
-        result = await client.ingest_async("conn-1")
+        result = client.ingest("conn-1")
         assert result == b"data"

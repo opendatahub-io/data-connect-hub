@@ -1,11 +1,11 @@
-"""Async REST client for DCH connection management APIs."""
+"""Synchronous REST client for DCH connection management APIs."""
 
 from __future__ import annotations
 
-import asyncio
 import json as _json
 import logging
 import random
+import time
 from typing import Any
 
 import httpx
@@ -39,7 +39,7 @@ def _unwrap_list(data: Any) -> list[Any]:
 
 
 class RestClient:
-    """httpx-based async REST client for DCH.
+    """httpx-based REST client for DCH.
 
     Supports configurable retry with exponential backoff for transient errors
     (429, 502, 503, 504) and connectivity/timeout failures on idempotent methods.
@@ -70,7 +70,7 @@ class RestClient:
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
         retry_methods: frozenset[str] | None = _IDEMPOTENT_METHODS,
-        http_client: httpx.AsyncClient | None = None,
+        http_client: httpx.Client | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._token = token
@@ -81,14 +81,14 @@ class RestClient:
         self._backoff_max = backoff_max
         self._retry_methods = retry_methods
         self._owns_client = http_client is None
-        self._client = http_client or httpx.AsyncClient(
+        self._client = http_client or httpx.Client(
             base_url=self._base_url,
             timeout=timeout,
         )
 
-    async def close(self) -> None:
+    def close(self) -> None:
         if self._owns_client:
-            await self._client.aclose()
+            self._client.close()
 
     def _headers(self, connection_id: str | None = None) -> dict[str, str]:
         return build_headers(
@@ -106,7 +106,7 @@ class RestClient:
         delay: float = min(self._backoff_base * (2**attempt), self._backoff_max)
         return delay * random.uniform(0.5, 1.0)
 
-    async def _request(
+    def _request(
         self,
         method: str,
         path: str,
@@ -120,7 +120,7 @@ class RestClient:
 
         for attempt in range(attempts):
             try:
-                resp = await self._client.request(
+                resp = self._client.request(
                     method,
                     f"{self._api_base}{path}",
                     headers=self._headers(connection_id),
@@ -131,7 +131,7 @@ class RestClient:
                 if attempt < attempts - 1:
                     delay = self._backoff_delay(attempt)
                     _log.debug("Retry %d/%d after ConnectError, sleeping %.2fs", attempt + 1, self._max_retries, delay)
-                    await asyncio.sleep(delay)
+                    time.sleep(delay)
                     continue
                 raise last_exc from exc
             except httpx.TimeoutException as exc:
@@ -139,7 +139,7 @@ class RestClient:
                 if attempt < attempts - 1:
                     delay = self._backoff_delay(attempt)
                     _log.debug("Retry %d/%d after timeout, sleeping %.2fs", attempt + 1, self._max_retries, delay)
-                    await asyncio.sleep(delay)
+                    time.sleep(delay)
                     continue
                 raise last_exc from exc
 
@@ -152,7 +152,7 @@ class RestClient:
                     resp.status_code,
                     delay,
                 )
-                await asyncio.sleep(delay)
+                time.sleep(delay)
                 continue
 
             if resp.status_code >= 400:
@@ -185,71 +185,71 @@ class RestClient:
 
     # -- Connections CRUD --
 
-    async def list_connections(self) -> list[DataConnection]:
-        resp = await self._request("GET", "/connections")
+    def list_connections(self) -> list[DataConnection]:
+        resp = self._request("GET", "/connections")
         return [DataConnection.model_validate(c) for c in _unwrap_list(self._parse_json(resp))]
 
-    async def get_connection(self, connection_id: str) -> DataConnection:
-        resp = await self._request("GET", f"/connections/{connection_id}")
+    def get_connection(self, connection_id: str) -> DataConnection:
+        resp = self._request("GET", f"/connections/{connection_id}")
         return DataConnection.model_validate(self._parse_json(resp))
 
-    async def create_connection(self, request: CreateConnectionRequest) -> DataConnection:
-        resp = await self._request(
+    def create_connection(self, request: CreateConnectionRequest) -> DataConnection:
+        resp = self._request(
             "POST",
             "/connections",
             json=request.model_dump(exclude_none=True),
         )
         return DataConnection.model_validate(self._parse_json(resp))
 
-    async def update_connection(self, connection_id: str, request: UpdateConnectionRequest) -> DataConnection:
-        resp = await self._request(
+    def update_connection(self, connection_id: str, request: UpdateConnectionRequest) -> DataConnection:
+        resp = self._request(
             "PATCH",
             f"/connections/{connection_id}",
             json=request.model_dump(exclude_none=True),
         )
         return DataConnection.model_validate(self._parse_json(resp))
 
-    async def delete_connection(self, connection_id: str) -> None:
-        await self._request("DELETE", f"/connections/{connection_id}")
+    def delete_connection(self, connection_id: str) -> None:
+        self._request("DELETE", f"/connections/{connection_id}")
 
     # -- Connection Types CRUD --
 
-    async def list_connection_types(self) -> list[ConnectionType]:
-        resp = await self._request("GET", "/connection_types")
+    def list_connection_types(self) -> list[ConnectionType]:
+        resp = self._request("GET", "/connection_types")
         return [ConnectionType.model_validate(ct) for ct in _unwrap_list(self._parse_json(resp))]
 
-    async def get_connection_type(self, type_id: str) -> ConnectionType:
-        resp = await self._request("GET", f"/connection_types/{type_id}")
+    def get_connection_type(self, type_id: str) -> ConnectionType:
+        resp = self._request("GET", f"/connection_types/{type_id}")
         return ConnectionType.model_validate(self._parse_json(resp))
 
-    async def create_connection_type(self, request: CreateConnectionTypeRequest) -> ConnectionType:
-        resp = await self._request(
+    def create_connection_type(self, request: CreateConnectionTypeRequest) -> ConnectionType:
+        resp = self._request(
             "POST",
             "/connection_types",
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
 
-    async def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
-        resp = await self._request(
+    def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
+        resp = self._request(
             "PATCH",
             f"/connection_types/{type_id}",
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
 
-    async def delete_connection_type(self, type_id: str) -> None:
-        await self._request("DELETE", f"/connection_types/{type_id}")
+    def delete_connection_type(self, type_id: str) -> None:
+        self._request("DELETE", f"/connection_types/{type_id}")
 
     # -- Unstructured ingestion --
 
-    async def ingest(self, connection_id: str) -> bytes:
+    def ingest(self, connection_id: str) -> bytes:
         """Fetch raw unstructured data for a connection.
 
         The ``x-dch-connection-id`` header is required by the ingestion
         service for routing/auditing even though the ID is in the path.
         """
-        resp = await self._request(
+        resp = self._request(
             "GET",
             f"/ingestion/{connection_id}",
             connection_id=connection_id,

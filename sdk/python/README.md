@@ -29,17 +29,6 @@ connections = client.list_connections()
 conn = client.get_connection("conn-id")
 ```
 
-## Async Usage
-
-```python
-async with DataConnectClient(
-    rest_url="https://dch.example.com",
-    token="<your-token>",
-    tenant_id="my-tenant",
-) as client:
-    connections = await client.list_connections_async()
-```
-
 ## API Reference
 
 ### Connection Management (REST)
