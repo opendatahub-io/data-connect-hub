@@ -56,13 +56,13 @@ spec:
               readOnly: true
           readinessProbe:
             httpGet:
-              path: /health
+              path: /api/v1/data/health
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /api/v1/data/health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 15

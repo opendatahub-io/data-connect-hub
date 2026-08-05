@@ -92,6 +92,7 @@ services/rest (binary, HTTP :8080)
 
 All routes are under `/api/v1/data`:
 
+- `GET /api/v1/data/health` — health check
 - `GET /api/v1/data/connections` — list connections
 - `POST /api/v1/data/connections` — create connection
 - `GET /api/v1/data/connections/{id}` — get connection
@@ -102,7 +103,6 @@ All routes are under `/api/v1/data`:
 - `GET /api/v1/data/connection-types/{id}` — get connection type
 - `PATCH /api/v1/data/connection-types/{id}` — update connection type
 - `DELETE /api/v1/data/connection-types/{id}` — delete connection type
-- `GET /health` — health check
 
 ## Container Builds
 

@@ -32,17 +32,21 @@ struct CommandLineArgs {
 fn api_routes(cfg: &mut web::ServiceConfig) {
     cfg.service(
         web::scope("/api/v1/data")
-            .wrap(middleware::from_fn(validate_headers))
-            .route("/connections", web::get().to(list_connections))
-            .route("/connections", web::post().to(create_connection))
-            .route("/connections/{id}", web::get().to(get_connection))
-            .route("/connections/{id}", web::patch().to(patch_connection))
-            .route("/connections/{id}", web::delete().to(delete_connection))
-            .route("/connection-types", web::get().to(list_connection_types))
-            .route("/connection-types", web::post().to(create_connection_type))
-            .route("/connection-types/{id}", web::get().to(get_connection_type))
-            .route("/connection-types/{id}", web::patch().to(patch_connection_type))
-            .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
+            .route("/health", web::get().to(health))
+            .service(
+                web::scope("")
+                    .wrap(middleware::from_fn(validate_headers))
+                    .route("/connections", web::get().to(list_connections))
+                    .route("/connections", web::post().to(create_connection))
+                    .route("/connections/{id}", web::get().to(get_connection))
+                    .route("/connections/{id}", web::patch().to(patch_connection))
+                    .route("/connections/{id}", web::delete().to(delete_connection))
+                    .route("/connection-types", web::get().to(list_connection_types))
+                    .route("/connection-types", web::post().to(create_connection_type))
+                    .route("/connection-types/{id}", web::get().to(get_connection_type))
+                    .route("/connection-types/{id}", web::patch().to(patch_connection_type))
+                    .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
+            ),
     )
     .default_service(web::route().to(not_found));
 }
@@ -77,7 +81,6 @@ async fn main() -> Result<()> {
             .app_data(json_config())
             .app_data(query_config())
             .app_data(path_config())
-            .route("/health", web::get().to(health))
             .configure(api_routes)
     })
     .bind((config.server.address, config.server.port))?

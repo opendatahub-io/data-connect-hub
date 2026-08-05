@@ -106,7 +106,11 @@ metadata:
   name: my-dch
 spec:
   devMode: true            # true (default): operator deploys Postgres
-                           # false: bring your own database via database.externalSecret
+                           # false: bring your own database (see below)
+
+  # External database (only when devMode is false)
+  # database:
+  #   externalSecret: my-database-secret
 
   # Per-service overrides
   restService:
@@ -216,7 +220,7 @@ oc rollout status deployment/flight-service -n <your-namespace>
 
 ```console
 # REST health check
-oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/health
+oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/api/v1/data/health
 
 # REST API via service DNS
 oc exec deploy/rest-service -n <your-namespace> -- \
@@ -262,7 +266,8 @@ reinitializing.
 ## Known gaps
 
 - **Postgres** is a single instance with a Kubernetes PVC -- fine for dev,
-  not a substitute for real backups. Use `devMode: false` with an
-  external database for production.
+  not a substitute for real backups. For production, set `devMode: false`
+  and provide `database.externalSecret` referencing a Secret with your
+  database connection details.
 - **NetworkPolicy** resources allow all ingress/egress -- real restriction
   is pending a defined gateway/client topology.
