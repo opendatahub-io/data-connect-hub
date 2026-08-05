@@ -28,7 +28,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
@@ -75,6 +77,7 @@ type DataConnectServiceReconciler struct {
 // +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
 func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -164,7 +167,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		msg := fmt.Sprintf("Waiting for deployments: %v", pendingDeployments)
 		log.Info(msg)
 		return r.updateStatus(ctx, req, "Progressing", func(cr *dataconnecthubv1alpha1.DataConnectService) {
-			r.gatewayStatus(cr)
+			r.gatewayStatus(ctx, cr)
 			r.setCondition(cr, conditionTypeAvailable, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProgressing, metav1.ConditionTrue, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "WaitingForDeployments", "No errors")
@@ -173,7 +176,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// All ready
 	return r.updateStatus(ctx, req, "Ready", func(cr *dataconnecthubv1alpha1.DataConnectService) {
-		r.gatewayStatus(cr)
+		r.gatewayStatus(ctx, cr)
 		r.setCondition(cr, conditionTypeAvailable, metav1.ConditionTrue, "Reconciled", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProgressing, metav1.ConditionFalse, "Reconciled", "Reconciliation complete")
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
@@ -255,7 +258,7 @@ func (r *DataConnectServiceReconciler) reconcileHTTPRoute(ctx context.Context, c
 	return r.applyResources(ctx, cr, resources)
 }
 
-func (r *DataConnectServiceReconciler) gatewayStatus(cr *dataconnecthubv1alpha1.DataConnectService) {
+func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectService) {
 	gwName := defaultGatewayName
 	gwNamespace := defaultGatewayNamespace
 	if cr.Spec.Gateway != nil {
@@ -267,6 +270,31 @@ func (r *DataConnectServiceReconciler) gatewayStatus(cr *dataconnecthubv1alpha1.
 		Name:      gwName,
 		Namespace: gwNamespace,
 	}
+
+	cr.Status.Hostname = r.resolveGatewayHostname(ctx, gwNamespace, gwName)
+}
+
+func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
+	gw := &unstructured.Unstructured{}
+	gw.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "gateway.networking.k8s.io",
+		Version: "v1",
+		Kind:    "Gateway",
+	})
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, gw); err != nil {
+		return ""
+	}
+
+	addresses, found, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
+	if !found || len(addresses) == 0 {
+		return ""
+	}
+	if addr, ok := addresses[0].(map[string]any); ok {
+		if val, ok := addr["value"].(string); ok {
+			return val
+		}
+	}
+	return ""
 }
 
 // isDeploymentReady checks if a deployment has all replicas available.
