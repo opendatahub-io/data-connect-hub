@@ -68,26 +68,21 @@ type ServiceOverrides struct {
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
-// DatabaseSpec configures the database backend for the DataConnectService.
+// DatabaseSpec configures an external database backend for the DataConnectService.
+// Only used when devMode is false.
 type DatabaseSpec struct {
-	// devMode when true deploys a built-in single-instance Postgres.
-	// When false, the controller expects the user to provide an external database
-	// via externalSecret.
-	// +kubebuilder:default=true
-	// +optional
-	DevMode *bool `json:"devMode,omitempty"`
-
 	// externalSecret is the name of a Secret containing database connection details.
-	// Used when devMode is false.
 	// +optional
 	ExternalSecret *string `json:"externalSecret,omitempty"`
 }
 
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
-	// description is a human-readable description of the service
+	// devMode when true deploys a built-in single-instance Postgres.
+	// When false, the user provides an external database via the database field.
+	// +kubebuilder:default=true
 	// +optional
-	Description string `json:"description,omitempty"`
+	DevMode *bool `json:"devMode,omitempty"`
 
 	// restService configures the REST API deployment
 	// +optional
@@ -97,7 +92,7 @@ type DataConnectServiceSpec struct {
 	// +optional
 	FlightService *ServiceOverrides `json:"flightService,omitempty"`
 
-	// database configures the database backend
+	// database configures the external database backend (used when devMode is false)
 	// +optional
 	Database *DatabaseSpec `json:"database,omitempty"`
 
@@ -134,6 +129,8 @@ type DataConnectServiceStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // DataConnectService is the Schema for the dataconnectservices API
 type DataConnectService struct {

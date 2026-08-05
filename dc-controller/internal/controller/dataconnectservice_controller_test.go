@@ -132,9 +132,7 @@ var _ = Describe("DataConnectService Controller", func() {
 					Name:      resourceName,
 					Namespace: resourceNamespace,
 				},
-				Spec: dataconnecthubv1alpha1.DataConnectServiceSpec{
-					Description: "test instance",
-				},
+				Spec: dataconnecthubv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -404,9 +402,7 @@ var _ = Describe("DataConnectService Controller", func() {
 					Namespace: resourceNamespace,
 				},
 				Spec: dataconnecthubv1alpha1.DataConnectServiceSpec{
-					Database: &dataconnecthubv1alpha1.DatabaseSpec{
-						DevMode: &devMode,
-					},
+					DevMode: &devMode,
 				},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())

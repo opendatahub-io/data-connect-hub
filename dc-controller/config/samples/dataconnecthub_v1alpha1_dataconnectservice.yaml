@@ -6,9 +6,7 @@ metadata:
     app.kubernetes.io/managed-by: kustomize
   name: dataconnectservice-sample
 spec:
-  description: "Sample Data Connect Hub deployment"
-  database:
-    devMode: true
+  devMode: true
   gateway:
     name: odh-gateway
     namespace: opendatahub

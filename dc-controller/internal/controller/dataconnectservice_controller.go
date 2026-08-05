@@ -93,7 +93,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	log.Info("reconciling DataConnectService", "name", cr.Name, "namespace", cr.Namespace)
 
 	// Phase 1: Database (postgres first, services depend on it)
-	devMode := cr.Spec.Database == nil || cr.Spec.Database.DevMode == nil || *cr.Spec.Database.DevMode
+	devMode := cr.Spec.DevMode == nil || *cr.Spec.DevMode
 	if devMode {
 		if err := r.reconcileDatabase(ctx, &cr); err != nil {
 			log.Error(err, "failed to reconcile Database")

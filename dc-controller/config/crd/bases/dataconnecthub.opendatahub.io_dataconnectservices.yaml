@@ -14,7 +14,14 @@ spec:
     singular: dataconnectservice
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: DataConnectService is the Schema for the dataconnectservices
@@ -41,24 +48,20 @@ spec:
             description: spec defines the desired state of DataConnectService
             properties:
               database:
-                description: database configures the database backend
+                description: database configures the external database backend (used
+                  when devMode is false)
                 properties:
-                  devMode:
-                    default: true
-                    description: |-
-                      devMode when true deploys a built-in single-instance Postgres.
-                      When false, the controller expects the user to provide an external database
-                      via externalSecret.
-                    type: boolean
                   externalSecret:
-                    description: |-
-                      externalSecret is the name of a Secret containing database connection details.
-                      Used when devMode is false.
+                    description: externalSecret is the name of a Secret containing
+                      database connection details.
                     type: string
                 type: object
-              description:
-                description: description is a human-readable description of the service
-                type: string
+              devMode:
+                default: true
+                description: |-
+                  devMode when true deploys a built-in single-instance Postgres.
+                  When false, the user provides an external database via the database field.
+                type: boolean
               flightService:
                 description: flightService configures the Flight gRPC API deployment
                 properties:
