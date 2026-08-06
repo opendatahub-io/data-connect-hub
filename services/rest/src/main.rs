@@ -30,9 +30,9 @@ struct CommandLineArgs {
 }
 
 fn api_routes(cfg: &mut web::ServiceConfig) {
-    cfg.service(
+    cfg.route("/api/v1/data/health", web::get().to(health))
+    .service(
         web::scope("/api/v1/data")
-            .route("/health", web::get().to(health))
             .service(
                 web::scope("")
                     .wrap(middleware::from_fn(validate_headers))

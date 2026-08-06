@@ -43,8 +43,6 @@ import (
 	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 )
 
-const fieldManager = "dc-controller"
-
 // --- Kustomize rendering ---
 
 func renderKustomization(diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
@@ -213,18 +211,27 @@ func parseImageRef(baseName, ref string) kustypes.Image {
 
 func buildServiceImages(name, restImage, flightImage string, overrideImage *string) []kustypes.Image {
 	resolvedImage := flightImage
+	manifestImage := defaultFlightImage
 	if name == nameRestService {
 		resolvedImage = restImage
+		manifestImage = defaultRestImage
 	}
-	baseName := defaultImageForService(name, restImage, flightImage)
+	baseName := stripTag(manifestImage)
 
 	if overrideImage != nil {
 		return []kustypes.Image{parseImageRef(baseName, *overrideImage)}
 	}
-	if resolvedImage != baseName {
+	if resolvedImage != manifestImage {
 		return []kustypes.Image{parseImageRef(baseName, resolvedImage)}
 	}
 	return nil
+}
+
+func stripTag(img string) string {
+	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
+		return img[:i]
+	}
+	return img
 }
 
 func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) ([]kustypes.Patch, []kustypes.Image) {
@@ -371,6 +378,14 @@ func (r *DataConnectHubReconciler) applyResources(
 			return fmt.Errorf("setting owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
+		desiredHash := specHash(obj)
+		ann := obj.GetAnnotations()
+		if ann == nil {
+			ann = map[string]string{}
+		}
+		ann["dataconnecthub/spec-hash"] = desiredHash
+		obj.SetAnnotations(ann)
+
 		existing := &unstructured.Unstructured{}
 		existing.SetGroupVersionKind(obj.GroupVersionKind())
 		err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing)
@@ -393,13 +408,35 @@ func (r *DataConnectHubReconciler) applyResources(
 			continue
 		}
 
-		if specHash(obj) == specHash(existing) {
+		existingHash := ""
+		if existingAnn := existing.GetAnnotations(); existingAnn != nil {
+			existingHash = existingAnn["dataconnecthub/spec-hash"]
+		}
+		if existingHash == desiredHash {
 			continue
 		}
 
+		if existingHash == "" {
+			// First reconcile after create — stamp the hash via merge patch
+			// without touching the spec (avoids generation bump).
+			patch := client.MergeFrom(existing.DeepCopy())
+			existingAnn := existing.GetAnnotations()
+			if existingAnn == nil {
+				existingAnn = map[string]string{}
+			}
+			existingAnn["dataconnecthub/spec-hash"] = desiredHash
+			existing.SetAnnotations(existingAnn)
+			if err := r.Patch(ctx, existing, patch); err != nil {
+				return fmt.Errorf("setting hash on %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+			log.V(1).Info("stamped spec hash", "kind", obj.GetKind(), "name", obj.GetName())
+			continue
+		}
+
+		// Spec actually changed — apply via SSA.
 		obj.SetResourceVersion("")
 		obj.SetManagedFields(nil)
-		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner(fieldManager), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
+		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner("dc-controller"), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
 			return fmt.Errorf("updating %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 		log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
@@ -477,17 +514,6 @@ func (r *DataConnectHubReconciler) reconcilePostgresSecret(ctx context.Context, 
 }
 
 // --- Helpers ---
-
-func defaultImageForService(name, restImage, flightImage string) string {
-	img := flightImage
-	if name == nameRestService {
-		img = restImage
-	}
-	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
-		return img[:i]
-	}
-	return img
-}
 
 func generatePassword(length int) string {
 	b := make([]byte, length)

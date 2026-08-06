@@ -8,3 +8,5 @@ data:
   distribution.name: Standalone
   distribution.version: 0.0.0
   controller.log.level: info
+  gateway.name: odh-gateway
+  gateway.namespace: opendatahub

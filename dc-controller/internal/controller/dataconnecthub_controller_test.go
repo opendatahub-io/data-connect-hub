@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,6 +78,19 @@ var _ = Describe("DataConnectHub Controller", func() {
 			np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}}
 			_ = k8sClient.Delete(ctx, np)
 		}
+		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: targetNamespace}})
+	}
+
+	deleteCR := func() {
+		cr := &dataconnecthubv1alpha1.DataConnectHub{}
+		if err := k8sClient.Get(ctx, crKey, cr); err != nil {
+			return
+		}
+		if controllerutil.ContainsFinalizer(cr, finalizerName) {
+			controllerutil.RemoveFinalizer(cr, finalizerName)
+			_ = k8sClient.Update(ctx, cr)
+		}
+		_ = k8sClient.Delete(ctx, cr)
 	}
 
 	simulateDeploymentReady := func(name string) {
@@ -133,11 +147,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 		AfterEach(func() {
 			cleanupOperatorResources()
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
-			err := k8sClient.Get(ctx, crKey, cr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
-			}
+			deleteCR()
 		})
 
 		It("should create rest-service and flight-service deployments", func() {
@@ -313,11 +323,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 		AfterEach(func() {
 			cleanupOperatorResources()
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
-			err := k8sClient.Get(ctx, crKey, cr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
-			}
+			deleteCR()
 		})
 
 		It("should apply image and replicas overrides", func() {
@@ -376,11 +382,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 		AfterEach(func() {
 			cleanupOperatorResources()
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
-			err := k8sClient.Get(ctx, crKey, cr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
-			}
+			deleteCR()
 		})
 
 		It("should set imagePullSecrets on the deployment pod spec", func() {
@@ -419,11 +421,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 		AfterEach(func() {
 			cleanupOperatorResources()
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
-			err := k8sClient.Get(ctx, crKey, cr)
-			if err == nil {
-				Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
-			}
+			deleteCR()
 		})
 
 		It("should not create postgres resources", func() {
@@ -464,6 +462,185 @@ var _ = Describe("DataConnectHub Controller", func() {
 				NamespacedName: types.NamespacedName{Name: "nonexistent"},
 			})
 			Expect(err).NotTo(HaveOccurred())
+		})
+	})
+
+	Context("Finalizer behavior", func() {
+		BeforeEach(func() {
+			cr := &dataconnecthubv1alpha1.DataConnectHub{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should add finalizer on first reconcile", func() {
+			r := reconciler()
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(cr, finalizerName)).To(BeTrue())
+		})
+
+		It("should remove finalizer on deletion", func() {
+			r := reconciler()
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
+
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			err = k8sClient.Get(ctx, crKey, cr)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+		})
+	})
+
+	Context("Platform version handshake", func() {
+		BeforeEach(func() {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      platformConfigName,
+					Namespace: targetNamespace,
+				},
+				Data: map[string]string{
+					"distribution.name":    "OpenDataHub",
+					"distribution.version": "2.20.0",
+					"platformVersion":      "2.20.0",
+				},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should include platform release when platformVersion is set in ConfigMap", func() {
+			reconcileUntilReady()
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+
+			Expect(cr.Status.Releases).To(HaveLen(3))
+
+			var platRelease *dataconnecthubv1alpha1.ReleaseStatus
+			for i := range cr.Status.Releases {
+				if cr.Status.Releases[i].Name == releasePlatform {
+					platRelease = &cr.Status.Releases[i]
+					break
+				}
+			}
+			Expect(platRelease).NotTo(BeNil())
+			Expect(platRelease.Version).To(Equal("2.20.0"))
+		})
+
+		It("should read distribution from ConfigMap", func() {
+			reconcileUntilReady()
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+
+			Expect(cr.Status.Distribution.Name).To(Equal("OpenDataHub"))
+			Expect(cr.Status.Distribution.Version).To(Equal("2.20.0"))
+		})
+
+		It("should not advance platform version while not Ready", func() {
+			r := reconciler()
+			req := reconcile.Request{NamespacedName: crKey}
+
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.Phase).NotTo(Equal(conditionTypeReady))
+
+			var platRelease *dataconnecthubv1alpha1.ReleaseStatus
+			for i := range cr.Status.Releases {
+				if cr.Status.Releases[i].Name == releasePlatform {
+					platRelease = &cr.Status.Releases[i]
+					break
+				}
+			}
+			if platRelease != nil {
+				Expect(platRelease.Version).To(Equal(""))
+			}
+		})
+	})
+
+	Context("Platform config gateway merge", func() {
+		BeforeEach(func() {
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      platformConfigName,
+					Namespace: targetNamespace,
+				},
+				Data: map[string]string{
+					"distribution.name":    "Standalone",
+					"distribution.version": "0.0.0",
+					"gateway.name":         "custom-gateway",
+					"gateway.namespace":    "custom-ns",
+				},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should use gateway config from ConfigMap when spec.gateway is not set", func() {
+			cr := &dataconnecthubv1alpha1.DataConnectHub{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+			reconcileUntilReady()
+
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.Gateway).NotTo(BeNil())
+			Expect(cr.Status.Gateway.Name).To(Equal("custom-gateway"))
+			Expect(cr.Status.Gateway.Namespace).To(Equal("custom-ns"))
+		})
+
+		It("should prefer spec.gateway over ConfigMap gateway", func() {
+			cr := &dataconnecthubv1alpha1.DataConnectHub{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
+					Gateway: &dataconnecthubv1alpha1.Gateway{
+						Name:      "spec-gateway",
+						Namespace: "spec-ns",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+			reconcileUntilReady()
+
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.Gateway).NotTo(BeNil())
+			Expect(cr.Status.Gateway.Name).To(Equal("spec-gateway"))
+			Expect(cr.Status.Gateway.Namespace).To(Equal("spec-ns"))
 		})
 	})
 })
