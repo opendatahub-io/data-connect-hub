@@ -18,6 +18,11 @@ class TestConfigGuards:
         with pytest.raises(DCHConfigError, match="rest_url"):
             client.list_connections()
 
+    def test_flight_without_url_raises(self) -> None:
+        client = DataConnectClient()
+        with pytest.raises(DCHConfigError, match="flight_url"):
+            client.server_info()
+
 
 class TestContextManager:
     def test_sync_context_manager(self) -> None:
@@ -97,11 +102,36 @@ class TestEmptyUpdateGuards:
         assert req.location.url == ""
 
 
-class TestIngestDelegation:
-    async def test_ingest(self) -> None:
-        client = DataConnectClient(rest_url="http://localhost")
-        assert client._rest is not None
-        client._rest.ingest = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+class TestFlightDelegation:
+    def test_read(self) -> None:
+        import pyarrow as pa
 
-        result = await client.ingest("conn-1")
-        assert result == b"data"
+        table = pa.table({"col": [1, 2]})
+        client = DataConnectClient(rest_url="http://localhost")
+        client._flight = MagicMock()
+        client._flight.read.return_value = table
+
+        result = client.read("SELECT 1", "conn-1")
+        assert result.equals(table)
+        client._flight.read.assert_called_once_with("SELECT 1", "conn-1")
+
+    def test_read_pandas(self) -> None:
+        import pandas as pd
+
+        df = pd.DataFrame({"col": [1, 2]})
+        client = DataConnectClient(rest_url="http://localhost")
+        client._flight = MagicMock()
+        client._flight.read_pandas.return_value = df
+
+        result = client.read_pandas("SELECT 1", "conn-1")
+        assert isinstance(result, pd.DataFrame)
+        client._flight.read_pandas.assert_called_once_with("SELECT 1", "conn-1")
+
+    def test_server_info(self) -> None:
+        client = DataConnectClient(rest_url="http://localhost")
+        client._flight = MagicMock()
+        client._flight.server_info.return_value = {"vendor": "DCH"}
+
+        result = client.server_info()
+        assert result == {"vendor": "DCH"}
+        client._flight.server_info.assert_called_once()

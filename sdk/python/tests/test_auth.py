@@ -6,7 +6,8 @@ import pytest
 
 from data_connect_hub._auth import (
     _normalize_token,
-    build_headers,
+    build_flight_headers,
+    build_rest_headers,
 )
 from data_connect_hub.exceptions import DCHConfigError
 
@@ -33,9 +34,9 @@ class TestNormalizeToken:
             _normalize_token("Digest realm=test")
 
 
-class TestBuildHeaders:
+class TestBuildRestHeaders:
     def test_all_headers(self) -> None:
-        headers = build_headers(
+        headers = build_rest_headers(
             token="abc123",
             tenant_id="tenant-1",
         )
@@ -45,9 +46,32 @@ class TestBuildHeaders:
         }
 
     def test_empty_values_excluded(self) -> None:
-        headers = build_headers(token="", tenant_id="")
+        headers = build_rest_headers(token="", tenant_id="")
         assert headers == {}
 
     def test_bearer_prefixed_token_not_doubled(self) -> None:
-        headers = build_headers(token="Bearer mytoken", tenant_id="t1")
+        headers = build_rest_headers(token="Bearer mytoken", tenant_id="t1")
         assert headers["Authorization"] == "Bearer mytoken"
+
+
+class TestBuildFlightHeaders:
+    def test_all_headers(self) -> None:
+        headers = build_flight_headers(token="abc123", tenant_id="t1", connection_id="conn-1")
+        assert headers == {
+            "adbc.flight.sql.rpc.call_header.authorization": "Bearer abc123",
+            "adbc.flight.sql.rpc.call_header.x-tenant-id": "t1",
+            "adbc.flight.sql.rpc.call_header.x-data-connection-id": "conn-1",
+        }
+
+    def test_empty_values_excluded(self) -> None:
+        headers = build_flight_headers(token="", tenant_id="")
+        assert headers == {}
+
+    def test_without_connection_id(self) -> None:
+        headers = build_flight_headers(token="tok", tenant_id="t1")
+        assert "adbc.flight.sql.rpc.call_header.x-data-connection-id" not in headers
+        assert headers["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer tok"
+
+    def test_bearer_prefixed_token_not_doubled(self) -> None:
+        headers = build_flight_headers(token="Bearer mytoken", tenant_id="t1")
+        assert headers["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer mytoken"
