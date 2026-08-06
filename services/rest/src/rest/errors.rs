@@ -68,6 +68,7 @@ impl From<MetaStoreError> for RestErrorResponse {
             MetaStoreError::Query(_) => ("query_error", 400),
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
+            MetaStoreError::Validation(_) => ("validation", 400),
         };
         RestErrorResponse {
             code: code.to_string(),
