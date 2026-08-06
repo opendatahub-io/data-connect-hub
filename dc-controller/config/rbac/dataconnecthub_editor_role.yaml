@@ -1,7 +1,7 @@
 # This rule is not used by the project dc-controller itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants permissions to create, update, and delete resources within the dataconnecthub.opendatahub.io.
+# Grants permissions to create, update, and delete resources within the components.platform.opendatahub.io.
 # This role is intended for users who need to manage these resources
 # but should not control RBAC or manage permissions for others.
 
@@ -11,12 +11,12 @@ metadata:
   labels:
     app.kubernetes.io/name: dc-controller
     app.kubernetes.io/managed-by: kustomize
-  name: dataconnectservice-editor-role
+  name: dataconnecthub-editor-role
 rules:
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - components.platform.opendatahub.io
   resources:
-  - dataconnectservices
+  - dataconnecthubs
   verbs:
   - create
   - delete
@@ -26,8 +26,8 @@ rules:
   - update
   - watch
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - components.platform.opendatahub.io
   resources:
-  - dataconnectservices/status
+  - dataconnecthubs/status
   verbs:
   - get

@@ -1,14 +1,12 @@
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
 metadata:
   labels:
     app.kubernetes.io/name: dc-controller
     app.kubernetes.io/managed-by: kustomize
-  name: dataconnectservice-sample
+  name: default-dataconnecthub
 spec:
-  description: "Sample Data Connect Hub deployment"
-  database:
-    devMode: true
+  devMode: true
   gateway:
     name: odh-gateway
     namespace: opendatahub

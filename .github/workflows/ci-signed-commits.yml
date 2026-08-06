@@ -11,6 +11,7 @@ concurrency:
 jobs:
   signed-commits:
     name: Check commit signatures
+    if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     permissions:
       contents: read

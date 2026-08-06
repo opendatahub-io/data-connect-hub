@@ -90,13 +90,19 @@ services/rest (binary, HTTP :8080)
 
 ## REST API Routes
 
-All routes are under `/v1/data`:
+All routes are under `/api/v1/data`:
 
-- `GET /v1/data/connections` — list all connections
-- `GET /v1/data/connections/{namespace}` — list by
-  namespace
-- `GET /v1/data/connections/{namespace}/{name}` — get
-  a specific connection
+- `GET /api/v1/data/health` — health check
+- `GET /api/v1/data/connections` — list connections
+- `POST /api/v1/data/connections` — create connection
+- `GET /api/v1/data/connections/{id}` — get connection
+- `PATCH /api/v1/data/connections/{id}` — update connection
+- `DELETE /api/v1/data/connections/{id}` — delete connection
+- `GET /api/v1/data/connection-types` — list connection types
+- `POST /api/v1/data/connection-types` — create connection type
+- `GET /api/v1/data/connection-types/{id}` — get connection type
+- `PATCH /api/v1/data/connection-types/{id}` — update connection type
+- `DELETE /api/v1/data/connection-types/{id}` — delete connection type
 
 ## Container Builds
 
@@ -133,3 +139,17 @@ Four workflows under `.github/workflows/`:
 ```console
 make check-dco   # run DCO check locally
 ```
+
+## ODH Integration Notes
+
+- The ODH operator module manifests currently use **Kustomize v5** (following the MLflow operator pattern).
+  The ODH team is actively migrating modules to **Helm v2 charts** (FeastOperator, OGX, Kserve, odh-observability
+  all use Helm). We should plan to convert our `dc-controller/config/` overlays to a Helm chart in a future release.
+  Reference PRs: opendatahub-operator#3813 (OGX/Helm), #3654 (MLflow/Kustomize migration).
+- The Module CRD uses API group `components.platform.opendatahub.io` (ODH standard for all module CRDs).
+- The Module CR is cluster-scoped and singleton (`default-dataconnecthub`).
+- Status follows the PlatformObject contract: `observedGeneration`, `distribution`, `releases`,
+  and conditions `Ready`, `ProvisioningSucceeded`, `Degraded`.
+- Application images are resolved from env vars for disconnected/air-gapped support:
+  `RELATED_IMAGE_ODH_DCH_REST_SERVICE` (rest-service) and
+  `RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE` (flight-service).

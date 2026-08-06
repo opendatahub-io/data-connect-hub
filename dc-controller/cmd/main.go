@@ -184,12 +184,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.DataConnectServiceReconciler{
+	namespace := os.Getenv("APPLICATIONS_NAMESPACE")
+	if namespace == "" {
+		namespace = "opendatahub"
+	}
+
+	if err := (&controller.DataConnectHubReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		ManifestsPath: manifestsPath,
+		Namespace:     namespace,
+		RestImage: controller.EnvOrDefault(
+			controller.EnvRestImage,
+			"ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest",
+		),
+		FlightImage: controller.EnvOrDefault(
+			controller.EnvFlightImage,
+			"ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest",
+		),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
+		setupLog.Error(err, "Failed to create controller", "controller", "dataconnecthub")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

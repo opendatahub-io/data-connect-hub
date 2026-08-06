@@ -59,8 +59,7 @@ apiVersion: dataconnecthub.opendatahub.io/v1alpha1
 kind: DataConnectService
 metadata:
   name: my-dch
-spec:
-  description: "My Data Connect Hub instance"
+spec: {}
 ```
 
 Apply it:
@@ -71,8 +70,7 @@ apiVersion: dataconnecthub.opendatahub.io/v1alpha1
 kind: DataConnectService
 metadata:
   name: my-dch
-spec:
-  description: "My Data Connect Hub instance"
+spec: {}
 EOF
 ```
 
@@ -87,11 +85,15 @@ The operator will automatically:
 ### 3. Monitor status
 
 ```console
-oc get dataconnectservice my-dch -n <your-namespace> -o yaml
+oc get dataconnectservices -n <your-namespace>
 ```
 
-The CR's `.status.phase` progresses through `Progressing` to `Ready`.
-Conditions (`Available`, `Progressing`, `Degraded`) provide detailed state.
+The `Phase` column progresses through `Progressing` to `Ready`. For full
+details including conditions (`Available`, `Progressing`, `Degraded`):
+
+```console
+oc get dataconnectservice my-dch -n <your-namespace> -o yaml
+```
 
 ### 4. Customising the CR
 
@@ -103,12 +105,12 @@ kind: DataConnectService
 metadata:
   name: my-dch
 spec:
-  description: "Custom deployment"
+  devMode: true            # true (default): operator deploys Postgres
+                           # false: bring your own database (see below)
 
-  # Database configuration
-  database:
-    devMode: true          # true (default): operator deploys Postgres
-                           # false: bring your own database via externalSecret
+  # External database (only when devMode is false)
+  # database:
+  #   externalSecret: my-database-secret
 
   # Per-service overrides
   restService:
@@ -218,14 +220,18 @@ oc rollout status deployment/flight-service -n <your-namespace>
 
 ```console
 # REST health check
-oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/health
+oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/api/v1/data/health
 
-# Query the database through the REST API
+# REST API via service DNS (X-Tenant-ID header is required for data routes)
 oc exec deploy/rest-service -n <your-namespace> -- \
-  curl -s http://127.0.0.1:8080/v1/data/connections
+  curl -s -H 'X-Tenant-ID: default' http://rest-service:8080/api/v1/data/connections
 
-# Flight service readiness (Ready 1/1 means gRPC health passes)
-oc get pods -n <your-namespace> -l app.kubernetes.io/name=flight-service
+# Flight gRPC health via service DNS
+oc exec deploy/flight-service -n <your-namespace> -- \
+  curl -s --http2-prior-knowledge -X POST \
+  -H 'content-type: application/grpc' -H 'te: trailers' \
+  http://flight-service:50051/grpc.health.v1.Health/Check \
+  -o /dev/null -w 'HTTP status: %{http_code}\n'
 ```
 
 ### 4. Updating images
@@ -260,7 +266,8 @@ reinitializing.
 ## Known gaps
 
 - **Postgres** is a single instance with a Kubernetes PVC -- fine for dev,
-  not a substitute for real backups. Use `database.devMode: false` with an
-  external database for production.
+  not a substitute for real backups. For production, set `devMode: false`
+  and provide `database.externalSecret` referencing a Secret with your
+  database connection details.
 - **NetworkPolicy** resources allow all ingress/egress -- real restriction
   is pending a defined gateway/client topology.
