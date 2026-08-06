@@ -19,7 +19,7 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /arrow.flight.protocol
+            value: /arrow.flight.protocol.FlightService
       backendRefs:
         - name: flight-service
           port: 50051

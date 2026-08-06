@@ -222,9 +222,9 @@ oc rollout status deployment/flight-service -n <your-namespace>
 # REST health check
 oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/api/v1/data/health
 
-# REST API via service DNS
+# REST API via service DNS (X-Tenant-ID header is required for data routes)
 oc exec deploy/rest-service -n <your-namespace> -- \
-  curl -s http://rest-service:8080/api/v1/data/connections
+  curl -s -H 'X-Tenant-ID: default' http://rest-service:8080/api/v1/data/connections
 
 # Flight gRPC health via service DNS
 oc exec deploy/flight-service -n <your-namespace> -- \
