@@ -5,7 +5,7 @@ Kubernetes operator for deploying and managing Data Connect Hub services
 
 ## Prerequisites
 
-- Go 1.96+
+- Go 1.26+
 - Access to an OpenShift 4.20+ cluster (Kubernetes 1.33+)
 - `oc` CLI
 - `podman` (logged into quay.io)
@@ -213,19 +213,20 @@ For each `DataConnectHub` CR, the controller creates:
 | Deployment | `postgres` | Only when `devMode: true` |
 | Service | `rest-service` | ClusterIP, port 8080 |
 | Service | `flight-service` | ClusterIP, port 50051 |
-| Service | `postgres` | ClusterIP, port 5432 |
+| Service | `postgres` | ClusterIP, port 5432 (devMode only) |
 | ServiceAccount | `data-connect-hub-sa` | For rest-service |
 | ServiceAccount | `flight-service-sa` | For flight-service |
 | ConfigMap | `rest-service-config` | Server config (config.toml) |
 | ConfigMap | `flight-service-config` | Server config (config.toml) |
-| Secret | `postgres-credentials` | Auto-generated DB credentials |
-| PVC | `postgres-data` | 5Gi, ReadWriteOnce |
+| Secret | `postgres-credentials` | Auto-generated DB credentials (devMode only) |
+| PVC | `postgres-data` | 5Gi, ReadWriteOnce (devMode only) |
 | NetworkPolicy | `rest-service` | Ingress/egress rules |
 | NetworkPolicy | `flight-service` | Ingress/egress rules |
-| NetworkPolicy | `postgres` | Ingress/egress rules |
+| NetworkPolicy | `postgres` | Ingress/egress rules (devMode only) |
 | HTTPRoute | `data-connect-hub` | Routes traffic via gateway |
 
-All resources have owner references back to the CR and a finalizer,
+All resources have owner references back to the CR. The CR itself
+carries a finalizer (`components.platform.opendatahub.io/finalizer`),
 so deleting the CR cleans up everything.
 
 ## Status
@@ -289,9 +290,8 @@ oc get pods -n dc-controller-system
 oc exec deploy/rest-service -n dc-controller-system -- \
   curl -s http://localhost:8080/api/v1/data/health
 
-# Test flight-service gRPC health
-oc exec deploy/flight-service -n dc-controller-system -- \
-  grpc_health_probe -addr=localhost:50051
+# Check flight-service pod is ready (uses built-in gRPC health probe)
+oc get pod -l app.kubernetes.io/name=flight-service -n dc-controller-system
 ```
 
 ## Uninstall
