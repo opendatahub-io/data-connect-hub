@@ -197,30 +197,48 @@ func stripSecretGenerator(fs filesys.FileSystem, dir string) error {
 
 // --- CR overrides → kustomize patches ---
 
-func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides) ([]kustypes.Patch, []kustypes.Image) {
+func parseImageRef(baseName, ref string) kustypes.Image {
+	img := kustypes.Image{Name: baseName}
+	if at := strings.Index(ref, "@"); at > 0 {
+		img.NewName = ref[:at]
+		img.Digest = ref[at+1:]
+	} else if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
+		img.NewName = ref[:i]
+		img.NewTag = ref[i+1:]
+	} else {
+		img.NewName = ref
+	}
+	return img
+}
+
+func buildServiceImages(name, restImage, flightImage string, overrideImage *string) []kustypes.Image {
+	resolvedImage := flightImage
+	if name == nameRestService {
+		resolvedImage = restImage
+	}
+	baseName := defaultImageForService(name, restImage, flightImage)
+
+	if overrideImage != nil {
+		return []kustypes.Image{parseImageRef(baseName, *overrideImage)}
+	}
+	if resolvedImage != baseName {
+		return []kustypes.Image{parseImageRef(baseName, resolvedImage)}
+	}
+	return nil
+}
+
+func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) ([]kustypes.Patch, []kustypes.Image) {
+	var overrideImage *string
+	if overrides != nil {
+		overrideImage = overrides.Image
+	}
+	images := buildServiceImages(name, restImage, flightImage, overrideImage)
+
 	if overrides == nil {
-		return nil, nil
+		return nil, images
 	}
 
 	var patches []kustypes.Patch
-	var images []kustypes.Image
-
-	if overrides.Image != nil {
-		img := kustypes.Image{
-			Name: defaultImageForService(name),
-		}
-		ref := *overrides.Image
-		if at := strings.Index(ref, "@"); at > 0 {
-			img.NewName = ref[:at]
-			img.Digest = ref[at+1:]
-		} else if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
-			img.NewName = ref[:i]
-			img.NewTag = ref[i+1:]
-		} else {
-			img.NewName = ref
-		}
-		images = append(images, img)
-	}
 
 	var patchParts []string
 
@@ -332,15 +350,22 @@ spec:
 
 // --- Apply resources with SSA and owner references ---
 
-func (r *DataConnectServiceReconciler) applyResources(
+func (r *DataConnectHubReconciler) applyResources(
 	ctx context.Context,
-	cr *dataconnecthubv1alpha1.DataConnectService,
+	cr *dataconnecthubv1alpha1.DataConnectHub,
 	resources []*unstructured.Unstructured,
 ) error {
 	log := logf.FromContext(ctx)
 
 	for _, obj := range resources {
-		obj.SetNamespace(cr.Namespace)
+		obj.SetNamespace(r.Namespace)
+
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["components.platform.opendatahub.io/managed-by"] = "dataconnecthub"
+		obj.SetLabels(labels)
 
 		if err := controllerutil.SetControllerReference(cr, obj, r.Scheme); err != nil {
 			return fmt.Errorf("setting owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), err)
@@ -401,11 +426,11 @@ func specHash(obj *unstructured.Unstructured) string {
 
 // --- Postgres secret (programmatic — random password generation) ---
 
-func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectService) error {
+func (r *DataConnectHubReconciler) reconcilePostgresSecret(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectHub) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namePostgresCreds,
-			Namespace: cr.Namespace,
+			Namespace: r.Namespace,
 		},
 	}
 
@@ -453,10 +478,10 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 
 // --- Helpers ---
 
-func defaultImageForService(name string) string {
-	img := defaultFlightImage
+func defaultImageForService(name, restImage, flightImage string) string {
+	img := flightImage
 	if name == nameRestService {
-		img = defaultRestImage
+		img = restImage
 	}
 	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
 		return img[:i]

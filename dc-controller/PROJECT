@@ -7,15 +7,14 @@ domain: opendatahub.io
 layout:
 - go.kubebuilder.io/v4
 projectName: dch-operator
-repo: github.com/opendatahub-io/data-connect-hub/dch-operator
+repo: github.com/opendatahub-io/data-connect-hub/dc-controller
 resources:
 - api:
     crdVersion: v1
-    namespaced: true
   controller: true
   domain: opendatahub.io
-  group: dataconnecthub
-  kind: DataConnectService
-  path: github.com/opendatahub-io/data-connect-hub/dch-operator/api/v1alpha1
+  group: components.platform
+  kind: DataConnectHub
+  path: github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1
   version: v1alpha1
 version: "3"

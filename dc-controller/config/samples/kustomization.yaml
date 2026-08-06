@@ -1,4 +1,4 @@
 ## Append samples of your project ##
 resources:
-- dataconnecthub_v1alpha1_dataconnectservice.yaml
+- components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

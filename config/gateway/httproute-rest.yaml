@@ -12,7 +12,14 @@ spec:
     - matches:
         - path:
             type: PathPrefix
-            value: /v1/data
+            value: /api/v1/data
       backendRefs:
         - name: rest-service
           port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /arrow.flight.protocol.FlightService
+      backendRefs:
+        - name: flight-service
+          port: 50051
