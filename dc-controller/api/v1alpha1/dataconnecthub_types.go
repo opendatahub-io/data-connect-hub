@@ -103,6 +103,7 @@ type ReleaseStatus struct {
 }
 
 // DataConnectHubSpec defines the desired state of DataConnectHub
+// +kubebuilder:validation:XValidation:rule="self.devMode != false || (has(self.database) && has(self.database.externalSecret))",message="database.externalSecret is required when devMode is false"
 type DataConnectHubSpec struct {
 	// devMode when true deploys a built-in single-instance Postgres.
 	// When false, the user provides an external database via the database field.

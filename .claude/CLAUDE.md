@@ -150,4 +150,6 @@ make check-dco   # run DCO check locally
 - The Module CR is cluster-scoped and singleton (`default-dataconnecthub`).
 - Status follows the PlatformObject contract: `observedGeneration`, `distribution`, `releases`,
   and conditions `Ready`, `ProvisioningSucceeded`, `Degraded`.
-- Application images are resolved from `RELATED_IMAGE_*` env vars for disconnected/air-gapped support.
+- Application images are resolved from env vars for disconnected/air-gapped support:
+  `RELATED_IMAGE_ODH_DCH_REST_SERVICE` (rest-service) and
+  `RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE` (flight-service).

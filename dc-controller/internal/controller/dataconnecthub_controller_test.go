@@ -402,12 +402,16 @@ var _ = Describe("DataConnectHub Controller", func() {
 	Context("When devMode is disabled", func() {
 		BeforeEach(func() {
 			devMode := false
+			extSecret := "my-db-secret"
 			cr := &dataconnecthubv1alpha1.DataConnectHub{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: resourceName,
 				},
 				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
 					DevMode: &devMode,
+					Database: &dataconnecthubv1alpha1.DatabaseSpec{
+						ExternalSecret: &extSecret,
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())

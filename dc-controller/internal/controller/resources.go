@@ -367,7 +367,7 @@ func (r *DataConnectHubReconciler) applyResources(
 		labels["components.platform.opendatahub.io/managed-by"] = "dataconnecthub"
 		obj.SetLabels(labels)
 
-		if err := controllerutil.SetOwnerReference(cr, obj, r.Scheme); err != nil {
+		if err := controllerutil.SetControllerReference(cr, obj, r.Scheme); err != nil {
 			return fmt.Errorf("setting owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
@@ -465,7 +465,7 @@ func (r *DataConnectHubReconciler) reconcilePostgresSecret(ctx context.Context, 
 			}
 		}
 
-		return controllerutil.SetOwnerReference(cr, secret, r.Scheme)
+		return controllerutil.SetControllerReference(cr, secret, r.Scheme)
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, mutateFn)
