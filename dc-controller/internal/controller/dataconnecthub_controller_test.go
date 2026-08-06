@@ -191,7 +191,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			Expect(cr.Status.ObservedGeneration).To(Equal(cr.Generation))
 			Expect(cr.Status.Distribution.Name).To(Equal("Standalone"))
-			Expect(cr.Status.Distribution.Version).To(Equal(buildVersion))
+			Expect(cr.Status.Distribution.Version).To(Equal(BuildVersion))
 			Expect(cr.Status.Releases).To(HaveLen(2))
 			Expect(cr.Status.Releases[0].Name).To(Equal("rest-service"))
 			Expect(cr.Status.Releases[1].Name).To(Equal("flight-service"))

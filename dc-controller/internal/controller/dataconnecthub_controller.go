@@ -67,9 +67,13 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	namePostgresCreds  = "postgres-credentials"
 
-	repoURL      = "https://github.com/opendatahub-io/data-connect-hub"
-	buildVersion = "0.1.0"
+	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
+
+	platformConfigName = "opendatahub-dataconnecthub-config"
 )
+
+// BuildVersion is set at build time via -ldflags.
+var BuildVersion = "dev"
 
 // DataConnectHubReconciler reconciles a DataConnectHub object
 type DataConnectHubReconciler struct {
@@ -79,6 +83,22 @@ type DataConnectHubReconciler struct {
 	Namespace     string // target namespace for deploying workloads
 	RestImage     string // resolved from RELATED_IMAGE or default
 	FlightImage   string // resolved from RELATED_IMAGE or default
+}
+
+func (r *DataConnectHubReconciler) readPlatformDistribution(ctx context.Context) dataconnecthubv1alpha1.DistributionStatus {
+	cm := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Name: platformConfigName, Namespace: r.Namespace}, cm); err != nil {
+		return dataconnecthubv1alpha1.DistributionStatus{Name: "Standalone", Version: BuildVersion}
+	}
+	name := cm.Data["distribution.name"]
+	version := cm.Data["distribution.version"]
+	if name == "" {
+		name = "Standalone"
+	}
+	if version == "" {
+		version = BuildVersion
+	}
+	return dataconnecthubv1alpha1.DistributionStatus{Name: name, Version: version}
 }
 
 // EnvOrDefault returns the value of the named environment variable or the fallback.
@@ -117,7 +137,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if err := r.reconcileDatabase(ctx, &cr); err != nil {
 			log.Error(err, "failed to reconcile Database")
 			return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseError", err.Error())
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DatabaseError", err.Error())
 				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseError", err.Error())
 				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseError", "Failed to apply database manifests")
 			})
@@ -125,7 +145,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		if pgReady, err := r.isDeploymentReady(ctx, r.Namespace, namePostgres); err != nil {
 			log.Error(err, "failed to check postgres readiness")
 			return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseError", err.Error())
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DatabaseError", err.Error())
 				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseError", err.Error())
 				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseError", "Failed to check database readiness")
 			})
@@ -143,7 +163,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
 		log.Error(err, "failed to reconcile RestService")
 		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "RestServiceError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "RestServiceError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "RestServiceError", "Failed to apply rest-service manifests")
 		})
@@ -152,7 +172,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
 		log.Error(err, "failed to reconcile FlightService")
 		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "FlightServiceError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightServiceError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "FlightServiceError", "Failed to apply flight-service manifests")
 		})
@@ -165,7 +185,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		} else {
 			log.Error(err, "failed to reconcile HTTPRoute")
 			return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "HTTPRouteError", err.Error())
 				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "HTTPRouteError", err.Error())
 				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "HTTPRouteError", "Failed to apply gateway manifests")
 			})
@@ -178,7 +198,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
 		return r.updateStatus(ctx, req, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DeploymentCheckError", err.Error())
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		})
@@ -216,13 +236,10 @@ func (r *DataConnectHubReconciler) updateStatus(
 
 	cr.Status.Phase = phase
 	cr.Status.ObservedGeneration = cr.Generation
-	cr.Status.Distribution = dataconnecthubv1alpha1.DistributionStatus{
-		Name:    "Standalone",
-		Version: buildVersion,
-	}
+	cr.Status.Distribution = r.readPlatformDistribution(ctx)
 	cr.Status.Releases = []dataconnecthubv1alpha1.ReleaseStatus{
-		{Name: "rest-service", RepoUrl: repoURL, Version: buildVersion},
-		{Name: "flight-service", RepoUrl: repoURL, Version: buildVersion},
+		{Name: "rest-service", RepoUrl: repoURL, Version: BuildVersion},
+		{Name: "flight-service", RepoUrl: repoURL, Version: BuildVersion},
 	}
 	mutate(&cr)
 

@@ -8,9 +8,13 @@ metadata:
 spec:
   group: components.platform.opendatahub.io
   names:
+    categories:
+    - opendatahub
     kind: DataConnectHub
     listKind: DataConnectHubList
     plural: dataconnecthubs
+    shortNames:
+    - dch
     singular: dataconnecthub
   scope: Cluster
   versions:

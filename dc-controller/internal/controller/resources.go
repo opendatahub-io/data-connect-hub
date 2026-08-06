@@ -197,30 +197,48 @@ func stripSecretGenerator(fs filesys.FileSystem, dir string) error {
 
 // --- CR overrides → kustomize patches ---
 
+func parseImageRef(baseName, ref string) kustypes.Image {
+	img := kustypes.Image{Name: baseName}
+	if at := strings.Index(ref, "@"); at > 0 {
+		img.NewName = ref[:at]
+		img.Digest = ref[at+1:]
+	} else if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
+		img.NewName = ref[:i]
+		img.NewTag = ref[i+1:]
+	} else {
+		img.NewName = ref
+	}
+	return img
+}
+
+func buildServiceImages(name, restImage, flightImage string, overrideImage *string) []kustypes.Image {
+	resolvedImage := flightImage
+	if name == nameRestService {
+		resolvedImage = restImage
+	}
+	baseName := defaultImageForService(name, restImage, flightImage)
+
+	if overrideImage != nil {
+		return []kustypes.Image{parseImageRef(baseName, *overrideImage)}
+	}
+	if resolvedImage != baseName {
+		return []kustypes.Image{parseImageRef(baseName, resolvedImage)}
+	}
+	return nil
+}
+
 func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) ([]kustypes.Patch, []kustypes.Image) {
+	var overrideImage *string
+	if overrides != nil {
+		overrideImage = overrides.Image
+	}
+	images := buildServiceImages(name, restImage, flightImage, overrideImage)
+
 	if overrides == nil {
-		return nil, nil
+		return nil, images
 	}
 
 	var patches []kustypes.Patch
-	var images []kustypes.Image
-
-	if overrides.Image != nil {
-		img := kustypes.Image{
-			Name: defaultImageForService(name, restImage, flightImage),
-		}
-		ref := *overrides.Image
-		if at := strings.Index(ref, "@"); at > 0 {
-			img.NewName = ref[:at]
-			img.Digest = ref[at+1:]
-		} else if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
-			img.NewName = ref[:i]
-			img.NewTag = ref[i+1:]
-		} else {
-			img.NewName = ref
-		}
-		images = append(images, img)
-	}
 
 	var patchParts []string
 
