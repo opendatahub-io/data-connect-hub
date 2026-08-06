@@ -8,6 +8,7 @@ use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
 use uuid::Uuid;
+use commons::api::connections::Admin;
 
 #[derive(Debug, Deserialize)]
 pub struct DatabaseConfig {
@@ -50,6 +51,10 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         data_connection: DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError> {
+        if let Some(Admin::Secret { .. }) = &data_connection.admin {
+            return Err(MetaStoreError::Validation("A plain secret cannot be stored in the database, use a secret reference instead".to_string()));
+        }
+
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let resource = DataConnectionResource {
             metadata: ResourceMetadata {

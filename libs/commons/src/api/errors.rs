@@ -30,6 +30,8 @@ pub enum MetaStoreError {
     Serialization(String),
     #[error("Deserialization error: {0}")]
     Deserialization(String),
+    #[error("Validation error: {0}")]
+    Validation(String),
 }
 
 #[derive(Error, Debug)]
