@@ -22,7 +22,7 @@ resources:
 # default, aiding admins in cluster management. Those roles are
 # not used by the dc-controller itself. You can comment the following lines
 # if you do not want those helpers be installed with your Project.
-- dataconnectservice_admin_role.yaml
-- dataconnectservice_editor_role.yaml
-- dataconnectservice_viewer_role.yaml
+- dataconnecthub_admin_role.yaml
+- dataconnecthub_editor_role.yaml
+- dataconnecthub_viewer_role.yaml
 

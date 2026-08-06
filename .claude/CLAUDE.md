@@ -139,3 +139,15 @@ Four workflows under `.github/workflows/`:
 ```console
 make check-dco   # run DCO check locally
 ```
+
+## ODH Integration Notes
+
+- The ODH operator module manifests currently use **Kustomize v5** (following the MLflow operator pattern).
+  The ODH team is actively migrating modules to **Helm v2 charts** (FeastOperator, OGX, Kserve, odh-observability
+  all use Helm). We should plan to convert our `dc-controller/config/` overlays to a Helm chart in a future release.
+  Reference PRs: opendatahub-operator#3813 (OGX/Helm), #3654 (MLflow/Kustomize migration).
+- The Module CRD uses API group `components.platform.opendatahub.io` (ODH standard for all module CRDs).
+- The Module CR is cluster-scoped and singleton (`default-dataconnecthub`).
+- Status follows the PlatformObject contract: `observedGeneration`, `distribution`, `releases`,
+  and conditions `Ready`, `ProvisioningSucceeded`, `Degraded`.
+- Application images are resolved from `RELATED_IMAGE_*` env vars for disconnected/air-gapped support.

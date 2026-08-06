@@ -197,7 +197,7 @@ func stripSecretGenerator(fs filesys.FileSystem, dir string) error {
 
 // --- CR overrides → kustomize patches ---
 
-func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides) ([]kustypes.Patch, []kustypes.Image) {
+func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) ([]kustypes.Patch, []kustypes.Image) {
 	if overrides == nil {
 		return nil, nil
 	}
@@ -207,7 +207,7 @@ func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceO
 
 	if overrides.Image != nil {
 		img := kustypes.Image{
-			Name: defaultImageForService(name),
+			Name: defaultImageForService(name, restImage, flightImage),
 		}
 		ref := *overrides.Image
 		if at := strings.Index(ref, "@"); at > 0 {
@@ -332,17 +332,24 @@ spec:
 
 // --- Apply resources with SSA and owner references ---
 
-func (r *DataConnectServiceReconciler) applyResources(
+func (r *DataConnectHubReconciler) applyResources(
 	ctx context.Context,
-	cr *dataconnecthubv1alpha1.DataConnectService,
+	cr *dataconnecthubv1alpha1.DataConnectHub,
 	resources []*unstructured.Unstructured,
 ) error {
 	log := logf.FromContext(ctx)
 
 	for _, obj := range resources {
-		obj.SetNamespace(cr.Namespace)
+		obj.SetNamespace(r.Namespace)
 
-		if err := controllerutil.SetControllerReference(cr, obj, r.Scheme); err != nil {
+		labels := obj.GetLabels()
+		if labels == nil {
+			labels = map[string]string{}
+		}
+		labels["components.platform.opendatahub.io/managed-by"] = "dataconnecthub"
+		obj.SetLabels(labels)
+
+		if err := controllerutil.SetOwnerReference(cr, obj, r.Scheme); err != nil {
 			return fmt.Errorf("setting owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
@@ -401,11 +408,11 @@ func specHash(obj *unstructured.Unstructured) string {
 
 // --- Postgres secret (programmatic — random password generation) ---
 
-func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectService) error {
+func (r *DataConnectHubReconciler) reconcilePostgresSecret(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectHub) error {
 	secret := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      namePostgresCreds,
-			Namespace: cr.Namespace,
+			Namespace: r.Namespace,
 		},
 	}
 
@@ -440,7 +447,7 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 			}
 		}
 
-		return controllerutil.SetControllerReference(cr, secret, r.Scheme)
+		return controllerutil.SetOwnerReference(cr, secret, r.Scheme)
 	}
 
 	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, secret, mutateFn)
@@ -453,10 +460,10 @@ func (r *DataConnectServiceReconciler) reconcilePostgresSecret(ctx context.Conte
 
 // --- Helpers ---
 
-func defaultImageForService(name string) string {
-	img := defaultFlightImage
+func defaultImageForService(name, restImage, flightImage string) string {
+	img := flightImage
 	if name == nameRestService {
-		img = defaultRestImage
+		img = restImage
 	}
 	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
 		return img[:i]
