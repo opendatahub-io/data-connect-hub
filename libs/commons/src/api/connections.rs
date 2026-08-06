@@ -3,9 +3,29 @@ use crate::api::errors::{MetaStoreError, SecretStoreError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Admin {
-    pub secret_ref: String,
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum Admin {
+    SecretRef {
+        secret_ref: Option<String>,
+    },
+
+    Secret {
+        secret: Option<Arc<HashMap<String, String>>>,
+    },
+}
+
+impl std::fmt::Debug for Admin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Admin::SecretRef { secret_ref } => f.debug_struct("SecretRef").field("secret_ref", &secret_ref).finish(),
+            Admin::Secret { secret } => f
+                .debug_struct("Secret")
+                .field("secret", if secret.is_some() { &"[REDACTED]" } else { &"None" })
+                .finish(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -13,12 +33,8 @@ pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
     pub format: String,
-    pub admin: Admin,
-    pub created_at: String,
-    pub updated_at: String,
+    pub admin: Option<Admin>,
     pub properties: HashMap<String, String>,
-    #[serde(skip)]
-    pub credentials: HashMap<String, String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -34,10 +50,7 @@ impl std::fmt::Debug for DataConnection {
             .field("data_connection_type_id", &self.data_connection_type_id)
             .field("format", &self.format)
             .field("admin", &self.admin)
-            .field("created_at", &self.created_at)
-            .field("updated_at", &self.updated_at)
             .field("properties", &self.properties)
-            .field("credentials", &"[REDACTED]")
             .finish()
     }
 }
@@ -162,25 +175,27 @@ mod tests {
                 name: "test-conn".to_string(),
                 data_connection_type_id: "postgres".to_string(),
                 format: "jdbc".to_string(),
-                admin: Admin {
-                    secret_ref: "secret/test-conn".to_string(),
-                },
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                admin: Some(Admin::SecretRef {
+                    secret_ref: Some("secret/test-conn".to_string()),
+                }),
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
-                credentials: HashMap::new(),
             },
         }
     }
 
     #[test]
     fn test_admin_serialize_deserialize() {
-        let admin = Admin {
-            secret_ref: "secret/test".to_string(),
+        let admin = Admin::SecretRef {
+            secret_ref: Some("secret/test".to_string()),
         };
         let json = serde_json::to_string(&admin).unwrap();
         let deserialized: Admin = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.secret_ref, admin.secret_ref);
+        match (&deserialized, &admin) {
+            (Admin::SecretRef { secret_ref: a }, Admin::SecretRef { secret_ref: b }) => {
+                assert_eq!(a, b);
+            },
+            _ => panic!("expected SecretRef variant"),
+        }
     }
 
     #[test]
@@ -197,8 +212,6 @@ mod tests {
                 "data_connection_type_id": "postgres",
                 "format": "jdbc",
                 "admin": { "secret_ref": "secret/test-conn" },
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
                 "properties": { "key": "value" }
             }
         });
@@ -210,7 +223,10 @@ mod tests {
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, "jdbc");
-        assert_eq!(res.resource.admin.secret_ref, "secret/test-conn");
+        match &res.resource.admin {
+            Some(Admin::SecretRef { secret_ref }) => assert_eq!(secret_ref, &Some("secret/test-conn".to_string())),
+            _ => panic!("expected SecretRef variant"),
+        }
         assert_eq!(res.resource.properties["key"], "value");
 
         let round_tripped = serde_json::to_value(&res).unwrap();
@@ -223,7 +239,12 @@ mod tests {
         let cloned = res.clone();
 
         assert_eq!(cloned.metadata.id, res.metadata.id);
-        assert_eq!(cloned.resource.admin.secret_ref, res.resource.admin.secret_ref);
+        match (&cloned.resource.admin, &res.resource.admin) {
+            (Some(Admin::SecretRef { secret_ref: a }), Some(Admin::SecretRef { secret_ref: b })) => {
+                assert_eq!(a, b);
+            },
+            _ => panic!("expected SecretRef variant"),
+        }
         assert_eq!(cloned.resource.properties, res.resource.properties);
     }
 

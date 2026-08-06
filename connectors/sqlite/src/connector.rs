@@ -3,7 +3,7 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnectionResource;
+use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::TabularState;
 use commons::api::tabular::{QueryOutput, TabularReader};
@@ -43,9 +43,13 @@ impl FlightConnector for SqliteConnector {
         &self,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let url = data_connection
-            .resource
-            .credentials
+        let credentials = match &data_connection.resource.admin {
+            Some(Admin::Secret { secret }) => secret.clone(),
+            _ => None,
+        }
+        .ok_or_else(|| ConnectorError::ConnectionError("SQLite credentials are required".to_string()))?;
+
+        let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
         let pool = self

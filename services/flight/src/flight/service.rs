@@ -10,7 +10,7 @@ use arrow_flight::{
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
-use commons::api::connections::{DataConnectionResource, SecretStore};
+use commons::api::connections::{Admin, DataConnectionResource, SecretStore};
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID, connections::MetaStore};
 use futures::TryStreamExt;
 use prost::Message;
@@ -72,14 +72,17 @@ impl TabularDataService {
             .await
             .map_err(map_meta_store_error)?;
 
-        let secret_ref = &r.resource.admin.secret_ref;
         tracing::info!("Resolving credentials");
-        let secret = self
-            .secret_store
-            .get_secret(tenant_id, secret_ref)
-            .await
-            .map_err(map_secret_store_error)?;
-        r.resource.credentials = secret.properties;
+        if let Some(Admin::SecretRef { secret_ref: Some(s) }) = &r.resource.admin {
+            let secret = self
+                .secret_store
+                .get_secret(tenant_id, s)
+                .await
+                .map_err(map_secret_store_error)?;
+            r.resource.admin = Some(Admin::Secret {
+                secret: Some(Arc::new(secret.properties)),
+            });
+        }
         Ok(r)
     }
 }

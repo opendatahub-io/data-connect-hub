@@ -37,13 +37,10 @@ impl MetaStore for TestMetaStore {
                 name: "test-db".to_string(),
                 data_connection_type_id: "sqlite".to_string(),
                 format: "tabular".to_string(),
-                admin: Admin {
-                    secret_ref: "sqlite_creds".to_string(),
-                },
-                created_at: "2026-07-21T00:00:00Z".to_string(),
-                updated_at: "2026-07-21T00:00:00Z".to_string(),
+                admin: Some(Admin::SecretRef {
+                    secret_ref: Some("sqlite_creds".to_string()),
+                }),
                 properties: HashMap::new(),
-                credentials: HashMap::new(),
             },
         })
     }
