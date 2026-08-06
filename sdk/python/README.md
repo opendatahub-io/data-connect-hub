@@ -54,7 +54,7 @@ client.delete_connection_type(type_id) -> None
 ### Unstructured Data Ingestion (REST)
 
 ```python
-client.ingest(connection_id) -> bytes
+await client.ingest(connection_id) -> bytes  # async
 ```
 
 ## Development

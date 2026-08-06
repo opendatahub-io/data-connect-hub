@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from .exceptions import DCHConfigError
@@ -185,5 +186,5 @@ class DataConnectClient:
 
     # -- Unstructured ingestion --
 
-    def ingest(self, connection_id: str) -> bytes:
-        return self._require_rest().ingest(connection_id)
+    async def ingest(self, connection_id: str) -> bytes:
+        return await asyncio.to_thread(self._require_rest().ingest, connection_id)

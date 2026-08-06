@@ -98,10 +98,10 @@ class TestEmptyUpdateGuards:
 
 
 class TestIngestDelegation:
-    def test_ingest(self) -> None:
+    async def test_ingest(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
         client._rest.ingest = MagicMock(return_value=b"data")  # type: ignore[method-assign]
 
-        result = client.ingest("conn-1")
+        result = await client.ingest("conn-1")
         assert result == b"data"
