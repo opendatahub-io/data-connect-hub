@@ -1,3 +1,4 @@
+use crate::flight::errors::{map_connector_error, map_meta_store_error, map_secret_store_error};
 use crate::flight::registry::ConnectorsRegistry;
 use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, Ticket,
@@ -65,26 +66,21 @@ impl TabularDataService {
             tenant_id,
             connection_id
         );
-        let r = self
+        let mut r = self
             .meta_store
             .get_data_connection(tenant_id, connection_id)
             .await
-            .map_err(|e| Status::internal(e.to_string()));
+            .map_err(map_meta_store_error)?;
 
-        if let Ok(mut r) = r {
-            let secret_ref = &r.resource.admin.secret_ref;
-            tracing::info!("Resolving credentials");
-            // Hydrate the connection with the secret credentials
-            let secret = self
-                .secret_store
-                .get_secret(tenant_id, secret_ref)
-                .await
-                .map_err(|e| Status::internal(e.to_string()))?;
-            r.resource.credentials = secret.properties;
-            return Ok(r);
-        }
-
-        r
+        let secret_ref = &r.resource.admin.secret_ref;
+        tracing::info!("Resolving credentials");
+        let secret = self
+            .secret_store
+            .get_secret(tenant_id, secret_ref)
+            .await
+            .map_err(map_secret_store_error)?;
+        r.resource.credentials = secret.properties;
+        Ok(r)
     }
 }
 
@@ -151,15 +147,17 @@ impl FlightSqlService for TabularDataService {
         let metadata = request.metadata();
         let connection_id = metadata
             .get(X_DATA_CONNECTION_ID)
-            .ok_or(Status::internal(format!("{X_DATA_CONNECTION_ID} header is required")))?
+            .ok_or(Status::invalid_argument(format!(
+                "{X_DATA_CONNECTION_ID} header is required"
+            )))?
             .to_str()
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
-            .ok_or(Status::internal(format!("{X_TENANT_ID} header is required")))?
+            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
             .to_str()
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         let connection = self.get_connection(tenant_id, connection_id).await?;
 
@@ -167,22 +165,16 @@ impl FlightSqlService for TabularDataService {
             .meta_store
             .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(map_meta_store_error)?;
 
         let connector = self
             .connectors_registry
             .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(map_connector_error)?;
 
-        let reader = connector
-            .get_reader(&connection)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
-        let pg_state = reader
-            .schema(query.query.as_str())
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let pg_state = reader.schema(query.query.as_str()).await.map_err(map_connector_error)?;
 
         let schema = pg_state.schema.clone();
 
@@ -215,15 +207,17 @@ impl FlightSqlService for TabularDataService {
         let metadata = request.metadata();
         let connection_id = metadata
             .get(X_DATA_CONNECTION_ID)
-            .ok_or(Status::internal(format!("{X_DATA_CONNECTION_ID} header is required")))?
+            .ok_or(Status::invalid_argument(format!(
+                "{X_DATA_CONNECTION_ID} header is required"
+            )))?
             .to_str()
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
-            .ok_or(Status::internal(format!("{X_TENANT_ID} header is required")))?
+            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
             .to_str()
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
         let connection = self.get_connection(tenant_id, connection_id).await?;
 
@@ -231,29 +225,20 @@ impl FlightSqlService for TabularDataService {
             .meta_store
             .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(map_meta_store_error)?;
 
         let connector = self
             .connectors_registry
             .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(map_connector_error)?;
 
-        let reader = connector
-            .get_reader(&connection)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
-        let state = reader
-            .schema(query.as_str())
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let state = reader.schema(query.as_str()).await.map_err(map_connector_error)?;
 
         let schema = state.schema.clone();
 
-        let stream = reader
-            .read(state, 512)
-            .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let stream = reader.read(state, 512).await.map_err(map_connector_error)?;
 
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(schema)

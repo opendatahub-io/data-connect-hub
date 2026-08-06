@@ -18,10 +18,20 @@ spec:
     spec:
       serviceAccountName: flight-service-sa
       automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: flight-service
           image: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 100m

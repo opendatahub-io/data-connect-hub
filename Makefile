@@ -22,6 +22,7 @@ endif
 	container-run-flight container-run-rest \
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
+	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-all \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -139,6 +140,49 @@ check-dco:
 	@bash hack/check-dco.sh
 
 # -------------------------------------------------------------------
+# Python SDK
+# -------------------------------------------------------------------
+
+PYTHON_SDK_DIR := sdk/python
+
+ifdef VIRTUAL_ENV
+  SDK_PYTHON       := python3
+  SDK_BIN          :=
+  SDK_VENV_PREREQ  :=
+else
+  SDK_PYTHON       := $(PYTHON_SDK_DIR)/.venv/bin/python3
+  SDK_BIN          := .venv/bin/
+  SDK_VENV_PREREQ  := $(SDK_PYTHON)
+endif
+
+$(PYTHON_SDK_DIR)/.venv/bin/python3:
+	python3 -m venv $(PYTHON_SDK_DIR)/.venv
+
+sdk-venv: $(SDK_VENV_PREREQ)
+
+sdk-install: sdk-venv
+	$(SDK_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[dev]"
+
+sdk-test: sdk-venv
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)pytest tests/ -v --cov=data_connect_hub --cov-report=term-missing --cov-report=html:htmlcov
+
+sdk-lint: sdk-venv
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check src/ tests/
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format --check src/ tests/
+
+sdk-fmt: sdk-venv
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format src/ tests/
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check --fix src/ tests/
+
+sdk-typecheck: sdk-venv
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)mypy src/
+
+sdk-build: sdk-venv
+	$(SDK_PYTHON) -m build $(PYTHON_SDK_DIR)
+
+sdk-all: sdk-lint sdk-typecheck sdk-test
+
+# -------------------------------------------------------------------
 # Dev Setup
 # -------------------------------------------------------------------
 
@@ -189,3 +233,12 @@ help:
 	@echo "  oc-build-flight      start flight-service build on cluster"
 	@echo "  oc-build-rest        start rest-service build on cluster"
 	@echo "  oc-build-all         build all services on cluster"
+	@echo ""
+	@echo "Python SDK:"
+	@echo "  sdk-install          install SDK in editable mode with dev deps"
+	@echo "  sdk-test             run SDK unit tests with coverage"
+	@echo "  sdk-lint             lint and format-check SDK"
+	@echo "  sdk-fmt              format SDK code"
+	@echo "  sdk-typecheck        run mypy on SDK"
+	@echo "  sdk-build            build SDK distribution"
+	@echo "  sdk-all              lint + typecheck + test SDK"

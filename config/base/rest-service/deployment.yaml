@@ -18,10 +18,20 @@ spec:
     spec:
       serviceAccountName: data-connect-hub-sa
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rest-service
           image: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 100m

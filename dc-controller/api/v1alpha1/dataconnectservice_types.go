@@ -17,12 +17,10 @@ limitations under the License.
 package v1alpha1
 
 import (
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 )
-
-// EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
-// NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
 // Gateway identifies a Kubernetes Gateway resource by name and namespace.
 type Gateway struct {
@@ -33,25 +31,78 @@ type Gateway struct {
 	Namespace string `json:"namespace"`
 }
 
+// ServiceOverrides allows per-service customisation of image, scaling, and pod spec fields.
+type ServiceOverrides struct {
+	// image overrides the container image for this service
+	// +optional
+	Image *string `json:"image,omitempty"`
+
+	// replicas overrides the number of pods
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=1
+	// +optional
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// resources overrides the container resource requirements
+	// +optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// env is a list of additional environment variables to set on the container
+	// +optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// envFrom is a list of sources to populate environment variables
+	// +optional
+	EnvFrom []corev1.EnvFromSource `json:"envFrom,omitempty"`
+
+	// volumes is a list of additional volumes to add to the pod
+	// +optional
+	Volumes []corev1.Volume `json:"volumes,omitempty"`
+
+	// volumeMounts is a list of additional volume mounts to add to the container
+	// +optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
+
+	// imagePullSecrets is a list of references to secrets for pulling the container image
+	// +optional
+	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+}
+
+// DatabaseSpec configures the database backend for the DataConnectService.
+type DatabaseSpec struct {
+	// devMode when true deploys a built-in single-instance Postgres.
+	// When false, the controller expects the user to provide an external database
+	// via externalSecret.
+	// +kubebuilder:default=true
+	// +optional
+	DevMode *bool `json:"devMode,omitempty"`
+
+	// externalSecret is the name of a Secret containing database connection details.
+	// Used when devMode is false.
+	// +optional
+	ExternalSecret *string `json:"externalSecret,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// description is a human-readable description of the service
 	// +optional
 	Description string `json:"description,omitempty"`
 
-	// restApiReplicas is the number of replicas for the REST API deployment
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=1
+	// restService configures the REST API deployment
 	// +optional
-	RestApiReplicas *int32 `json:"restApiReplicas,omitempty"`
+	RestService *ServiceOverrides `json:"restService,omitempty"`
 
-	// flightApiReplicas is the number of replicas for the Flight gRPC API deployment
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=1
+	// flightService configures the Flight gRPC API deployment
 	// +optional
-	FlightApiReplicas *int32 `json:"flightApiReplicas,omitempty"`
+	FlightService *ServiceOverrides `json:"flightService,omitempty"`
 
-	// gateway is an optional reference to a Kubernetes Gateway for external traffic
+	// database configures the database backend
+	// +optional
+	Database *DatabaseSpec `json:"database,omitempty"`
+
+	// gateway is a reference to a Kubernetes Gateway for external traffic.
+	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
 }
