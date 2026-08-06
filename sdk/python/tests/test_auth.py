@@ -38,22 +38,14 @@ class TestBuildHeaders:
         headers = build_headers(
             token="abc123",
             tenant_id="tenant-1",
-            connection_id="conn-1",
         )
         assert headers == {
             "Authorization": "Bearer abc123",
             "x-tenant-id": "tenant-1",
-            "x-dch-connection-id": "conn-1",
         }
 
-    def test_without_connection_id(self) -> None:
-        headers = build_headers(token="abc", tenant_id="t1")
-        assert "x-dch-connection-id" not in headers
-        assert headers["Authorization"] == "Bearer abc"
-        assert headers["x-tenant-id"] == "t1"
-
     def test_empty_values_excluded(self) -> None:
-        headers = build_headers(token="", tenant_id="", connection_id=None)
+        headers = build_headers(token="", tenant_id="")
         assert headers == {}
 
     def test_bearer_prefixed_token_not_doubled(self) -> None:

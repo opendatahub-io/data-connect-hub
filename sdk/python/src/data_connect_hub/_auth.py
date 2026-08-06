@@ -30,7 +30,6 @@ def build_headers(
     *,
     token: str,
     tenant_id: str,
-    connection_id: str | None = None,
 ) -> dict[str, str]:
     """Build HTTP headers for REST API calls."""
     headers: dict[str, str] = {}
@@ -38,6 +37,4 @@ def build_headers(
         headers["Authorization"] = _normalize_token(token)
     if tenant_id:
         headers["x-tenant-id"] = tenant_id
-    if connection_id:
-        headers["x-dch-connection-id"] = connection_id
     return headers

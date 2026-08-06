@@ -90,11 +90,10 @@ class RestClient:
         if self._owns_client:
             self._client.close()
 
-    def _headers(self, connection_id: str | None = None) -> dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         return build_headers(
             token=self._token,
             tenant_id=self._tenant_id,
-            connection_id=connection_id,
         )
 
     def _is_retryable(self, method: str) -> bool:
@@ -111,7 +110,6 @@ class RestClient:
         method: str,
         path: str,
         *,
-        connection_id: str | None = None,
         json: dict[str, object] | None = None,
     ) -> httpx.Response:
         last_exc: DCHError | None = None
@@ -123,7 +121,7 @@ class RestClient:
                 resp = self._client.request(
                     method,
                     f"{self._api_base}{path}",
-                    headers=self._headers(connection_id),
+                    headers=self._headers(),
                     json=json,
                 )
             except httpx.ConnectError as exc:
@@ -244,14 +242,6 @@ class RestClient:
     # -- Unstructured ingestion --
 
     def ingest(self, connection_id: str) -> bytes:
-        """Fetch raw unstructured data for a connection.
-
-        The ``x-dch-connection-id`` header is required by the ingestion
-        service for routing/auditing even though the ID is in the path.
-        """
-        resp = self._request(
-            "GET",
-            f"/ingestion/{connection_id}",
-            connection_id=connection_id,
-        )
+        """Fetch raw unstructured data for a connection."""
+        resp = self._request("GET", f"/ingestion/{connection_id}")
         return resp.content

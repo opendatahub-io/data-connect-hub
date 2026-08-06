@@ -214,7 +214,6 @@ class TestIngest:
     def test_returns_bytes(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/api/v1/data/ingestion/conn-1"
-            assert request.headers.get("x-dch-connection-id") == "conn-1"
             return httpx.Response(200, content=b"raw-data")
 
         transport = httpx.MockTransport(handler)
