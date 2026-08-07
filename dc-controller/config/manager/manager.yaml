@@ -78,8 +78,6 @@ spec:
           value: RELATED_IMAGE_ODH_DCH_REST_SERVICE
         - name: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
           value: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
-        - name: RELATED_IMAGE_ODH_DCH_POSTGRESQL
-          value: RELATED_IMAGE_ODH_DCH_POSTGRESQL
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

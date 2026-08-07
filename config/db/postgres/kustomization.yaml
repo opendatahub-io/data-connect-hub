@@ -7,23 +7,6 @@ resources:
   - service.yaml
   - networkpolicy.yaml
 
-configMapGenerator:
-- name: dch-postgres-params
-  envs:
-  - params.env
-
-replacements:
-- source:
-    kind: ConfigMap
-    name: dch-postgres-params
-    fieldPath: data.RELATED_IMAGE_ODH_DCH_POSTGRESQL
-  targets:
-  - select:
-      kind: Deployment
-      name: postgres
-    fieldPaths:
-    - spec.template.spec.containers.[name=postgres].image
-
 # Run ./generate-secrets.sh once before the first apply to create these
 # git-ignored files locally; kustomize builds the real Secret from them.
 secretGenerator:
