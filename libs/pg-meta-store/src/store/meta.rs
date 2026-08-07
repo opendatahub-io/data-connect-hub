@@ -145,18 +145,17 @@ impl MetaStore for PgMetaStore {
 
     async fn get_data_connection_type(
         &self,
-        _tenant_id: &str,
+        tenant_id: &str,
         id: &str,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        // TODO: add tenant_id filter when we have a way to store data connection types per tenant
-
-        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1")
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2")
             .bind(id)
+            .bind(tenant_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| match e {
                 sqlx::Error::RowNotFound => {
-                    MetaStoreError::ResourceNotFound(format!("connection type '{id}' not found"))
+                    MetaStoreError::ResourceNotFound(format!("Connection type '{id}' not found for tenant '{tenant_id}'"))
                 },
                 e => MetaStoreError::Query(e.to_string()),
             })?;
