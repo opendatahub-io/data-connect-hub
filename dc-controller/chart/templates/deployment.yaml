@@ -39,9 +39,9 @@ spec:
             fieldRef:
               fieldPath: metadata.namespace
         - name: RELATED_IMAGE_ODH_DCH_REST_SERVICE
-          value: {{ .Values.relatedImages.restService }}
+          value: {{ .Values.relatedImages.restService | quote }}
         - name: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
-          value: {{ .Values.relatedImages.flightService }}
+          value: {{ .Values.relatedImages.flightService | quote }}
         ports:
         - name: health
           containerPort: 8081

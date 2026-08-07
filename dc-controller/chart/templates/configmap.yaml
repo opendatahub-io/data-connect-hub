@@ -9,6 +9,6 @@ metadata:
 data:
   distribution.name: "Standalone"
   distribution.version: "0.0.0"
-  controller.log.level: {{ .Values.platformConfig.logLevel | quote }}
-  gateway.name: {{ .Values.platformConfig.gatewayName | quote }}
-  gateway.namespace: {{ .Values.platformConfig.gatewayNamespace | quote }}
+  controller.log.level: "info"
+  gateway.name: "odh-gateway"
+  gateway.namespace: "opendatahub"
