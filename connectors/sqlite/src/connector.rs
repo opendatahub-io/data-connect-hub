@@ -97,7 +97,13 @@ impl TabularReader for SqliteReader {
         let query = state.query.clone();
 
         let stream = async_stream::try_stream! {
-            let mut rows = sqlx::query(query.as_str()).fetch(&pool);
+            let mut conn = pool.acquire().await.map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
+            sqlx::query("PRAGMA query_only = ON")
+                .execute(&mut *conn)
+                .await
+                .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+
+            let mut rows = sqlx::query(query.as_str()).fetch(&mut *conn);
             let mut chunk = Vec::with_capacity(batch_size);
 
             while let Some(row) = rows.next().await {
