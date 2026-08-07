@@ -3,7 +3,7 @@
 Data Connect Hub can be deployed in two ways:
 
 1. **Operator (recommended)** -- install the `dc-controller` operator and create
-   a `DataConnectService` custom resource. The operator handles Postgres,
+   a `DataConnectHub` custom resource. The operator handles Postgres,
    rest-service, flight-service, networking, and lifecycle management
    automatically.
 2. **Kustomize (manual)** -- apply the Kustomize manifests under `config/`
@@ -17,7 +17,6 @@ Data Connect Hub can be deployed in two ways:
 - OpenShift 4.20+ (Kubernetes 1.33+) -- required for the native `grpc:`
   readiness/liveness probe type used by `flight-service`.
 - Logged in to the target cluster (`oc login` / `oc whoami` should work).
-- A namespace to deploy into.
 
 ### Image pulls
 
@@ -32,46 +31,63 @@ Data Connect Hub can be deployed in two ways:
 
 ## Option 1: Operator deployment
 
-### 1. Install the operator
+The operator can be installed via Helm or Kustomize. Both methods install
+the same resources (CRD, RBAC, controller Deployment, platform ConfigMap).
 
-Install the CRD and deploy the controller:
+### 1a. Install with Helm (recommended)
 
 ```console
 cd dc-controller
-make deploy IMG=<operator-image>
+
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace
+```
+
+To override images (e.g. for testing with a custom registry):
+
+```console
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace \
+  --set controllerManager.image=quay.io/<your-org>/data-connect-hub-controller:latest \
+  --set relatedImages.restService=quay.io/<your-org>/data-connect-hub-rest:latest \
+  --set relatedImages.flightService=quay.io/<your-org>/data-connect-hub-flight:latest
+```
+
+### 1b. Install with Kustomize
+
+```console
+cd dc-controller
+
+make deploy IMG=ghcr.io/opendatahub-io/data-connect-hub/dc-controller:latest
 ```
 
 This creates the `dc-controller-system` namespace with the controller
-Deployment, RBAC, and the `DataConnectService` CRD.
+Deployment, RBAC, and the `DataConnectHub` CRD.
 
-To verify the operator is running:
+### 2. Verify the operator is running
 
 ```console
 oc get pods -n dc-controller-system
 ```
 
-### 2. Create a DataConnectService
+### 3. Create a DataConnectHub
 
-Create a `DataConnectService` CR in your target namespace. A minimal example:
-
-```yaml
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
-metadata:
-  name: my-dch
-spec: {}
-```
-
-Apply it:
+The `DataConnectHub` CR is cluster-scoped and singleton (must be named
+`default-dataconnecthub`). A minimal example:
 
 ```console
-oc apply -f - -n <your-namespace> <<EOF
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
+oc apply -f dc-controller/config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
+```
+
+Or inline:
+
+```yaml
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
 metadata:
-  name: my-dch
-spec: {}
-EOF
+  name: default-dataconnecthub
+spec:
+  devMode: true
 ```
 
 The operator will automatically:
@@ -82,28 +98,28 @@ The operator will automatically:
 - Create an HTTPRoute if Gateway API CRDs are installed
 - Report status on the CR
 
-### 3. Monitor status
+### 4. Monitor status
 
 ```console
-oc get dataconnectservices -n <your-namespace>
+oc get dch default-dataconnecthub
 ```
 
 The `Phase` column progresses through `Progressing` to `Ready`. For full
-details including conditions (`Available`, `Progressing`, `Degraded`):
+details including conditions (`Ready`, `ProvisioningSucceeded`, `Degraded`):
 
 ```console
-oc get dataconnectservice my-dch -n <your-namespace> -o yaml
+oc get dch default-dataconnecthub -o yaml
 ```
 
-### 4. Customising the CR
+### 5. Customising the CR
 
-The `DataConnectService` spec supports several overrides:
+The `DataConnectHub` spec supports several overrides:
 
 ```yaml
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
 metadata:
-  name: my-dch
+  name: default-dataconnecthub
 spec:
   devMode: true            # true (default): operator deploys Postgres
                            # false: bring your own database (see below)
@@ -144,13 +160,17 @@ spec:
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
 
-### 5. Uninstall
+### 6. Uninstall
 
-Delete the CR first, then the operator:
+Delete the CR first (the finalizer ensures all managed resources are cleaned
+up), then remove the operator:
 
 ```console
-oc delete dataconnectservice my-dch -n <your-namespace>
-make undeploy
+oc delete dch default-dataconnecthub
+
+# Choose the method you used to install:
+helm uninstall dc-controller -n dc-controller-system   # Helm
+make undeploy                                           # Kustomize
 ```
 
 ---
