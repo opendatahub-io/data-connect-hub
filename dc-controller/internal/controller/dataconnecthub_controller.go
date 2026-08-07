@@ -113,6 +113,9 @@ func (r *DataConnectHubReconciler) readPlatformConfig(ctx context.Context) platf
 
 	cm := &corev1.ConfigMap{}
 	if err := r.Get(ctx, types.NamespacedName{Name: platformConfigName, Namespace: r.Namespace}, cm); err != nil {
+		if !apierrors.IsNotFound(err) {
+			logf.FromContext(ctx).Error(err, "failed to read platform ConfigMap, using defaults")
+		}
 		return cfg
 	}
 

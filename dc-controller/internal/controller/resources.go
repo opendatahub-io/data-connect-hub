@@ -413,6 +413,13 @@ func (r *DataConnectHubReconciler) applyResources(
 			existingHash = existingAnn["dataconnecthub/spec-hash"]
 		}
 		if existingHash == desiredHash {
+			if existing.GetOwnerReferences() == nil || len(existing.GetOwnerReferences()) == 0 {
+				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err == nil {
+					if updateErr := r.Update(ctx, existing); updateErr != nil {
+						return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
+					}
+				}
+			}
 			continue
 		}
 
