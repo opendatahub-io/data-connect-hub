@@ -11,6 +11,7 @@ use arrow_flight::{
     },
 };
 use commons::api::connections::{Admin, DataConnectionResource, SecretStore};
+use commons::api::tabular::QueryOptions;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID, connections::MetaStore};
 use futures::TryStreamExt;
 use prost::Message;
@@ -24,6 +25,7 @@ pub struct TabularDataService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
+    query_options: QueryOptions,
 }
 
 impl TabularDataService {
@@ -31,6 +33,7 @@ impl TabularDataService {
         connectors_registry: Arc<ConnectorsRegistry>,
         meta_store: Arc<dyn MetaStore + Send + Sync>,
         secret_store: Arc<dyn SecretStore + Send + Sync>,
+        query_options: QueryOptions,
     ) -> Self {
         let mut builder = SqlInfoDataBuilder::new();
         builder.append(SqlInfo::FlightSqlServerName, "Data Connect Hub");
@@ -45,6 +48,7 @@ impl TabularDataService {
             meta_store,
             secret_store,
             sql_info: builder.build().expect("valid sql info"),
+            query_options,
         }
     }
 
@@ -241,7 +245,10 @@ impl FlightSqlService for TabularDataService {
 
         let schema = state.schema.clone();
 
-        let stream = reader.read(state, 512).await.map_err(map_connector_error)?;
+        let stream = reader
+            .read(state, &self.query_options)
+            .await
+            .map_err(map_connector_error)?;
 
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(schema)
