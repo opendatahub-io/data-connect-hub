@@ -210,7 +210,7 @@ class TestConnectionTypes:
         client.delete_connection_type("ct-1")
 
 
-class TestIngest:
+class TestReadBytes:
     def test_returns_bytes(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.url.path == "/api/v1/data/ingestion/conn-1"
@@ -218,7 +218,7 @@ class TestIngest:
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
-        result = client.ingest("conn-1")
+        result = client.read_bytes("conn-1")
         assert result == b"raw-data"
 
 

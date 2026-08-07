@@ -51,10 +51,11 @@ client.update_connection_type(type_id, name=...) -> ConnectionType
 client.delete_connection_type(type_id) -> None
 ```
 
-### Unstructured Data Ingestion (REST)
+### Unstructured Data Access (REST)
 
 ```python
-await client.ingest(connection_id) -> bytes  # async
+client.read_bytes(connection_id) -> bytes
+client.read_pandas(connection_id) -> pd.DataFrame  # requires: pip install data-connect-hub[pandas]
 ```
 
 ## Development

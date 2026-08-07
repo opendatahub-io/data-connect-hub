@@ -97,11 +97,11 @@ class TestEmptyUpdateGuards:
         assert req.location.url == ""
 
 
-class TestIngestDelegation:
-    async def test_ingest(self) -> None:
+class TestReadBytesDelegation:
+    def test_read_bytes(self) -> None:
         client = DataConnectClient(rest_url="http://localhost")
         assert client._rest is not None
-        client._rest.ingest = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+        client._rest.read_bytes = MagicMock(return_value=b"data")  # type: ignore[method-assign]
 
-        result = await client.ingest("conn-1")
+        result = client.read_bytes("conn-1")
         assert result == b"data"

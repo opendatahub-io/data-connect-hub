@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 from .exceptions import DCHConfigError
 from .models import (
@@ -184,7 +186,24 @@ class DataConnectClient:
     def delete_connection_type(self, type_id: str) -> None:
         self._require_rest().delete_connection_type(type_id)
 
-    # -- Unstructured ingestion --
+    # -- Unstructured data access --
 
-    async def ingest(self, connection_id: str) -> bytes:
-        return await asyncio.to_thread(self._require_rest().ingest, connection_id)
+    def read_bytes(self, connection_id: str) -> bytes:
+        return self._require_rest().read_bytes(connection_id)
+
+    def read_pandas(self, connection_id: str) -> "pd.DataFrame":
+        """Fetch data for a connection and return it as a pandas DataFrame.
+
+        Requires the ``pandas`` optional dependency::
+
+            pip install data-connect-hub[pandas]
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            raise DCHConfigError(
+                "pandas is required for read_pandas — install with: "
+                "pip install data-connect-hub[pandas]"
+            ) from None
+        raw = self.read_bytes(connection_id)
+        return pd.read_json(raw)

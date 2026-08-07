@@ -239,9 +239,9 @@ class RestClient:
     def delete_connection_type(self, type_id: str) -> None:
         self._request("DELETE", f"/connection_types/{type_id}")
 
-    # -- Unstructured ingestion --
+    # -- Unstructured data access --
 
-    def ingest(self, connection_id: str) -> bytes:
+    def read_bytes(self, connection_id: str) -> bytes:
         """Fetch raw unstructured data for a connection."""
         resp = self._request("GET", f"/ingestion/{connection_id}")
         return resp.content
