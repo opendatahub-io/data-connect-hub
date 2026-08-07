@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import json
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -105,3 +106,36 @@ class TestReadBytesDelegation:
 
         result = client.read_bytes("conn-1")
         assert result == b"data"
+
+
+class TestReadPandas:
+    def test_returns_dataframe(self) -> None:
+        import pandas as pd
+
+        payload = json.dumps([{"a": 1, "b": 2}]).encode()
+        client = DataConnectClient(rest_url="http://localhost")
+        assert client._rest is not None
+        client._rest.read_bytes = MagicMock(return_value=payload)  # type: ignore[method-assign]
+
+        df = client.read_pandas("conn-1")
+        assert isinstance(df, pd.DataFrame)
+        assert list(df.columns) == ["a", "b"]
+        assert df["a"].tolist() == [1]
+
+    def test_missing_pandas_raises(self) -> None:
+        import builtins
+
+        real_import = builtins.__import__
+
+        def mock_import(name: str, *args: object, **kwargs: object) -> object:
+            if name == "pandas":
+                raise ImportError("No module named 'pandas'")
+            return real_import(name, *args, **kwargs)
+
+        client = DataConnectClient(rest_url="http://localhost")
+        assert client._rest is not None
+        client._rest.read_bytes = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+
+        with patch("builtins.__import__", side_effect=mock_import):
+            with pytest.raises(DCHConfigError, match="pandas is required"):
+                client.read_pandas("conn-1")
