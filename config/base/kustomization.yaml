@@ -13,7 +13,7 @@ replacements:
 - source:
     kind: ConfigMap
     name: dch-params
-    fieldPath: data.RELATED_IMAGE_ODH_DCH_REST_SERVICE
+    fieldPath: data.RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
   targets:
   - select:
       kind: Deployment
@@ -23,7 +23,7 @@ replacements:
 - source:
     kind: ConfigMap
     name: dch-params
-    fieldPath: data.RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+    fieldPath: data.RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
   targets:
   - select:
       kind: Deployment

@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flight-service
-          image: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+          image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false

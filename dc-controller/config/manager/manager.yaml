@@ -74,10 +74,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        - name: RELATED_IMAGE_ODH_DCH_REST_SERVICE
-          value: RELATED_IMAGE_ODH_DCH_REST_SERVICE
-        - name: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
-          value: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
+          value: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
+          value: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

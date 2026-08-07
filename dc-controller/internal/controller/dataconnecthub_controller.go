@@ -43,8 +43,8 @@ import (
 )
 
 const (
-	EnvRestImage   = "RELATED_IMAGE_ODH_DCH_REST_SERVICE"
-	EnvFlightImage = "RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE"
+	EnvRestImage   = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
+	EnvFlightImage = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
 
 	defaultRestImage   = "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
 	defaultFlightImage = "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
