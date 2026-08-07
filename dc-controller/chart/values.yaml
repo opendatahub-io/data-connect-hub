@@ -1,5 +1,8 @@
 controllerManager:
-  image: ghcr.io/opendatahub-io/data-connect-hub/dc-controller:latest
+  image:
+    repository: ghcr.io/opendatahub-io/data-connect-hub/dc-controller
+    tag: latest
+    pullPolicy: IfNotPresent
   replicas: 1
   resources:
     limits:
@@ -14,11 +17,8 @@ relatedImages:
   flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
 
 platformConfig:
-  distributionName: Standalone
-  distributionVersion: "0.0.0"
   gatewayName: odh-gateway
   gatewayNamespace: opendatahub
   logLevel: info
 
 leaderElection: true
-metricsSecure: true

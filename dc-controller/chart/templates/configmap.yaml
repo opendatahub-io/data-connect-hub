@@ -7,8 +7,8 @@ metadata:
     platform.opendatahub.io/managed: "true"
     {{- include "dc-controller.labels" . | nindent 4 }}
 data:
-  distribution.name: {{ .Values.platformConfig.distributionName }}
-  distribution.version: {{ .Values.platformConfig.distributionVersion | quote }}
-  controller.log.level: {{ .Values.platformConfig.logLevel }}
-  gateway.name: {{ .Values.platformConfig.gatewayName }}
-  gateway.namespace: {{ .Values.platformConfig.gatewayNamespace }}
+  distribution.name: "Standalone"
+  distribution.version: "0.0.0"
+  controller.log.level: {{ .Values.platformConfig.logLevel | quote }}
+  gateway.name: {{ .Values.platformConfig.gatewayName | quote }}
+  gateway.namespace: {{ .Values.platformConfig.gatewayNamespace | quote }}

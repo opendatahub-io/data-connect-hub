@@ -48,9 +48,10 @@ To override images (e.g. for testing with a custom registry):
 ```console
 helm install dc-controller chart/ \
   --namespace dc-controller-system --create-namespace \
-  --set controllerManager.image=quay.io/<your-org>/data-connect-hub-controller:latest \
-  --set relatedImages.restService=quay.io/<your-org>/data-connect-hub-rest:latest \
-  --set relatedImages.flightService=quay.io/<your-org>/data-connect-hub-flight:latest
+  --set controllerManager.image.repository=quay.io/YOUR_ORG/data-connect-hub-controller \
+  --set controllerManager.image.tag=latest \
+  --set relatedImages.restService=quay.io/YOUR_ORG/data-connect-hub-rest:latest \
+  --set relatedImages.flightService=quay.io/YOUR_ORG/data-connect-hub-flight:latest
 ```
 
 ### 1b. Install with Kustomize
@@ -76,7 +77,7 @@ The `DataConnectHub` CR is cluster-scoped and singleton (must be named
 `default-dataconnecthub`). A minimal example:
 
 ```console
-oc apply -f dc-controller/config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
+oc apply -f config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
 ```
 
 Or inline:
