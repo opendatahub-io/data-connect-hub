@@ -13,5 +13,12 @@ relatedImages:
   restService: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
   flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
 
+platformConfig:
+  distributionName: Standalone
+  distributionVersion: "0.0.0"
+  gatewayName: odh-gateway
+  gatewayNamespace: opendatahub
+  logLevel: info
+
 leaderElection: true
 metricsSecure: true

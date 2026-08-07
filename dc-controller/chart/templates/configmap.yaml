@@ -7,8 +7,8 @@ metadata:
     platform.opendatahub.io/managed: "true"
     {{- include "dc-controller.labels" . | nindent 4 }}
 data:
-  distribution.name: Standalone
-  distribution.version: "0.0.0"
-  controller.log.level: info
-  gateway.name: odh-gateway
-  gateway.namespace: opendatahub
+  distribution.name: {{ .Values.platformConfig.distributionName }}
+  distribution.version: {{ .Values.platformConfig.distributionVersion | quote }}
+  controller.log.level: {{ .Values.platformConfig.logLevel }}
+  gateway.name: {{ .Values.platformConfig.gatewayName }}
+  gateway.namespace: {{ .Values.platformConfig.gatewayNamespace }}
