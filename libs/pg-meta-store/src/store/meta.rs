@@ -78,7 +78,11 @@ impl MetaStore for PgMetaStore {
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
 
         let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
             .bind(uid)
@@ -91,7 +95,8 @@ impl MetaStore for PgMetaStore {
             })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        let existing: DataConnectionResource = serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+        let existing: DataConnectionResource =
+            serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
 
         let data_connection = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -193,7 +198,11 @@ impl MetaStore for PgMetaStore {
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        let mut tx = self.pool.begin().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
 
         let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
             .bind(uid)
@@ -206,7 +215,8 @@ impl MetaStore for PgMetaStore {
             })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        let existing: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+        let existing: DataConnectionTypeResource =
+            serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
 
         let data_connection_type = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
