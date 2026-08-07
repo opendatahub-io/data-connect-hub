@@ -1,0 +1,17 @@
+controllerManager:
+  image: ghcr.io/opendatahub-io/data-connect-hub/dc-controller:latest
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+relatedImages:
+  restService: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
+  flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+
+leaderElection: true
+metricsSecure: true

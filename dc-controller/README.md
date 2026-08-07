@@ -26,113 +26,47 @@ oc apply -f config/samples/components.platform.opendatahub.io_v1alpha1_dataconne
 
 ## Deploying to a Cluster
 
-### Step 1: Build service images on-cluster
+Two deployment methods are available. Both install the same resources
+(CRD, RBAC, controller Deployment, platform ConfigMap).
 
-The Rust services need to be compiled for linux/amd64. Use OpenShift
-BuildConfigs to build on-cluster (avoids QEMU issues on ARM Macs):
-
-```console
-cd data-connect-hub
-
-# Create a namespace and push secret for quay.io
-oc new-project dch-test 2>/dev/null || oc project dch-test
-oc create secret docker-registry quay-push-secret \
-  --from-file=.dockerconfigjson=$HOME/.config/containers/auth.json \
-  -n dch-test
-
-# Create BuildConfigs for both services
-for svc in rest flight; do
-cat <<EOF | oc apply -n dch-test -f -
-apiVersion: build.openshift.io/v1
-kind: BuildConfig
-metadata:
-  name: ${svc}-service-ubi9
-spec:
-  resources:
-    limits: { cpu: "4", memory: 6Gi }
-    requests: { cpu: "1", memory: 2Gi }
-  source: { type: Binary }
-  strategy:
-    type: Docker
-    dockerStrategy:
-      dockerfilePath: services/${svc}/Containerfile
-  output:
-    to: { kind: DockerImage, name: "quay.io/<your-org>/data-connect-hub-${svc}:latest" }
-    pushSecret: { name: quay-push-secret }
-EOF
-done
-
-# Start builds (uploads repo as build context, ~6 min each)
-oc start-build rest-service-ubi9 --from-dir=. -n dch-test --follow
-oc start-build flight-service-ubi9 --from-dir=. -n dch-test --follow
-```
-
-### Step 2: Build and push the controller image
+### Option A: Helm (recommended)
 
 ```console
 cd dc-controller
 
-# Cross-compile Go binary for amd64
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o manager-amd64 ./cmd/main.go
-
-# Build container image (copies pre-compiled binary + manifests)
-cd ..
-podman build --platform linux/amd64 \
-  -t quay.io/<your-org>/data-connect-hub-controller:latest \
-  -f - . <<'DOCKERFILE'
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
-WORKDIR /
-COPY dc-controller/manager-amd64 /manager
-COPY config/ /manifests/
-USER 1001
-ENTRYPOINT ["/manager"]
-DOCKERFILE
-
-podman push quay.io/<your-org>/data-connect-hub-controller:latest
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace
 ```
 
-### Step 3: Deploy the operator
+Then create the CR (see [Custom Resource](#custom-resource) below):
+
+```console
+oc apply -f config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
+```
+
+To override images (e.g. for testing with a custom registry):
+
+```console
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace \
+  --set controllerManager.image=quay.io/<your-org>/data-connect-hub-controller:latest \
+  --set relatedImages.restService=quay.io/<your-org>/data-connect-hub-rest:latest \
+  --set relatedImages.flightService=quay.io/<your-org>/data-connect-hub-flight:latest
+```
+
+### Option B: Kustomize (make deploy)
 
 ```console
 cd dc-controller
 
-# Install CRD, RBAC, and controller deployment
-make deploy IMG=quay.io/<your-org>/data-connect-hub-controller:latest
-
-# Create a pull secret for quay.io images (named dch-pull-secret to match
-# what the base manifests expect on the service accounts)
-oc create secret docker-registry dch-pull-secret \
-  --from-file=.dockerconfigjson=$HOME/.config/containers/auth.json \
-  -n dc-controller-system
-
-# Patch the controller to use your custom service images
-oc patch deployment dc-controller-controller-manager \
-  -n dc-controller-system --type=json -p='[
-  {"op":"replace","path":"/spec/template/spec/containers/0/env/1/value",
-   "value":"quay.io/<your-org>/data-connect-hub-rest:latest"},
-  {"op":"replace","path":"/spec/template/spec/containers/0/env/2/value",
-   "value":"quay.io/<your-org>/data-connect-hub-flight:latest"},
-  {"op":"add","path":"/spec/template/spec/imagePullSecrets",
-   "value":[{"name":"dch-pull-secret"}]}
-]'
-
-oc rollout status deployment/dc-controller-controller-manager \
-  -n dc-controller-system --timeout=60s
+make deploy IMG=ghcr.io/opendatahub-io/data-connect-hub/dc-controller:latest
+oc apply -f config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
 ```
 
-### Step 4: Create a DataConnectHub CR
+### Verify
 
 ```console
-oc apply -f - <<'EOF'
-apiVersion: components.platform.opendatahub.io/v1alpha1
-kind: DataConnectHub
-metadata:
-  name: default-dataconnecthub
-spec:
-  devMode: true
-EOF
-
-# Wait ~60s, then check status
+# Wait ~60s, then check
 oc get pods -n dc-controller-system
 oc get dch default-dataconnecthub
 ```
@@ -300,8 +234,9 @@ oc get pod -l app.kubernetes.io/name=flight-service -n dc-controller-system
 # Delete CR (cleans up all managed resources via finalizer)
 oc delete dch default-dataconnecthub
 
-# Remove the controller, RBAC, and CRD
-cd dc-controller && make undeploy
+# Remove the operator — choose the method you used to install:
+helm uninstall dc-controller -n dc-controller-system   # Helm
+make undeploy                                           # Kustomize
 ```
 
 ## Development
