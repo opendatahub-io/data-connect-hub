@@ -3,3 +3,30 @@ kind: Kustomization
 resources:
   - rest-service
   - flight-service
+
+configMapGenerator:
+- name: dch-params
+  envs:
+  - params.env
+
+replacements:
+- source:
+    kind: ConfigMap
+    name: dch-params
+    fieldPath: data.RELATED_IMAGE_ODH_DCH_REST_SERVICE
+  targets:
+  - select:
+      kind: Deployment
+      name: rest-service
+    fieldPaths:
+    - spec.template.spec.containers.[name=rest-service].image
+- source:
+    kind: ConfigMap
+    name: dch-params
+    fieldPath: data.RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+  targets:
+  - select:
+      kind: Deployment
+      name: flight-service
+    fieldPaths:
+    - spec.template.spec.containers.[name=flight-service].image

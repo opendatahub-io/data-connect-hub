@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flight-service
-          image: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+          image: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false

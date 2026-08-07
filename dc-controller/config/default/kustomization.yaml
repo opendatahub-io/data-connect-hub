@@ -19,6 +19,43 @@ images:
   newName: controller
   newTag: latest
 
+configMapGenerator:
+- name: dch-params
+  envs:
+  - params.env
+
+replacements:
+- source:
+    kind: ConfigMap
+    name: dch-params
+    fieldPath: data.RELATED_IMAGE_ODH_DCH_REST_SERVICE
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_DCH_REST_SERVICE].value
+- source:
+    kind: ConfigMap
+    name: dch-params
+    fieldPath: data.RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE].value
+- source:
+    kind: ConfigMap
+    name: dch-params
+    fieldPath: data.RELATED_IMAGE_ODH_DCH_POSTGRESQL
+  targets:
+  - select:
+      kind: Deployment
+      name: controller-manager
+    fieldPaths:
+    - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_DCH_POSTGRESQL].value
+
 resources:
 - ../crd
 - ../rbac
