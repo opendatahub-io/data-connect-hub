@@ -31,9 +31,8 @@ struct CommandLineArgs {
 
 fn api_routes(cfg: &mut web::ServiceConfig) {
     cfg.route("/api/v1/data/health", web::get().to(health))
-    .service(
-        web::scope("/api/v1/data")
-            .service(
+        .service(
+            web::scope("/api/v1/data").service(
                 web::scope("")
                     .wrap(middleware::from_fn(validate_headers))
                     .route("/connections", web::get().to(list_connections))
@@ -47,8 +46,8 @@ fn api_routes(cfg: &mut web::ServiceConfig) {
                     .route("/connection-types/{id}", web::patch().to(patch_connection_type))
                     .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
             ),
-    )
-    .default_service(web::route().to(not_found));
+        )
+        .default_service(web::route().to(not_found));
 }
 
 fn load_config(config_file: String, secret_config_file: String) -> Result<ServerConfig> {
