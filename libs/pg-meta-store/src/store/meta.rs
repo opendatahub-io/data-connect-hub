@@ -111,7 +111,7 @@ impl MetaStore for PgMetaStore {
             serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
 
         let data_connection = update_fn(existing.resource)?;
-        
+
         Self::can_store(&data_connection).await?;
 
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);

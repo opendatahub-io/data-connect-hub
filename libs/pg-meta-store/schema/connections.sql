@@ -12,8 +12,6 @@
 --     format                string    — data format (e.g. "tabular")
 --     admin                 object    — admin metadata
 --       secret_ref          string    — name of the secret holding credentials
---     created_at            string    — ISO 8601 creation timestamp
---     updated_at            string    — ISO 8601 last-update timestamp
 --     properties            object    — arbitrary key/value pairs
 CREATE TABLE IF NOT EXISTS data_connections (
     data JSONB NOT NULL

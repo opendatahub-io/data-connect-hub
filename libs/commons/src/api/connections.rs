@@ -27,12 +27,19 @@ impl std::fmt::Debug for Admin {
         }
     }
 }
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum DataFormat {
+    #[serde(rename = "tabular")]
+    Tabular,
+    #[serde(rename = "binary")]
+    Binary,
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
-    pub format: String,
+    pub format: DataFormat,
     pub admin: Option<Admin>,
     pub properties: HashMap<String, String>,
 }
@@ -174,7 +181,7 @@ mod tests {
             resource: DataConnection {
                 name: "test-conn".to_string(),
                 data_connection_type_id: "postgres".to_string(),
-                format: "jdbc".to_string(),
+                format: DataFormat::Tabular,
                 admin: Some(Admin::SecretRef {
                     secret_ref: Some("secret/test-conn".to_string()),
                 }),
@@ -210,7 +217,7 @@ mod tests {
             "resource": {
                 "name": "test-conn",
                 "data_connection_type_id": "postgres",
-                "format": "jdbc",
+                "format": "tabular",
                 "admin": { "secret_ref": "secret/test-conn" },
                 "properties": { "key": "value" }
             }
@@ -222,7 +229,7 @@ mod tests {
         assert_eq!(res.metadata.tenant_id, "tenant-1");
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
-        assert_eq!(res.resource.format, "jdbc");
+        assert_eq!(res.resource.format, DataFormat::Tabular);
         match &res.resource.admin {
             Some(Admin::SecretRef { secret_ref }) => assert_eq!(secret_ref, &Some("secret/test-conn".to_string())),
             _ => panic!("expected SecretRef variant"),
