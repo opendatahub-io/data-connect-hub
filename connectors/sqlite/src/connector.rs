@@ -44,7 +44,7 @@ impl FlightConnector for SqliteConnector {
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { secret }) => secret.clone(),
+            Some(Admin::Secret { secret }) => Some(secret.clone()),
             _ => None,
         }
         .ok_or_else(|| ConnectorError::ConnectionError("SQLite credentials are required".to_string()))?;

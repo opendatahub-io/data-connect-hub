@@ -10,6 +10,7 @@ pub(crate) fn map_meta_store_error(e: MetaStoreError) -> Status {
         MetaStoreError::Query(_) => Status::internal("metadata query error"),
         MetaStoreError::Serialization(_) => Status::invalid_argument("invalid metadata payload"),
         MetaStoreError::Deserialization(_) => Status::invalid_argument("invalid metadata payload"),
+        MetaStoreError::Validation(_) => Status::invalid_argument("validation error"),
     }
 }
 

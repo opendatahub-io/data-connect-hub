@@ -40,7 +40,7 @@ impl MetaStore for TestMetaStore {
                 data_connection_type_id: "sqlite".to_string(),
                 format: DataFormat::Tabular,
                 admin: Some(Admin::SecretRef {
-                    secret_ref: Some("sqlite_creds".to_string()),
+                    secret_ref: "sqlite_creds".to_string(),
                 }),
                 properties: HashMap::new(),
             },

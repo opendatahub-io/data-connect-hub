@@ -73,14 +73,14 @@ impl TabularDataService {
             .map_err(map_meta_store_error)?;
 
         tracing::info!("Resolving credentials");
-        if let Some(Admin::SecretRef { secret_ref: Some(s) }) = &r.resource.admin {
+        if let Some(Admin::SecretRef { secret_ref: s }) = &r.resource.admin {
             let secret = self
                 .secret_store
                 .get_secret(tenant_id, s)
                 .await
                 .map_err(map_secret_store_error)?;
             r.resource.admin = Some(Admin::Secret {
-                secret: Some(Arc::new(secret.properties)),
+                secret: Arc::new(secret.properties),
             });
         }
         Ok(r)

@@ -7,23 +7,16 @@ use std::sync::Arc;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Admin {
-    SecretRef {
-        secret_ref: Option<String>,
-    },
+    SecretRef { secret_ref: String },
 
-    Secret {
-        secret: Option<Arc<HashMap<String, String>>>,
-    },
+    Secret { secret: Arc<HashMap<String, String>> },
 }
 
 impl std::fmt::Debug for Admin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Admin::SecretRef { secret_ref } => f.debug_struct("SecretRef").field("secret_ref", &secret_ref).finish(),
-            Admin::Secret { secret } => f
-                .debug_struct("Secret")
-                .field("secret", if secret.is_some() { &"[REDACTED]" } else { &"None" })
-                .finish(),
+            Admin::Secret { .. } => f.debug_struct("Secret").field("secret", &"[REDACTED]").finish(),
         }
     }
 }
@@ -183,7 +176,7 @@ mod tests {
                 data_connection_type_id: "postgres".to_string(),
                 format: DataFormat::Tabular,
                 admin: Some(Admin::SecretRef {
-                    secret_ref: Some("secret/test-conn".to_string()),
+                    secret_ref: "secret/test-conn".to_string(),
                 }),
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
@@ -193,7 +186,7 @@ mod tests {
     #[test]
     fn test_admin_serialize_deserialize() {
         let admin = Admin::SecretRef {
-            secret_ref: Some("secret/test".to_string()),
+            secret_ref: "secret/test".to_string(),
         };
         let json = serde_json::to_string(&admin).unwrap();
         let deserialized: Admin = serde_json::from_str(&json).unwrap();
@@ -231,7 +224,7 @@ mod tests {
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, DataFormat::Tabular);
         match &res.resource.admin {
-            Some(Admin::SecretRef { secret_ref }) => assert_eq!(secret_ref, &Some("secret/test-conn".to_string())),
+            Some(Admin::SecretRef { secret_ref }) => assert_eq!(secret_ref, &"secret/test-conn".to_string()),
             _ => panic!("expected SecretRef variant"),
         }
         assert_eq!(res.resource.properties["key"], "value");
