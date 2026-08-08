@@ -2,10 +2,9 @@
 
 Data Connect Hub can be deployed in two ways:
 
-1. **Operator (recommended)** -- install the `dc-controller` operator and create
-   a `DataConnectHub` custom resource. The operator handles Postgres,
-   rest-service, flight-service, networking, and lifecycle management
-   automatically.
+1. **Operator (recommended)** -- install the `dc-controller` operator via Helm.
+   The operator handles Postgres, rest-service, flight-service, networking, and
+   lifecycle management automatically.
 2. **Kustomize (manual)** -- apply the Kustomize manifests under `config/`
    directly. Useful when you want full control over each component or cannot
    run an operator.
@@ -29,12 +28,12 @@ Data Connect Hub can be deployed in two ways:
 
 ---
 
-## Option 1: Operator deployment
+## Option 1: Operator deployment (Helm)
 
-The operator can be installed via Helm or Kustomize. Both methods install
-the same resources (CRD, RBAC, controller Deployment, platform ConfigMap).
+A single `helm install` deploys the controller, CRD, RBAC, and creates
+the `DataConnectHub` CR automatically.
 
-### 1a. Install with Helm (recommended)
+### 1. Install
 
 ```console
 cd dc-controller
@@ -43,93 +42,61 @@ helm install dc-controller chart/ \
   --namespace dc-controller-system --create-namespace
 ```
 
-To override images (e.g. for testing with a custom registry):
+If you want operands (rest-service, flight-service, postgres) deployed to
+a separate namespace, create it first and pass `operandNamespace`:
+
+```console
+oc create ns dch-services
+
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace \
+  --set operandNamespace=dch-services
+```
+
+By default, operands are deployed into the controller's namespace.
+
+### 2. Override images
+
+To use custom images (e.g. for dev/testing with a private registry):
 
 ```console
 helm install dc-controller chart/ \
   --namespace dc-controller-system --create-namespace \
-  --set controllerManager.image.repository=quay.io/YOUR_ORG/data-connect-hub-controller \
+  --set controllerManager.image.repository=quay.io/YOUR_ORG/dc-controller \
   --set controllerManager.image.tag=latest \
-  --set relatedImages.restService=quay.io/YOUR_ORG/data-connect-hub-rest:latest \
-  --set relatedImages.flightService=quay.io/YOUR_ORG/data-connect-hub-flight:latest
+  --set relatedImages.restService=quay.io/YOUR_ORG/rest-service:latest \
+  --set relatedImages.flightService=quay.io/YOUR_ORG/flight-service:latest
 ```
 
-### 1b. Install with Kustomize
+Image resolution priority (highest wins):
+1. CR spec override (`spec.restService.image`)
+2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
+3. Default (`ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest`)
 
-```console
-cd dc-controller
-
-make deploy IMG=ghcr.io/opendatahub-io/data-connect-hub/dc-controller:latest
-```
-
-This creates the `dc-controller-system` namespace with the controller
-Deployment, RBAC, and the `DataConnectHub` CRD.
-
-### 2. Verify the operator is running
+### 3. Verify
 
 ```console
 oc get pods -n dc-controller-system
-```
-
-### 3. Create a DataConnectHub
-
-The `DataConnectHub` CR is cluster-scoped and singleton (must be named
-`default-dataconnecthub`). A minimal example:
-
-```console
-oc apply -f config/samples/components.platform.opendatahub.io_v1alpha1_dataconnecthub.yaml
-```
-
-Or inline:
-
-```yaml
-apiVersion: components.platform.opendatahub.io/v1alpha1
-kind: DataConnectHub
-metadata:
-  name: default-dataconnecthub
-spec:
-  devMode: true
-```
-
-The operator will automatically:
-- Deploy a single-instance Postgres with auto-generated credentials
-- Wait for Postgres to become ready
-- Deploy rest-service and flight-service
-- Create networking resources (Services, NetworkPolicies)
-- Create an HTTPRoute if Gateway API CRDs are installed
-- Report status on the CR
-
-### 4. Monitor status
-
-```console
 oc get dch default-dataconnecthub
 ```
 
-The `Phase` column progresses through `Progressing` to `Ready`. For full
-details including conditions (`Ready`, `ProvisioningSucceeded`, `Degraded`):
+The `Phase` column progresses through `Progressing` to `Ready`.
 
-```console
-oc get dch default-dataconnecthub -o yaml
-```
+### 4. Customising via values.yaml
 
-### 5. Customising the CR
-
-The `DataConnectHub` spec supports several overrides:
+All `DataConnectHub` CR fields are configurable through Helm values.
+The CR is created automatically with `dataConnectHub.enabled: true`
+(the default).
 
 ```yaml
-apiVersion: components.platform.opendatahub.io/v1alpha1
-kind: DataConnectHub
-metadata:
-  name: default-dataconnecthub
-spec:
-  devMode: true            # true (default): operator deploys Postgres
-                           # false: bring your own database (see below)
+dataConnectHub:
+  enabled: true        # set false to skip CR creation
+  # devMode: true      # omitted by default (CRD defaults to true)
 
-  # External database (only when devMode is false)
+  # External database (set devMode to false first)
   # database:
   #   externalSecret: my-database-secret
 
-  # Per-service overrides
   restService:
     image: "my-registry/rest-service:v1.2.3"
     replicas: 3
@@ -149,10 +116,7 @@ spec:
   flightService:
     image: "my-registry/flight-service:v1.2.3"
     replicas: 2
-    imagePullSecrets:
-      - name: my-pull-secret
 
-  # Gateway (optional, requires Gateway API CRDs)
   gateway:
     name: my-gateway
     namespace: my-gateway-ns
@@ -161,17 +125,57 @@ spec:
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
 
-### 6. Uninstall
+### 5. Monitor status
 
-Delete the CR first (the finalizer ensures all managed resources are cleaned
-up), then remove the operator:
+```console
+oc get dch default-dataconnecthub -o yaml
+```
+
+Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`.
+
+### 6. What gets created
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| Deployment | `rest-service` | HTTP API on port 8080 |
+| Deployment | `flight-service` | Arrow Flight gRPC on port 50051 |
+| Deployment | `postgres` | Only when `devMode: true` |
+| Service | `rest-service` | ClusterIP, port 8080 |
+| Service | `flight-service` | ClusterIP, port 50051 |
+| Service | `postgres` | ClusterIP, port 5432 (devMode only) |
+| ServiceAccount | `data-connect-hub-sa` | For rest-service |
+| ServiceAccount | `flight-service-sa` | For flight-service |
+| ConfigMap | `rest-service-config` | Server config (config.toml) |
+| ConfigMap | `flight-service-config` | Server config (config.toml) |
+| Secret | `postgres-credentials` | Auto-generated (devMode only) |
+| PVC | `postgres-data` | 5Gi, ReadWriteOnce (devMode only) |
+| NetworkPolicy | `rest-service` | Ingress/egress rules |
+| NetworkPolicy | `flight-service` | Ingress/egress rules |
+| NetworkPolicy | `postgres` | Ingress/egress rules (devMode only) |
+| HTTPRoute | `data-connect-hub` | Routes traffic via gateway |
+
+All resources have owner references back to the CR. The CR carries a
+finalizer, so deleting the CR cleans up everything.
+
+### 7. Uninstall
+
+Delete the CR first so the finalizer cleans up all managed resources,
+then remove the operator:
 
 ```console
 oc delete dch default-dataconnecthub
+helm uninstall dc-controller -n dc-controller-system
+```
 
-# Choose the method you used to install:
-helm uninstall dc-controller -n dc-controller-system   # Helm
-make undeploy                                           # Kustomize
+### 8. Verify
+
+```console
+# REST health check
+oc exec deploy/rest-service -n <namespace> -- \
+  curl -s http://localhost:8080/api/v1/data/health
+
+# Flight gRPC health (pod readiness uses built-in gRPC probe)
+oc get pod -l app.kubernetes.io/name=flight-service -n <namespace>
 ```
 
 ---
@@ -223,8 +227,6 @@ oc rollout status deployment/flight-service -n <your-namespace>
 
 ### 2b. Deploy components individually
 
-If you prefer granular control, apply each component separately:
-
 ```console
 # Postgres first
 oc apply -k config/db/postgres -n <your-namespace>
@@ -237,25 +239,7 @@ oc rollout status deployment/rest-service -n <your-namespace>
 oc rollout status deployment/flight-service -n <your-namespace>
 ```
 
-### 3. Verify
-
-```console
-# REST health check
-oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/api/v1/data/health
-
-# REST API via service DNS (X-Tenant-ID header is required for data routes)
-oc exec deploy/rest-service -n <your-namespace> -- \
-  curl -s -H 'X-Tenant-ID: default' http://rest-service:8080/api/v1/data/connections
-
-# Flight gRPC health via service DNS
-oc exec deploy/flight-service -n <your-namespace> -- \
-  curl -s --http2-prior-knowledge -X POST \
-  -H 'content-type: application/grpc' -H 'te: trailers' \
-  http://flight-service:50051/grpc.health.v1.Health/Check \
-  -o /dev/null -w 'HTTP status: %{http_code}\n'
-```
-
-### 4. Updating images
+### 3. Updating images
 
 `imagePullPolicy: Always` is set on both services. To pick up a new image
 pushed to `:latest`:
@@ -264,23 +248,6 @@ pushed to `:latest`:
 oc rollout restart deployment/rest-service -n <your-namespace>
 oc rollout restart deployment/flight-service -n <your-namespace>
 ```
-
-### Credential rotation
-
-Postgres credentials can be rotated by deleting the generated files,
-rerunning `generate-secrets.sh`, re-applying, and restarting:
-
-```console
-rm config/db/postgres/postgres-credentials.env config/db/postgres/secret-config.toml
-./config/db/postgres/generate-secrets.sh
-oc apply -k config/db/postgres -n <your-namespace>
-oc rollout restart deployment/postgres -n <your-namespace>
-oc rollout restart deployment/rest-service -n <your-namespace>
-oc rollout restart deployment/flight-service -n <your-namespace>
-```
-
-Note: `POSTGRESQL_USER` cannot be changed without wiping the PVC and
-reinitializing.
 
 ---
 
@@ -292,3 +259,5 @@ reinitializing.
   database connection details.
 - **NetworkPolicy** resources allow all ingress/egress -- real restriction
   is pending a defined gateway/client topology.
+- **Operand namespace** is not auto-created by the controller -- create it
+  before installing if using `operandNamespace`.

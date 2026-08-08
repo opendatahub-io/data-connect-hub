@@ -49,9 +49,6 @@ const (
 	EnvRestImage   = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
 	EnvFlightImage = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
 
-	defaultRestImage   = "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-	defaultFlightImage = "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
-
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"
 	defaultNamespace        = "opendatahub"
@@ -369,12 +366,15 @@ func (r *DataConnectHubReconciler) reconcileService(
 ) error {
 	basePath := filepath.Join(r.ManifestsPath, "base", name)
 
-	patches, images := buildServicePatches(name, overrides, r.RestImage, r.FlightImage)
+	patches := buildServicePatches(name, overrides)
 
-	resources, err := renderKustomization(basePath, patches, images)
+	resources, err := renderKustomization(basePath, patches, nil)
 	if err != nil {
 		return fmt.Errorf("rendering %s manifests: %w", name, err)
 	}
+
+	image := resolveServiceImage(name, overrides, r.RestImage, r.FlightImage)
+	setDeploymentImage(resources, name, image)
 
 	return r.applyResources(ctx, cr, resources)
 }
