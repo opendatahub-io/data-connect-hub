@@ -5,7 +5,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::TabularState;
+use commons::api::tabular::{QueryOptions, TabularState};
 use commons::api::tabular::{QueryOutput, TabularReader};
 
 use futures::StreamExt;
@@ -95,10 +95,11 @@ impl TabularReader for SqliteReader {
         )))
     }
 
-    async fn read(&self, state: Arc<TabularState>, batch_size: usize) -> QueryOutput {
+    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
         let schema = state.schema.clone();
         let query = state.query.clone();
+        let batch_size = options.batch_size;
 
         let stream = async_stream::try_stream! {
             let mut conn = pool.acquire().await.map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
@@ -112,6 +113,7 @@ impl TabularReader for SqliteReader {
 
             while let Some(row) = rows.next().await {
                 chunk.push(row.map_err(|e| ConnectorError::SQLError(e.to_string()))?);
+
                 if chunk.len() >= batch_size {
                     yield rows_to_batch(&schema, &chunk)?;
                     chunk.clear();

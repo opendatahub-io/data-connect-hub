@@ -235,6 +235,7 @@ async fn test_flight_sql_select_prompts() {
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
         Arc::new(secret_store),
+        Default::default(),
     );
 
     tokio::spawn(async move {

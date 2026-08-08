@@ -71,6 +71,7 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
 async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
+    config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
     commons::utils::init_tracing(args.json_logs);
 
     tracing::info!("Starting DataConnectorHub Flight service");
@@ -85,11 +86,16 @@ async fn main() -> Result<()> {
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
 
+    let query_options = commons::api::tabular::QueryOptions {
+        batch_size: config.query.batch_size,
+    };
+
     let addr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let service = TabularDataService::new(
         Arc::new(connectors_registry),
         Arc::new(PgMetaStore::new(config.database).await?),
         Arc::new(secret_store),
+        query_options,
     );
 
     let auth_interceptor = AuthInterceptor::new();

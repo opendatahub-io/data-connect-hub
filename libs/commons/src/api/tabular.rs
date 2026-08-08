@@ -20,13 +20,24 @@ impl TabularState {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct QueryOptions {
+    pub batch_size: usize,
+}
+
+impl Default for QueryOptions {
+    fn default() -> Self {
+        Self { batch_size: 512 }
+    }
+}
+
 #[async_trait::async_trait]
 pub trait TabularReader: Send + Sync {
     fn provider(&self) -> String;
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError>;
 
-    async fn read(&self, state: Arc<TabularState>, batch_size: usize) -> QueryOutput;
+    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput;
 }
 
 #[async_trait::async_trait]
