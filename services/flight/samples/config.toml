@@ -9,3 +9,7 @@ port = 50051
 max_capacity = 50
 ttl_secs = 30
 idle_secs = 30
+
+[auth]
+enabled = false
+cache_ttl_secs = 300
