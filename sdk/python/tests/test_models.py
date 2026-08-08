@@ -35,7 +35,7 @@ class TestDataConnection:
         assert conn.namespace == "test-ns"
         assert conn.name == "test-conn"
         assert conn.provider == "postgres"
-        assert conn.format == "jdbc"
+        assert conn.format == "tabular"
         assert conn.tenant_id == "tenant-1"
         assert conn.location.url == "postgresql://localhost:5432/db"
         assert conn.created_at == datetime(2026, 1, 1, tzinfo=UTC)

@@ -11,7 +11,7 @@ SAMPLE_CONNECTION_JSON = {
     "namespace": "test-ns",
     "name": "test-conn",
     "provider": "postgres",
-    "format": "jdbc",
+    "format": "tabular",
     "tenant_id": "tenant-1",
     "location": {"url": "postgresql://localhost:5432/db"},
     "created_at": "2026-01-01T00:00:00Z",

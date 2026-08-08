@@ -58,7 +58,7 @@ class TestConnectionsDelegation:
             name="test-conn",
             namespace="test-ns",
             provider="postgres",
-            data_format="jdbc",
+            data_format="tabular",
             location_url="postgresql://localhost:5432/db",
         )
         assert result.id == "123"
