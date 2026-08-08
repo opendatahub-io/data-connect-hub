@@ -195,54 +195,9 @@ func stripSecretGenerator(fs filesys.FileSystem, dir string) error {
 
 // --- CR overrides → kustomize patches ---
 
-func parseImageRef(baseName, ref string) kustypes.Image {
-	img := kustypes.Image{Name: baseName}
-	if at := strings.Index(ref, "@"); at > 0 {
-		img.NewName = ref[:at]
-		img.Digest = ref[at+1:]
-	} else if i := strings.LastIndex(ref, ":"); i > 0 && !strings.Contains(ref[i:], "/") {
-		img.NewName = ref[:i]
-		img.NewTag = ref[i+1:]
-	} else {
-		img.NewName = ref
-	}
-	return img
-}
-
-func buildServiceImages(name, restImage, flightImage string, overrideImage *string) []kustypes.Image {
-	resolvedImage := flightImage
-	manifestImage := defaultFlightImage
-	if name == nameRestService {
-		resolvedImage = restImage
-		manifestImage = defaultRestImage
-	}
-	baseName := stripTag(manifestImage)
-
-	if overrideImage != nil {
-		return []kustypes.Image{parseImageRef(baseName, *overrideImage)}
-	}
-	if resolvedImage != manifestImage {
-		return []kustypes.Image{parseImageRef(baseName, resolvedImage)}
-	}
-	return nil
-}
-
-func stripTag(img string) string {
-	if i := strings.LastIndex(img, ":"); i > 0 && !strings.Contains(img[i:], "/") {
-		return img[:i]
-	}
-	return img
-}
-
-func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) ([]kustypes.Patch, []kustypes.Image) {
-	var overrideImage *string
-	if overrides != nil {
-		overrideImage = overrides.Image
-	}
-	images := buildServiceImages(name, restImage, flightImage, overrideImage)
-
+func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides) []kustypes.Patch {
 	if overrides == nil {
-		return nil, images
+		return nil
 	}
 
 	var patches []kustypes.Patch
@@ -331,7 +286,40 @@ func buildServicePatches(name string, overrides *dataconnecthubv1alpha1.ServiceO
 		})
 	}
 
-	return patches, images
+	return patches
+}
+
+func resolveServiceImage(name string, overrides *dataconnecthubv1alpha1.ServiceOverrides, restImage, flightImage string) string {
+	if overrides != nil && overrides.Image != nil {
+		return *overrides.Image
+	}
+	if name == nameRestService {
+		return restImage
+	}
+	return flightImage
+}
+
+func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
+	for _, obj := range resources {
+		if obj.GetKind() != "Deployment" {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		for i, c := range containers {
+			container, ok := c.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			if name, ok := container["name"].(string); ok && name == containerName {
+				container["image"] = image
+				containers[i] = container
+			}
+		}
+		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+	}
 }
 
 func buildGatewayPatches(gw *dataconnecthubv1alpha1.Gateway) []kustypes.Patch {
@@ -423,24 +411,7 @@ func (r *DataConnectHubReconciler) applyResources(
 			continue
 		}
 
-		if existingHash == "" {
-			// First reconcile after create — stamp the hash via merge patch
-			// without touching the spec (avoids generation bump).
-			patch := client.MergeFrom(existing.DeepCopy())
-			existingAnn := existing.GetAnnotations()
-			if existingAnn == nil {
-				existingAnn = map[string]string{}
-			}
-			existingAnn["dataconnecthub/spec-hash"] = desiredHash
-			existing.SetAnnotations(existingAnn)
-			if err := r.Patch(ctx, existing, patch); err != nil {
-				return fmt.Errorf("setting hash on %s %s: %w", obj.GetKind(), obj.GetName(), err)
-			}
-			log.V(1).Info("stamped spec hash", "kind", obj.GetKind(), "name", obj.GetName())
-			continue
-		}
-
-		// Spec actually changed — apply via SSA.
+		// Spec changed or first reconcile — apply via SSA.
 		obj.SetResourceVersion("")
 		obj.SetManagedFields(nil)
 		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner("dc-controller"), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects

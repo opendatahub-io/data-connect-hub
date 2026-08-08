@@ -35,12 +35,16 @@ spec:
           - --health-probe-bind-address=:8081
         env:
         - name: APPLICATIONS_NAMESPACE
+          {{- if .Values.operandNamespace }}
+          value: {{ .Values.operandNamespace | quote }}
+          {{- else }}
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
-        - name: RELATED_IMAGE_ODH_DCH_REST_SERVICE
+          {{- end }}
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
           value: {{ .Values.relatedImages.restService | quote }}
-        - name: RELATED_IMAGE_ODH_DCH_FLIGHT_SERVICE
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           value: {{ .Values.relatedImages.flightService | quote }}
         ports:
         - name: health
