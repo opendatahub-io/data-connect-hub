@@ -12,5 +12,4 @@ credentials_fields:
     description: Huggingface token
     required: false
     type: string
-    default_value: main
 
