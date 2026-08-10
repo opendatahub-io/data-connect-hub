@@ -19,11 +19,44 @@ SAMPLE_CONNECTION_JSON = {
     "properties": {"key": "value"},
 }
 
+SAMPLE_CONNECTION_WRAPPED_JSON = {
+    "metadata": {
+        "id": "123",
+        "tenant_id": "tenant-1",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    },
+    "resource": {
+        "namespace": "test-ns",
+        "name": "test-conn",
+        "provider": "postgres",
+        "format": "tabular",
+        "location": {"url": "postgresql://localhost:5432/db"},
+        "properties": {"key": "value"},
+    },
+}
+
 SAMPLE_CONNECTION_TYPE_JSON = {
     "id": "ct-1",
     "name": "postgres",
+    "provider": "postgres",
     "description": "PostgreSQL connection",
-    "properties_schema": {"host": "string", "port": "integer"},
+    "credentials_fields": [],
+}
+
+SAMPLE_CONNECTION_TYPE_WRAPPED_JSON = {
+    "metadata": {
+        "id": "ct-1",
+        "tenant_id": "default",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    },
+    "resource": {
+        "name": "postgres",
+        "provider": "postgres",
+        "description": "PostgreSQL connection",
+        "credentials_fields": [],
+    },
 }
 
 

@@ -22,6 +22,9 @@ from .models import (
 )
 
 _DEFAULT_API_BASE = "/api/v1/data"
+_CONNECTIONS_ENDPOINT = "/connections"
+_CONNECTION_TYPES_ENDPOINT = "/connection-types"
+_INGESTION_ENDPOINT = "/ingestion"
 _RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
 
@@ -184,17 +187,17 @@ class RestClient:
     # -- Connections CRUD --
 
     def list_connections(self) -> list[DataConnection]:
-        resp = self._request("GET", "/connections")
+        resp = self._request("GET", _CONNECTIONS_ENDPOINT)
         return [DataConnection.model_validate(c) for c in _unwrap_list(self._parse_json(resp))]
 
     def get_connection(self, connection_id: str) -> DataConnection:
-        resp = self._request("GET", f"/connections/{connection_id}")
+        resp = self._request("GET", f"{_CONNECTIONS_ENDPOINT}/{connection_id}")
         return DataConnection.model_validate(self._parse_json(resp))
 
     def create_connection(self, request: CreateConnectionRequest) -> DataConnection:
         resp = self._request(
             "POST",
-            "/connections",
+            _CONNECTIONS_ENDPOINT,
             json=request.model_dump(exclude_none=True),
         )
         return DataConnection.model_validate(self._parse_json(resp))
@@ -202,28 +205,28 @@ class RestClient:
     def update_connection(self, connection_id: str, request: UpdateConnectionRequest) -> DataConnection:
         resp = self._request(
             "PATCH",
-            f"/connections/{connection_id}",
+            f"{_CONNECTIONS_ENDPOINT}/{connection_id}",
             json=request.model_dump(exclude_none=True),
         )
         return DataConnection.model_validate(self._parse_json(resp))
 
     def delete_connection(self, connection_id: str) -> None:
-        self._request("DELETE", f"/connections/{connection_id}")
+        self._request("DELETE", f"{_CONNECTIONS_ENDPOINT}/{connection_id}")
 
     # -- Connection Types CRUD --
 
     def list_connection_types(self) -> list[ConnectionType]:
-        resp = self._request("GET", "/connection-types")
+        resp = self._request("GET", _CONNECTION_TYPES_ENDPOINT)
         return [ConnectionType.model_validate(ct) for ct in _unwrap_list(self._parse_json(resp))]
 
     def get_connection_type(self, type_id: str) -> ConnectionType:
-        resp = self._request("GET", f"/connection-types/{type_id}")
+        resp = self._request("GET", f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}")
         return ConnectionType.model_validate(self._parse_json(resp))
 
     def create_connection_type(self, request: CreateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
             "POST",
-            "/connection-types",
+            _CONNECTION_TYPES_ENDPOINT,
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
@@ -231,17 +234,17 @@ class RestClient:
     def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
             "PATCH",
-            f"/connection-types/{type_id}",
+            f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}",
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
 
     def delete_connection_type(self, type_id: str) -> None:
-        self._request("DELETE", f"/connection-types/{type_id}")
+        self._request("DELETE", f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}")
 
     # -- Unstructured ingestion --
 
     def ingest(self, connection_id: str) -> bytes:
         """Fetch raw unstructured data for a connection."""
-        resp = self._request("GET", f"/ingestion/{connection_id}")
+        resp = self._request("GET", f"{_INGESTION_ENDPOINT}/{connection_id}")
         return resp.content
