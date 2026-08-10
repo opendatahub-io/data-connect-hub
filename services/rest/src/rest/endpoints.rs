@@ -47,10 +47,7 @@ pub async fn list_connections(
     ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("list_connections: for tenant {:?}", ctx.tenant_id);
-    let connections = service
-        .meta_store
-        .get_data_connections(ctx.tenant_id.as_str())
-        .await?;
+    let connections = service.meta_store.get_data_connections(ctx.tenant_id.as_str()).await?;
     Ok(HttpResponse::Ok().json(connections))
 }
 
