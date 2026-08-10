@@ -30,6 +30,9 @@ mod tests {
     #[test]
     fn test_server_config_deserialize() {
         let toml_str = r#"
+            [database]
+            url = "postgresql://user-a@localhost:5432/db-a"
+            
             [server]
             address = "127.0.0.1"
             port = 8080

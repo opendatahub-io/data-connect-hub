@@ -26,3 +26,4 @@ kube-utils = { workspace = true }
 [dev-dependencies]
 actix-rt = "2"
 tokio = { workspace = true }
+async-trait = { workspace = true }

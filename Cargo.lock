@@ -3041,6 +3041,7 @@ dependencies = [
  "actix-rt",
  "actix-web",
  "anyhow",
+ "async-trait",
  "clap",
  "commons",
  "config",
