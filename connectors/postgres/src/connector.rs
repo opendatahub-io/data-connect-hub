@@ -146,7 +146,7 @@ fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, Co
             let col = &columns[col_idx];
             build_array(col.type_info().name(), rows, col_idx)
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
@@ -164,40 +164,73 @@ fn pg_type_to_arrow(pg_type: &str) -> DataType {
     }
 }
 
-fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> ArrayRef {
+fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> Result<ArrayRef, ConnectorError> {
+    let err = |e: sqlx::Error| ConnectorError::SQLError(e.to_string());
     match pg_type {
         "BOOL" => {
-            let vals: Vec<Option<bool>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(BooleanArray::from(vals))
+            let vals: Vec<Option<bool>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(BooleanArray::from(vals)))
         },
         "INT2" | "SMALLINT" | "SMALLSERIAL" => {
-            let vals: Vec<Option<i16>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int16Array::from(vals))
+            let vals: Vec<Option<i16>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Int16Array::from(vals)))
         },
         "INT4" | "INT" | "INTEGER" | "SERIAL" => {
-            let vals: Vec<Option<i32>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int32Array::from(vals))
+            let vals: Vec<Option<i32>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Int32Array::from(vals)))
         },
         "INT8" | "BIGINT" | "BIGSERIAL" => {
-            let vals: Vec<Option<i64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int64Array::from(vals))
+            let vals: Vec<Option<i64>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Int64Array::from(vals)))
         },
         "FLOAT4" | "REAL" => {
-            let vals: Vec<Option<f32>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Float32Array::from(vals))
+            let vals: Vec<Option<f32>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Float32Array::from(vals)))
         },
         "FLOAT8" | "DOUBLE PRECISION" => {
-            let vals: Vec<Option<f64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Float64Array::from(vals))
+            let vals: Vec<Option<f64>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Float64Array::from(vals)))
         },
         "BYTEA" => {
-            let vals: Vec<Option<Vec<u8>>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            let vals: Vec<Option<Vec<u8>>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
             let vals: Vec<Option<&[u8]>> = vals.iter().map(|v| v.as_deref()).collect();
-            Arc::new(BinaryArray::from(vals))
+            Ok(Arc::new(BinaryArray::from(vals)))
         },
         _ => {
-            let vals: Vec<Option<String>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(StringArray::from(vals))
+            let vals: Vec<Option<String>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(StringArray::from(vals)))
         },
     }
 }
