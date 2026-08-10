@@ -62,7 +62,7 @@ pub async fn create_connection(
     _ctx: web::ReqData<ApiContext>,
     connection: web::Json<DataConnection>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Ok(HttpResponse::Ok().json(connection))
+    Ok(HttpResponse::Created().json(connection))
 }
 
 pub async fn list_connection_types(
@@ -112,7 +112,7 @@ pub async fn create_connection_type(
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
         .await?;
 
-    Ok(HttpResponse::Ok().json(connection_type))
+    Ok(HttpResponse::Created().json(connection_type))
 }
 
 pub async fn patch_connection_type(

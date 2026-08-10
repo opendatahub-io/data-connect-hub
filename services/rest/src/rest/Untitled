@@ -1,0 +1,5 @@
+    connectors_registry: Arc<ConnectorsRegistry>,
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    sql_info: arrow_flight::sql::metadata::SqlInfoData,
+    query_options: QueryOptions,

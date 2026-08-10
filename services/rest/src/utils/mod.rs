@@ -1,5 +1,3 @@
-pub mod loader;
-
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 
@@ -10,15 +8,9 @@ pub struct Server {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ConnectionTypes {
-    pub folder: String,
-}
-
-#[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
-    pub connection_types: ConnectionTypes,
 }
 
 #[cfg(test)]
@@ -37,8 +29,6 @@ mod tests {
             address = "127.0.0.1"
             port = 8080
 
-            [connection_types]
-            folder = "connection-types"
         "#;
 
         let config = Config::builder()
@@ -49,7 +39,6 @@ mod tests {
         let server_config: ServerConfig = config.try_deserialize().unwrap();
         assert_eq!(server_config.server.address, "127.0.0.1");
         assert_eq!(server_config.server.port, 8080);
-        assert_eq!(server_config.connection_types.folder, "connection-types");
     }
 
     #[test]

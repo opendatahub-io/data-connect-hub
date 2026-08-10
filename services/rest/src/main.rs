@@ -6,7 +6,6 @@ use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
-use crate::utils::loader::sync_default_connection_types;
 use anyhow::Result;
 use commons::api::connections::MetaStore;
 use config::{Config, File};
@@ -74,9 +73,8 @@ async fn main() -> Result<()> {
     commons::utils::init_tracing(args.json_logs);
     tracing::info!("Starting DataConnectorHub API service");
 
-    let meta_store: Arc<dyn MetaStore + Send + Sync> = Arc::new(PgMetaStore::new(config.database).await?);
-
-    sync_default_connection_types(&meta_store, config.connection_types.folder.as_str()).await?;
+    let pg_meta_store = Arc::new(PgMetaStore::new(config.database).await?);
+    let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
 
