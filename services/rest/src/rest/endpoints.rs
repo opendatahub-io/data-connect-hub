@@ -43,10 +43,15 @@ pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
 }
 
 pub async fn list_connections(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("list_connections: for tenant {:?}", ctx.tenant_id);
+    let connections = service
+        .meta_store
+        .get_data_connections(ctx.tenant_id.as_str())
+        .await?;
+    Ok(HttpResponse::Ok().json(connections))
 }
 
 pub async fn get_connection(
@@ -163,7 +168,10 @@ mod tests {
             &self,
             _t: &str,
         ) -> Result<ResourceList<DataConnectionResource>, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            Ok(ResourceList {
+                total_count: 0,
+                items: vec![],
+            })
         }
         async fn get_data_connection(
             &self,
@@ -286,7 +294,7 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_list_connections_unimplemented() {
+    async fn test_list_connections() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
             .uri("/api/v1/data/connections")
@@ -294,9 +302,10 @@ mod tests {
             .to_request();
         let resp = test::call_service(&app, req).await;
 
-        assert_eq!(resp.status(), 501);
+        assert_eq!(resp.status(), 200);
         let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unimplemented");
+        assert_eq!(body["total_count"], 0);
+        assert_eq!(body["items"], serde_json::json!([]));
     }
 
     #[actix_web::test]
