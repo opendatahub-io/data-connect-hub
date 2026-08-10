@@ -81,36 +81,9 @@ You can verify the `DataConnectService` as follows:
   postgres-7f46bcbd7b-77t5h         1/1     Running   0          67m
   rest-service-7f4cc4948b-n6llb     1/1     Running   0          73m
   ```
-- Verify the REST service in the pod is responding:
-  ```
-  $ oc exec -it $(oc get po -n dch-example -l app.kubernetes.io/name=rest-service -o jsonpath='{.items[0].metadata.name}') -n dch-example -- curl -s http://localhost:8080/api/v1/data/connections
-  ```
+- Verify the REST service in the pod is responding by running the script [scripts/verify-rest-from-pod.sh](./scripts/verify-rest-from-pod.sh)
 
-- Verify the flight service in the pod is responding by running the following script:
-  ```bash
-  #!/bin/bash
-  flight_pod=$(oc get po -n dch-example -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}')
-
-  curl -sL -o /tmp/Flight.proto https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto
-  
-  oc port-forward $flight_pod -n dch-example 50051:50051 &
-
-  grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:50051 list
-
-  grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:50051 describe arrow.flight.protocol.FlightService
-  ```
-
-  You should see the following output:
-  ```console
-  arrow.flight.protocol.FlightService
-  arrow.flight.protocol.FlightService is a service:
-  // A flight service is an endpoint for retrieving or storing Arrow data. A
-  // flight service can expose one or more predefined endpoints that can be
-  // accessed using the Arrow Flight Protocol. Additionally, a flight service
-  // can expose a set of actions that are available.
-  service FlightService {
-  ...
-  ```
+- Verify the flight service in the pod is responding by running the script [scripts/verify-flight-from-pod.sh](./scripts/verify-flight-from-pod.sh)
 
 ### Create and Grant Users to DCH Service
 For the purpose of the demo, we create `serviceaccount` instead of users.
