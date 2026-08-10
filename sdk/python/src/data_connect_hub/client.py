@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 
 from .exceptions import DCHConfigError
 from .models import (
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
+    CredentialField,
     DataConnection,
     DataLocation,
     UpdateConnectionRequest,
@@ -154,13 +154,15 @@ class DataConnectClient:
         self,
         *,
         name: str,
-        description: str = "",
-        properties_schema: dict[str, Any] | None = None,
+        provider: str,
+        description: str | None = None,
+        credentials_fields: list[CredentialField] | None = None,
     ) -> ConnectionType:
         req = CreateConnectionTypeRequest(
             name=name,
+            provider=provider,
             description=description,
-            properties_schema=properties_schema or {},
+            credentials_fields=credentials_fields or [],
         )
         return self._require_rest().create_connection_type(req)
 
@@ -169,15 +171,17 @@ class DataConnectClient:
         type_id: str,
         *,
         name: str | None = None,
+        provider: str | None = None,
         description: str | None = None,
-        properties_schema: dict[str, Any] | None = None,
+        credentials_fields: list[CredentialField] | None = None,
     ) -> ConnectionType:
-        if all(v is None for v in (name, description, properties_schema)):
+        if all(v is None for v in (name, provider, description, credentials_fields)):
             raise DCHConfigError("at least one field must be provided for update")
         req = UpdateConnectionTypeRequest(
             name=name,
+            provider=provider,
             description=description,
-            properties_schema=properties_schema,
+            credentials_fields=credentials_fields,
         )
         return self._require_rest().update_connection_type(type_id, req)
 

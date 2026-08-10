@@ -12,7 +12,12 @@ from data_connect_hub.models import (
     UpdateConnectionRequest,
 )
 
-from .conftest import SAMPLE_CONNECTION_JSON, SAMPLE_CONNECTION_TYPE_JSON
+from .conftest import (
+    SAMPLE_CONNECTION_JSON,
+    SAMPLE_CONNECTION_TYPE_JSON,
+    SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+    SAMPLE_CONNECTION_WRAPPED_JSON,
+)
 
 
 class TestDataLocation:
@@ -31,6 +36,20 @@ class TestDataConnection:
     def test_from_json_fixture(self) -> None:
         """Mirrors the Rust test in commons/src/api/connections.rs."""
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
+        assert conn.id == "123"
+        assert conn.namespace == "test-ns"
+        assert conn.name == "test-conn"
+        assert conn.provider == "postgres"
+        assert conn.format == "tabular"
+        assert conn.tenant_id == "tenant-1"
+        assert conn.location.url == "postgresql://localhost:5432/db"
+        assert conn.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert conn.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert conn.properties == {"key": "value"}
+
+    def test_from_wrapped_json(self) -> None:
+        """Server returns {metadata, resource} envelope."""
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_WRAPPED_JSON)
         assert conn.id == "123"
         assert conn.namespace == "test-ns"
         assert conn.name == "test-conn"
@@ -83,5 +102,18 @@ class TestConnectionType:
         ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_JSON)
         assert ct.id == "ct-1"
         assert ct.name == "postgres"
+        assert ct.provider == "postgres"
         assert ct.description == "PostgreSQL connection"
-        assert ct.properties_schema == {"host": "string", "port": "integer"}
+        assert ct.credentials_fields == []
+
+    def test_from_wrapped_json(self) -> None:
+        """Server returns {metadata, resource} envelope."""
+        ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_WRAPPED_JSON)
+        assert ct.id == "ct-1"
+        assert ct.name == "postgres"
+        assert ct.provider == "postgres"
+        assert ct.description == "PostgreSQL connection"
+        assert ct.tenant_id == "default"
+        assert ct.created_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert ct.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
+        assert ct.credentials_fields == []

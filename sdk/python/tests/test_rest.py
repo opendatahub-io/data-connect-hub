@@ -26,7 +26,12 @@ from data_connect_hub.models import (
 )
 from data_connect_hub.rest import RestClient
 
-from .conftest import SAMPLE_CONNECTION_JSON, SAMPLE_CONNECTION_TYPE_JSON
+from .conftest import (
+    SAMPLE_CONNECTION_JSON,
+    SAMPLE_CONNECTION_TYPE_JSON,
+    SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+    SAMPLE_CONNECTION_WRAPPED_JSON,
+)
 
 
 def _make_transport(
@@ -157,7 +162,7 @@ class TestConnectionTypes:
         transport = _make_transport(
             body=[SAMPLE_CONNECTION_TYPE_JSON],
             assert_method="GET",
-            assert_path="/api/v1/data/connection_types",
+            assert_path="/api/v1/data/connection-types",
         )
         client = _make_client(transport)
         result = client.list_connection_types()
@@ -167,7 +172,7 @@ class TestConnectionTypes:
     def test_get(self) -> None:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_TYPE_JSON,
-            assert_path="/api/v1/data/connection_types/ct-1",
+            assert_path="/api/v1/data/connection-types/ct-1",
         )
         client = _make_client(transport)
         result = client.get_connection_type("ct-1")
@@ -176,22 +181,23 @@ class TestConnectionTypes:
     def test_create(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "POST"
-            assert request.url.path == "/api/v1/data/connection_types"
+            assert request.url.path == "/api/v1/data/connection-types"
             body = json.loads(request.content)
             assert body["name"] == "mysql"
+            assert body["provider"] == "mysql"
             assert body["description"] == "MySQL connector"
             return httpx.Response(201, json=SAMPLE_CONNECTION_TYPE_JSON)
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
-        req = CreateConnectionTypeRequest(name="mysql", description="MySQL connector")
+        req = CreateConnectionTypeRequest(name="mysql", provider="mysql", description="MySQL connector")
         result = client.create_connection_type(req)
         assert result.id == "ct-1"
 
     def test_update(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "PATCH"
-            assert request.url.path == "/api/v1/data/connection_types/ct-1"
+            assert request.url.path == "/api/v1/data/connection-types/ct-1"
             body = json.loads(request.content)
             assert body == {"name": "renamed"}
             return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
@@ -204,7 +210,7 @@ class TestConnectionTypes:
     def test_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",
-            assert_path="/api/v1/data/connection_types/ct-1",
+            assert_path="/api/v1/data/connection-types/ct-1",
         )
         client = _make_client(transport)
         client.delete_connection_type("ct-1")
@@ -334,6 +340,17 @@ class TestListUnwrapping:
         assert len(result) == 1
         assert result[0].id == "123"
 
+    def test_handles_resource_list_with_total_count(self) -> None:
+        transport = _make_transport(
+            body={"total_count": 1, "items": [SAMPLE_CONNECTION_TYPE_WRAPPED_JSON]},
+            assert_method="GET",
+        )
+        client = _make_client(transport)
+        result = client.list_connection_types()
+        assert len(result) == 1
+        assert result[0].id == "ct-1"
+        assert result[0].name == "postgres"
+
     def test_handles_bare_array_response(self) -> None:
         transport = _make_transport(
             body=[SAMPLE_CONNECTION_JSON],
@@ -342,6 +359,45 @@ class TestListUnwrapping:
         client = _make_client(transport)
         result = client.list_connections()
         assert len(result) == 1
+
+
+class TestWrappedResourceFormat:
+    def test_get_connection_wrapped(self) -> None:
+        transport = _make_transport(
+            body=SAMPLE_CONNECTION_WRAPPED_JSON,
+            assert_method="GET",
+            assert_path="/api/v1/data/connections/123",
+        )
+        client = _make_client(transport)
+        result = client.get_connection("123")
+        assert result.id == "123"
+        assert result.namespace == "test-ns"
+        assert result.provider == "postgres"
+
+    def test_get_connection_type_wrapped(self) -> None:
+        transport = _make_transport(
+            body=SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+            assert_method="GET",
+            assert_path="/api/v1/data/connection-types/ct-1",
+        )
+        client = _make_client(transport)
+        result = client.get_connection_type("ct-1")
+        assert result.id == "ct-1"
+        assert result.name == "postgres"
+        assert result.provider == "postgres"
+        assert result.tenant_id == "default"
+
+    def test_create_connection_type_returns_wrapped(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "POST"
+            return httpx.Response(201, json=SAMPLE_CONNECTION_TYPE_WRAPPED_JSON)
+
+        transport = httpx.MockTransport(handler)
+        client = _make_client(transport)
+        req = CreateConnectionTypeRequest(name="pg", provider="postgres")
+        result = client.create_connection_type(req)
+        assert result.id == "ct-1"
+        assert result.name == "postgres"
 
 
 class TestRetry:

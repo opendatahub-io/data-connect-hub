@@ -136,7 +136,7 @@ fn rows_to_batch(schema: &Arc<Schema>, rows: &[SqliteRow]) -> Result<RecordBatch
             let col = &columns[col_idx];
             build_array(col.type_info().name(), rows, col_idx)
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
     RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
@@ -151,28 +151,49 @@ fn sqlite_type_to_arrow(sqlite_type: &str) -> DataType {
     }
 }
 
-fn build_array(sqlite_type: &str, rows: &[SqliteRow], col_idx: usize) -> ArrayRef {
+fn build_array(sqlite_type: &str, rows: &[SqliteRow], col_idx: usize) -> Result<ArrayRef, ConnectorError> {
+    let err = |e: sqlx::Error| ConnectorError::SQLError(e.to_string());
     match sqlite_type {
         "BOOLEAN" => {
-            let vals: Vec<Option<bool>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(BooleanArray::from(vals))
+            let vals: Vec<Option<bool>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(BooleanArray::from(vals)))
         },
         "INTEGER" => {
-            let vals: Vec<Option<i64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Int64Array::from(vals))
+            let vals: Vec<Option<i64>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Int64Array::from(vals)))
         },
         "REAL" => {
-            let vals: Vec<Option<f64>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(Float64Array::from(vals))
+            let vals: Vec<Option<f64>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(Float64Array::from(vals)))
         },
         "BLOB" => {
-            let vals: Vec<Option<Vec<u8>>> = rows.iter().map(|r| r.get(col_idx)).collect();
+            let vals: Vec<Option<Vec<u8>>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
             let vals: Vec<Option<&[u8]>> = vals.iter().map(|v| v.as_deref()).collect();
-            Arc::new(BinaryArray::from(vals))
+            Ok(Arc::new(BinaryArray::from(vals)))
         },
         _ => {
-            let vals: Vec<Option<String>> = rows.iter().map(|r| r.get(col_idx)).collect();
-            Arc::new(StringArray::from(vals))
+            let vals: Vec<Option<String>> = rows
+                .iter()
+                .map(|r| r.try_get(col_idx))
+                .collect::<Result<_, _>>()
+                .map_err(err)?;
+            Ok(Arc::new(StringArray::from(vals)))
         },
     }
 }
