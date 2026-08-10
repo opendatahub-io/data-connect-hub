@@ -196,7 +196,10 @@ mod tests {
             &self,
             _t: &str,
         ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            Ok(ResourceList {
+                total_count: 0,
+                items: vec![],
+            })
         }
         async fn get_data_connection_type(
             &self,
@@ -308,6 +311,21 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "header_not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_list_connection_types() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connection-types")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["total_count"], 0);
+        assert_eq!(body["items"], serde_json::json!([]));
     }
 
     #[actix_web::test]
