@@ -213,17 +213,17 @@ class RestClient:
     # -- Connection Types CRUD --
 
     def list_connection_types(self) -> list[ConnectionType]:
-        resp = self._request("GET", "/connection_types")
+        resp = self._request("GET", "/connection-types")
         return [ConnectionType.model_validate(ct) for ct in _unwrap_list(self._parse_json(resp))]
 
     def get_connection_type(self, type_id: str) -> ConnectionType:
-        resp = self._request("GET", f"/connection_types/{type_id}")
+        resp = self._request("GET", f"/connection-types/{type_id}")
         return ConnectionType.model_validate(self._parse_json(resp))
 
     def create_connection_type(self, request: CreateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
             "POST",
-            "/connection_types",
+            "/connection-types",
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
@@ -231,13 +231,13 @@ class RestClient:
     def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
             "PATCH",
-            f"/connection_types/{type_id}",
+            f"/connection-types/{type_id}",
             json=request.model_dump(exclude_none=True),
         )
         return ConnectionType.model_validate(self._parse_json(resp))
 
     def delete_connection_type(self, type_id: str) -> None:
-        self._request("DELETE", f"/connection_types/{type_id}")
+        self._request("DELETE", f"/connection-types/{type_id}")
 
     # -- Unstructured ingestion --
 

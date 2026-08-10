@@ -157,7 +157,7 @@ class TestConnectionTypes:
         transport = _make_transport(
             body=[SAMPLE_CONNECTION_TYPE_JSON],
             assert_method="GET",
-            assert_path="/api/v1/data/connection_types",
+            assert_path="/api/v1/data/connection-types",
         )
         client = _make_client(transport)
         result = client.list_connection_types()
@@ -167,7 +167,7 @@ class TestConnectionTypes:
     def test_get(self) -> None:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_TYPE_JSON,
-            assert_path="/api/v1/data/connection_types/ct-1",
+            assert_path="/api/v1/data/connection-types/ct-1",
         )
         client = _make_client(transport)
         result = client.get_connection_type("ct-1")
@@ -176,7 +176,7 @@ class TestConnectionTypes:
     def test_create(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "POST"
-            assert request.url.path == "/api/v1/data/connection_types"
+            assert request.url.path == "/api/v1/data/connection-types"
             body = json.loads(request.content)
             assert body["name"] == "mysql"
             assert body["description"] == "MySQL connector"
@@ -191,7 +191,7 @@ class TestConnectionTypes:
     def test_update(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "PATCH"
-            assert request.url.path == "/api/v1/data/connection_types/ct-1"
+            assert request.url.path == "/api/v1/data/connection-types/ct-1"
             body = json.loads(request.content)
             assert body == {"name": "renamed"}
             return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
@@ -204,7 +204,7 @@ class TestConnectionTypes:
     def test_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",
-            assert_path="/api/v1/data/connection_types/ct-1",
+            assert_path="/api/v1/data/connection-types/ct-1",
         )
         client = _make_client(transport)
         client.delete_connection_type("ct-1")
