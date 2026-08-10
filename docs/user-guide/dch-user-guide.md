@@ -5,8 +5,14 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - [x] Prerequisites
 - [ ] Install DCH Operator
 - [ ] Install `DataConnectService`
-- [ ] Verify `DataConnectService`
-- [x] Create and Grant Users to DCH Service
+- [x] Verify `DataConnectService`
+- [ ] DCH Service Authentication/Authorization
+  - [x] Configure kube-rbac-proxy 
+  - [x] Create Roles
+  - [x] Create Test User
+  - [x] Authorize Test User
+  - [x] Verify Rest Service Authentication
+  - [ ] Verify Flight Service Authentication
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
 - [ ] Create Connections and Connection Types
 - [ ] DCH Rest Swagger
@@ -85,16 +91,79 @@ You can verify the `DataConnectService` as follows:
 
 - Verify the flight service in the pod is responding by running the script [scripts/verify-flight-from-pod.sh](./scripts/verify-flight-from-pod.sh)
 
-### Create and Grant Users to DCH Service
-For the purpose of the demo, we create `serviceaccount` instead of users.
-- To create and grant a user who can perform DCH **read**, run the script [create-grant-test-user.sh](scripts/create-grant-test-user.sh). You should see the following output:
-   ```console
-   TBD
-  ```
-- To create and grant an admin who can perform DCH **read/write**, run the script [create-grant-admin-user.sh](scripts/create-grant-admin-user.sh). You should see the following output:
-   ```console
-   TBD
-  ```
+### DCH Service Authentication/Authorization
+#### Config `kube-rbac-proxy`
+You  can run the script [scripts/config-kube-rbac-proxy.sh](scripts/config-kube-rbac-proxy.sh) to configure `kube-rbac-proxy` for authentication/authorization. This step will be done automatically when creating the `DataConnectService`.
+
+
+#### Create Roles
+There are 2 roles in DCH; namely, `dch-ingest` and `dch-admin`. The `dch-ingest` role has read-only permissions. The `dch-admin` role has all permissions.
+You can create roles in `dch-example` namespace by running the script [scripts/create-roles.sh](scripts/create-roles.sh). This step will be done automatically when creating the `DataConnectService`.
+
+#### Create Test User
+For the purpose of the demo, we create `serviceaccount` (SA) instead of users.
+You can run the script the script [scripts/create-test-user.sh](scripts/create-test-user.sh). This script creates `serviceaccount/dch-test-user` in `dch-example` namespace.
+
+You can verify the user as follows:
+```console
+$ oc get sa -n dch-example dch-test-user
+NAME            SECRETS   AGE
+dch-test-user   1         3m7s
+```
+
+#### Authorize Test User
+To allow `dch-test-user` to have `dch-ingest` role, you can run the script the script [scripts/auath-test-user.sh](scripts/auth-test-user.sh).
+
+#### Verify Rest Service Authentication
+You can run the script [scripts/verify-rest-auth.sh](scripts/verify-rest-auth.sh) to verify REST service authentication. You should see the following output:
+```console
+================================== VERIFY REST AUTH =============================
+--- Testing rest-service via gateway for dch-example ---
+  Waiting for port 8443 to be free...
+  Port-forwarding dch-gateway-data-science-gateway-class:443 -> localhost:8443...
+  Waiting for port-forward...
+Forwarding from 127.0.0.1:8443 -> 443
+Forwarding from [::1]:8443 -> 443
+Handling connection for 8443
+
+Test 1: Unauthenticated request (expect 401)...
+  CMD: curl -sk https://localhost:8443/api/v1/data/connections
+Handling connection for 8443
+  RESPONSE STATUS: 401
+  RESPONSE BODY: Unauthorized
+  PASSED: unauthenticated request rejected (401)
+
+Test 2: Non-matching path (expect 404)...
+  CMD: curl -sk -H 'Authorization: Bearer <token>' https://localhost:8443/api/v2/data/connections
+Handling connection for 8443
+  RESPONSE STATUS: 404
+  RESPONSE BODY:
+  PASSED: non-matching path — no route matched (404)
+
+Test 3: Bad token (expect 401)...
+  CMD: curl -sk -H 'Authorization: Bearer bad-token' https://localhost:8443/api/v1/data/connections
+Handling connection for 8443
+  RESPONSE STATUS: 401
+  RESPONSE BODY: Unauthorized
+  PASSED: bad token correctly rejected (401)
+
+Test 4: Authenticated request (expect 200 or 501)...
+  User: cluster-admin
+  CMD: curl -sk -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' https://localhost:8443/api/v1/data/connections
+Handling connection for 8443
+  RESPONSE STATUS: 501
+  RESPONSE BODY: {"code":"unimplemented","message":"Unimplemented"}
+  PASSED: authenticated request reached rest-service (501)
+
+ALL PASSED: gateway REST auth tests for dch-example
+```
+
+#### Verify Flight Service Authentication
+You can run the script [scripts/verify-flight-auth.sh](scripts/verify-flight-auth.sh) to verify flight service authentication. You should see the following output:
+```console
+TBF
+```
+
 
 ### DCH REST Service
 - REST Swagger
