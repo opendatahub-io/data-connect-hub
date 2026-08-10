@@ -18,10 +18,20 @@ spec:
     spec:
       serviceAccountName: data-connect-hub-sa
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rest-service
-          image: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
+          image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 100m
@@ -46,13 +56,13 @@ spec:
               readOnly: true
           readinessProbe:
             httpGet:
-              path: /health
+              path: /api/v1/data/health
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /health
+              path: /api/v1/data/health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 15

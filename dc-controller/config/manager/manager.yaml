@@ -69,6 +69,15 @@ spec:
         - containerPort: 8081
           name: health
           protocol: TCP
+        env:
+        - name: APPLICATIONS_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
+          value: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
+          value: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
         securityContext:
           readOnlyRootFilesystem: true
           allowPrivilegeEscalation: false

@@ -5,9 +5,13 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - ""
   resources:
-  - dataconnectservices
+  - configmaps
+  - persistentvolumeclaims
+  - secrets
+  - serviceaccounts
+  - services
   verbs:
   - create
   - delete
@@ -17,16 +21,72 @@ rules:
   - update
   - watch
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - apps
   resources:
-  - dataconnectservices/finalizers
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dataconnecthubs
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dataconnecthubs/finalizers
   verbs:
   - update
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - components.platform.opendatahub.io
   resources:
-  - dataconnectservices/status
+  - dataconnecthubs/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - gateways
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
+  - httproutes
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

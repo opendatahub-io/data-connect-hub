@@ -30,7 +30,7 @@ tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal"] }
 tokio-stream = "0.1"
 futures = "0.3"
 prost = "0.14"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 log = "0.4"
 env_logger = "0.11"
@@ -50,3 +50,5 @@ config = "0.15"
 kube = { version = "3.1.0", features = ["client", "runtime"] }
 k8s-openapi = { version = "0.27.0", features = ["latest"] }
 moka = "0.12"
+uuid = { version = "1", features = ["v4"] }
+chrono = "0.4"

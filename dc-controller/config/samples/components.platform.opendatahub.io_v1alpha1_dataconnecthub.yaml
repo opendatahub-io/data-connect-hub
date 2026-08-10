@@ -1,0 +1,14 @@
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
+metadata:
+  labels:
+    app.kubernetes.io/name: dc-controller
+    app.kubernetes.io/managed-by: kustomize
+  name: default-dataconnecthub
+spec:
+  devMode: true
+  gateway:
+    name: odh-gateway
+    namespace: opendatahub
+  restService: {}
+  flightService: {}

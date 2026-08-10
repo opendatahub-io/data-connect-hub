@@ -10,6 +10,7 @@ concurrency:
 jobs:
   dco:
     name: Check Signed-off-by (DCO)
+    if: github.event.pull_request.user.type != 'Bot'
     runs-on: ubuntu-latest
     permissions:
       contents: read

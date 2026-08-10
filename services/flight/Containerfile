@@ -14,14 +14,16 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    --profile minimal --default-toolchain 1.96.0
+    --profile minimal --default-toolchain none
 
 # protoc isn't available via microdnf on UBI9-minimal's unentitled repos, so fetch
 # the upstream release binary directly (arrow-flight's build script needs it).
 ARG PROTOC_VERSION=35.1
 RUN case "$(uname -m)" in \
-        x86_64) PROTOC_ARCH=x86_64 ;; \
+        x86_64)  PROTOC_ARCH=x86_64 ;; \
         aarch64) PROTOC_ARCH=aarch_64 ;; \
+        ppc64le) PROTOC_ARCH=ppcle_64 ;; \
+        s390x)   PROTOC_ARCH=s390_64 ;; \
         *) echo "unsupported arch: $(uname -m)" >&2; exit 1 ;; \
     esac \
     && curl -fsSL -o /tmp/protoc.zip \
@@ -37,6 +39,8 @@ WORKDIR /src
 # Source
 # ------------------------------------------------------------------------------
 
+COPY rust-toolchain.toml ./
+RUN rustup install
 COPY Cargo.toml Cargo.lock ./
 COPY libs/ ./libs/
 COPY connectors/ ./connectors/

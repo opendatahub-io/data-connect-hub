@@ -1,5 +1,5 @@
+use commons::api::errors::ConnectorError;
 use commons::api::tabular::FlightConnector;
-use commons::errors::ApiError;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -19,9 +19,12 @@ impl ConnectorsRegistry {
         self
     }
 
-    pub fn get_connector(&self, provider: &str) -> Result<&Arc<dyn FlightConnector>, ApiError> {
+    pub fn get_connector(&self, provider: &str) -> Result<&Arc<dyn FlightConnector>, ConnectorError> {
         self.connectors
             .get(provider)
-            .ok_or(ApiError::InvalidRequest(format!("Connector not found: {}", provider)))
+            .ok_or(ConnectorError::InvalidRequest(format!(
+                "Connector not found: {}",
+                provider
+            )))
     }
 }

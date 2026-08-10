@@ -1,0 +1,36 @@
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:d91be7cea9f03a757d69ad7fcdfcd7849dba820110e7980d5e2a1f46ed06ea3b AS builder
+
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+    && microdnf clean all
+
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH=/usr/local/cargo/bin:$PATH
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
+    --profile minimal --default-toolchain none
+
+WORKDIR /src
+
+COPY rust-toolchain.toml ./
+RUN rustup install
+COPY Cargo.toml Cargo.lock ./
+COPY libs/ ./libs/
+COPY connectors/ ./connectors/
+COPY services/ ./services/
+
+RUN cargo build --release -p rest-service \
+    && cp target/release/rest-service /usr/local/bin/rest-service
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:d91be7cea9f03a757d69ad7fcdfcd7849dba820110e7980d5e2a1f46ed06ea3b
+WORKDIR /
+
+RUN microdnf install -y ca-certificates \
+    && microdnf clean all
+
+COPY --from=builder --chown=root:root --chmod=0555 \
+    /usr/local/bin/rest-service /app/rest-service
+
+USER 1001:1001
+
+ENTRYPOINT ["/app/rest-service"]

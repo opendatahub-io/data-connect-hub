@@ -1,0 +1,80 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dc-controller.fullname" . }}-manager-role
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps, persistentvolumeclaims, secrets, serviceaccounts, services]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [components.platform.opendatahub.io]
+  resources: [dataconnecthubs]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [components.platform.opendatahub.io]
+  resources: [dataconnecthubs/finalizers]
+  verbs: [update]
+- apiGroups: [components.platform.opendatahub.io]
+  resources: [dataconnecthubs/status]
+  verbs: [get, patch, update]
+- apiGroups: [gateway.networking.k8s.io]
+  resources: [gateways]
+  verbs: [get, list, watch]
+- apiGroups: [gateway.networking.k8s.io]
+  resources: [httproutes]
+  verbs: [create, delete, get, list, patch, update, watch]
+- apiGroups: [networking.k8s.io]
+  resources: [networkpolicies]
+  verbs: [create, delete, get, list, patch, update, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dc-controller.fullname" . }}-manager-rolebinding
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "dc-controller.fullname" . }}-manager-role
+subjects:
+- kind: ServiceAccount
+  name: {{ include "dc-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "dc-controller.fullname" . }}-leader-election-role
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, list, watch, create, update, patch, delete]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "dc-controller.fullname" . }}-leader-election-rolebinding
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "dc-controller.fullname" . }}-leader-election-role
+subjects:
+- kind: ServiceAccount
+  name: {{ include "dc-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}

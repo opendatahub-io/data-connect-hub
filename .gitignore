@@ -1,3 +1,7 @@
+# OS files
+.DS_Store
+Thumbs.db
+
 # Cargo build output
 target/
 
@@ -31,6 +35,12 @@ coverage.json
 !.hooks/
 .claude/*
 !.claude/CLAUDE.md
+
+# Python SDK build artifacts
+sdk/python/dist/
+sdk/python/src/*.egg-info/
+sdk/python/.coverage
+sdk/python/htmlcov/
 
 # Docs are markdown only
 docs/**/

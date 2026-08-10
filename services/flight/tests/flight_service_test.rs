@@ -2,9 +2,14 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray};
 use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
-use commons::api::connections::{Admin, DataConnection, DataConnectionType, MetaStore, Secret};
+use commons::api::ResourceMetadata;
+use commons::api::connections::DataConnectionResource;
+use commons::api::connections::DataFormat;
+use commons::api::connections::{
+    Admin, DataConnection, DataConnectionType, DataConnectionTypeResource, MetaStore, Secret,
+};
+use commons::api::errors::MetaStoreError;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
-use commons::errors::MetaStoreError;
 use flight_service::flight::service::TabularDataService;
 use flight_service::flight::{InMemorySecretStore, registry::ConnectorsRegistry};
 use futures::TryStreamExt;
@@ -18,42 +23,97 @@ struct TestMetaStore;
 
 #[async_trait::async_trait]
 impl MetaStore for TestMetaStore {
-    async fn get_connection(&self, _tenant_id: &str, _connection_id: &str) -> Result<DataConnection, MetaStoreError> {
-        Ok(DataConnection {
-            id: "1234".to_string(),
-            name: "test-db".to_string(),
-            data_connection_type_id: "sqlite".to_string(),
-            format: "tabular".to_string(),
-            tenant_id: "default".to_string(),
-            admin: Admin {
-                secret_ref: "sqlite_creds".to_string(),
+    async fn get_data_connection(
+        &self,
+        _tenant_id: &str,
+        _connection_id: &str,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        Ok(DataConnectionResource {
+            metadata: ResourceMetadata {
+                id: "1234".to_string(),
+                tenant_id: "default".to_string(),
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
             },
-            created_at: "2026-07-21T00:00:00Z".to_string(),
-            updated_at: "2026-07-21T00:00:00Z".to_string(),
-            properties: HashMap::new(),
-            credentials: HashMap::new(),
+            resource: DataConnection {
+                name: "test-db".to_string(),
+                data_connection_type_id: "sqlite".to_string(),
+                format: DataFormat::Tabular,
+                admin: Some(Admin::SecretRef {
+                    secret_ref: "sqlite_creds".to_string(),
+                }),
+                properties: HashMap::new(),
+            },
         })
     }
+    async fn create_data_connection(
+        &self,
+        _tenant_id: &str,
+        _data_connection: DataConnection,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn delete_data_connection(&self, _tenant_id: &str, _uid: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn create_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _data_connection_type: DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn delete_data_connection_type(&self, _tenant_id: &str, _uid: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+
     async fn get_data_connection_type(
         &self,
         _tenant_id: &str,
         _id: &str,
-    ) -> Result<DataConnectionType, MetaStoreError> {
-        Ok(DataConnectionType {
-            id: "sqlite".to_string(),
-            tenant_id: Some("default".to_string()),
-            name: "SQLite".to_string(),
-            provider: "sqlite".to_string(),
-            description: None,
-            credentials_fields: vec![commons::api::connections::Field {
-                name: "url".to_string(),
-                label: "Url".to_string(),
-                d_type: "string".to_string(),
-                description: Some("SQLite connection URL".to_string()),
-                required: true,
-                enum_values: None,
-                default_value: None,
-            }],
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        Ok(DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: "sqlite".to_string(),
+                tenant_id: "default".to_string(),
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+            },
+            resource: DataConnectionType {
+                name: "SQLite".to_string(),
+                provider: "sqlite".to_string(),
+                description: None,
+                credentials_fields: vec![commons::api::connections::Field {
+                    name: "url".to_string(),
+                    label: "Url".to_string(),
+                    d_type: "string".to_string(),
+                    description: Some("SQLite connection URL".to_string()),
+                    required: true,
+                    enum_values: None,
+                    default_value: None,
+                }],
+            },
         })
     }
 }
@@ -175,6 +235,7 @@ async fn test_flight_sql_select_prompts() {
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
         Arc::new(secret_store),
+        Default::default(),
     );
 
     tokio::spawn(async move {

@@ -1,0 +1,58 @@
+name: Python SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk/python/**'
+  pull_request:
+    paths:
+      - 'sdk/python/**'
+
+concurrency:
+  group: python-sdk-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('sdk/python/pyproject.toml') }}
+
+      - name: Install dependencies
+        run: make sdk-install
+
+      - name: Lint
+        run: make sdk-lint
+
+      - name: Typecheck
+        run: make sdk-typecheck
+
+      - name: Test
+        run: make sdk-test
+
+      - name: Upload coverage
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: sdk/python/htmlcov/
+          retention-days: 14

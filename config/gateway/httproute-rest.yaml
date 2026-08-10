@@ -1,0 +1,25 @@
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: data-connect-hub
+  labels:
+    app.kubernetes.io/part-of: data-connect-hub
+spec:
+  parentRefs:
+    - name: odh-gateway
+      namespace: opendatahub
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/data
+      backendRefs:
+        - name: rest-service
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /arrow.flight.protocol.FlightService
+      backendRefs:
+        - name: flight-service
+          port: 50051

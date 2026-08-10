@@ -14,7 +14,7 @@ ENV RUSTUP_HOME=/usr/local/rustup \
     PATH=/usr/local/cargo/bin:$PATH
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    --profile minimal --default-toolchain 1.96.0
+    --profile minimal --default-toolchain none
 
 WORKDIR /src
 
@@ -22,6 +22,8 @@ WORKDIR /src
 # Source
 # ------------------------------------------------------------------------------
 
+COPY rust-toolchain.toml ./
+RUN rustup install
 COPY Cargo.toml Cargo.lock ./
 COPY libs/ ./libs/
 COPY connectors/ ./connectors/

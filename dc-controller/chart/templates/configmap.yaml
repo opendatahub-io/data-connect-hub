@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opendatahub-dataconnecthub-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    platform.opendatahub.io/managed: "true"
+    {{- include "dc-controller.labels" . | nindent 4 }}
+data:
+  distribution.name: "Standalone"
+  distribution.version: "0.0.0"
+  controller.log.level: "info"
+  gateway.name: "odh-gateway"
+  gateway.namespace: "opendatahub"

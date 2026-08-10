@@ -5,6 +5,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use config::{Config, File};
 use flight_service::flight::TabularDataService;
+use flight_service::flight::auth::AuthInterceptor;
 use flight_service::flight::registry::ConnectorsRegistry;
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
@@ -70,6 +71,7 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
 async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
+    config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
     commons::utils::init_tracing(args.json_logs);
 
     tracing::info!("Starting DataConnectorHub Flight service");
@@ -82,14 +84,22 @@ async fn main() -> Result<()> {
         )))
         .with_connector(Arc::new(SqliteConnector::new()));
 
-    let secret_store = KubeSecretStore::try_default().await?;
+    let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
+
+    let query_options = commons::api::tabular::QueryOptions {
+        batch_size: config.query.batch_size,
+    };
 
     let addr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let service = TabularDataService::new(
         Arc::new(connectors_registry),
         Arc::new(PgMetaStore::new(config.database).await?),
         Arc::new(secret_store),
+        query_options,
     );
+
+    let auth_interceptor = AuthInterceptor::new();
+    let service = FlightServiceServer::with_interceptor(service, auth_interceptor);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -98,7 +108,7 @@ async fn main() -> Result<()> {
 
     tonic::transport::Server::builder()
         .add_service(health_service)
-        .add_service(FlightServiceServer::new(service))
+        .add_service(service)
         .serve_with_shutdown(addr, shutdown_signal())
         .await?;
 

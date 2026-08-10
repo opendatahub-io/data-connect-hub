@@ -1,9 +1,0 @@
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
-metadata:
-  labels:
-    app.kubernetes.io/name: dc-controller
-    app.kubernetes.io/managed-by: kustomize
-  name: dataconnectservice-sample
-spec:
-  # TODO(user): Add fields here

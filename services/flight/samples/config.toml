@@ -9,3 +9,7 @@ port = 50051
 max_capacity = 50
 ttl_secs = 30
 idle_secs = 30
+
+[query]
+batch_size = 512
+max_rows = 1000000

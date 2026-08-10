@@ -5,15 +5,16 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnection;
-use commons::api::tabular::TabularState;
+use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::errors::ConnectorError;
+use commons::api::tabular::{QueryOptions, TabularState};
 use commons::api::tabular::{QueryOutput, TabularReader};
-use commons::errors::ApiError;
 
 use futures::StreamExt;
 
 use commons::api::tabular::FlightConnector;
 use moka::future::Cache;
+use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
 use std::time::Duration;
@@ -40,20 +41,29 @@ impl FlightConnector for PgConnector {
         "postgres".to_string()
     }
 
-    async fn get_reader(&self, data_connection: &DataConnection) -> Result<Arc<dyn TabularReader>, ApiError> {
-        let url = data_connection
-            .credentials
+    async fn get_reader(
+        &self,
+        data_connection: &DataConnectionResource,
+    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+        let credentials = match &data_connection.resource.admin {
+            Some(Admin::Secret { secret }) => Some(secret.clone()),
+            _ => None,
+        }
+        .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
+
+        let url = credentials
             .get("url")
-            .ok_or_else(|| ApiError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+            .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
                 PgPool::connect(url.as_str())
                     .await
-                    .map_err(|e| ApiError::ConnectionError(e.to_string()))
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))
             })
             .await
-            .map_err(|e| ApiError::ConnectionError(e.to_string()))?;
+            .map_err(|_| ConnectorError::ConnectionError("Failed to get PostgreSQL reader".to_string()))?;
 
         Ok(Arc::new(PgReader { pool }))
     }
@@ -71,12 +81,12 @@ impl TabularReader for PgReader {
         "postgres".to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ApiError> {
+    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
         let statement = self
             .pool
             .prepare(query)
             .await
-            .map_err(|e| ApiError::SQLError(e.to_string()))?;
+            .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
 
         let fields: Vec<Field> = statement
             .columns()
@@ -90,33 +100,46 @@ impl TabularReader for PgReader {
         )))
     }
 
-    async fn read(&self, state: Arc<TabularState>, batch_size: usize) -> QueryOutput {
+    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
         let schema = state.schema.clone();
         let query = state.query.clone();
+        let batch_size = options.batch_size;
 
         let stream = async_stream::try_stream! {
-            let mut rows = sqlx::query(query.as_str()).fetch(&pool);
-            let mut chunk = Vec::with_capacity(batch_size);
+            let mut conn = pool.acquire().await.map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
+            let mut tx = conn.begin().await.map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+            sqlx::query("SET TRANSACTION READ ONLY")
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
 
-            while let Some(row) = rows.next().await {
-                chunk.push(row.map_err(|e| ApiError::SQLError(e.to_string()))?);
-                if chunk.len() >= batch_size {
+            {
+                let mut rows = sqlx::query(query.as_str()).fetch(&mut *tx);
+                let mut chunk = Vec::with_capacity(batch_size);
+
+                while let Some(row) = rows.next().await {
+                    chunk.push(row.map_err(|e| ConnectorError::SQLError(e.to_string()))?);
+
+                    if chunk.len() >= batch_size {
+                        yield rows_to_batch(&schema, &chunk)?;
+                        chunk.clear();
+                    }
+                }
+
+                if !chunk.is_empty() {
                     yield rows_to_batch(&schema, &chunk)?;
-                    chunk.clear();
                 }
             }
 
-            if !chunk.is_empty() {
-                yield rows_to_batch(&schema, &chunk)?;
-            }
+            tx.commit().await.map_err(|e| ConnectorError::SQLError(e.to_string()))?;
         };
 
         Ok(Box::pin(stream))
     }
 }
 
-fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, ApiError> {
+fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, ConnectorError> {
     let columns = rows[0].columns();
     let arrays: Vec<ArrayRef> = (0..columns.len())
         .map(|col_idx| {
@@ -125,7 +148,7 @@ fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, Ap
         })
         .collect();
 
-    RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ApiError::SQLError(e.to_string()))
+    RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
 
 fn pg_type_to_arrow(pg_type: &str) -> DataType {

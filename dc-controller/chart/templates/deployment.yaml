@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dc-controller.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.controllerManager.replicas }}
+  selector:
+    matchLabels:
+      {{- include "dc-controller.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/default-container: manager
+      labels:
+        {{- include "dc-controller.selectorLabels" . | nindent 8 }}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: {{ include "dc-controller.fullname" . }}
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: manager
+        image: "{{ .Values.controllerManager.image.repository }}:{{ .Values.controllerManager.image.tag }}"
+        imagePullPolicy: {{ .Values.controllerManager.image.pullPolicy }}
+        command: ["/manager"]
+        args:
+          {{- if .Values.leaderElection }}
+          - --leader-elect
+          {{- end }}
+          - --health-probe-bind-address=:8081
+        env:
+        - name: APPLICATIONS_NAMESPACE
+          {{- if .Values.operandNamespace }}
+          value: {{ .Values.operandNamespace | quote }}
+          {{- else }}
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+          {{- end }}
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
+          value: {{ .Values.relatedImages.restService | quote }}
+        - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
+          value: {{ .Values.relatedImages.flightService | quote }}
+        ports:
+        - name: health
+          containerPort: 8081
+          protocol: TCP
+        securityContext:
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop: ["ALL"]
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        resources:
+          {{- toYaml .Values.controllerManager.resources | nindent 10 }}
+        volumeMounts: []
+      volumes: []

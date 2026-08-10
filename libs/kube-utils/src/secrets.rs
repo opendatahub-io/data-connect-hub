@@ -1,41 +1,58 @@
 use commons::api::connections::{Secret, SecretStore};
-use commons::errors::SecretStoreError;
+use commons::api::errors::SecretStoreError;
 use k8s_openapi::api::core::v1::Secret as K8sSecret;
 use kube::{Api, Client};
+use moka::future::Cache;
 use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Duration;
 
 pub struct KubeSecretStore {
     client: Client,
+    cache: Cache<String, Secret>,
 }
 
 impl KubeSecretStore {
-    pub fn new(client: Client) -> Self {
-        Self { client }
+    pub fn new(client: Client, cache_ttl: Duration) -> Self {
+        Self {
+            client,
+            cache: Cache::builder().time_to_live(cache_ttl).build(),
+        }
     }
 
-    pub async fn try_default() -> Result<Self, kube::Error> {
+    pub async fn try_default(cache_ttl: Duration) -> Result<Self, kube::Error> {
         let client = Client::try_default().await?;
-        Ok(Self { client })
+        Ok(Self::new(client, cache_ttl))
     }
 }
 
 #[async_trait::async_trait]
 impl SecretStore for KubeSecretStore {
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError> {
-        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
+        let key = format!("{namespace}/{name}");
+        let client = self.client.clone();
+        let ns = namespace.to_string();
+        let n = name.to_string();
 
-        let k8s_secret = api
-            .get(name)
+        self.cache
+            .try_get_with(key, async move {
+                let api: Api<K8sSecret> = Api::namespaced(client, &ns);
+                let k8s_secret = api
+                    .get(&n)
+                    .await
+                    .map_err(|_| SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string()))?;
+                let properties = extract_properties(&k8s_secret);
+                Ok(Secret {
+                    name: n,
+                    namespace: ns,
+                    properties,
+                })
+            })
             .await
-            .map_err(|_| SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string()))?;
-
-        let properties = extract_properties(&k8s_secret);
-
-        Ok(Secret {
-            name: name.to_string(),
-            namespace: namespace.to_string(),
-            properties,
-        })
+            .map_err(|e: Arc<SecretStoreError>| match e.as_ref() {
+                SecretStoreError::SecretNotFound(msg) => SecretStoreError::SecretNotFound(msg.clone()),
+                SecretStoreError::Forbidden(msg) => SecretStoreError::Forbidden(msg.clone()),
+            })
     }
 }
 

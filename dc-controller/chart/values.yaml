@@ -1,0 +1,70 @@
+controllerManager:
+  image:
+    repository: ghcr.io/opendatahub-io/data-connect-hub/dc-controller
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    limits:
+      cpu: 500m
+      memory: 128Mi
+    requests:
+      cpu: 10m
+      memory: 64Mi
+
+relatedImages:
+  restService: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
+  flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+
+leaderElection: true
+
+# operandNamespace: ""  # defaults to the controller's namespace if unset
+
+dataConnectHub:
+  enabled: true
+  devMode: true
+
+  # database:
+  #   externalSecret: my-database-secret  # required when devMode is false
+
+  restService: {}
+    # image: "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+    # replicas: 1
+    # resources:
+    #   requests:
+    #     cpu: "100m"
+    #     memory: "256Mi"
+    #   limits:
+    #     cpu: "1"
+    #     memory: "512Mi"
+    # env:
+    #   - name: RUST_LOG
+    #     value: debug
+    # envFrom: []
+    # volumes: []
+    # volumeMounts: []
+    # imagePullSecrets:
+    #   - name: my-pull-secret
+
+  flightService: {}
+    # image: "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    # replicas: 1
+    # resources:
+    #   requests:
+    #     cpu: "100m"
+    #     memory: "256Mi"
+    #   limits:
+    #     cpu: "1"
+    #     memory: "512Mi"
+    # env:
+    #   - name: RUST_LOG
+    #     value: debug
+    # envFrom: []
+    # volumes: []
+    # volumeMounts: []
+    # imagePullSecrets:
+    #   - name: my-pull-secret
+
+  gateway: {}
+    # name: odh-gateway
+    # namespace: opendatahub

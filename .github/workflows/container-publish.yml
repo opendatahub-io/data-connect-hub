@@ -70,6 +70,26 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
 
+      - name: Build and push dc-controller
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: dc-controller/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ${{ env.REGISTRY }}/${{ github.repository }}/dc-controller:${{ steps.meta.outputs.commit_sha }}
+            ${{ env.REGISTRY }}/${{ github.repository }}/dc-controller:${{ steps.meta.outputs.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.created=${{ steps.meta.outputs.build_date }}
+            org.opencontainers.image.title=dc-controller
+            org.opencontainers.image.description=Data Connect Hub - Kubernetes Controller
+          cache-from: type=gha,scope=dc-controller
+          cache-to: type=gha,mode=max,scope=dc-controller
+
       - name: Build and push flight-service
         uses: docker/build-push-action@v6
         with:
@@ -117,6 +137,8 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           echo "Images pushed:"
+          echo "  - ${REGISTRY_REPO}/dc-controller:${COMMIT_SHA}"
+          echo "  - ${REGISTRY_REPO}/dc-controller:${TAG}"
           echo "  - ${REGISTRY_REPO}/flight-service:${COMMIT_SHA}"
           echo "  - ${REGISTRY_REPO}/flight-service:${TAG}"
           echo "  - ${REGISTRY_REPO}/rest-service:${COMMIT_SHA}"

@@ -17,11 +17,21 @@ spec:
         app.kubernetes.io/part-of: data-connect-hub
     spec:
       serviceAccountName: flight-service-sa
-      automountServiceAccountToken: false
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: flight-service
-          image: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+          image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
           resources:
             requests:
               cpu: 100m

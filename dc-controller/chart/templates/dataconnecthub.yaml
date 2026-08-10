@@ -1,0 +1,28 @@
+{{- if .Values.dataConnectHub.enabled }}
+{{- $spec := dict }}
+{{- if not .Values.dataConnectHub.devMode }}
+  {{- $_ := set $spec "devMode" false }}
+{{- end }}
+{{- with .Values.dataConnectHub.database }}
+  {{- $_ := set $spec "database" . }}
+{{- end }}
+{{- with .Values.dataConnectHub.restService }}
+  {{- $_ := set $spec "restService" . }}
+{{- end }}
+{{- with .Values.dataConnectHub.flightService }}
+  {{- $_ := set $spec "flightService" . }}
+{{- end }}
+{{- with .Values.dataConnectHub.gateway }}
+  {{- $_ := set $spec "gateway" . }}
+{{- end }}
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
+metadata:
+  name: default-dataconnecthub
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec: {{- if $spec }}
+  {{- toYaml $spec | nindent 2 }}
+{{- else }} {}
+{{- end }}
+{{- end }}

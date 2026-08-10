@@ -1,159 +1,263 @@
-# Deploying Data Connect Hub (current state)
+# Deploying Data Connect Hub
 
-This documents the current, working way to deploy Data Connect Hub to an
-OpenShift cluster using the Kustomize manifests under `config/`. It reflects
-what's actually been stood up and tested so far, not a finished/final
-deployment story.
+Data Connect Hub can be deployed in two ways:
 
-## Layout
+1. **Operator (recommended)** -- install the `dc-controller` operator via Helm.
+   The operator handles Postgres, rest-service, flight-service, networking, and
+   lifecycle management automatically.
+2. **Kustomize (manual)** -- apply the Kustomize manifests under `config/`
+   directly. Useful when you want full control over each component or cannot
+   run an operator.
 
-```text
-config/
-  base/
-    rest-service/     # HTTP API (actix-web), port 8080
-    flight-service/    # Arrow Flight gRPC service, port 50051
-  db/
-    postgres/          # Postgres instance backing both services
-```
+---
 
-Each directory is a self-contained Kustomization, applied independently.
-There is no top-level `config/base/kustomization.yaml` yet aggregating all
-three — apply them one at a time as shown below.
+## Prerequisites (both methods)
 
-## Prerequisites
-
-- OpenShift 4.20+ (Kubernetes 1.33+) — required for the native `grpc:`
-  readiness/liveness probe type used by `flight-service`. Validated against
-  a 4.20.31 cluster.
-- Logged in to the target cluster (`oc login` / `oc whoami` should work)
-- A namespace to deploy into. These docs use `redhat-ods-applications`,
-  which is what we validated against — swap it for your own namespace.
-- `openssl` available locally (used by the secret-generation script)
+- OpenShift 4.20+ (Kubernetes 1.33+) -- required for the native `grpc:`
+  readiness/liveness probe type used by `flight-service`.
+- Logged in to the target cluster (`oc login` / `oc whoami` should work).
 
 ### Image pulls
 
 - `rest-service` / `flight-service` images live at
   `ghcr.io/opendatahub-io/data-connect-hub/{rest-service,flight-service}:latest`,
-  built by this repo's CI, with `imagePullPolicy: Always`. This is
-  intentional for now, while the project is early and changing fast —
-  expect this to move to pinned, intentionally-updated digests as things
-  stabilize. **Note:** `imagePullPolicy: Always` only affects Pods when they
-  start — it does **not** make `oc apply -k` refresh already-running Pods
-  after a new image is pushed to `:latest`. Force that with:
-  ```console
-  oc rollout restart deployment/rest-service -n <your-namespace>
-  oc rollout restart deployment/flight-service -n <your-namespace>
-  ```
+  built by this repo's CI with `imagePullPolicy: Always`.
 - `registry.redhat.io/rhel9/postgresql-16` requires registry auth, but on
   most OpenShift clusters the cluster-wide pull secret already covers
-  `registry.redhat.io` — no extra pull secret is needed for Postgres. If
-  your cluster doesn't have that configured, you'll need to add one.
-- `rest-service`/`flight-service` each have their own `ServiceAccount`
-  (`data-connect-hub-sa`, `flight-service-sa`) referencing an
-  `imagePullSecrets` entry named `dch-pull-secret`. That secret must already
-  exist in your target namespace and cover whichever registry actually
-  hosts your images.
+  `registry.redhat.io`.
 
-## 1. Generate Postgres credentials (once per environment)
+---
+
+## Option 1: Operator deployment (Helm)
+
+A single `helm install` deploys the controller, CRD, RBAC, and creates
+the `DataConnectHub` CR automatically.
+
+### 1. Install
+
+```console
+cd dc-controller
+
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace
+```
+
+If you want operands (rest-service, flight-service, postgres) deployed to
+a separate namespace, create it first and pass `operandNamespace`:
+
+```console
+oc create ns dch-services
+
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace \
+  --set operandNamespace=dch-services
+```
+
+By default, operands are deployed into the controller's namespace.
+
+### 2. Override images
+
+To use custom images (e.g. for dev/testing with a private registry):
+
+```console
+helm install dc-controller chart/ \
+  --namespace dc-controller-system --create-namespace \
+  --set controllerManager.image.repository=quay.io/YOUR_ORG/dc-controller \
+  --set controllerManager.image.tag=latest \
+  --set relatedImages.restService=quay.io/YOUR_ORG/rest-service:latest \
+  --set relatedImages.flightService=quay.io/YOUR_ORG/flight-service:latest
+```
+
+Image resolution priority (highest wins):
+1. CR spec override (`spec.restService.image`)
+2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
+3. Default (`ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest`)
+
+### 3. Verify
+
+```console
+oc get pods -n dc-controller-system
+oc get dch default-dataconnecthub
+```
+
+The `Phase` column progresses through `Progressing` to `Ready`.
+
+### 4. Customising via values.yaml
+
+All `DataConnectHub` CR fields are configurable through Helm values.
+The CR is created automatically with `dataConnectHub.enabled: true`
+(the default).
+
+```yaml
+dataConnectHub:
+  enabled: true        # set false to skip CR creation
+  # devMode: true      # omitted by default (CRD defaults to true)
+
+  # External database (set devMode to false first)
+  # database:
+  #   externalSecret: my-database-secret
+
+  restService:
+    image: "my-registry/rest-service:v1.2.3"
+    replicas: 3
+    resources:
+      requests:
+        cpu: "200m"
+        memory: "512Mi"
+      limits:
+        cpu: "2"
+        memory: "1Gi"
+    env:
+      - name: RUST_LOG
+        value: debug
+    imagePullSecrets:
+      - name: my-pull-secret
+
+  flightService:
+    image: "my-registry/flight-service:v1.2.3"
+    replicas: 2
+
+  gateway:
+    name: my-gateway
+    namespace: my-gateway-ns
+```
+
+Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
+`envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
+
+### 5. Monitor status
+
+```console
+oc get dch default-dataconnecthub -o yaml
+```
+
+Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`.
+
+### 6. What gets created
+
+| Resource | Name | Notes |
+|----------|------|-------|
+| Deployment | `rest-service` | HTTP API on port 8080 |
+| Deployment | `flight-service` | Arrow Flight gRPC on port 50051 |
+| Deployment | `postgres` | Only when `devMode: true` |
+| Service | `rest-service` | ClusterIP, port 8080 |
+| Service | `flight-service` | ClusterIP, port 50051 |
+| Service | `postgres` | ClusterIP, port 5432 (devMode only) |
+| ServiceAccount | `data-connect-hub-sa` | For rest-service |
+| ServiceAccount | `flight-service-sa` | For flight-service |
+| ConfigMap | `rest-service-config` | Server config (config.toml) |
+| ConfigMap | `flight-service-config` | Server config (config.toml) |
+| Secret | `postgres-credentials` | Auto-generated (devMode only) |
+| PVC | `postgres-data` | 5Gi, ReadWriteOnce (devMode only) |
+| NetworkPolicy | `rest-service` | Ingress/egress rules |
+| NetworkPolicy | `flight-service` | Ingress/egress rules |
+| NetworkPolicy | `postgres` | Ingress/egress rules (devMode only) |
+| HTTPRoute | `data-connect-hub` | Routes traffic via gateway |
+
+All resources have owner references back to the CR. The CR carries a
+finalizer, so deleting the CR cleans up everything.
+
+### 7. Uninstall
+
+Delete the CR first so the finalizer cleans up all managed resources,
+then remove the operator:
+
+```console
+oc delete dch default-dataconnecthub
+helm uninstall dc-controller -n dc-controller-system
+```
+
+### 8. Verify
+
+```console
+# REST health check
+oc exec deploy/rest-service -n <namespace> -- \
+  curl -s http://localhost:8080/api/v1/data/health
+
+# Flight gRPC health (pod readiness uses built-in gRPC probe)
+oc get pod -l app.kubernetes.io/name=flight-service -n <namespace>
+```
+
+---
+
+## Option 2: Kustomize deployment
+
+### Layout
+
+```text
+config/
+  base/
+    rest-service/      # HTTP API (actix-web), port 8080
+    flight-service/    # Arrow Flight gRPC service, port 50051
+  db/
+    postgres/          # Postgres instance backing both services
+  overlays/
+    dev/               # Dev overlay aggregating base + db + gateway
+```
+
+Each subdirectory under `base/` is a self-contained Kustomization. The
+`overlays/dev` overlay aggregates all components for a single `oc apply`.
+
+### 1. Generate Postgres credentials (once per environment)
 
 Postgres credentials are **not** committed to the repo. Kustomize's
-`secretGenerator` builds the real `Secret` from two local files that you
-generate once per environment and that are git-ignored:
+`secretGenerator` builds the `Secret` from local files generated by:
 
 ```console
 ./config/db/postgres/generate-secrets.sh
 ```
 
-This creates, next to the script (both `chmod 600`, owner-read/write only):
-- `postgres-credentials.env` — `POSTGRESQL_USER` / `POSTGRESQL_PASSWORD` /
-  `POSTGRESQL_DATABASE`, consumed by the Postgres container itself.
-- `secret-config.toml` — a `[database]` TOML snippet with the full connection
-  URL, mounted into `rest-service`/`flight-service` as a file (see below).
+This creates (both `chmod 600`, git-ignored):
+- `postgres-credentials.env` -- `POSTGRESQL_USER` / `POSTGRESQL_PASSWORD` /
+  `POSTGRESQL_DATABASE`
+- `secret-config.toml` -- `[database]` TOML with the full connection URL,
+  mounted into rest-service/flight-service
 
-The script refuses to overwrite existing files — delete them first if you
-genuinely want to rotate credentials (see the note on rotation below).
+The script refuses to overwrite existing files. Delete them first to rotate
+credentials.
 
-`*.env.example` / `*.toml.example` in the same directory show the expected
-shape if you want to hand-author these instead.
-
-## 2. Deploy Postgres
+### 2a. Deploy everything at once (dev overlay)
 
 ```console
-oc apply -k config/db/postgres -n <your-namespace>
+oc apply -k config/overlays/dev -n <your-namespace>
 oc rollout status deployment/postgres -n <your-namespace>
+oc rollout status deployment/rest-service -n <your-namespace>
+oc rollout status deployment/flight-service -n <your-namespace>
 ```
 
-This creates a `Secret` (from the generated files), a 5Gi `PersistentVolumeClaim`
-(default StorageClass), a `Deployment` (single replica, `Recreate` strategy —
-required since the PVC is `ReadWriteOnce`), a `Service` reachable
-in-namespace at `postgres:5432`, and a `NetworkPolicy` (currently allow-all
-ingress/egress — a placeholder to tighten once we have a defined
-gateway/client topology, not a real restriction yet).
-
-**Credential rotation caveat:** this Postgres image only sets a role's
-password at first `initdb`; on every subsequent start it runs
-`ALTER ROLE <user> PASSWORD ...` for whatever's in the Secret. That means you
-can safely rotate the **password** by deleting *both* `postgres-credentials.env`
-and `secret-config.toml`, rerunning `generate-secrets.sh`, re-applying, and
-restarting Postgres — but you **cannot** change `POSTGRESQL_USER` without
-wiping `postgres-data` and reinitializing, since the role won't exist yet
-under the new name.
-
-Note the Secret's name is intentionally kept stable (no content-hash
-suffix — see the comment in `config/db/postgres/kustomization.yaml`), since
-`rest-service`/`flight-service` reference it by static name from separate
-Kustomize trees. The tradeoff: rotating it does **not** automatically roll
-those two Deployments — you must restart them manually (next section).
-
-## 3. Deploy rest-service and flight-service
+### 2b. Deploy components individually
 
 ```console
+# Postgres first
+oc apply -k config/db/postgres -n <your-namespace>
+oc rollout status deployment/postgres -n <your-namespace>
+
+# Then services
 oc apply -k config/base/rest-service -n <your-namespace>
 oc apply -k config/base/flight-service -n <your-namespace>
 oc rollout status deployment/rest-service -n <your-namespace>
 oc rollout status deployment/flight-service -n <your-namespace>
 ```
 
-Both services get their `config.toml` from a `ConfigMap` (server/cache
-settings only — no credentials) and their database connection info from
-`/secrets/secret-config.toml`, mounted from the same `postgres-credentials`
-Secret Postgres uses. The app merges both file sources at startup, with the
-mounted secret file taking priority for the `[database]` section.
+### 3. Updating images
 
-If you rotate the Postgres password (see above), restart **both** of these
-deployments afterward so they re-read the updated secret file — mounted
-Secret volumes update automatically, but the app only reads config once at
-startup:
+`imagePullPolicy: Always` is set on both services. To pick up a new image
+pushed to `:latest`:
 
 ```console
 oc rollout restart deployment/rest-service -n <your-namespace>
 oc rollout restart deployment/flight-service -n <your-namespace>
 ```
 
-## 4. Verify
+---
 
-```console
-# rest-service has a real health route now
-oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/health
+## Known gaps
 
-# and the app can actually query the DB
-oc exec deploy/rest-service -n <your-namespace> -- \
-  curl -s http://127.0.0.1:8080/v1/data/connections
-
-# flight-service: Ready 1/1 means its gRPC health check (tonic-health) is
-# passing, which only happens after it successfully connects to Postgres
-oc get pods -n <your-namespace> -l app.kubernetes.io/name=flight-service
-```
-
-## Known gaps / follow-ups
-
-- No top-level Kustomization ties `rest-service` + `flight-service` +
-  `postgres` together yet; each is applied separately. This also means
-  Postgres secret rotation can't be auto-propagated to its consumers (see
-  above) without merging into one kustomization.
-- No `odh` / `rhoai` overlays yet (`config/overlays/` exists but is empty).
-- `NetworkPolicy` resources exist for all three components but currently
-  allow all ingress/egress — real restriction is pending a defined
-  gateway/client topology.
-- Postgres has no backup/restore story — it's a single instance with a
-  Kubernetes-managed PVC, fine for dev but not a substitute for real backups.
+- **Postgres** is a single instance with a Kubernetes PVC -- fine for dev,
+  not a substitute for real backups. For production, set `devMode: false`
+  and provide `database.externalSecret` referencing a Secret with your
+  database connection details.
+- **NetworkPolicy** resources allow all ingress/egress -- real restriction
+  is pending a defined gateway/client topology.
+- **Operand namespace** is not auto-created by the controller -- create it
+  before installing if using `operandNamespace`.
