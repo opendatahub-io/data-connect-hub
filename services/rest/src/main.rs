@@ -6,14 +6,14 @@ use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
-use anyhow::Result;
-use config::{Config, File};
 use crate::utils::loader::sync_default_connection_types;
+use anyhow::Result;
+use commons::api::connections::MetaStore;
+use config::{Config, File};
+use kube_utils::secrets::KubeSecretStore;
+use pg_meta_store::store::PgMetaStore;
 use std::sync::Arc;
 use std::time::Duration;
-use commons::api::connections::MetaStore;
-use pg_meta_store::store::PgMetaStore;
-use kube_utils::secrets::KubeSecretStore;
 
 mod rest;
 mod utils;
@@ -35,7 +35,7 @@ struct CommandLineArgs {
     secret_config: String,
 }
 
-fn api_routes(cfg: &mut web::ServiceConfig, service: Arc<ApiService>) {
+fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/api/v1/data/health", web::get().to(health))
         .service(
             web::scope("/api/v1/data").service(
@@ -80,10 +80,7 @@ async fn main() -> Result<()> {
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
 
-    let service = Arc::new(ApiService::new(
-        meta_store,
-        Arc::new(secret_store)
-    ));
+    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store)));
 
     HttpServer::new(move || {
         let service = service.clone();

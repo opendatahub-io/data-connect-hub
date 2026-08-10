@@ -24,14 +24,14 @@ struct HealthResponse {
 
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
-    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    _secret_store: Arc<dyn SecretStore + Send + Sync>,
 }
 
 impl ApiService {
     pub fn new(meta_store: Arc<dyn MetaStore + Send + Sync>, secret_store: Arc<dyn SecretStore + Send + Sync>) -> Self {
         Self {
             meta_store,
-            secret_store,
+            _secret_store: secret_store,
         }
     }
 }
@@ -43,23 +43,23 @@ pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
 }
 
 pub async fn list_connections(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn get_connection(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    id: web::Path<String>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn create_connection(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
     connection: web::Json<DataConnection>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Ok(HttpResponse::Ok().json(connection))
@@ -92,10 +92,10 @@ pub async fn get_connection_type(
 }
 
 pub async fn patch_connection(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    id: web::Path<String>,
-    body: web::Json<Vec<JsonPatch>>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _id: web::Path<String>,
+    _body: web::Json<Vec<JsonPatch>>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
@@ -116,26 +116,26 @@ pub async fn create_connection_type(
 }
 
 pub async fn patch_connection_type(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    path: web::Path<String>,
-    body: Bytes,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _path: web::Path<String>,
+    _body: Bytes,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    path: web::Path<String>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _path: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection_type(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    path: web::Path<String>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _path: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }

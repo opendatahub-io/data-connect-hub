@@ -87,7 +87,7 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         data_connection: &DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError> {
-        Self::can_store(&data_connection).await?;
+        Self::can_store(data_connection).await?;
 
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let resource = DataConnectionResource {
@@ -204,10 +204,10 @@ impl MetaStore for PgMetaStore {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-            Ok(ResourceList {
-                total_count: items.len(),
-                items,
-            })
+        Ok(ResourceList {
+            total_count: items.len(),
+            items,
+        })
     }
 
     async fn get_data_connection_type(

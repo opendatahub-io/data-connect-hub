@@ -115,8 +115,11 @@ pub struct DataConnectionTypeResource {
 #[async_trait::async_trait]
 pub trait MetaStore {
     /// Retrieves all data connections for the given tenant.
-    async fn get_data_connections(&self, tenant_id: &str) -> Result<ResourceList<DataConnectionResource>, MetaStoreError>;
-    
+    async fn get_data_connections(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionResource>, MetaStoreError>;
+
     /// Retrieves a data connection by tenant and unique identifier.
     async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError>;
 
@@ -139,7 +142,10 @@ pub trait MetaStore {
     async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
 
     /// Retrieves all data connection types for the given tenant.
-    async fn get_data_connection_types(&self, tenant_id: &str) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
+    async fn get_data_connection_types(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
 
     /// Retrieves a data connection type by tenant and unique identifier.
     async fn get_data_connection_type(

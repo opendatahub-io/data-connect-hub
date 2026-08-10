@@ -16,10 +16,7 @@ fn load_default_connection_types(folder: &str) -> Result<Vec<DataConnectionType>
     Ok(types)
 }
 
-pub async fn sync_default_connection_types(
-    meta_store: &Arc<dyn MetaStore + Send + Sync>,
-    folder: &str,
-) -> Result<()> {
+pub async fn sync_default_connection_types(meta_store: &Arc<dyn MetaStore + Send + Sync>, folder: &str) -> Result<()> {
     let defaults = load_default_connection_types(folder)?;
     tracing::info!("Loaded {} default connection types", defaults.len());
 
@@ -38,11 +35,11 @@ pub async fn sync_default_connection_types(
                 meta_store
                     .update_data_connection_type("", uid, Arc::new(move |_| Ok(ct.clone())))
                     .await?;
-            }
+            },
             None => {
                 tracing::info!("Creating default connection type: {}", ct.name);
                 meta_store.create_data_connection_type("", ct).await?;
-            }
+            },
         }
     }
     Ok(())
