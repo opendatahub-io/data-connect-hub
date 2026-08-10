@@ -8,29 +8,35 @@ The SDK flattens these into user-friendly models that merge metadata fields
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+DataFormat = Literal["tabular", "binary"]
 
-class DataLocation(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
 
-    url: str
+class AdminSecretRef(BaseModel):
+    secret_ref: str
+
+
+class AdminSecret(BaseModel):
+    secret: dict[str, str]
+
+
+Admin = AdminSecretRef | AdminSecret
 
 
 class DataConnection(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
-    namespace: str
     name: str
-    provider: str
-    format: str
+    data_connection_type_id: str
+    format: DataFormat
     tenant_id: str
-    location: DataLocation
     created_at: datetime
     updated_at: datetime
+    admin: Admin | None = None
     properties: dict[str, str] = Field(default_factory=dict)
 
     @model_validator(mode="before")
@@ -43,21 +49,24 @@ class DataConnection(BaseModel):
 
 
 class CreateConnectionRequest(BaseModel):
-    namespace: str
     name: str
-    provider: str
-    format: str
-    location: DataLocation
+    data_connection_type_id: str
+    format: DataFormat
+    admin: Admin | None = None
     properties: dict[str, str] = Field(default_factory=dict)
 
 
 class UpdateConnectionRequest(BaseModel):
     name: str | None = None
-    namespace: str | None = None
-    provider: str | None = None
-    format: str | None = None
-    location: DataLocation | None = None
+    data_connection_type_id: str | None = None
+    format: DataFormat | None = None
+    admin: Admin | None = None
     properties: dict[str, str] | None = None
+
+
+class EnumValue(BaseModel):
+    value: str
+    label: str
 
 
 class CredentialField(BaseModel):
@@ -66,9 +75,9 @@ class CredentialField(BaseModel):
     name: str
     label: str
     description: str | None = None
-    required: bool = False
-    type: str = "string"
-    enum_values: list[dict[str, str]] | None = None
+    required: bool
+    type: str
+    enum_values: list[EnumValue] | None = None
     default_value: str | None = None
 
 

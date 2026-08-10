@@ -17,7 +17,7 @@ pip install "sdk/python[flight]"
 ## Quick Start
 
 ```python
-from data_connect_hub import DataConnectClient
+from data_connect_hub import AdminSecretRef, DataConnectClient
 
 client = DataConnectClient(
     rest_url="https://dch.example.com",
@@ -28,6 +28,17 @@ client = DataConnectClient(
 
 # List connections (REST)
 connections = client.list_connections()
+
+# Get a specific connection
+conn = client.get_connection("conn-id")
+
+# Create a connection
+conn = client.create_connection(
+    name="my-db",
+    connection_type_id="dct-a1b2c3d4",
+    data_format="tabular",  # DataFormat: "tabular" | "binary"
+    admin=AdminSecretRef(secret_ref="secret/my-db"),
+)
 
 # Query data via Flight SQL
 table = client.read("SELECT * FROM prompts", connection_id="conn-uuid")
@@ -41,8 +52,8 @@ df = table.to_pandas()
 ```python
 client.list_connections() -> list[DataConnection]
 client.get_connection(connection_id) -> DataConnection
-client.create_connection(name=..., namespace=..., provider=..., data_format=..., location_url=...) -> DataConnection
-client.update_connection(connection_id, name=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., admin=..., properties=...) -> DataConnection
+client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., admin=...) -> DataConnection
 client.delete_connection(connection_id) -> None
 ```
 

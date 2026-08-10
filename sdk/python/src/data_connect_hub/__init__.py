@@ -17,16 +17,23 @@ from .exceptions import (
     DCHValidationError,
 )
 from .models import (
+    Admin,
+    AdminSecret,
+    AdminSecretRef,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     DataConnection,
-    DataLocation,
+    DataFormat,
+    EnumValue,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
 
 __all__ = [
+    "Admin",
+    "AdminSecret",
+    "AdminSecretRef",
     "ConnectionType",
     "CreateConnectionRequest",
     "CreateConnectionTypeRequest",
@@ -44,7 +51,8 @@ __all__ = [
     "DCHValidationError",
     "DataConnectClient",
     "DataConnection",
-    "DataLocation",
+    "DataFormat",
+    "EnumValue",
     "UpdateConnectionRequest",
     "UpdateConnectionTypeRequest",
     "__version__",

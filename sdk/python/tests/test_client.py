@@ -61,10 +61,8 @@ class TestConnectionsDelegation:
 
         result = client.create_connection(
             name="test-conn",
-            namespace="test-ns",
-            provider="postgres",
+            connection_type_id="postgres",
             data_format="tabular",
-            location_url="postgresql://localhost:5432/db",
         )
         assert result.id == "123"
 
@@ -88,7 +86,7 @@ class TestEmptyUpdateGuards:
         with pytest.raises(DCHConfigError, match="at least one field"):
             client.update_connection_type("ct-1")
 
-    def test_update_connection_empty_location_url(self) -> None:
+    def test_update_connection_with_admin(self) -> None:
         from data_connect_hub.models import DataConnection
 
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
@@ -96,10 +94,11 @@ class TestEmptyUpdateGuards:
         assert client._rest is not None
         client._rest.update_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
 
-        client.update_connection("123", location_url="")
+        from data_connect_hub.models import AdminSecretRef
+
+        client.update_connection("123", admin=AdminSecretRef(secret_ref="secret/new"))
         req = client._rest.update_connection.call_args[0][1]
-        assert req.location is not None
-        assert req.location.url == ""
+        assert req.admin == AdminSecretRef(secret_ref="secret/new")
 
 
 class TestFlightDelegation:

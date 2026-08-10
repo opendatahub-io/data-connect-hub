@@ -7,12 +7,13 @@ from typing import TYPE_CHECKING, Any
 
 from .exceptions import DCHConfigError
 from .models import (
+    Admin,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     CredentialField,
     DataConnection,
-    DataLocation,
+    DataFormat,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
@@ -138,18 +139,16 @@ class DataConnectClient:
         self,
         *,
         name: str,
-        namespace: str,
-        provider: str,
-        data_format: str,
-        location_url: str,
+        connection_type_id: str,
+        data_format: DataFormat,
+        admin: Admin | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
         req = CreateConnectionRequest(
             name=name,
-            namespace=namespace,
-            provider=provider,
+            data_connection_type_id=connection_type_id,
             format=data_format,
-            location=DataLocation(url=location_url),
+            admin=admin,
             properties=properties or {},
         )
         return self._require_rest().create_connection(req)
@@ -159,21 +158,18 @@ class DataConnectClient:
         connection_id: str,
         *,
         name: str | None = None,
-        namespace: str | None = None,
-        provider: str | None = None,
-        data_format: str | None = None,
-        location_url: str | None = None,
+        connection_type_id: str | None = None,
+        data_format: DataFormat | None = None,
+        admin: Admin | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
-        if all(v is None for v in (name, namespace, provider, data_format, location_url, properties)):
+        if all(v is None for v in (name, connection_type_id, data_format, admin, properties)):
             raise DCHConfigError("at least one field must be provided for update")
-        location = DataLocation(url=location_url) if location_url is not None else None
         req = UpdateConnectionRequest(
             name=name,
-            namespace=namespace,
-            provider=provider,
+            data_connection_type_id=connection_type_id,
             format=data_format,
-            location=location,
+            admin=admin,
             properties=properties,
         )
         return self._require_rest().update_connection(connection_id, req)
