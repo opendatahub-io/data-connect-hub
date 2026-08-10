@@ -1,0 +1,15 @@
+name: HuggingFace
+provider: huggingface
+description: Hugging Face model and dataset hub
+credentials_fields:
+  - name: HF_URI
+    label: URI
+    description: HuggingFace URI
+    required: true
+    type: string
+  - name: HF_TOKEN
+    label: Token
+    description: Huggingface token
+    required: false
+    type: string
+

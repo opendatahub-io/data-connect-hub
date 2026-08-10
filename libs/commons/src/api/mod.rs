@@ -4,6 +4,8 @@ pub mod tabular;
 
 pub const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";
 pub const X_TENANT_ID: &str = "x-tenant-id";
+pub const X_REMOTE_USER: &str = "x-remote-user";
+pub const X_REMOTE_GROUPS: &str = "x-remote-groups";
 
 use serde::{Deserialize, Serialize};
 
@@ -13,4 +15,10 @@ pub struct ResourceMetadata {
     pub tenant_id: String,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResourceList<T> {
+    pub total_count: usize,
+    pub items: Vec<T>,
 }

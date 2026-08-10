@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::api::ResourceList;
+
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Admin {
@@ -33,6 +35,7 @@ pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
     pub format: DataFormat,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub admin: Option<Admin>,
     pub properties: HashMap<String, String>,
 }
@@ -65,11 +68,14 @@ pub struct EnumValue {
 pub struct Field {
     pub name: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub required: bool,
     #[serde(rename = "type")]
     pub d_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub enum_values: Option<Vec<EnumValue>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
 }
 
@@ -94,6 +100,7 @@ impl std::fmt::Debug for Secret {
 pub struct DataConnectionType {
     pub name: String,
     pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
 }
@@ -107,6 +114,12 @@ pub struct DataConnectionTypeResource {
 /// Persistent store for data connection and data connection type metadata.
 #[async_trait::async_trait]
 pub trait MetaStore {
+    /// Retrieves all data connections for the given tenant.
+    async fn get_data_connections(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionResource>, MetaStoreError>;
+
     /// Retrieves a data connection by tenant and unique identifier.
     async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError>;
 
@@ -114,7 +127,7 @@ pub trait MetaStore {
     async fn create_data_connection(
         &self,
         tenant_id: &str,
-        data_connection: DataConnection,
+        data_connection: &DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError>;
 
     /// Replaces the data connection identified by `uid` with the provided value.
@@ -128,6 +141,12 @@ pub trait MetaStore {
     /// Deletes the data connection identified by `uid`.
     async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
 
+    /// Retrieves all data connection types for the given tenant.
+    async fn get_data_connection_types(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
+
     /// Retrieves a data connection type by tenant and unique identifier.
     async fn get_data_connection_type(
         &self,
@@ -139,7 +158,7 @@ pub trait MetaStore {
     async fn create_data_connection_type(
         &self,
         tenant_id: &str,
-        data_connection_type: DataConnectionType,
+        data_connection_type: &DataConnectionType,
     ) -> Result<DataConnectionTypeResource, MetaStoreError>;
 
     /// Replaces the data connection type identified by `uid` with the provided value.

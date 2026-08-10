@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use arrow::array::{Array, StringArray};
 use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
+use commons::api::ResourceList;
 use commons::api::ResourceMetadata;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataFormat;
@@ -23,6 +24,13 @@ struct TestMetaStore;
 
 #[async_trait::async_trait]
 impl MetaStore for TestMetaStore {
+    async fn get_data_connections(
+        &self,
+        _tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionResource>, MetaStoreError> {
+        unimplemented!()
+    }
+
     async fn get_data_connection(
         &self,
         _tenant_id: &str,
@@ -49,7 +57,7 @@ impl MetaStore for TestMetaStore {
     async fn create_data_connection(
         &self,
         _tenant_id: &str,
-        _data_connection: DataConnection,
+        _data_connection: &DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }
@@ -70,7 +78,7 @@ impl MetaStore for TestMetaStore {
     async fn create_data_connection_type(
         &self,
         _tenant_id: &str,
-        _data_connection_type: DataConnectionType,
+        _data_connection_type: &DataConnectionType,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         unimplemented!()
     }
@@ -85,6 +93,13 @@ impl MetaStore for TestMetaStore {
     }
 
     async fn delete_data_connection_type(&self, _tenant_id: &str, _uid: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn get_data_connection_types(
+        &self,
+        _tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         unimplemented!()
     }
 

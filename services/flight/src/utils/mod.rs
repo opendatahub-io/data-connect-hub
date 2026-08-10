@@ -32,6 +32,27 @@ impl Default for QueryConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AuthConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+}
+
+fn default_cache_ttl_secs() -> u64 {
+    300
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            cache_ttl_secs: default_cache_ttl_secs(),
+        }
+    }
+}
+
 impl QueryConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.batch_size == 0 {
@@ -48,4 +69,6 @@ pub struct ServerConfig {
     pub ingestion_cache_pools: IngestionCachePools,
     #[serde(default)]
     pub query: QueryConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }

@@ -1,0 +1,30 @@
+name: S3
+provider: s3
+description: Amazon S3 compatible object storage
+credentials_fields:
+  - name: AWS_S3_ENDPOINT
+    label: Endpoint
+    description: S3 endpoint URL (for non-AWS S3-compatible services)
+    required: false
+    type: string
+  - name: AWS_DEFAULT_REGION
+    label: Region
+    description: AWS region
+    required: false
+    type: string
+    default_value: us-east-1
+  - name: AWS_S3_BUCKET
+    label: Bucket
+    description: S3 bucket name
+    required: true
+    type: string
+  - name: AWS_ACCESS_KEY_ID
+    label: Access Key ID
+    description: AWS access key ID
+    required: true
+    type: string
+  - name: AWS_SECRET_ACCESS_KEY
+    label: Secret Access Key
+    description: AWS secret access key
+    required: true
+    type: string

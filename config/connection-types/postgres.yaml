@@ -1,0 +1,10 @@
+name: Postgres
+provider: postgres
+description: Postgres data connection type
+credentials_fields:
+  - name: URI
+    label: Uri
+    description: Postgres connection URI
+    required: true
+    type: string
+

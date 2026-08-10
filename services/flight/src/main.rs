@@ -5,8 +5,9 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use config::{Config, File};
 use flight_service::flight::TabularDataService;
-use flight_service::flight::auth::AuthInterceptor;
+use flight_service::flight::auth::AuthLayer;
 use flight_service::flight::registry::ConnectorsRegistry;
+use kube_utils::KubeAuthClient;
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use postgres_connector::PgConnector;
@@ -98,19 +99,33 @@ async fn main() -> Result<()> {
         query_options,
     );
 
-    let auth_interceptor = AuthInterceptor::new();
-    let service = FlightServiceServer::with_interceptor(service, auth_interceptor);
+    let service = FlightServiceServer::new(service);
 
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_serving::<FlightServiceServer<TabularDataService>>()
         .await;
 
-    tonic::transport::Server::builder()
-        .add_service(health_service)
-        .add_service(service)
-        .serve_with_shutdown(addr, shutdown_signal())
-        .await?;
+    let mut builder = tonic::transport::Server::builder();
+
+    if config.auth.enabled {
+        tracing::info!("Auth enabled (cache TTL: {}s)", config.auth.cache_ttl_secs);
+        let kube_auth = KubeAuthClient::try_default(Duration::from_secs(config.auth.cache_ttl_secs)).await?;
+        let auth_layer = AuthLayer::new(Arc::new(kube_auth));
+        builder
+            .layer(auth_layer)
+            .add_service(health_service)
+            .add_service(service)
+            .serve_with_shutdown(addr, shutdown_signal())
+            .await?;
+    } else {
+        tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
+        builder
+            .add_service(health_service)
+            .add_service(service)
+            .serve_with_shutdown(addr, shutdown_signal())
+            .await?;
+    }
 
     tracing::info!("DataConnectorHub Flight service stopped");
 
