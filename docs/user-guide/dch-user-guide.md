@@ -1,21 +1,26 @@
-# Data Connect Hub (DCH) - Installation
-The purpose of this document is to provide **end-users** steps to install, configure, verify DCH as such this document can be used by doc team to build official doc. This approach is similar to other services.
+# Data Connect Hub (DCH) - User Guide
+The purpose of this document is to provide **end-users** steps to install, configure, use DCH as such this document can be used by doc team to build official doc. This approach is similar to other services.
 
 ## Content
-- Prerequisites
-- Install DCH Operator
-- Install `DataConnectService`
-- Verify `DataConnectService`
-- DCH Rest Swagger
-- Verify DCH REST Service
-- Verify Flight Service
-- Verify S3 Data Connection
-- DCH Python SDK
-- Trouble Shooting
+- [x] Prerequisites
+- [ ] Install DCH Operator
+- [ ] Install `DataConnectService`
+- [ ] Verify `DataConnectService`
+- [x] Create and Grant Users to DCH Service
+- [ ] Auto Migrate Existing RHAI Connections and Connection Types
+- [ ] Create Connections and Connection Types
+- [ ] DCH Rest Swagger
+- [ ] DCH REST Service
+- [ ] DCH Flight Service
+- [ ] Flight Service jsonl files ingestion - S3
+- [ ] Verify S3 Data Connection
+- [ ] DCH Python SDK
+- [ ] Trouble Shooting
 
 ## Prerequisites
 - You have an OpenShift cluster on version `4.20` or higher.
 - You have installed the OpenShift CLI (`oc`).
+- You have installed `helm` which will be used to install DCH operator.
 - You have installed `curl`, `grpcurl`. We will use these to test DCH REST and flight service. There are different versions of `grpcurl` and they work differently. `grpcurl` used in this document was installed with `go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest`.
 - You have logged in as a user with cluster-admin privileges.
 - You have installed {productname-long} {vernum}.
@@ -26,74 +31,29 @@ The purpose of this document is to provide **end-users** steps to install, confi
   NAME           AGE   PHASE   CREATED AT
   default-dsci   83d   Ready   2026-05-08T12:41:52Z
   ```
-- A `Gateway` which will be referred to by `DataConnectService` CR. You can use an existing `Gateway`. For the purpose of this demo, we will create a `Gateway` called `dch-gateway` in `openshift-ingress` namespace as follows:
-  ```
-  $ oc apply -f - <<EOF
-  apiVersion: v1
-  kind: ConfigMap
-  metadata:
-    name: dch-gateway-config
-    namespace: openshift-ingress
-  data:
-    service: |
-      metadata:
-        annotations:
-          service.beta.openshift.io/serving-cert-secret-name: "dch-gateway-tls"
-      spec:
-        type: ClusterIP
-    deployment: |
-      spec:
-        template:
-          spec:
-            containers:
-              - name: istio-proxy
-                resources:
-                  limits:
-                    cpu: "2"
-                    memory: 2Gi
-                  requests:
-                    cpu: 500m
-                    memory: 512Mi
-  ---
-  apiVersion: gateway.networking.k8s.io/v1
-  kind: Gateway
-  metadata:
-    name: dch-gateway
-    namespace: openshift-ingress
-  spec:
-    gatewayClassName: data-science-gateway-class
-    infrastructure:
-      parametersRef:
-        group: ""
-        kind: ConfigMap
-        name: dch-gateway-config
-    listeners:
-    - allowedRoutes:
-        namespaces:
-          from: All
-      name: https
-      port: 443
-      protocol: HTTPS
-      tls:
-        certificateRefs:
-        - group: ""
-          kind: Secret
-          name: dch-gateway-tls
-        mode: Terminate
-  EOF
-  }
-    ```
+- A `Gateway` which will be referred to by `DataConnectService` CR. You can use an existing `Gateway`. For the purpose of this demo, we will create a `Gateway` called `dch-gateway` in `openshift-ingress` namespace by running the [scripts/create-gateway.sh](scripts/create-gateway.sh)
+ 
 - A namespace called `dch-example` for this demo. You can create a namespace as follows:
   ```
   $ oc new-project dch-example
   ```
 
 ## Install DCH Operator
-### Install Manually
+### Install with `Helm`
+- For Dev Preview (DP), you can install the operator as follows:
+  - Clone the repo `https://github.com/red-hat-data-services/data-connect-hub`
+  - Change directory to `data-connect-hub`.
+  - Run the [scripts/install-operator.sh](scripts/install-operator.sh). This script installs the operator in `redhat-ods-applications` namespace.
+- You can use the following commands to delete the `helm` chart:
+  ```bash
+    $ helm delete dc-controller -n redhat-ods-applications --no-hooks
+    $ oc delete secret sh.helm.release.v1.dc-controller.v1 -n redhat-ods-applications
+  ```
+  
 ### Install with `DataScienceCluster` (DSC)
-  - Post DP
+  - This will be supported in Technical Preview (TP)
 ### Install `DataConnectService`
-Once the DCH operator is running and there's an available `Gateway`, the next step is to create a `DataConnectService` which will create a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. You can create a `DataConnectService` in a namespace for a tenant as follows:
+Once the DCH operator is running and there's an available `Gateway`, the next step is to create a `DataConnectService` which will create a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. You can create a `DataConnectService` for this demo as follows:
 
 ```bash
 oc apply -f - <<'EOF'
@@ -152,11 +112,21 @@ You can verify the `DataConnectService` as follows:
   ...
   ```
 
-### DCH Rest Swagger
-   - TODO
+### Create and Grant Users to DCH Service
+For the purpose of the demo, we create `serviceaccount` instead of users.
+- To create and grant a user who can perform DCH **read**, run the script [create-grant-test-user.sh](scripts/create-grant-test-user.sh). You should see the following output:
+   ```console
+   TBD
+  ```
+- To create and grant an admin who can perform DCH **read/write**, run the script [create-grant-admin-user.sh](scripts/create-grant-admin-user.sh). You should see the following output:
+   ```console
+   TBD
+  ```
 
-### Verify DCH REST Service
-  - Get the gateway service:
+### DCH REST Service
+- REST Swagger
+  - TODO
+- Get the gateway service:
     ```
     $ oc get service -n openshift-ingress dch-gateway-data-science-gateway-class
     NAME                                              TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)             AGE
@@ -175,7 +145,8 @@ You can verify the `DataConnectService` as follows:
     ```
     {"code":"unimplemented","message":"Unimplemented"}
     ```
-### Verify Flight Service
+### DCH Flight Service
+ - TODO: add header ask
  - Get the gateway service:
     ```
     $ oc get service -n openshift-ingress dch-gateway-data-science-gateway-class
@@ -199,5 +170,6 @@ You can verify the `DataConnectService` as follows:
 ### Verify S3 Data Connection
 
 ### Verify Python SDK
+Python SDK installation and examples can be found [Python SDK](https://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python).
 
 ## Trouble Shooting
