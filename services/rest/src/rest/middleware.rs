@@ -3,7 +3,7 @@ use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::Next;
 use actix_web::{HttpMessage, HttpResponse};
 
-use super::endpoints::AppData;
+use super::endpoints::ApiContext;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use commons::api::X_TENANT_ID;
@@ -42,7 +42,7 @@ pub async fn validate_headers(
         },
     };
 
-    req.extensions_mut().insert(AppData { tenant_id });
+    req.extensions_mut().insert(ApiContext { tenant_id });
 
     next.call(req).await.map(ServiceResponse::map_into_left_body)
 }

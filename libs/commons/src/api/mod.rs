@@ -14,3 +14,9 @@ pub struct ResourceMetadata {
     pub created_at: String,
     pub updated_at: String,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResourceList<T> {
+    pub total_count: usize,
+    pub items: Vec<T>,
+}

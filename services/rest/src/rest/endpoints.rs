@@ -4,10 +4,16 @@ use super::errors::RestErrorResponse;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
+use commons::api::connections::MetaStore;
+use commons::api::connections::SecretStore;
 use serde::Serialize;
+use std::sync::Arc;
+use tracing::info;
+
+use commons::api::connections::DataConnectionType;
 
 #[derive(Clone)]
-pub struct AppData {
+pub struct ApiContext {
     pub tenant_id: String,
 }
 
@@ -16,76 +22,120 @@ struct HealthResponse {
     service: String,
 }
 
+pub struct ApiService {
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
+}
+
+impl ApiService {
+    pub fn new(meta_store: Arc<dyn MetaStore + Send + Sync>, secret_store: Arc<dyn SecretStore + Send + Sync>) -> Self {
+        Self {
+            meta_store,
+            secret_store,
+        }
+    }
+}
+
 pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
     Ok(HttpResponse::Ok().json(HealthResponse {
         service: "Data Connect Hub".to_string(),
     }))
 }
 
-pub async fn list_connections(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
-}
-
-pub async fn get_connection(
-    _app_data: web::ReqData<AppData>,
-    _id: web::Path<String>,
+pub async fn list_connections(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
-pub async fn list_connection_types(_app_data: web::ReqData<AppData>) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
-}
-
-pub async fn get_connection_type(
-    _app_data: web::ReqData<AppData>,
-    _id: web::Path<String>,
+pub async fn get_connection(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn create_connection(
-    app_data: web::ReqData<AppData>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
     connection: web::Json<DataConnection>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    let _tenant_id = app_data.tenant_id.clone();
-
     Ok(HttpResponse::Ok().json(connection))
 }
 
+pub async fn list_connection_types(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("list_connection_types: for tenant {:?}", ctx.tenant_id);
+    let connection_types = service
+        .meta_store
+        .get_data_connection_types(ctx.tenant_id.as_str())
+        .await?;
+    Ok(HttpResponse::Ok().json(connection_types))
+}
+
+pub async fn get_connection_type(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("get_connection_type: for tenant {:?}", ctx.tenant_id);
+    let id = id.clone();
+    let connection_type = service
+        .meta_store
+        .get_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+    Ok(HttpResponse::Ok().json(connection_type))
+}
+
 pub async fn patch_connection(
-    _app_data: web::ReqData<AppData>,
-    _id: web::Path<String>,
-    _body: web::Json<Vec<JsonPatch>>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+    body: web::Json<Vec<JsonPatch>>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn create_connection_type(
-    _app_data: web::ReqData<AppData>,
-    _body: Bytes,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    connection_type: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("create_connection_type: for tenant {:?}", ctx.tenant_id);
+
+    let connection_type = service
+        .meta_store
+        .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(connection_type))
 }
 
 pub async fn patch_connection_type(
-    _app_data: web::ReqData<AppData>,
-    _path: web::Path<String>,
-    _body: Bytes,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    path: web::Path<String>,
+    body: Bytes,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection(
-    _app_data: web::ReqData<AppData>,
-    _path: web::Path<String>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    path: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection_type(
-    _app_data: web::ReqData<AppData>,
-    _path: web::Path<String>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    path: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
 }

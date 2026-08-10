@@ -8,6 +8,12 @@ use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use config::{Config, File};
+use crate::utils::loader::sync_default_connection_types;
+use std::sync::Arc;
+use std::time::Duration;
+use commons::api::connections::MetaStore;
+use pg_meta_store::store::PgMetaStore;
+use kube_utils::secrets::KubeSecretStore;
 
 mod rest;
 mod utils;
@@ -29,22 +35,22 @@ struct CommandLineArgs {
     secret_config: String,
 }
 
-fn api_routes(cfg: &mut web::ServiceConfig) {
+fn api_routes(cfg: &mut web::ServiceConfig, service: Arc<ApiService>) {
     cfg.route("/api/v1/data/health", web::get().to(health))
         .service(
             web::scope("/api/v1/data").service(
                 web::scope("")
                     .wrap(middleware::from_fn(validate_headers))
-                    .route("/connections", web::get().to(list_connections))
-                    .route("/connections", web::post().to(create_connection))
-                    .route("/connections/{id}", web::get().to(get_connection))
-                    .route("/connections/{id}", web::patch().to(patch_connection))
-                    .route("/connections/{id}", web::delete().to(delete_connection))
                     .route("/connection-types", web::get().to(list_connection_types))
                     .route("/connection-types", web::post().to(create_connection_type))
                     .route("/connection-types/{id}", web::get().to(get_connection_type))
                     .route("/connection-types/{id}", web::patch().to(patch_connection_type))
-                    .route("/connection-types/{id}", web::delete().to(delete_connection_type)),
+                    .route("/connection-types/{id}", web::delete().to(delete_connection_type))
+                    .route("/connections", web::get().to(list_connections))
+                    .route("/connections", web::post().to(create_connection))
+                    .route("/connections/{id}", web::get().to(get_connection))
+                    .route("/connections/{id}", web::patch().to(patch_connection))
+                    .route("/connections/{id}", web::delete().to(delete_connection)),
             ),
         )
         .default_service(web::route().to(not_found));
@@ -68,7 +74,19 @@ async fn main() -> Result<()> {
     commons::utils::init_tracing(args.json_logs);
     tracing::info!("Starting DataConnectorHub API service");
 
-    HttpServer::new(|| {
+    let meta_store: Arc<dyn MetaStore + Send + Sync> = Arc::new(PgMetaStore::new(config.database).await?);
+
+    sync_default_connection_types(&meta_store, config.connection_types.folder.as_str()).await?;
+
+    let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
+
+    let service = Arc::new(ApiService::new(
+        meta_store,
+        Arc::new(secret_store)
+    ));
+
+    HttpServer::new(move || {
+        let service = service.clone();
         let cors = Cors::default()
             .allow_any_origin()
             .send_wildcard()
@@ -77,10 +95,11 @@ async fn main() -> Result<()> {
 
         App::new()
             .wrap(cors)
+            .app_data(web::Data::from(service.clone()))
             .app_data(json_config())
             .app_data(query_config())
             .app_data(path_config())
-            .configure(api_routes)
+            .configure(move |cfg| api_routes(cfg, service))
     })
     .bind((config.server.address, config.server.port))?
     .run()

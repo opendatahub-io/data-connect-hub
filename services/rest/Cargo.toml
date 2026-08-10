@@ -19,6 +19,9 @@ pg-meta-store = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+serde_yaml = { workspace = true }
+kube-utils = { workspace = true }
+
 
 [dev-dependencies]
 actix-rt = "2"
