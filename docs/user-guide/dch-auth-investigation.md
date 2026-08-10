@@ -259,7 +259,7 @@ automountServiceAccountToken: true is required so the proxy can call the Kuberne
     PASSED: authenticated ListFlights responded
 
     Test 4: Non-matching gRPC path (expect failure)...
-    CMD: grpcurl -insecure -import-path /tmp -proto Flight.proto -H 'Authorization: Bearer sha256~V773RWeib50ss2Y38t-1wHNAHJhnnmmtwir81oXtBYM' -H 'x-tenant-id: dch-example' -d '{}' localhost:9443 fake.service.BadPath/BadMethod
+    CMD: grpcurl -insecure -import-path /tmp -proto Flight.proto -H 'Authorization: Bearer sha256~V7.....XtBYM' -H 'x-tenant-id: dch-example' -d '{}' localhost:9443 fake.service.BadPath/BadMethod
     Handling connection for 9443
     RESPONSE: Error invoking method "fake.service.BadPath/BadMethod": target server does not expose service "fake.service.BadPath"
     PASSED: non-matching path rejected    
