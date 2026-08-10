@@ -38,10 +38,16 @@ pub struct AuthConfig {
     pub enabled: bool,
     #[serde(default = "default_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
+    #[serde(default = "default_token_review_audiences")]
+    pub token_review_audiences: Vec<String>,
 }
 
 fn default_cache_ttl_secs() -> u64 {
     300
+}
+
+fn default_token_review_audiences() -> Vec<String> {
+    vec!["https://kubernetes.default.svc".to_string()]
 }
 
 impl Default for AuthConfig {
@@ -49,6 +55,7 @@ impl Default for AuthConfig {
         Self {
             enabled: false,
             cache_ttl_secs: default_cache_ttl_secs(),
+            token_review_audiences: default_token_review_audiences(),
         }
     }
 }

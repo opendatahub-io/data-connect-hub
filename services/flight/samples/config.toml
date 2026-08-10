@@ -17,3 +17,4 @@ max_rows = 1000000
 [auth]
 enabled = false
 cache_ttl_secs = 300
+token_review_audiences = ["https://kubernetes.default.svc"]
