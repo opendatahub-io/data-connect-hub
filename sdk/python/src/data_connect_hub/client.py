@@ -9,6 +9,7 @@ from .models import (
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
+    CredentialField,
     DataConnection,
     DataLocation,
     UpdateConnectionRequest,
@@ -155,11 +156,13 @@ class DataConnectClient:
         name: str,
         provider: str,
         description: str | None = None,
+        credentials_fields: list[CredentialField] | None = None,
     ) -> ConnectionType:
         req = CreateConnectionTypeRequest(
             name=name,
             provider=provider,
             description=description,
+            credentials_fields=credentials_fields or [],
         )
         return self._require_rest().create_connection_type(req)
 
@@ -170,13 +173,15 @@ class DataConnectClient:
         name: str | None = None,
         provider: str | None = None,
         description: str | None = None,
+        credentials_fields: list[CredentialField] | None = None,
     ) -> ConnectionType:
-        if all(v is None for v in (name, provider, description)):
+        if all(v is None for v in (name, provider, description, credentials_fields)):
             raise DCHConfigError("at least one field must be provided for update")
         req = UpdateConnectionTypeRequest(
             name=name,
             provider=provider,
             description=description,
+            credentials_fields=credentials_fields,
         )
         return self._require_rest().update_connection_type(type_id, req)
 
