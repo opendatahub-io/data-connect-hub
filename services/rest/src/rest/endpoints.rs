@@ -231,6 +231,12 @@ mod tests {
         ) -> Result<(), commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+        async fn set_default_connection_type(
+            &self,
+            _d: &DataConnectionType,
+        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
     }
 
     struct StubSecretStore;

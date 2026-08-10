@@ -21,7 +21,6 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 kube-utils = { workspace = true }
 
-
 [dev-dependencies]
 actix-rt = "2"
 tokio = { workspace = true }

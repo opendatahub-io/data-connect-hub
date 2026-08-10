@@ -1126,6 +1126,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "db-sync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "commons",
+ "config",
+ "pg-meta-store",
+ "serde",
+ "serde_yaml",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "defmt"
 version = "1.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

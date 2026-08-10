@@ -171,6 +171,12 @@ pub trait MetaStore {
 
     /// Deletes the data connection type identified by `uid`.
     async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
+
+    /// Inserts a connection type or updates it if one with the same name and tenant already exists.
+    async fn set_default_connection_type(
+        &self,
+        data_connection_type: &DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
 }
 
 #[async_trait::async_trait]

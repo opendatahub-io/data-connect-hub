@@ -330,6 +330,38 @@ impl MetaStore for PgMetaStore {
 
         Ok(())
     }
+
+    async fn set_default_connection_type(
+        &self,
+        data_connection_type: &DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: Uuid::new_v4().to_string(),
+                tenant_id: "".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resource: data_connection_type.clone(),
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+
+        let row = sqlx::query(
+            "INSERT INTO data_connection_types (data) VALUES ($1) \
+             ON CONFLICT ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id')) \
+             DO UPDATE SET data = jsonb_set(data_connection_types.data, '{resource}', ($1->'resource')) \
+             RETURNING data",
+        )
+        .bind(&json_value)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        let result: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        serde_json::from_value(result).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+    }
 }
 
 #[cfg(test)]

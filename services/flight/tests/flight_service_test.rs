@@ -131,6 +131,12 @@ impl MetaStore for TestMetaStore {
             },
         })
     }
+    async fn set_default_connection_type(
+        &self,
+        _data_connection_type: &DataConnectionType,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
 }
 
 async fn setup_sqlite_db() -> String {
