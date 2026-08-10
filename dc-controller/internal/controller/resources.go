@@ -309,7 +309,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 			continue
 		}
 		for i, c := range containers {
-			container, ok := c.(map[string]interface{})
+			container, ok := c.(map[string]any)
 			if !ok {
 				continue
 			}

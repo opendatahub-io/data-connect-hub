@@ -56,8 +56,8 @@ var _ = Describe("DataConnectHub Controller", func() {
 			Scheme:        k8sClient.Scheme(),
 			ManifestsPath: manifestsPath,
 			Namespace:     targetNamespace,
-			RestImage:     defaultRestImage,
-			FlightImage:   defaultFlightImage,
+			RestImage:     DefaultRestImage,
+			FlightImage:   DefaultFlightImage,
 		}
 	}
 
@@ -155,12 +155,12 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			restDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			Expect(restDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultRestImage))
+			Expect(restDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(DefaultRestImage))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(defaultFlightImage))
+			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(DefaultFlightImage))
 		})
 
 		It("should create services for rest and flight", func() {

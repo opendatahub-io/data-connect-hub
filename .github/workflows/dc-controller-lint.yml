@@ -1,13 +1,16 @@
-name: E2E Tests
+name: "dc-controller: Lint"
 
 on:
   push:
+    branches: [main]
+    paths: ['dc-controller/**']
   pull_request:
+    paths: ['dc-controller/**']
 
 permissions: {}
 
 jobs:
-  test-e2e:
+  lint:
     permissions:
       contents: read
     name: Run on Ubuntu
@@ -26,16 +29,7 @@ jobs:
         with:
           go-version-file: dc-controller/go.mod
 
-      - name: Install the latest version of kind
-        run: |
-          curl -Lo ./kind https://kind.sigs.k8s.io/dl/latest/kind-linux-$(go env GOARCH)
-          chmod +x ./kind
-          sudo mv ./kind /usr/local/bin/kind
-
-      - name: Verify kind installation
-        run: kind version
-
-      - name: Running Test e2e
-        run: |
-          go mod tidy
-          make test-e2e
+      - name: Check linter configuration
+        run: make lint-config
+      - name: Run linter
+        run: make lint

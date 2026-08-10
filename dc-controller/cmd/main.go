@@ -37,8 +37,8 @@ import (
 
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -198,11 +198,11 @@ func main() {
 		Namespace:     namespace,
 		RestImage: controller.EnvOrDefault(
 			controller.EnvRestImage,
-			"ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest",
+			controller.DefaultRestImage,
 		),
 		FlightImage: controller.EnvOrDefault(
 			controller.EnvFlightImage,
-			"ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest",
+			controller.DefaultFlightImage,
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnecthub")
