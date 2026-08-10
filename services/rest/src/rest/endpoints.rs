@@ -148,9 +148,7 @@ pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
 mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
-    use commons::api::connections::{
-        DataConnectionResource, DataConnectionTypeResource, Secret,
-    };
+    use commons::api::connections::{DataConnectionResource, DataConnectionTypeResource, Secret};
     use commons::api::errors::SecretStoreError;
 
     use super::*;
@@ -161,30 +159,91 @@ mod tests {
 
     #[async_trait::async_trait]
     impl MetaStore for StubMetaStore {
-        async fn get_data_connections(&self, _t: &str) -> Result<ResourceList<DataConnectionResource>, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn get_data_connection(&self, _t: &str, _u: &str) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn create_data_connection(&self, _t: &str, _d: &DataConnection) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn update_data_connection(&self, _t: &str, _u: &str, _f: Arc<dyn Fn(DataConnection) -> Result<DataConnection, commons::api::errors::MetaStoreError> + Send + Sync>) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn delete_data_connection(&self, _t: &str, _u: &str) -> Result<(), commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn get_data_connection_types(&self, _t: &str) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn get_data_connection_type(&self, _t: &str, _i: &str) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn create_data_connection_type(&self, _t: &str, _d: &DataConnectionType) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn update_data_connection_type(&self, _t: &str, _u: &str, _f: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError> + Send + Sync>) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> { unimplemented!() }
-        async fn delete_data_connection_type(&self, _t: &str, _u: &str) -> Result<(), commons::api::errors::MetaStoreError> { unimplemented!() }
+        async fn get_data_connections(
+            &self,
+            _t: &str,
+        ) -> Result<ResourceList<DataConnectionResource>, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection(
+            &self,
+            _t: &str,
+            _u: &str,
+        ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn create_data_connection(
+            &self,
+            _t: &str,
+            _d: &DataConnection,
+        ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection(
+            &self,
+            _t: &str,
+            _u: &str,
+            _f: Arc<
+                dyn Fn(DataConnection) -> Result<DataConnection, commons::api::errors::MetaStoreError> + Send + Sync,
+            >,
+        ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn delete_data_connection(&self, _t: &str, _u: &str) -> Result<(), commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection_types(
+            &self,
+            _t: &str,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection_type(
+            &self,
+            _t: &str,
+            _i: &str,
+        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn create_data_connection_type(
+            &self,
+            _t: &str,
+            _d: &DataConnectionType,
+        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection_type(
+            &self,
+            _t: &str,
+            _u: &str,
+            _f: Arc<
+                dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError>
+                    + Send
+                    + Sync,
+            >,
+        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+        async fn delete_data_connection_type(
+            &self,
+            _t: &str,
+            _u: &str,
+        ) -> Result<(), commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
     }
 
     struct StubSecretStore;
 
     #[async_trait::async_trait]
     impl SecretStore for StubSecretStore {
-        async fn get_secret(&self, _n: &str, _k: &str) -> Result<Secret, SecretStoreError> { unimplemented!() }
+        async fn get_secret(&self, _n: &str, _k: &str) -> Result<Secret, SecretStoreError> {
+            unimplemented!()
+        }
     }
 
     fn test_service() -> web::Data<ApiService> {
-        web::Data::new(ApiService::new(
-            Arc::new(StubMetaStore),
-            Arc::new(StubSecretStore),
-        ))
+        web::Data::new(ApiService::new(Arc::new(StubMetaStore), Arc::new(StubSecretStore)))
     }
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
@@ -228,12 +287,7 @@ mod tests {
 
     #[actix_web::test]
     async fn test_list_connections_unimplemented() {
-        let app = test::init_service(
-            App::new()
-                .app_data(test_service())
-                .configure(test_app_config),
-        )
-        .await;
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
             .uri("/api/v1/data/connections")
             .insert_header(("x-tenant-id", "test-tenant"))
@@ -247,15 +301,8 @@ mod tests {
 
     #[actix_web::test]
     async fn test_missing_tenant_header() {
-        let app = test::init_service(
-            App::new()
-                .app_data(test_service())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri("/api/v1/data/connections")
-            .to_request();
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get().uri("/api/v1/data/connections").to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 400);
