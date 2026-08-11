@@ -1,31 +1,27 @@
 #!/bin/bash
 set -euo pipefail
 
-NAMESPACE="${1:-dch-example}"
-
 echo ""
 echo ""
 echo "================================== CREATE ROLES ============================="
-echo "--- Creating Roles in $NAMESPACE ---"
+echo "--- Creating ClusterRoles ---"
 oc apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: dch-ingest
-  namespace: $NAMESPACE
 rules:
 - apiGroups: ["dataconnecthub.opendatahub.io"]
-  resources: ["data-connection", "data-store"]
+  resources: ["data-connections", "data-store"]
   verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
   name: dch-admin
-  namespace: $NAMESPACE
 rules:
 - apiGroups: ["dataconnecthub.opendatahub.io"]
-  resources: ["data-connection"]
+  resources: ["data-connections"]
   verbs: ["get", "create", "patch", "delete"]
 - apiGroups: ["dataconnecthub.opendatahub.io"]
   resources: ["data-connection-types"]
@@ -34,4 +30,4 @@ rules:
   resources: ["data-store"]
   verbs: ["get"]
 EOF
-echo "PASSED: Roles created"
+echo "PASSED: ClusterRoles created"

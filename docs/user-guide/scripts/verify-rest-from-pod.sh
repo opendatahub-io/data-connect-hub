@@ -19,8 +19,8 @@ echo "  CMD: curl -s -H 'x-tenant-id: $NAMESPACE' http://localhost:8080/api/v1/d
 rest_response=$(curl -s -H "x-tenant-id: $NAMESPACE" http://localhost:8080/api/v1/data/connections)
 echo "  RESPONSE: $rest_response"
 
-kill $pf_pid 2>/dev/null
-wait $pf_pid 2>/dev/null
+kill $pf_pid 2>/dev/null || true
+wait $pf_pid 2>/dev/null || true
 
 if [ -z "$rest_response" ] || echo "$rest_response" | grep -q '"code":"header_not_found"'; then
   echo "FAILED: rest-service returned empty or error response"

@@ -16,7 +16,7 @@ metadata:
   namespace: $NAMESPACE
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: Role
+  kind: ClusterRole
   name: $ROLE
 subjects:
 - kind: ServiceAccount

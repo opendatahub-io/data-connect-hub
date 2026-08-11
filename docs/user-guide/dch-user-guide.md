@@ -2,7 +2,9 @@
 The purpose of this document is to provide **end-users** steps to install, configure, use DCH as such this document can be used by doc team to build official doc. This approach is similar to other services.
 
 ## Content
-- [x] Prerequisites
+- [ ] Prerequisites
+  - [x] Gateway 
+  - [ ] Postgres 
 - [ ] Install DCH Operator
 - [ ] Install `DataConnectService`
 - [x] Verify `DataConnectService`
@@ -97,7 +99,7 @@ You  can run the script [scripts/config-kube-rbac-proxy.sh](scripts/config-kube-
 
 
 #### Create Roles
-There are 2 roles in DCH; namely, `dch-ingest` and `dch-admin`. The `dch-ingest` role has read-only permissions. The `dch-admin` role has all permissions.
+There are 2 cluster roles in DCH; namely, `dch-ingest` and `dch-admin`. The `dch-ingest` role has read-only permissions. The `dch-admin` role has all permissions.
 You can create roles in `dch-example` namespace by running the script [scripts/create-roles.sh](scripts/create-roles.sh). This step will be done automatically when creating the `DataConnectService`.
 
 #### Create Test User
@@ -112,7 +114,7 @@ dch-test-user   1         3m7s
 ```
 
 #### Authorize Test User
-To allow `dch-test-user` to have `dch-ingest` role, you can run the script the script [scripts/auath-test-user.sh](scripts/auth-test-user.sh).
+To allow `dch-test-user` to have `dch-ingest` role, you can run the script the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh).
 
 #### Verify Rest Service Authentication
 You can run the script [scripts/verify-rest-auth.sh](scripts/verify-rest-auth.sh) to verify REST service authentication. You should see the following output:
@@ -157,13 +159,18 @@ Handling connection for 8443
 
 ALL PASSED: gateway REST auth tests for dch-example
 ```
+- NOTE: In order to authenticate, the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh) must get appropriate token. Pls review how the script get the token for the appropriate audience.
 
 #### Verify Flight Service Authentication
+- First make sure authentication is enabled by the flight service. You can check as follows:
+  ```console
+  $ oc logs deployment/flight-service -n dch-example | fgrep "Auth enabled"
+  2026-08-10T20:40:18.584655Z  INFO flight_service: services/flight/src/main.rs:112: Auth enabled (cache TTL: 300s)
+  ```
 You can run the script [scripts/verify-flight-auth.sh](scripts/verify-flight-auth.sh) to verify flight service authentication. You should see the following output:
 ```console
 TBF
 ```
-
 
 ### DCH REST Service
 - REST Swagger
