@@ -7,13 +7,10 @@ Python client library for the [Data Connect Hub](https://github.com/opendatahub-
 > **Note:** This package is not yet published to PyPI. Install from source for now.
 
 ```bash
-# Full install (REST + Flight SQL)
-pip install -e sdk/python
+# REST only (default)
+pip install sdk/python
 
-# REST connection management only
-pip install "sdk/python[connections]"
-
-# Flight SQL data querying only
+# REST + Flight SQL
 pip install "sdk/python[flight]"
 ```
 
@@ -84,4 +81,5 @@ make sdk-all         # lint + typecheck + test
 ## Requirements
 
 - Python 3.11+
-- Dependencies: httpx, pydantic, adbc-driver-flightsql, pyarrow, pandas
+- Core dependencies: httpx, pydantic
+- Flight SQL extras: adbc-driver-flightsql, pyarrow, pandas (`pip install "data-connect-hub[flight]"`)
