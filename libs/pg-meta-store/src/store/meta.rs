@@ -21,6 +21,15 @@ pub struct PgMetaStore {
     pool: PgPool,
 }
 
+fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
+    if let sqlx::Error::Database(ref db_err) = e
+        && db_err.code().as_deref() == Some("23505")
+    {
+        return MetaStoreError::Conflict(db_err.message().to_string());
+    }
+    MetaStoreError::Query(e.to_string())
+}
+
 impl PgMetaStore {
     pub async fn new(config: DatabaseConfig) -> Result<Self, MetaStoreError> {
         Ok(Self {
@@ -106,7 +115,7 @@ impl MetaStore for PgMetaStore {
             .bind(&json_value)
             .execute(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(map_sqlx_error)?;
 
         Ok(resource)
     }
@@ -253,7 +262,7 @@ impl MetaStore for PgMetaStore {
             .bind(&json_value)
             .execute(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(map_sqlx_error)?;
 
         Ok(resource)
     }
