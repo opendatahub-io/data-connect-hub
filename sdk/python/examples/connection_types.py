@@ -32,10 +32,11 @@ new_type = client.create_connection_type(
 )
 print(f"\nCreated type: {new_type.id} ({new_type.name})")
 
-# Update it
-updated = client.update_connection_type(new_type.id, description="Updated description")
-print(f"Updated description: {updated.description}")
-
-# Clean up
-client.delete_connection_type(new_type.id)
-print(f"Deleted type {new_type.id}")
+try:
+    # Update it
+    updated = client.update_connection_type(new_type.id, description="Updated description")
+    print(f"Updated description: {updated.description}")
+finally:
+    # Clean up
+    client.delete_connection_type(new_type.id)
+    print(f"Deleted type {new_type.id}")

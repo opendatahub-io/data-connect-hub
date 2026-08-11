@@ -13,11 +13,19 @@ from data_connect_hub.exceptions import DCHConnectionError, DCHQueryError
 from data_connect_hub.flight import FlightClient
 
 
-class _OperationalError(Exception):
+class _Error(Exception):
     pass
 
 
-class _InterfaceError(Exception):
+class _OperationalError(_Error):
+    pass
+
+
+class _InterfaceError(_Error):
+    pass
+
+
+class _ProgrammingError(_Error):
     pass
 
 
@@ -33,8 +41,10 @@ def _mock_cursor(table: pa.Table) -> MagicMock:
 
 
 def _set_mock_exceptions(mock_dbapi: MagicMock) -> None:
+    mock_dbapi.Error = _Error
     mock_dbapi.InterfaceError = _InterfaceError
     mock_dbapi.OperationalError = _OperationalError
+    mock_dbapi.ProgrammingError = _ProgrammingError
 
 
 class TestRead:
@@ -71,6 +81,18 @@ class TestRead:
         mock_dbapi.connect.return_value = mock_conn
 
         with pytest.raises(DCHQueryError, match="bad sql"):
+            flight_client.read("BAD SQL", "conn-1")
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        mock_conn = MagicMock()
+        cursor = MagicMock()
+        cursor.execute.side_effect = _ProgrammingError("syntax error")
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        with pytest.raises(DCHQueryError, match="syntax error"):
             flight_client.read("BAD SQL", "conn-1")
 
 

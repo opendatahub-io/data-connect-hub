@@ -51,7 +51,7 @@ class FlightClient:
             try:
                 cursor.execute(sql)
                 return cursor.fetch_arrow_table()
-            except flight_dbapi.OperationalError as exc:
+            except flight_dbapi.Error as exc:
                 raise DCHQueryError(str(exc)) from exc
             finally:
                 cursor.close()

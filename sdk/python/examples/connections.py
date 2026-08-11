@@ -34,14 +34,15 @@ new_conn = client.create_connection(
 )
 print(f"\nCreated connection: {new_conn.id}")
 
-# Fetch it back
-fetched = client.get_connection(new_conn.id)
-print(f"Fetched: {fetched.name} in namespace '{fetched.namespace}'")
+try:
+    # Fetch it back
+    fetched = client.get_connection(new_conn.id)
+    print(f"Fetched: {fetched.name} in namespace '{fetched.namespace}'")
 
-# Update it
-updated = client.update_connection(new_conn.id, name="renamed-postgres")
-print(f"Renamed to: {updated.name}")
-
-# Clean up
-client.delete_connection(new_conn.id)
-print(f"Deleted connection {new_conn.id}")
+    # Update it
+    updated = client.update_connection(new_conn.id, name="renamed-postgres")
+    print(f"Renamed to: {updated.name}")
+finally:
+    # Clean up
+    client.delete_connection(new_conn.id)
+    print(f"Deleted connection {new_conn.id}")

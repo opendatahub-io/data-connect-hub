@@ -22,6 +22,12 @@ class TestNormalizeToken:
     def test_strips_double_prefix(self) -> None:
         assert _normalize_token("Bearer Bearer abc123") == "Bearer abc123"
 
+    def test_case_insensitive_prefix(self) -> None:
+        assert _normalize_token("bearer abc123") == "Bearer abc123"
+
+    def test_case_insensitive_mixed_case(self) -> None:
+        assert _normalize_token("BEARER abc123") == "Bearer abc123"
+
     def test_empty_token(self) -> None:
         assert _normalize_token("") == ""
 

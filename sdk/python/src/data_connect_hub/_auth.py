@@ -16,7 +16,7 @@ def _normalize_token(token: str) -> str:
     if not token:
         return token
 
-    while token.startswith(_BEARER_PREFIX):
+    while token.upper().startswith(_BEARER_PREFIX.upper()):
         token = token[len(_BEARER_PREFIX) :]
 
     detected_scheme = token.split(None, 1)[0] if token else ""
