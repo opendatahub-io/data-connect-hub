@@ -172,7 +172,7 @@ kill $proxy_pid 2>/dev/null || true
 wait $proxy_pid 2>/dev/null || true
 
 if [ -z "$user_token" ]; then
-  echo "  SKIPPED  could not obtain token for $SA_NAME (run create-test-user.sh first)"
+  echo "  SKIPPED  could not obtain token for $SA_NAME (run create-test-users.sh first)"
   echo ""
 else
   echo "  CMD: curl $CURL_OPTS -H 'Authorization: Bearer <token>' -H 'x-tenant-id: $NAMESPACE' ${BASE_URL}${API_PATH}"

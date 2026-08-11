@@ -25,8 +25,8 @@ echo "  CMD: grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:
 list_output=$(grpcurl -plaintext -import-path /tmp -proto Flight.proto localhost:50051 list 2>&1)
 echo "  RESPONSE: $list_output"
 
-kill $pf_pid 2>/dev/null
-wait $pf_pid 2>/dev/null
+kill $pf_pid 2>/dev/null || true
+wait $pf_pid 2>/dev/null || true
 
 if ! echo "$list_output" | grep -q "arrow.flight.protocol.FlightService"; then
   echo "FAILED: flight-service did not return FlightService"

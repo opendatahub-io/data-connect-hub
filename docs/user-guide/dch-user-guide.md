@@ -102,15 +102,18 @@ You  can run the script [scripts/config-kube-rbac-proxy.sh](scripts/config-kube-
 There are 2 cluster roles in DCH; namely, `dch-ingest` and `dch-admin`. The `dch-ingest` role has read-only permissions. The `dch-admin` role has all permissions.
 You can create roles in `dch-example` namespace by running the script [scripts/create-roles.sh](scripts/create-roles.sh). This step will be done automatically when creating the `DataConnectService`.
 
-#### Create Test User
+#### Create Test Users
 For the purpose of the demo, we create `serviceaccount` (SA) instead of users.
-You can run the script the script [scripts/create-test-user.sh](scripts/create-test-user.sh). This script creates `serviceaccount/dch-test-user` in `dch-example` namespace.
+You can run the script [scripts/create-test-users.sh](scripts/create-test-users.sh). This script creates two service accounts in `dch-example` namespace:
+- `dch-test-user` — authorized user (bound to `dch-ingest` role)
+- `dch-test-noauth` — unauthorized user (no RoleBinding)
 
-You can verify the user as follows:
+You can verify the users as follows:
 ```console
-$ oc get sa -n dch-example dch-test-user
-NAME            SECRETS   AGE
-dch-test-user   1         3m7s
+$ oc get sa -n dch-example dch-test-user dch-test-noauth
+NAME               SECRETS   AGE
+dch-test-user      1         3m7s
+dch-test-noauth    1         3m7s
 ```
 
 #### Authorize Test User
