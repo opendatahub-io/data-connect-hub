@@ -46,6 +46,20 @@ make fmt
 make lint
 ```
 
+### Pre-commit Hooks
+
+This repository uses [pre-commit](https://pre-commit.com/) to run local checks before each commit.
+
+```sh
+# Install pre-commit (example with pipx)
+pipx install pre-commit
+
+# Install repository hooks
+make setup-hooks
+```
+
+The configured hooks run Rust formatting checks (`cargo fmt --check`), workspace compilation checks (`cargo check`), and Clippy (`-D warnings`).
+
 ### Running the Services
 
 ```sh

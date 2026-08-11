@@ -59,6 +59,22 @@ rules:
   - patch
   - update
 - apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - initdataconnectiontypes
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - initdataconnectiontypes/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - gateways
