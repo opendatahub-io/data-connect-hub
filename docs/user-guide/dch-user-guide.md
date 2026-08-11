@@ -14,7 +14,7 @@ The purpose of this document is to provide **end-users** steps to install, confi
   - [x] Create Test User
   - [x] Authorize Test User
   - [x] Verify Rest Service Authentication
-  - [ ] Verify Flight Service Authentication
+  - [x] Verify Flight Service Authentication
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
 - [ ] Create Connections and Connection Types
 - [ ] DCH Rest Swagger
@@ -119,8 +119,8 @@ dch-test-noauth    1         3m7s
 #### Authorize Test User
 To allow `dch-test-user` to have `dch-ingest` role, you can run the script the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh).
 
-#### Verify Rest Service Authentication
-You can run the script [scripts/verify-rest-auth.sh](scripts/verify-rest-auth.sh) to verify REST service authentication. You should see the following output:
+#### Verify Rest Service Security
+You can run the script [scripts/verify-rest-sec.sh](scripts/verify-rest-sec.sh) to verify REST service authentication, authorization, and TLS. You should see the following output:
 ```console
 ================================== VERIFY REST AUTH =============================
 --- Testing rest-service via gateway for dch-example ---
@@ -170,7 +170,7 @@ ALL PASSED: gateway REST auth tests for dch-example
   $ oc logs deployment/flight-service -n dch-example | fgrep "Auth enabled"
   2026-08-10T20:40:18.584655Z  INFO flight_service: services/flight/src/main.rs:112: Auth enabled (cache TTL: 300s)
   ```
-You can run the script [scripts/verify-flight-auth.sh](scripts/verify-flight-auth.sh) to verify flight service authentication. You should see the following output:
+You can run the script [scripts/verify-flight-sec.sh](scripts/verify-flight-sec.sh) to verify flight service authentication, authorization, and TLS. You should see the following output:
 ```console
 TBF
 ```
