@@ -341,7 +341,7 @@ impl MetaStore for PgMetaStore {
                 id: Uuid::new_v4().to_string(),
                 tenant_id: "".to_string(),
                 created_at: now.clone(),
-                updated_at: now,
+                updated_at: now.clone(),
             },
             resource: data_connection_type.clone(),
         };
@@ -351,10 +351,13 @@ impl MetaStore for PgMetaStore {
         let row = sqlx::query(
             "INSERT INTO data_connection_types (data) VALUES ($1) \
              ON CONFLICT ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id')) \
-             DO UPDATE SET data = jsonb_set(data_connection_types.data, '{resource}', ($1->'resource')) \
+             DO UPDATE SET data = jsonb_set(\
+                jsonb_set(data_connection_types.data, '{resource}', ($1->'resource')), \
+                '{metadata,updated_at}', to_jsonb($2::text)) \
              RETURNING data",
         )
         .bind(&json_value)
+        .bind(&now)
         .fetch_one(&self.pool)
         .await
         .map_err(|e| MetaStoreError::Query(e.to_string()))?;
