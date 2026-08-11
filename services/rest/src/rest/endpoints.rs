@@ -142,6 +142,14 @@ pub async fn delete_connection_type(
     Err(EndpointError::Unimplemented.into())
 }
 
+pub async fn get_ingestion_data(
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _id: web::Path<String>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    Err(EndpointError::Unimplemented.into())
+}
+
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
@@ -263,6 +271,7 @@ mod tests {
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
+                .route("/ingestion/{id}", web::get().to(get_ingestion_data))
                 .default_service(web::route().to(not_found)),
         );
     }
@@ -332,6 +341,21 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["total_count"], 0);
         assert_eq!(body["items"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_get_ingestion_data_unimplemented() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/ingestion/some-id")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 501);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unimplemented");
+        assert_eq!(body["message"], "Unimplemented");
     }
 
     #[actix_web::test]
