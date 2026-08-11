@@ -6,12 +6,13 @@ import json as _json
 import logging
 import random
 import time
+from collections.abc import Callable
 from typing import Any
 
 import httpx
 
 from ._auth import build_rest_headers
-from .exceptions import DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
+from .exceptions import DCHConfigError, DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
 from .models import (
     ConnectionType,
     CreateConnectionRequest,
@@ -66,6 +67,7 @@ class RestClient:
         token: str,
         tenant_id: str,
         *,
+        token_provider: Callable[[], str] | None = None,
         api_base: str = _DEFAULT_API_BASE,
         timeout: float = 30.0,
         ca_cert: str | None = None,
@@ -76,8 +78,15 @@ class RestClient:
         retry_methods: frozenset[str] | None = _IDEMPOTENT_METHODS,
         http_client: httpx.Client | None = None,
     ) -> None:
+        if token and token_provider:
+            raise DCHConfigError(
+                "Cannot specify both 'token' and 'token_provider'."
+                " Please provide either a static token or a token_provider callable, not both."
+            )
+
         self._base_url = base_url.rstrip("/")
         self._token = token
+        self._token_provider = token_provider
         self._tenant_id = tenant_id
         self._api_base = api_base
         self._max_retries = max_retries
@@ -102,8 +111,9 @@ class RestClient:
             self._client.close()
 
     def _headers(self) -> dict[str, str]:
+        token = self._token_provider() if self._token_provider else self._token
         return build_rest_headers(
-            token=self._token,
+            token=token,
             tenant_id=self._tenant_id,
         )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -27,9 +27,11 @@ class FlightSQLClient:
     flight_url : str
         gRPC endpoint, e.g. ``grpc://host:50051``.
     token : str
-        Raw Bearer token value.
+        Static Bearer token value.
     tenant_id : str
         Tenant identifier.
+    token_provider : Callable[[], str], optional
+        Called per-request to obtain a fresh token. Mutually exclusive with *token*.
     timeout : float, optional
         Timeout in seconds for Flight SQL RPC calls (applies to both query and fetch).
     """
@@ -40,19 +42,28 @@ class FlightSQLClient:
         token: str = "",
         tenant_id: str = "",
         *,
+        token_provider: Callable[[], str] | None = None,
         timeout: float | None = None,
     ) -> None:
         self._flight_url = flight_url
-        self._token = token
         self._tenant_id = tenant_id
-        self._base_kwargs = build_flight_headers(token=token, tenant_id=tenant_id)
+        self._token_provider = token_provider
+        self._static_kwargs: dict[str, str] = {}
         if timeout is not None:
-            self._base_kwargs[_QUERY_TIMEOUT_KEY] = str(timeout)
-            self._base_kwargs[_FETCH_TIMEOUT_KEY] = str(timeout)
+            self._static_kwargs[_QUERY_TIMEOUT_KEY] = str(timeout)
+            self._static_kwargs[_FETCH_TIMEOUT_KEY] = str(timeout)
+        if not token_provider:
+            self._static_kwargs.update(build_flight_headers(token=token, tenant_id=tenant_id))
+
+    def _base_kwargs(self) -> dict[str, str]:
+        if self._token_provider:
+            headers = build_flight_headers(token=self._token_provider(), tenant_id=self._tenant_id)
+            return {**self._static_kwargs, **headers}
+        return dict(self._static_kwargs)
 
     def _connect(self, connection_id: str) -> flight_dbapi.Connection:
         db_kwargs = {
-            **self._base_kwargs,
+            **self._base_kwargs(),
             f"{ADBC_HEADER_PREFIX}x-data-connection-id": connection_id,
         }
         try:
@@ -83,7 +94,7 @@ class FlightSQLClient:
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""
         try:
-            conn = flight_dbapi.connect(self._flight_url, db_kwargs=self._base_kwargs)
+            conn = flight_dbapi.connect(self._flight_url, db_kwargs=self._base_kwargs())
         except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:
             raise DCHConnectionError(str(exc)) from exc
         try:

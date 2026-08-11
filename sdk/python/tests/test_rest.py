@@ -501,3 +501,49 @@ class TestRetry:
         with pytest.raises(DCHServerError):
             client.list_connections()
         assert call_count == 1
+
+
+class TestTokenProviderGuard:
+    def test_token_and_provider_raises(self) -> None:
+        from data_connect_hub.exceptions import DCHConfigError
+
+        with pytest.raises(DCHConfigError, match="Cannot specify both"):
+            RestClient(
+                base_url="http://test",
+                token="tok",
+                tenant_id="t1",
+                token_provider=lambda: "fresh",
+            )
+
+
+class TestTokenProvider:
+    def test_provider_called_per_request(self) -> None:
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        captured_headers: list[dict[str, str]] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured_headers.append(dict(request.headers))
+            return httpx.Response(200, json=[])
+
+        transport = httpx.MockTransport(handler)
+        http_client = httpx.Client(transport=transport, base_url="http://test")
+        client = RestClient(
+            base_url="http://test",
+            token="",
+            tenant_id="t1",
+            token_provider=provider,
+            http_client=http_client,
+        )
+
+        client.list_connections()
+        client.list_connections()
+
+        assert call_count == 2
+        assert captured_headers[0]["authorization"] == "Bearer token-1"
+        assert captured_headers[1]["authorization"] == "Bearer token-2"

@@ -191,6 +191,74 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
 
 
+class TestTokenProvider:
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_called_per_request(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+        kwargs1 = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert kwargs1["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-1"
+
+        client.read("SELECT 1", "conn-1")
+        kwargs2 = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert kwargs2["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-2"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_used_for_server_info(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=lambda: "fresh-token",
+        )
+        mock_conn = MagicMock()
+        mock_conn.adbc_get_info.return_value = {"vendor": "DCH"}
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.server_info()
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer fresh-token"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_with_timeout(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=lambda: "fresh-token",
+            timeout=10.0,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer fresh-token"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
+
+
 class TestTimeouts:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_timeouts_injected(self, mock_dbapi: MagicMock) -> None:

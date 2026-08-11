@@ -156,3 +156,20 @@ class TestFlightDelegation:
         result = client.server_info()
         assert result == {"vendor": "DCH"}
         client._flight.server_info.assert_called_once()
+
+
+class TestTokenProviderGuard:
+    def test_token_and_provider_raises(self) -> None:
+        with pytest.raises(DCHConfigError, match="Cannot specify both"):
+            DataConnectClient(
+                rest_url="http://localhost",
+                token="tok",
+                token_provider=lambda: "fresh",
+            )
+
+    def test_provider_only_accepted(self) -> None:
+        client = DataConnectClient(
+            rest_url="http://localhost",
+            token_provider=lambda: "fresh",
+        )
+        assert client._rest is not None
