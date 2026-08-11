@@ -161,7 +161,7 @@ $(PYTHON_SDK_DIR)/.venv/bin/python3:
 sdk-venv: $(SDK_VENV_PREREQ)
 
 sdk-install: sdk-venv
-	$(SDK_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[dev]"
+	$(SDK_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[flight,dev]"
 
 sdk-test: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)pytest tests/ -v --cov=data_connect_hub --cov-report=term-missing --cov-report=html:htmlcov
@@ -187,9 +187,12 @@ sdk-all: sdk-lint sdk-typecheck sdk-test
 # -------------------------------------------------------------------
 
 setup-hooks:
-	@mkdir -p .hooks
-	ln -sf ../../.hooks/pre-commit .git/hooks/pre-commit
-	@echo "Git hooks installed."
+	@command -v pre-commit >/dev/null 2>&1 || { \
+		echo "pre-commit not found. Install it first (for example: pipx install pre-commit)."; \
+		exit 1; \
+	}
+	pre-commit install
+	@echo "Pre-commit hook installed."
 
 # -------------------------------------------------------------------
 # Help

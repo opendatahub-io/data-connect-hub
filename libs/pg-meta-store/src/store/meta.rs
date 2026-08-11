@@ -215,8 +215,6 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         id: &str,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        // TODO: add tenant_id filter when we have a way to store data connection types per tenant
-
         let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = '')")
             .bind(id)
             .bind(tenant_id)

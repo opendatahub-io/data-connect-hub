@@ -10,7 +10,7 @@ from typing import Any
 
 import httpx
 
-from ._auth import build_headers
+from ._auth import build_rest_headers
 from .exceptions import DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
 from .models import (
     ConnectionType,
@@ -24,7 +24,6 @@ from .models import (
 _DEFAULT_API_BASE = "/api/v1/data"
 _CONNECTIONS_ENDPOINT = "/connections"
 _CONNECTION_TYPES_ENDPOINT = "/connection-types"
-_INGESTION_ENDPOINT = "/ingestion"
 _RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
 _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
 
@@ -94,7 +93,7 @@ class RestClient:
             self._client.close()
 
     def _headers(self) -> dict[str, str]:
-        return build_headers(
+        return build_rest_headers(
             token=self._token,
             tenant_id=self._tenant_id,
         )
@@ -241,10 +240,3 @@ class RestClient:
 
     def delete_connection_type(self, type_id: str) -> None:
         self._request("DELETE", f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}")
-
-    # -- Unstructured ingestion --
-
-    def ingest(self, connection_id: str) -> bytes:
-        """Fetch raw unstructured data for a connection."""
-        resp = self._request("GET", f"{_INGESTION_ENDPOINT}/{connection_id}")
-        return resp.content

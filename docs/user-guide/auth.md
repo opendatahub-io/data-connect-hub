@@ -14,9 +14,12 @@ Enable auth in the Flight service `config.toml`:
 [auth]
 enabled = true
 cache_ttl_secs = 300
+token_review_audiences = ["https://kubernetes.default.svc"]
 ```
 
 When `enabled = false` (the default), all requests bypass authentication.
+`auth.token_review_audiences` is the list of audience identifiers that Flight explicitly trusts for TokenReview. Include only audiences intentionally trusted by Flight.
+If your cluster uses a different service account token audience (for example, kind often uses `https://kubernetes.default.svc.cluster.local`), override `auth.token_review_audiences` accordingly.
 
 ## 3. Deployment Prerequisites
 
@@ -101,4 +104,4 @@ Authentication and authorization results are cached using in-memory Moka caches 
 
 - **REST service has no auth.** All REST endpoints are publicly accessible.
 - **Single verb.** The Flight service checks only the `get` verb for all operations, regardless of the gRPC method called.
-- **Hardcoded token audience.** TokenReview validates against the audience `https://kubernetes.default.svc`. Some cluster environments (e.g., kind) issue tokens with a different default audience (`https://kubernetes.default.svc.cluster.local`). Clients in those environments must request tokens with the matching audience explicitly.
+- **Audience configuration must match cluster tokens.** TokenReview audiences are configurable through `auth.token_review_audiences` (default: `https://kubernetes.default.svc`), and a mismatch will cause authentication failures.

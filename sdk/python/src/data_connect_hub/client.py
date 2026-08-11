@@ -1,8 +1,8 @@
-"""Unified DataConnectClient for REST API access."""
+"""Unified DataConnectClient for REST and Flight SQL access."""
 
 from __future__ import annotations
 
-import asyncio
+from typing import TYPE_CHECKING, Any
 
 from .exceptions import DCHConfigError
 from .models import (
@@ -17,6 +17,12 @@ from .models import (
 )
 from .rest import RestClient
 
+if TYPE_CHECKING:
+    import pandas as pd
+    import pyarrow as pa
+
+    from .flight import FlightSQLClient
+
 
 class DataConnectClient:
     """Single entry point for all DCH interactions.
@@ -25,6 +31,8 @@ class DataConnectClient:
     ----------
     rest_url : str, optional
         Base URL of the DCH REST service.
+    flight_url : str, optional
+        gRPC endpoint of the DCH Flight SQL service.
     token : str
         Raw Bearer token value (without the "Bearer " prefix).
     tenant_id : str
@@ -44,6 +52,7 @@ class DataConnectClient:
     def __init__(
         self,
         rest_url: str | None = None,
+        flight_url: str | None = None,
         token: str = "",
         tenant_id: str = "",
         *,
@@ -54,6 +63,7 @@ class DataConnectClient:
         backoff_max: float = 30.0,
     ) -> None:
         self._rest: RestClient | None = None
+        self._flight: FlightSQLClient | None = None
 
         if rest_url:
             self._rest = RestClient(
@@ -67,6 +77,15 @@ class DataConnectClient:
                 backoff_max=backoff_max,
             )
 
+        if flight_url:
+            from .flight import FlightSQLClient as _FlightSQLClient
+
+            self._flight = _FlightSQLClient(
+                flight_url=flight_url,
+                token=token,
+                tenant_id=tenant_id,
+            )
+
     # -- context manager --
 
     def __enter__(self) -> DataConnectClient:
@@ -76,9 +95,11 @@ class DataConnectClient:
         self.close()
 
     def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close underlying clients."""
         if self._rest:
             self._rest.close()
+        if self._flight:
+            self._flight.close()
 
     # -- guards --
 
@@ -86,6 +107,11 @@ class DataConnectClient:
         if self._rest is None:
             raise DCHConfigError("rest_url is required for this operation")
         return self._rest
+
+    def _require_flight(self) -> FlightSQLClient:
+        if self._flight is None:
+            raise DCHConfigError("flight_url is required for this operation")
+        return self._flight
 
     # -- Connections --
 
@@ -188,7 +214,16 @@ class DataConnectClient:
     def delete_connection_type(self, type_id: str) -> None:
         self._require_rest().delete_connection_type(type_id)
 
-    # -- Unstructured ingestion --
+    # -- Flight SQL queries --
 
-    async def ingest(self, connection_id: str) -> bytes:
-        return await asyncio.to_thread(self._require_rest().ingest, connection_id)
+    def read(self, sql: str, connection_id: str) -> pa.Table:
+        """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
+        return self._require_flight().read(sql, connection_id)
+
+    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
+        """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
+        return self._require_flight().read_pandas(sql, connection_id)
+
+    def server_info(self) -> dict[str, Any]:
+        """Return Flight SQL server metadata."""
+        return self._require_flight().server_info()

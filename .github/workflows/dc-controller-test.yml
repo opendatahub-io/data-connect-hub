@@ -1,8 +1,11 @@
-name: Tests
+name: "dc-controller: Tests"
 
 on:
   push:
+    branches: [main]
+    paths: ['dc-controller/**']
   pull_request:
+    paths: ['dc-controller/**']
 
 permissions: {}
 

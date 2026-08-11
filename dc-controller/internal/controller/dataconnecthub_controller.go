@@ -46,8 +46,10 @@ import (
 )
 
 const (
-	EnvRestImage   = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
-	EnvFlightImage = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
+	EnvRestImage       = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
+	EnvFlightImage     = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
+	DefaultRestImage   = "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+	DefaultFlightImage = "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
 
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"

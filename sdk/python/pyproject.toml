@@ -25,10 +25,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-pandas = ["pandas>=2.0"]
+flight = [
+    "adbc-driver-flightsql>=1.0.0",
+    "pyarrow>=14.0",
+    "pandas>=2.0",
+]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
     "pytest-cov>=5.0",
     "ruff>=0.5",
     "mypy>=1.10",
@@ -69,9 +72,17 @@ strict = true
 warn_return_any = true
 warn_unused_configs = true
 
+[[tool.mypy.overrides]]
+module = [
+    "pyarrow",
+    "pyarrow.*",
+    "pandas",
+    "adbc_driver_flightsql.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-asyncio_mode = "auto"
 
 [tool.coverage.run]
 source = ["data_connect_hub"]

@@ -7,8 +7,11 @@ Python client library for the [Data Connect Hub](https://github.com/opendatahub-
 > **Note:** This package is not yet published to PyPI. Install from source for now.
 
 ```bash
-# From the repository root
-pip install -e "sdk/python[dev]"
+# REST only (default)
+pip install sdk/python
+
+# REST + Flight SQL
+pip install "sdk/python[flight]"
 ```
 
 ## Quick Start
@@ -18,15 +21,17 @@ from data_connect_hub import DataConnectClient
 
 client = DataConnectClient(
     rest_url="https://dch.example.com",
+    flight_url="grpc://dch.example.com:50051",
     token="<your-token>",  # raw token value, "Bearer" prefix added automatically
     tenant_id="my-tenant",
 )
 
-# List connections
+# List connections (REST)
 connections = client.list_connections()
 
-# Get a specific connection
-conn = client.get_connection("conn-id")
+# Query data via Flight SQL
+table = client.read("SELECT * FROM prompts", connection_id="conn-uuid")
+df = table.to_pandas()
 ```
 
 ## API Reference
@@ -46,15 +51,17 @@ client.delete_connection(connection_id) -> None
 ```python
 client.list_connection_types() -> list[ConnectionType]
 client.get_connection_type(type_id) -> ConnectionType
-client.create_connection_type(name=..., description=...) -> ConnectionType
-client.update_connection_type(type_id, name=...) -> ConnectionType
+client.create_connection_type(name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
+client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
 client.delete_connection_type(type_id) -> None
 ```
 
-### Unstructured Data Ingestion (REST)
+### Tabular Data Queries (Flight SQL)
 
 ```python
-await client.ingest(connection_id) -> bytes  # async
+client.read(sql, connection_id) -> pyarrow.Table       # full result as Arrow Table
+client.read_pandas(sql, connection_id) -> pd.DataFrame # full result as pandas DataFrame
+client.server_info() -> dict                           # server metadata
 ```
 
 ## Development
@@ -74,4 +81,5 @@ make sdk-all         # lint + typecheck + test
 ## Requirements
 
 - Python 3.11+
-- Dependencies: httpx, pydantic
+- Core dependencies: httpx, pydantic
+- Flight SQL extras: adbc-driver-flightsql, pyarrow, pandas (`pip install "data-connect-hub[flight]"`)

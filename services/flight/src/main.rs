@@ -109,8 +109,16 @@ async fn main() -> Result<()> {
     let mut builder = tonic::transport::Server::builder();
 
     if config.auth.enabled {
-        tracing::info!("Auth enabled (cache TTL: {}s)", config.auth.cache_ttl_secs);
-        let kube_auth = KubeAuthClient::try_default(Duration::from_secs(config.auth.cache_ttl_secs)).await?;
+        tracing::info!(
+            "Auth enabled (cache TTL: {}s, token_review_audiences: {:?})",
+            config.auth.cache_ttl_secs,
+            config.auth.token_review_audiences
+        );
+        let kube_auth = KubeAuthClient::try_default(
+            Duration::from_secs(config.auth.cache_ttl_secs),
+            config.auth.token_review_audiences.clone(),
+        )
+        .await?;
         let auth_layer = AuthLayer::new(Arc::new(kube_auth));
         builder
             .layer(auth_layer)
