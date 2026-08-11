@@ -61,13 +61,13 @@ LABEL org.opencontainers.image.description="Data Connection Hub — Flight Servi
 
 RUN microdnf install -y shadow-utils ca-certificates \
     && microdnf clean all \
-    && groupadd -r dch \
-    && useradd -r -g dch -d /nonexistent -s /sbin/nologin dch
+    && groupadd -g 10001 -r dch \
+    && useradd -u 10001 -r -g dch -d /nonexistent -s /sbin/nologin dch
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/flight-service /usr/local/bin/flight-service
 
-USER dch:dch
+USER 10001:10001
 
 EXPOSE 50051
 

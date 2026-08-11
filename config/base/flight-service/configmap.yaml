@@ -15,3 +15,7 @@ data:
     max_capacity = 50
     ttl_secs = 30
     idle_secs = 30
+
+    [auth]
+    enabled = true
+    cache_ttl_secs = 60

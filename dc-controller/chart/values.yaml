@@ -15,6 +15,7 @@ controllerManager:
 relatedImages:
   restService: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
   flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+  kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3
 
 leaderElection: true
 

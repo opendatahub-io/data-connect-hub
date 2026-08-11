@@ -48,6 +48,9 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+const DefaultKubeRbacProxyImage = "quay.io/opendatahub/odh-kube-rbac-proxy@" +
+	"sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3"
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
@@ -203,6 +206,10 @@ func main() {
 		FlightImage: controller.EnvOrDefault(
 			controller.EnvFlightImage,
 			controller.DefaultFlightImage,
+		),
+		KubeRbacProxyImage: controller.EnvOrDefault(
+			controller.EnvKubeRbacProxyImage,
+			DefaultKubeRbacProxyImage,
 		),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnecthub")

@@ -46,10 +46,11 @@ import (
 )
 
 const (
-	EnvRestImage       = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
-	EnvFlightImage     = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
-	DefaultRestImage   = "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
-	DefaultFlightImage = "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+	EnvRestImage          = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
+	EnvFlightImage        = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
+	EnvKubeRbacProxyImage = "RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"
+	DefaultRestImage      = "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+	DefaultFlightImage    = "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
 
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"
@@ -86,11 +87,12 @@ var BuildVersion = "dev"
 // DataConnectHubReconciler reconciles a DataConnectHub object
 type DataConnectHubReconciler struct {
 	client.Client
-	Scheme        *runtime.Scheme
-	ManifestsPath string
-	Namespace     string // target namespace for deploying workloads
-	RestImage     string // resolved from RELATED_IMAGE or default
-	FlightImage   string // resolved from RELATED_IMAGE or default
+	Scheme             *runtime.Scheme
+	ManifestsPath      string
+	Namespace          string // target namespace for deploying workloads
+	RestImage          string // resolved from RELATED_IMAGE or default
+	FlightImage        string // resolved from RELATED_IMAGE or default
+	KubeRbacProxyImage string // resolved from RELATED_IMAGE or default
 }
 
 type platformConfig struct {
@@ -377,6 +379,9 @@ func (r *DataConnectHubReconciler) reconcileService(
 
 	image := resolveServiceImage(name, overrides, r.RestImage, r.FlightImage)
 	setDeploymentImage(resources, name, image)
+	if name == nameRestService {
+		setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
+	}
 
 	return r.applyResources(ctx, cr, resources)
 }

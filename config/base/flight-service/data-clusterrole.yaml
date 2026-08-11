@@ -1,0 +1,27 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dch-read
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-connections", "data-connection-types"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dch-read-write
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-connections", "data-connection-types"]
+    # Include both Kubernetes-style verbs and HTTP-method verbs for kube-rbac-proxy mappings.
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dch-admin
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-connections", "data-connection-types"]
+    verbs: ["*"]

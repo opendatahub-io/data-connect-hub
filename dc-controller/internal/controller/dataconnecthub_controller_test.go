@@ -52,13 +52,23 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 	reconciler := func() *DataConnectHubReconciler {
 		return &DataConnectHubReconciler{
-			Client:        k8sClient,
-			Scheme:        k8sClient.Scheme(),
-			ManifestsPath: manifestsPath,
-			Namespace:     targetNamespace,
-			RestImage:     DefaultRestImage,
-			FlightImage:   DefaultFlightImage,
+			Client:             k8sClient,
+			Scheme:             k8sClient.Scheme(),
+			ManifestsPath:      manifestsPath,
+			Namespace:          targetNamespace,
+			RestImage:          DefaultRestImage,
+			FlightImage:        DefaultFlightImage,
+			KubeRbacProxyImage: "quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3",
 		}
+	}
+
+	findContainer := func(deploy *appsv1.Deployment, name string) *corev1.Container {
+		for i := range deploy.Spec.Template.Spec.Containers {
+			if deploy.Spec.Template.Spec.Containers[i].Name == name {
+				return &deploy.Spec.Template.Spec.Containers[i]
+			}
+		}
+		return nil
 	}
 
 	cleanupOperatorResources := func() {
@@ -155,7 +165,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			restDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			Expect(restDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(DefaultRestImage))
+			restContainer := findContainer(restDeploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			Expect(restContainer.Image).To(Equal(DefaultRestImage))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
@@ -168,7 +180,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			restSvc := &corev1.Service{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restSvc)).To(Succeed())
-			Expect(restSvc.Spec.Ports[0].Port).To(Equal(int32(8080)))
+			Expect(restSvc.Spec.Ports[0].Port).To(Equal(int32(8443)))
 
 			flightSvc := &corev1.Service{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightSvc)).To(Succeed())
@@ -331,7 +343,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
-			Expect(deploy.Spec.Template.Spec.Containers[0].Image).To(Equal("custom-rest:v2"))
+			restContainer := findContainer(deploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			Expect(restContainer.Image).To(Equal("custom-rest:v2"))
 			Expect(*deploy.Spec.Replicas).To(Equal(int32(3)))
 		})
 
@@ -340,7 +354,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
-			Expect(deploy.Spec.Template.Spec.Containers[0].Resources.Requests.Cpu().String()).To(Equal("200m"))
+			restContainer := findContainer(deploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			Expect(restContainer.Resources.Requests.Cpu().String()).To(Equal("200m"))
 		})
 
 		It("should add custom env vars", func() {
@@ -350,7 +366,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
 
 			envNames := make(map[string]string)
-			for _, e := range deploy.Spec.Template.Spec.Containers[0].Env {
+			restContainer := findContainer(deploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			for _, e := range restContainer.Env {
 				envNames[e.Name] = e.Value
 			}
 			Expect(envNames).To(HaveKeyWithValue("CUSTOM_VAR", "custom-value"))

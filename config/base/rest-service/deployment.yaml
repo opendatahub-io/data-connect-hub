@@ -17,12 +17,49 @@ spec:
         app.kubernetes.io/part-of: data-connect-hub
     spec:
       serviceAccountName: data-connect-hub-sa
-      automountServiceAccountToken: false
+      automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
         seccompProfile:
           type: RuntimeDefault
       containers:
+        - name: kube-rbac-proxy
+          image: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
+          args:
+            - --secure-listen-address=0.0.0.0:8443
+            - --upstream=http://127.0.0.1:8080
+            - --config-file=/etc/kube-rbac-proxy/config-file.yaml
+            - --ignore-paths=/api/v1/data/health
+            - --logtostderr=true
+          ports:
+            - name: https
+              containerPort: 8443
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          volumeMounts:
+            - name: kube-rbac-proxy-config
+              mountPath: /etc/kube-rbac-proxy
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 5
+            periodSeconds: 15
         - name: rest-service
           image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
           imagePullPolicy: Always
@@ -70,6 +107,9 @@ spec:
         - name: config
           configMap:
             name: rest-service-config
+        - name: kube-rbac-proxy-config
+          configMap:
+            name: rest-service-kube-rbac-proxy-config
         - name: db-secret
           secret:
             secretName: postgres-credentials
