@@ -187,9 +187,12 @@ sdk-all: sdk-lint sdk-typecheck sdk-test
 # -------------------------------------------------------------------
 
 setup-hooks:
-	@mkdir -p .hooks
-	ln -sf ../../.hooks/pre-commit .git/hooks/pre-commit
-	@echo "Git hooks installed."
+	@command -v pre-commit >/dev/null 2>&1 || { \
+		echo "pre-commit not found. Install it first (for example: pipx install pre-commit)."; \
+		exit 1; \
+	}
+	pre-commit install
+	@echo "Pre-commit hook installed."
 
 # -------------------------------------------------------------------
 # Help
