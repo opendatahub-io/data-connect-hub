@@ -1,4 +1,5 @@
 use crate::flight::errors::{map_connector_error, map_meta_store_error, map_secret_store_error};
+use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
 use arrow_flight::{
     FlightDescriptor, FlightEndpoint, FlightInfo, Ticket,
@@ -17,8 +18,37 @@ use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
 use std::sync::Arc;
+use std::time::Instant;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
+
+const METHOD_GET_FLIGHT_INFO: &str = "arrow.flight.protocol.FlightService/GetFlightInfo";
+const METHOD_DO_GET: &str = "arrow.flight.protocol.FlightService/DoGet";
+const OPERATION_SQL_INFO: &str = "sql_info";
+const OPERATION_STATEMENT: &str = "statement";
+const STATUS_OK: &str = "OK";
+
+fn grpc_status_label(status: &Status) -> &'static str {
+    match status.code() {
+        tonic::Code::Ok => "OK",
+        tonic::Code::Cancelled => "Cancelled",
+        tonic::Code::Unknown => "Unknown",
+        tonic::Code::InvalidArgument => "InvalidArgument",
+        tonic::Code::DeadlineExceeded => "DeadlineExceeded",
+        tonic::Code::NotFound => "NotFound",
+        tonic::Code::AlreadyExists => "AlreadyExists",
+        tonic::Code::PermissionDenied => "PermissionDenied",
+        tonic::Code::ResourceExhausted => "ResourceExhausted",
+        tonic::Code::FailedPrecondition => "FailedPrecondition",
+        tonic::Code::Aborted => "Aborted",
+        tonic::Code::OutOfRange => "OutOfRange",
+        tonic::Code::Unimplemented => "Unimplemented",
+        tonic::Code::Internal => "Internal",
+        tonic::Code::Unavailable => "Unavailable",
+        tonic::Code::DataLoss => "DataLoss",
+        tonic::Code::Unauthenticated => "Unauthenticated",
+    }
+}
 
 pub struct TabularDataService {
     connectors_registry: Arc<ConnectorsRegistry>,
@@ -89,21 +119,13 @@ impl TabularDataService {
         }
         Ok(r)
     }
-}
 
-#[tonic::async_trait]
-impl FlightSqlService for TabularDataService {
-    type FlightService = TabularDataService;
-
-    async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {}
-
-    async fn get_flight_info_sql_info(
+    fn handle_get_flight_info_sql_info(
         &self,
         query: CommandGetSqlInfo,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
         let requested: Vec<String> = Self::query_to_string(&query);
-
         info!("get_flight_info_sql_info: {:?}", requested);
 
         let flight_descriptor = request.into_inner();
@@ -119,13 +141,11 @@ impl FlightSqlService for TabularDataService {
         Ok(Response::new(flight_info))
     }
 
-    async fn do_get_sql_info(
+    fn handle_do_get_sql_info(
         &self,
         query: CommandGetSqlInfo,
-        _request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let requested: Vec<String> = Self::query_to_string(&query);
-
         info!("do_get_sql_info: {:?}", requested);
 
         let batch = query
@@ -144,7 +164,7 @@ impl FlightSqlService for TabularDataService {
         ))
     }
 
-    async fn get_flight_info_statement(
+    async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,
         request: Request<FlightDescriptor>,
@@ -202,7 +222,7 @@ impl FlightSqlService for TabularDataService {
         Ok(Response::new(flight_info))
     }
 
-    async fn do_get_statement(
+    async fn handle_do_get_statement(
         &self,
         ticket: TicketStatementQuery,
         request: Request<Ticket>,
@@ -258,5 +278,72 @@ impl FlightSqlService for TabularDataService {
         Ok(Response::new(
             Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
         ))
+    }
+}
+
+#[tonic::async_trait]
+impl FlightSqlService for TabularDataService {
+    type FlightService = TabularDataService;
+
+    async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {}
+
+    async fn get_flight_info_sql_info(
+        &self,
+        query: CommandGetSqlInfo,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        let started = Instant::now();
+        let result = self.handle_get_flight_info_sql_info(query, request);
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_GET_FLIGHT_INFO, OPERATION_SQL_INFO, status, started.elapsed());
+        result
+    }
+
+    async fn do_get_sql_info(
+        &self,
+        query: CommandGetSqlInfo,
+        _request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let started = Instant::now();
+        let result = self.handle_do_get_sql_info(query);
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_DO_GET, OPERATION_SQL_INFO, status, started.elapsed());
+        result
+    }
+
+    async fn get_flight_info_statement(
+        &self,
+        query: CommandStatementQuery,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        let started = Instant::now();
+        let result = self.handle_get_flight_info_statement(query, request).await;
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_GET_FLIGHT_INFO, OPERATION_STATEMENT, status, started.elapsed());
+        result
+    }
+
+    async fn do_get_statement(
+        &self,
+        ticket: TicketStatementQuery,
+        request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let started = Instant::now();
+        let result = self.handle_do_get_statement(ticket, request).await;
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_DO_GET, OPERATION_STATEMENT, status, started.elapsed());
+        result
     }
 }

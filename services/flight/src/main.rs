@@ -6,6 +6,7 @@ use clap::Parser;
 use config::{Config, File};
 use flight_service::flight::TabularDataService;
 use flight_service::flight::auth::AuthLayer;
+use flight_service::flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
 use flight_service::flight::registry::ConnectorsRegistry;
 use kube_utils::KubeAuthClient;
 use kube_utils::secrets::KubeSecretStore;
@@ -107,6 +108,18 @@ async fn main() -> Result<()> {
         .await;
 
     let mut builder = tonic::transport::Server::builder();
+
+    if config.metrics.enabled {
+        tracing::info!(
+            "Prometheus metrics enabled on {}:{}",
+            config.metrics.address,
+            config.metrics.port
+        );
+        install_prometheus_recorder()?;
+        spawn_metrics_server(config.metrics.address.clone(), config.metrics.port);
+    } else {
+        tracing::info!("Prometheus metrics disabled");
+    }
 
     if config.auth.enabled {
         tracing::info!(
