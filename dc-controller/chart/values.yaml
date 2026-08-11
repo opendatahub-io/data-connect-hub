@@ -21,12 +21,8 @@ leaderElection: true
 
 # operandNamespace: ""  # defaults to the controller's namespace if unset
 
-dataConnectHub:
+dataConnectService:
   enabled: true
-  devMode: true
-
-  # database:
-  #   externalSecret: my-database-secret  # required when devMode is false
 
   restService: {}
     # image: "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"

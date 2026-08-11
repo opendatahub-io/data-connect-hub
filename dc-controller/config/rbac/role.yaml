@@ -8,8 +8,6 @@ rules:
   - ""
   resources:
   - configmaps
-  - persistentvolumeclaims
-  - secrets
   - serviceaccounts
   - services
   verbs:
@@ -19,6 +17,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - apps
@@ -33,9 +39,9 @@ rules:
   - update
   - watch
 - apiGroups:
-  - components.platform.opendatahub.io
+  - dataconnecthub.opendatahub.io
   resources:
-  - dataconnecthubs
+  - dataconnectservices
   verbs:
   - create
   - delete
@@ -45,15 +51,16 @@ rules:
   - update
   - watch
 - apiGroups:
-  - components.platform.opendatahub.io
+  - dataconnecthub.opendatahub.io
   resources:
-  - dataconnecthubs/finalizers
+  - dataconnectservices/finalizers
   verbs:
   - update
 - apiGroups:
-  - components.platform.opendatahub.io
+  - dataconnecthub.opendatahub.io
   resources:
-  - dataconnecthubs/status
+  - dataconnectservices/status
+  - initdataconnectiontypes/status
   verbs:
   - get
   - patch
@@ -66,14 +73,6 @@ rules:
   - get
   - list
   - watch
-- apiGroups:
-  - dataconnecthub.opendatahub.io
-  resources:
-  - initdataconnectiontypes/status
-  verbs:
-  - get
-  - patch
-  - update
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

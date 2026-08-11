@@ -112,7 +112,7 @@ spec:
             name: rest-service-kube-rbac-proxy-config
         - name: db-secret
           secret:
-            secretName: postgres-credentials
+            secretName: dch-database-config
             items:
               - key: secret-config.toml
                 path: secret-config.toml

@@ -28,30 +28,28 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
+	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
-var _ = Describe("DataConnectHub Controller", func() {
+var _ = Describe("DataConnectService Controller", func() {
 	const (
-		resourceName = "default-dataconnecthub"
-		// Cluster-scoped CRs deploy resources into this namespace
+		resourceName    = "default-dataconnectservice"
 		targetNamespace = "default"
 	)
 
 	ctx := context.Background()
 
-	crKey := types.NamespacedName{Name: resourceName}
+	crKey := types.NamespacedName{Name: resourceName, Namespace: targetNamespace}
 
 	manifestsPath := filepath.Join("..", "..", "..", "config")
 
-	reconciler := func() *DataConnectHubReconciler {
-		return &DataConnectHubReconciler{
+	reconciler := func() *DataConnectServiceReconciler {
+		return &DataConnectServiceReconciler{
 			Client:             k8sClient,
 			Scheme:             k8sClient.Scheme(),
 			ManifestsPath:      manifestsPath,
@@ -72,7 +70,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 	}
 
 	cleanupOperatorResources := func() {
-		for _, name := range []string{nameRestService, nameFlightService, namePostgres} {
+		for _, name := range []string{nameRestService, nameFlightService} {
 			_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 			_ = k8sClient.Delete(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
@@ -82,9 +80,8 @@ var _ = Describe("DataConnectHub Controller", func() {
 		for _, name := range []string{nameDataConnectHub + "-sa", nameFlightService + "-sa"} {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
-		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: namePostgresCreds, Namespace: targetNamespace}})
-		_ = k8sClient.Delete(ctx, &corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: namePostgres + "-data", Namespace: targetNamespace}})
-		for _, name := range []string{nameRestService, nameFlightService, namePostgres} {
+		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: targetNamespace}})
+		for _, name := range []string{nameRestService, nameFlightService} {
 			np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}}
 			_ = k8sClient.Delete(ctx, np)
 		}
@@ -92,7 +89,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 	}
 
 	deleteCR := func() {
-		cr := &dataconnecthubv1alpha1.DataConnectHub{}
+		cr := &dchv1alpha1.DataConnectService{}
 		if err := k8sClient.Get(ctx, crKey, cr); err != nil {
 			return
 		}
@@ -121,13 +118,13 @@ var _ = Describe("DataConnectHub Controller", func() {
 			result, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			if cr.Status.Phase == conditionTypeReady {
 				return
 			}
 
-			for _, name := range []string{namePostgres, nameRestService, nameFlightService} {
+			for _, name := range []string{nameRestService, nameFlightService} {
 				deploy := &appsv1.Deployment{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: targetNamespace}, deploy); err == nil {
 					simulateDeploymentReady(name)
@@ -139,18 +136,34 @@ var _ = Describe("DataConnectHub Controller", func() {
 			}
 		}
 
-		cr := &dataconnecthubv1alpha1.DataConnectHub{}
+		cr := &dchv1alpha1.DataConnectService{}
 		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 		Expect(cr.Status.Phase).To(Equal(conditionTypeReady))
 	}
 
+	createDatabaseSecret := func() {
+		secret := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      nameDatabaseConfig,
+				Namespace: targetNamespace,
+			},
+			StringData: map[string]string{
+				"DATABASE_URL":       "postgresql://dch:testpass@postgres:5432/dataconnecthub",
+				"secret-config.toml": "[database]\nurl = \"postgresql://dch:testpass@postgres:5432/dataconnecthub\"\n",
+			},
+		}
+		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+	}
+
 	Context("When reconciling with default spec", func() {
 		BeforeEach(func() {
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
+					Name:      resourceName,
+					Namespace: targetNamespace,
 				},
-				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -187,28 +200,10 @@ var _ = Describe("DataConnectHub Controller", func() {
 			Expect(flightSvc.Spec.Ports[0].Port).To(Equal(int32(50051)))
 		})
 
-		It("should create postgres resources in dev mode by default", func() {
-			reconcileUntilReady()
-
-			pgDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: targetNamespace}, pgDeploy)).To(Succeed())
-
-			pgSvc := &corev1.Service{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: targetNamespace}, pgSvc)).To(Succeed())
-			Expect(pgSvc.Spec.Ports[0].Port).To(Equal(int32(5432)))
-
-			pgSecret := &corev1.Secret{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgresCreds, Namespace: targetNamespace}, pgSecret)).To(Succeed())
-			Expect(pgSecret.Data).To(HaveKey("secret-config.toml"))
-
-			pgPVC := &corev1.PersistentVolumeClaim{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres + "-data", Namespace: targetNamespace}, pgPVC)).To(Succeed())
-		})
-
 		It("should set PlatformObject status fields", func() {
 			reconcileUntilReady()
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 
 			Expect(cr.Status.ObservedGeneration).To(Equal(cr.Generation))
@@ -227,7 +222,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(cr.Status.Phase).To(Equal("Progressing"))
 
@@ -240,10 +235,6 @@ var _ = Describe("DataConnectHub Controller", func() {
 			}
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
-
-			simulateDeploymentReady(namePostgres)
-			result, err = r.Reconcile(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
 
 			for _, name := range []string{nameRestService, nameFlightService} {
 				simulateDeploymentReady(name)
@@ -265,53 +256,27 @@ var _ = Describe("DataConnectHub Controller", func() {
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 		})
 
-		It("should wait for postgres before deploying services", func() {
-			r := reconciler()
-			req := reconcile.Request{NamespacedName: crKey}
-
-			result, err := r.Reconcile(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-			Expect(result.RequeueAfter).To(BeNumerically(">", 0))
-
-			pgDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: targetNamespace}, pgDeploy)).To(Succeed())
-
-			restDeploy := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)
-			Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			flightDeploy := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)
-			Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			simulateDeploymentReady(namePostgres)
-
-			_, err = r.Reconcile(ctx, req)
-			Expect(err).NotTo(HaveOccurred())
-
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-		})
-
 		It("should add managed-by label to created resources", func() {
 			reconcileUntilReady()
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
-			Expect(deploy.Labels).To(HaveKeyWithValue("components.platform.opendatahub.io/managed-by", "dataconnecthub"))
+			Expect(deploy.Labels).To(HaveKeyWithValue("dataconnecthub.opendatahub.io/managed-by", "dataconnectservice"))
 		})
 	})
 
 	Context("When reconciling with service overrides", func() {
 		BeforeEach(func() {
+			createDatabaseSecret()
 			customImage := "custom-rest:v2"
 			customReplicas := int32(3)
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
+			cr := &dchv1alpha1.DataConnectService{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
+					Name:      resourceName,
+					Namespace: targetNamespace,
 				},
-				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
-					RestService: &dataconnecthubv1alpha1.ServiceOverrides{
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{
 						Image:    &customImage,
 						Replicas: &customReplicas,
 						Resources: &corev1.ResourceRequirements{
@@ -377,17 +342,19 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 	Context("When imagePullSecrets are specified", func() {
 		BeforeEach(func() {
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
+					Name:      resourceName,
+					Namespace: targetNamespace,
 				},
-				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
-					RestService: &dataconnecthubv1alpha1.ServiceOverrides{
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{
 						ImagePullSecrets: []corev1.LocalObjectReference{
 							{Name: "my-registry-secret"},
 						},
 					},
-					FlightService: &dataconnecthubv1alpha1.ServiceOverrides{
+					FlightService: &dchv1alpha1.ServiceOverrides{
 						ImagePullSecrets: []corev1.LocalObjectReference{
 							{Name: "flight-pull-secret"},
 							{Name: "shared-secret"},
@@ -419,20 +386,14 @@ var _ = Describe("DataConnectHub Controller", func() {
 		})
 	})
 
-	Context("When devMode is disabled", func() {
+	Context("When database secret is missing", func() {
 		BeforeEach(func() {
-			devMode := false
-			extSecret := "my-db-secret"
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
+			cr := &dchv1alpha1.DataConnectService{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: resourceName,
+					Name:      resourceName,
+					Namespace: targetNamespace,
 				},
-				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
-					DevMode: &devMode,
-					Database: &dataconnecthubv1alpha1.DatabaseSpec{
-						ExternalSecret: &extSecret,
-					},
-				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -442,42 +403,50 @@ var _ = Describe("DataConnectHub Controller", func() {
 			deleteCR()
 		})
 
-		It("should not create postgres resources", func() {
-			for _, obj := range []client.Object{
-				&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: targetNamespace}},
-				&corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: targetNamespace}},
-				&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: namePostgresCreds, Namespace: targetNamespace}},
-				&corev1.PersistentVolumeClaim{ObjectMeta: metav1.ObjectMeta{Name: namePostgres + "-data", Namespace: targetNamespace}},
-			} {
-				_ = k8sClient.Delete(ctx, obj)
+		It("should set Degraded condition", func() {
+			r := reconciler()
+			req := reconcile.Request{NamespacedName: crKey}
+
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.Phase).To(Equal("Error"))
+
+			var degraded *metav1.Condition
+			for i := range cr.Status.Conditions {
+				if cr.Status.Conditions[i].Type == conditionTypeDegraded {
+					degraded = &cr.Status.Conditions[i]
+					break
+				}
 			}
-
-			reconcileUntilReady()
-
-			pgDeploy := &appsv1.Deployment{}
-			err := k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: targetNamespace}, pgDeploy)
-			Expect(errors.IsNotFound(err)).To(BeTrue())
-
-			pgSecret := &corev1.Secret{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: namePostgresCreds, Namespace: targetNamespace}, pgSecret)
-			Expect(errors.IsNotFound(err)).To(BeTrue())
+			Expect(degraded).NotTo(BeNil())
+			Expect(degraded.Status).To(Equal(metav1.ConditionTrue))
+			Expect(degraded.Reason).To(Equal("DatabaseSecretMissing"))
 		})
 
-		It("should still create rest-service and flight-service", func() {
-			reconcileUntilReady()
+		It("should not create service deployments", func() {
+			r := reconciler()
+			req := reconcile.Request{NamespacedName: crKey}
+
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
 
 			restDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})
 
 	Context("When CR is deleted", func() {
 		It("should not error on reconcile", func() {
 			_, err := reconciler().Reconcile(ctx, reconcile.Request{
-				NamespacedName: types.NamespacedName{Name: "nonexistent"},
+				NamespacedName: types.NamespacedName{Name: "nonexistent", Namespace: targetNamespace},
 			})
 			Expect(err).NotTo(HaveOccurred())
 		})
@@ -485,9 +454,10 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 	Context("Finalizer behavior", func() {
 		BeforeEach(func() {
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				Spec:       dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -502,7 +472,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(controllerutil.ContainsFinalizer(cr, finalizerName)).To(BeTrue())
 		})
@@ -512,7 +482,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 			Expect(err).NotTo(HaveOccurred())
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
 
@@ -526,6 +496,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 	Context("Platform version handshake", func() {
 		BeforeEach(func() {
+			createDatabaseSecret()
 			cm := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      platformConfigName,
@@ -539,9 +510,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 			}
 			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				Spec:       dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -554,12 +525,12 @@ var _ = Describe("DataConnectHub Controller", func() {
 		It("should include platform release when platformVersion is set in ConfigMap", func() {
 			reconcileUntilReady()
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 
 			Expect(cr.Status.Releases).To(HaveLen(3))
 
-			var platRelease *dataconnecthubv1alpha1.ReleaseStatus
+			var platRelease *dchv1alpha1.ReleaseStatus
 			for i := range cr.Status.Releases {
 				if cr.Status.Releases[i].Name == releasePlatform {
 					platRelease = &cr.Status.Releases[i]
@@ -573,7 +544,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 		It("should read distribution from ConfigMap", func() {
 			reconcileUntilReady()
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 
 			Expect(cr.Status.Distribution.Name).To(Equal("OpenDataHub"))
@@ -587,11 +558,11 @@ var _ = Describe("DataConnectHub Controller", func() {
 			_, err := r.Reconcile(ctx, req)
 			Expect(err).NotTo(HaveOccurred())
 
-			cr := &dataconnecthubv1alpha1.DataConnectHub{}
+			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(cr.Status.Phase).NotTo(Equal(conditionTypeReady))
 
-			var platRelease *dataconnecthubv1alpha1.ReleaseStatus
+			var platRelease *dchv1alpha1.ReleaseStatus
 			for i := range cr.Status.Releases {
 				if cr.Status.Releases[i].Name == releasePlatform {
 					platRelease = &cr.Status.Releases[i]
@@ -606,6 +577,7 @@ var _ = Describe("DataConnectHub Controller", func() {
 
 	Context("Platform config gateway merge", func() {
 		BeforeEach(func() {
+			createDatabaseSecret()
 			cm := &corev1.ConfigMap{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      platformConfigName,
@@ -627,9 +599,9 @@ var _ = Describe("DataConnectHub Controller", func() {
 		})
 
 		It("should use gateway config from ConfigMap when spec.gateway is not set", func() {
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec:       dataconnecthubv1alpha1.DataConnectHubSpec{},
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				Spec:       dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
@@ -642,10 +614,10 @@ var _ = Describe("DataConnectHub Controller", func() {
 		})
 
 		It("should prefer spec.gateway over ConfigMap gateway", func() {
-			cr := &dataconnecthubv1alpha1.DataConnectHub{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName},
-				Spec: dataconnecthubv1alpha1.DataConnectHubSpec{
-					Gateway: &dataconnecthubv1alpha1.Gateway{
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					Gateway: &dchv1alpha1.Gateway{
 						Name:      "spec-gateway",
 						Namespace: "spec-ns",
 					},

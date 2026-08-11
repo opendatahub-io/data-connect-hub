@@ -42,7 +42,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
+	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
 const (
@@ -66,17 +66,16 @@ const (
 
 	nameRestService    = "rest-service"
 	nameFlightService  = "flight-service"
-	namePostgres       = "postgres"
 	nameDataConnectHub = "data-connect-hub"
-	namePostgresCreds  = "postgres-credentials"
+	nameDatabaseConfig = "dch-database-config"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
 	platformConfigName = "opendatahub-dataconnecthub-config"
 
-	finalizerName = "components.platform.opendatahub.io/finalizer"
+	finalizerName = "dataconnecthub.opendatahub.io/finalizer"
 
-	singletonCRName = "default-dataconnecthub"
+	singletonCRName = "default-dataconnectservice"
 
 	releasePlatform = "platform"
 )
@@ -84,8 +83,8 @@ const (
 // BuildVersion is set at build time via -ldflags.
 var BuildVersion = "dev"
 
-// DataConnectHubReconciler reconciles a DataConnectHub object
-type DataConnectHubReconciler struct {
+// DataConnectServiceReconciler reconciles a DataConnectService object
+type DataConnectServiceReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	ManifestsPath      string
@@ -96,15 +95,15 @@ type DataConnectHubReconciler struct {
 }
 
 type platformConfig struct {
-	Distribution     dataconnecthubv1alpha1.DistributionStatus
+	Distribution     dchv1alpha1.DistributionStatus
 	PlatformVersion  string
 	GatewayName      string
 	GatewayNamespace string
 }
 
-func (r *DataConnectHubReconciler) readPlatformConfig(ctx context.Context) platformConfig {
+func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context) platformConfig {
 	cfg := platformConfig{
-		Distribution: dataconnecthubv1alpha1.DistributionStatus{
+		Distribution: dchv1alpha1.DistributionStatus{
 			Name:    "Standalone",
 			Version: BuildVersion,
 		},
@@ -145,19 +144,26 @@ func EnvOrDefault(key, fallback string) string {
 	return fallback
 }
 
-// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=dataconnecthubs,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=dataconnecthubs/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=components.platform.opendatahub.io,resources=dataconnecthubs/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=services;configmaps;secrets;serviceaccounts;persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 
-func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
-	var cr dataconnecthubv1alpha1.DataConnectHub
+	// Only reconcile CRs in the operand namespace
+	if req.Namespace != r.Namespace {
+		log.Info("ignoring DataConnectService outside operand namespace", "namespace", req.Namespace)
+		return ctrl.Result{}, nil
+	}
+
+	var cr dchv1alpha1.DataConnectService
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		if apierrors.IsNotFound(err) {
 			return ctrl.Result{}, nil
@@ -168,7 +174,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	// Handle deletion — run finalizer then allow GC
 	if !cr.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&cr, finalizerName) {
-			log.Info("running finalizer for DataConnectHub")
+			log.Info("running finalizer for DataConnectService")
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
 		}
@@ -183,44 +189,27 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 		}
 	}
 
-	log.Info("reconciling DataConnectHub", "name", cr.Name)
+	log.Info("reconciling DataConnectService", "name", cr.Name)
 
 	// Read platform configuration from ConfigMap
 	platCfg := r.readPlatformConfig(ctx)
 
-	// Phase 1: Database (postgres first, services depend on it)
-	devMode := cr.Spec.DevMode == nil || *cr.Spec.DevMode
-	if devMode {
-		if err := r.reconcileDatabase(ctx, &cr); err != nil {
-			log.Error(err, "failed to reconcile Database")
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DatabaseError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseError", "Failed to apply database manifests")
-			})
-		}
-		if pgReady, err := r.isDeploymentReady(ctx, r.Namespace, namePostgres); err != nil {
-			log.Error(err, "failed to check postgres readiness")
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DatabaseError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseError", "Failed to check database readiness")
-			})
-		} else if !pgReady {
-			log.Info("waiting for postgres to become ready")
-			return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDatabase", "Waiting for postgres deployment to become ready")
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Database manifests applied successfully")
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "WaitingForDatabase", "No errors")
-			})
-		}
+	// Phase 1: Validate database secret exists
+	if err := r.validateDatabaseSecret(ctx); err != nil {
+		log.Error(err, "database secret validation failed")
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseSecretMissing", err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseSecretMissing", err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseSecretMissing",
+				"Secret 'dch-database-config' with keys DATABASE_URL and secret-config.toml is required")
+		})
 	}
 
 	// Phase 2: Services (only after database is ready)
 	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
 		log.Error(err, "failed to reconcile RestService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "RestServiceError", err.Error())
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "RestServiceError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "RestServiceError", "Failed to apply rest-service manifests")
 		})
@@ -228,8 +217,8 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
 		log.Error(err, "failed to reconcile FlightService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "FlightServiceError", err.Error())
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightServiceError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "FlightServiceError", "Failed to apply flight-service manifests")
 		})
@@ -241,8 +230,8 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
 			log.Error(err, "failed to reconcile HTTPRoute")
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "HTTPRouteError", err.Error())
+			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
 				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "HTTPRouteError", err.Error())
 				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "HTTPRouteError", "Failed to apply gateway manifests")
 			})
@@ -251,11 +240,11 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 
 	// All manifests applied successfully
 	// Phase 4: Check all deployments are ready before declaring Ready
-	pendingDeployments, err := r.pendingDeployments(ctx, r.Namespace, devMode)
+	pendingDeployments, err := r.pendingDeployments(ctx, r.Namespace)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		})
@@ -263,7 +252,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	if len(pendingDeployments) > 0 {
 		msg := fmt.Sprintf("Waiting for deployments: %v", pendingDeployments)
 		log.Info(msg)
-		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
+		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
 			r.gatewayStatus(ctx, cr, &platCfg)
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -272,7 +261,7 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	}
 
 	// All ready
-	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dataconnecthubv1alpha1.DataConnectHub) {
+	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -280,14 +269,14 @@ func (r *DataConnectHubReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	})
 }
 
-func (r *DataConnectHubReconciler) updateStatus(
+func (r *DataConnectServiceReconciler) updateStatus(
 	ctx context.Context,
 	req ctrl.Request,
 	platCfg *platformConfig,
 	phase string,
-	mutate func(*dataconnecthubv1alpha1.DataConnectHub),
+	mutate func(*dchv1alpha1.DataConnectService),
 ) (ctrl.Result, error) {
-	var cr dataconnecthubv1alpha1.DataConnectHub
+	var cr dchv1alpha1.DataConnectService
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -317,20 +306,20 @@ func (r *DataConnectHubReconciler) updateStatus(
 // buildReleases constructs the status.releases list.
 // The platform version entry is only advanced when the module is Ready,
 // implementing the v2 platform version handshake protocol.
-func (r *DataConnectHubReconciler) buildReleases(
-	cr *dataconnecthubv1alpha1.DataConnectHub,
+func (r *DataConnectServiceReconciler) buildReleases(
+	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
 	isReady bool,
-) []dataconnecthubv1alpha1.ReleaseStatus {
-	releases := make([]dataconnecthubv1alpha1.ReleaseStatus, 2, 3)
-	releases[0] = dataconnecthubv1alpha1.ReleaseStatus{Name: "rest-service", RepoUrl: repoURL, Version: BuildVersion}
-	releases[1] = dataconnecthubv1alpha1.ReleaseStatus{Name: "flight-service", RepoUrl: repoURL, Version: BuildVersion}
+) []dchv1alpha1.ReleaseStatus {
+	releases := make([]dchv1alpha1.ReleaseStatus, 2, 3)
+	releases[0] = dchv1alpha1.ReleaseStatus{Name: "rest-service", RepoUrl: repoURL, Version: BuildVersion}
+	releases[1] = dchv1alpha1.ReleaseStatus{Name: "flight-service", RepoUrl: repoURL, Version: BuildVersion}
 
 	if platCfg.PlatformVersion == "" {
 		return releases
 	}
 
-	platformRelease := dataconnecthubv1alpha1.ReleaseStatus{
+	platformRelease := dchv1alpha1.ReleaseStatus{
 		Name: releasePlatform,
 	}
 
@@ -348,25 +337,11 @@ func (r *DataConnectHubReconciler) buildReleases(
 	return append(releases, platformRelease)
 }
 
-func (r *DataConnectHubReconciler) reconcileDatabase(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectHub) error {
-	if err := r.reconcilePostgresSecret(ctx, cr); err != nil {
-		return fmt.Errorf("postgres secret: %w", err)
-	}
-
-	pgPath := filepath.Join(r.ManifestsPath, "db", "postgres")
-	resources, err := renderPostgresKustomization(pgPath)
-	if err != nil {
-		return fmt.Errorf("rendering postgres manifests: %w", err)
-	}
-
-	return r.applyResources(ctx, cr, resources)
-}
-
-func (r *DataConnectHubReconciler) reconcileService(
+func (r *DataConnectServiceReconciler) reconcileService(
 	ctx context.Context,
-	cr *dataconnecthubv1alpha1.DataConnectHub,
+	cr *dchv1alpha1.DataConnectService,
 	name string,
-	overrides *dataconnecthubv1alpha1.ServiceOverrides,
+	overrides *dchv1alpha1.ServiceOverrides,
 ) error {
 	basePath := filepath.Join(r.ManifestsPath, "base", name)
 
@@ -386,7 +361,7 @@ func (r *DataConnectHubReconciler) reconcileService(
 	return r.applyResources(ctx, cr, resources)
 }
 
-func (r *DataConnectHubReconciler) reconcileHTTPRoute(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectHub, platCfg *platformConfig) error {
+func (r *DataConnectServiceReconciler) reconcileHTTPRoute(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) error {
 	gwPath := filepath.Join(r.ManifestsPath, "gateway")
 
 	gw := r.resolveGateway(cr, platCfg)
@@ -401,8 +376,8 @@ func (r *DataConnectHubReconciler) reconcileHTTPRoute(ctx context.Context, cr *d
 }
 
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.
-func (r *DataConnectHubReconciler) resolveGateway(cr *dataconnecthubv1alpha1.DataConnectHub, platCfg *platformConfig) dataconnecthubv1alpha1.Gateway {
-	gw := dataconnecthubv1alpha1.Gateway{
+func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) dchv1alpha1.Gateway {
+	gw := dchv1alpha1.Gateway{
 		Name:      platCfg.GatewayName,
 		Namespace: platCfg.GatewayNamespace,
 	}
@@ -413,17 +388,17 @@ func (r *DataConnectHubReconciler) resolveGateway(cr *dataconnecthubv1alpha1.Dat
 	return gw
 }
 
-func (r *DataConnectHubReconciler) gatewayStatus(ctx context.Context, cr *dataconnecthubv1alpha1.DataConnectHub, platCfg *platformConfig) {
+func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
 	gw := r.resolveGateway(cr, platCfg)
 	cr.Status.HttpRoute = nameDataConnectHub
-	cr.Status.Gateway = &dataconnecthubv1alpha1.Gateway{
+	cr.Status.Gateway = &dchv1alpha1.Gateway{
 		Name:      gw.Name,
 		Namespace: gw.Namespace,
 	}
 	cr.Status.Hostname = r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
 }
 
-func (r *DataConnectHubReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
+func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
 	gw := &unstructured.Unstructured{}
 	gw.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "gateway.networking.k8s.io",
@@ -447,7 +422,7 @@ func (r *DataConnectHubReconciler) resolveGatewayHostname(ctx context.Context, n
 }
 
 // isDeploymentReady checks if a deployment has all replicas available.
-func (r *DataConnectHubReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
+func (r *DataConnectServiceReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
 	deploy := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, deploy); err != nil {
 		if apierrors.IsNotFound(err) {
@@ -462,11 +437,8 @@ func (r *DataConnectHubReconciler) isDeploymentReady(ctx context.Context, namesp
 }
 
 // pendingDeployments returns the names of deployments that are not yet ready.
-func (r *DataConnectHubReconciler) pendingDeployments(ctx context.Context, namespace string, includePostgres bool) ([]string, error) {
+func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string) ([]string, error) {
 	names := []string{nameRestService, nameFlightService}
-	if includePostgres {
-		names = append(names, namePostgres)
-	}
 	var pending []string
 	for _, name := range names {
 		ready, err := r.isDeploymentReady(ctx, namespace, name)
@@ -480,7 +452,7 @@ func (r *DataConnectHubReconciler) pendingDeployments(ctx context.Context, names
 	return pending, nil
 }
 
-func (r *DataConnectHubReconciler) setCondition(cr *dataconnecthubv1alpha1.DataConnectHub, condType string, status metav1.ConditionStatus, reason, message string) {
+func (r *DataConnectServiceReconciler) setCondition(cr *dchv1alpha1.DataConnectService, condType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&cr.Status.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -491,7 +463,7 @@ func (r *DataConnectHubReconciler) setCondition(cr *dataconnecthubv1alpha1.DataC
 }
 
 // SetupWithManager sets up the controller with the Manager.
-func (r *DataConnectHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ownsPredicate := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})
 
 	isPlatformConfig := predicate.NewPredicateFuncs(func(obj client.Object) bool {
@@ -499,23 +471,21 @@ func (r *DataConnectHubReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&dataconnecthubv1alpha1.DataConnectHub{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
+		For(&dchv1alpha1.DataConnectService{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&corev1.Service{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&corev1.ConfigMap{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&corev1.ServiceAccount{}, builder.WithPredicates(ownsPredicate)).
-		Owns(&corev1.PersistentVolumeClaim{}, builder.WithPredicates(ownsPredicate)).
-		Owns(&corev1.Secret{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&networkingv1.NetworkPolicy{}, builder.WithPredicates(ownsPredicate)).
 		Watches(
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.platformConfigToReconcile),
 			builder.WithPredicates(isPlatformConfig),
 		).
-		Named("dataconnecthub").
+		Named("dataconnectservice").
 		Complete(r)
 }
 
-func (r *DataConnectHubReconciler) platformConfigToReconcile(_ context.Context, _ client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: singletonCRName}}}
+func (r *DataConnectServiceReconciler) platformConfigToReconcile(_ context.Context, _ client.Object) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: singletonCRName, Namespace: r.Namespace}}}
 }
