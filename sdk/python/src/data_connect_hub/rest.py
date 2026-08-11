@@ -68,6 +68,8 @@ class RestClient:
         *,
         api_base: str = _DEFAULT_API_BASE,
         timeout: float = 30.0,
+        ca_cert: str | None = None,
+        insecure: bool = False,
         max_retries: int = 3,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
@@ -83,9 +85,16 @@ class RestClient:
         self._backoff_max = backoff_max
         self._retry_methods = retry_methods
         self._owns_client = http_client is None
+        if insecure:
+            verify: str | bool = False
+        elif ca_cert:
+            verify = ca_cert
+        else:
+            verify = True
         self._client = http_client or httpx.Client(
             base_url=self._base_url,
             timeout=timeout,
+            verify=verify,
         )
 
     def close(self) -> None:

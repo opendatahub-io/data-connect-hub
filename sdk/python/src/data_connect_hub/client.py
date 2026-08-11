@@ -41,6 +41,10 @@ class DataConnectClient:
         API path prefix (default ``/api/v1/data``).
     timeout : float
         HTTP request timeout in seconds.
+    ca_cert : str, optional
+        Path to a CA certificate file for TLS verification.
+    insecure : bool
+        Skip TLS certificate verification (default False).
     max_retries : int
         Maximum retry attempts for transient errors (default 3, 0 to disable).
     backoff_base : float
@@ -58,6 +62,8 @@ class DataConnectClient:
         *,
         api_base: str = "/api/v1/data",
         timeout: float = 30.0,
+        ca_cert: str | None = None,
+        insecure: bool = False,
         max_retries: int = 3,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
@@ -72,6 +78,8 @@ class DataConnectClient:
                 tenant_id=tenant_id,
                 api_base=api_base,
                 timeout=timeout,
+                ca_cert=ca_cert,
+                insecure=insecure,
                 max_retries=max_retries,
                 backoff_base=backoff_base,
                 backoff_max=backoff_max,
