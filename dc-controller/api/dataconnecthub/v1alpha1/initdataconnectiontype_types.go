@@ -24,28 +24,34 @@ import (
 // EnumValue represents a selectable option for an enumerated field.
 type EnumValue struct {
 	// value is the internal value of the option
+	// +kubebuilder:validation:MaxLength=256
 	Value string `json:"value"`
 
 	// label is the human-readable label for the option
+	// +kubebuilder:validation:MaxLength=256
 	Label string `json:"label"`
 }
 
 // CredentialsField describes a single field in a connection type's credentials form.
 type CredentialsField struct {
 	// name is the field identifier
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// label is the human-readable label for the field
+	// +kubebuilder:validation:MaxLength=256
 	Label string `json:"label"`
 
 	// description is an optional help text for the field
+	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Description *string `json:"description,omitempty"`
 
 	// required indicates whether the field must be provided
 	Required bool `json:"required"`
 
-	// type is the data type of the field (e.g. "text", "password", "enum")
+	// type is the data type of the field
+	// +kubebuilder:validation:Enum=string;enum
 	Type string `json:"type"`
 
 	// enumValues lists the allowed values when type is "enum"
@@ -53,6 +59,7 @@ type CredentialsField struct {
 	EnumValues []EnumValue `json:"enumValues,omitempty"`
 
 	// defaultValue is the default value for the field
+	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	DefaultValue *string `json:"defaultValue,omitempty"`
 }
@@ -60,12 +67,15 @@ type CredentialsField struct {
 // InitDataConnectionTypeSpec defines the desired state of InitDataConnectionType.
 type InitDataConnectionTypeSpec struct {
 	// name is the unique name of the connection type
+	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
 	// provider identifies the backing data provider (e.g. "postgres", "s3")
+	// +kubebuilder:validation:MaxLength=253
 	Provider string `json:"provider"`
 
 	// description is an optional human-readable description
+	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	Description *string `json:"description,omitempty"`
 

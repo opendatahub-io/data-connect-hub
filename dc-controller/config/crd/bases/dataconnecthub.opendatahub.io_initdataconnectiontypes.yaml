@@ -60,9 +60,11 @@ spec:
                   properties:
                     defaultValue:
                       description: defaultValue is the default value for the field
+                      maxLength: 1024
                       type: string
                     description:
                       description: description is an optional help text for the field
+                      maxLength: 1024
                       type: string
                     enumValues:
                       description: enumValues lists the allowed values when type is
@@ -74,9 +76,11 @@ spec:
                           label:
                             description: label is the human-readable label for the
                               option
+                            maxLength: 256
                             type: string
                           value:
                             description: value is the internal value of the option
+                            maxLength: 256
                             type: string
                         required:
                         - label
@@ -85,16 +89,20 @@ spec:
                       type: array
                     label:
                       description: label is the human-readable label for the field
+                      maxLength: 256
                       type: string
                     name:
                       description: name is the field identifier
+                      maxLength: 253
                       type: string
                     required:
                       description: required indicates whether the field must be provided
                       type: boolean
                     type:
-                      description: type is the data type of the field (e.g. "text",
-                        "password", "enum")
+                      description: type is the data type of the field
+                      enum:
+                      - string
+                      - enum
                       type: string
                   required:
                   - label
@@ -105,13 +113,16 @@ spec:
                 type: array
               description:
                 description: description is an optional human-readable description
+                maxLength: 1024
                 type: string
               name:
                 description: name is the unique name of the connection type
+                maxLength: 253
                 type: string
               provider:
                 description: provider identifies the backing data provider (e.g. "postgres",
                   "s3")
+                maxLength: 253
                 type: string
             required:
             - credentialsFields
