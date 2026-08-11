@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from .flight import FlightClient
+    from .flight import FlightSQLClient
 
 
 class DataConnectClient:
@@ -63,7 +63,7 @@ class DataConnectClient:
         backoff_max: float = 30.0,
     ) -> None:
         self._rest: RestClient | None = None
-        self._flight: FlightClient | None = None
+        self._flight: FlightSQLClient | None = None
 
         if rest_url:
             self._rest = RestClient(
@@ -78,9 +78,9 @@ class DataConnectClient:
             )
 
         if flight_url:
-            from .flight import FlightClient as _FlightClient
+            from .flight import FlightSQLClient as _FlightSQLClient
 
-            self._flight = _FlightClient(
+            self._flight = _FlightSQLClient(
                 flight_url=flight_url,
                 token=token,
                 tenant_id=tenant_id,
@@ -108,7 +108,7 @@ class DataConnectClient:
             raise DCHConfigError("rest_url is required for this operation")
         return self._rest
 
-    def _require_flight(self) -> FlightClient:
+    def _require_flight(self) -> FlightSQLClient:
         if self._flight is None:
             raise DCHConfigError("flight_url is required for this operation")
         return self._flight

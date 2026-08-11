@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -14,7 +15,7 @@ from ._auth import ADBC_HEADER_PREFIX, build_flight_headers
 from .exceptions import DCHConnectionError, DCHQueryError
 
 
-class FlightClient:
+class FlightSQLClient:
     """Thin wrapper around ADBC Flight SQL for Data Connect Hub queries.
 
     Parameters
@@ -54,7 +55,8 @@ class FlightClient:
             except flight_dbapi.Error as exc:
                 raise DCHQueryError(str(exc)) from exc
             finally:
-                cursor.close()
+                with contextlib.suppress(Exception):
+                    cursor.close()
         finally:
             conn.close()
 

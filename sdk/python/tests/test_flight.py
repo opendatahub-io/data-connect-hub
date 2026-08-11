@@ -1,4 +1,4 @@
-"""Tests for the FlightClient wrapper."""
+"""Tests for the FlightSQLClient wrapper."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from data_connect_hub.exceptions import DCHConnectionError, DCHQueryError
-from data_connect_hub.flight import FlightClient
+from data_connect_hub.flight import FlightSQLClient
 
 
 class _Error(Exception):
@@ -30,8 +30,8 @@ class _ProgrammingError(_Error):
 
 
 @pytest.fixture()
-def flight_client() -> FlightClient:
-    return FlightClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
+def flight_client() -> FlightSQLClient:
+    return FlightSQLClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
 
 
 def _mock_cursor(table: pa.Table) -> MagicMock:
@@ -49,7 +49,7 @@ def _set_mock_exceptions(mock_dbapi: MagicMock) -> None:
 
 class TestRead:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
@@ -61,7 +61,7 @@ class TestRead:
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_empty_result_returns_empty_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_empty_result_returns_empty_table(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
         mock_conn = MagicMock()
@@ -72,7 +72,7 @@ class TestRead:
         assert result.num_rows == 0
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         cursor = MagicMock()
@@ -84,7 +84,7 @@ class TestRead:
             flight_client.read("BAD SQL", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         cursor = MagicMock()
@@ -98,7 +98,7 @@ class TestRead:
 
 class TestReadPandas:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_returns_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
@@ -111,7 +111,7 @@ class TestReadPandas:
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_empty_result_returns_empty_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_empty_result_returns_empty_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
         mock_conn = MagicMock()
@@ -125,7 +125,7 @@ class TestReadPandas:
 
 class TestServerInfo:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_dict(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_returns_dict(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         info: dict[str, Any] = {"vendor": "DCH", "version": "1.0"}
         mock_conn = MagicMock()
@@ -139,7 +139,7 @@ class TestServerInfo:
 
 class TestConnectionError:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_interface_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_interface_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
 
@@ -147,7 +147,7 @@ class TestConnectionError:
             flight_client.read("SELECT 1", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_operational_error_on_connect_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_operational_error_on_connect_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _OperationalError("connection refused")
 
@@ -155,7 +155,7 @@ class TestConnectionError:
             flight_client.read("SELECT 1", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_server_info_connect_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_server_info_connect_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
 
@@ -163,7 +163,7 @@ class TestConnectionError:
             flight_client.server_info()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_server_info_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_server_info_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         mock_conn.adbc_get_info.side_effect = _OperationalError("connection refused")
@@ -175,7 +175,7 @@ class TestConnectionError:
 
 class TestHeaders:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_connection_id_injected(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_connection_id_injected(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         mock_conn = MagicMock()
