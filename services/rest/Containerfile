@@ -28,6 +28,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY libs/ ./libs/
 COPY connectors/ ./connectors/
 COPY services/ ./services/
+COPY jobs/ ./jobs/
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/src/target \
