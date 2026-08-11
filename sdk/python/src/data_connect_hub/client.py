@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import DCHConfigError
@@ -39,8 +40,8 @@ class DataConnectClient:
         Tenant identifier sent via ``x-tenant-id`` header.
     api_base : str
         API path prefix (default ``/api/v1/data``).
-    timeout : float
-        HTTP request timeout in seconds.
+    rest_timeout : float
+        HTTP request timeout in seconds (default 30.0).
     ca_cert : str, optional
         Path to a CA certificate file for TLS verification.
     insecure : bool
@@ -51,6 +52,8 @@ class DataConnectClient:
         Base delay in seconds for exponential backoff (default 0.5).
     backoff_max : float
         Maximum backoff delay in seconds (default 30.0).
+    flight_timeout : float, optional
+        Timeout in seconds for Flight SQL RPC calls.
     """
 
     def __init__(
@@ -61,12 +64,13 @@ class DataConnectClient:
         tenant_id: str = "",
         *,
         api_base: str = "/api/v1/data",
-        timeout: float = 30.0,
+        rest_timeout: float = 30.0,
         ca_cert: str | None = None,
         insecure: bool = False,
         max_retries: int = 3,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        flight_timeout: float | None = None,
     ) -> None:
         self._rest: RestClient | None = None
         self._flight: FlightSQLClient | None = None
@@ -77,7 +81,7 @@ class DataConnectClient:
                 token=token,
                 tenant_id=tenant_id,
                 api_base=api_base,
-                timeout=timeout,
+                timeout=rest_timeout,
                 ca_cert=ca_cert,
                 insecure=insecure,
                 max_retries=max_retries,
@@ -92,6 +96,7 @@ class DataConnectClient:
                 flight_url=flight_url,
                 token=token,
                 tenant_id=tenant_id,
+                timeout=flight_timeout,
             )
 
     # -- context manager --
@@ -224,13 +229,13 @@ class DataConnectClient:
 
     # -- Flight SQL queries --
 
-    def read(self, sql: str, connection_id: str) -> pa.Table:
+    def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
-        return self._require_flight().read(sql, connection_id)
+        return self._require_flight().read(sql, connection_id, parameters=parameters)
 
-    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
+    def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
-        return self._require_flight().read_pandas(sql, connection_id)
+        return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""
