@@ -37,6 +37,7 @@ const (
 
 var (
 	ErrNotFound           = errors.New("resource not found")
+	ErrConflict           = errors.New("resource already exists")
 	ErrServiceUnavailable = errors.New("rest service unavailable")
 )
 
@@ -108,7 +109,7 @@ func NewHTTPConnectionTypeClient(baseURL, tenantID string) ConnectionTypeClient 
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
 					InsecureSkipVerify: true, //nolint:gosec // in-cluster service communication
-					NextProtos:        []string{"http/1.1"},
+					NextProtos:         []string{"http/1.1"},
 				},
 			},
 		},
@@ -255,6 +256,9 @@ func (c *httpConnectionTypeClient) readToken() (string, error) {
 func (c *httpConnectionTypeClient) handleErrorResponse(resp *http.Response) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
 	}
 	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 		return fmt.Errorf("authentication/authorization failed (HTTP %d)", resp.StatusCode)

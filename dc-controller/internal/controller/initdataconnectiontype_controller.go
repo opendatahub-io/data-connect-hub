@@ -153,6 +153,11 @@ func (r *InitDataConnectionTypeReconciler) syncToREST(ctx context.Context, cr *d
 	// Create new resource
 	resource, err := r.RestClient.CreateConnectionType(ctx, desired)
 	if err != nil {
+		if errors.Is(err, ErrConflict) {
+			logf.FromContext(ctx).Info("connection type already exists in REST service, will retry",
+				"name", cr.Spec.Name)
+			return "", err
+		}
 		return "", err
 	}
 
