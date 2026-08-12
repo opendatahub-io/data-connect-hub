@@ -8,13 +8,14 @@ Usage:
     python examples/token_provider.py
 
 Requires:
+    - Execution inside a Kubernetes Pod (reads the in-cluster SA token)
     - A running DCH stack (rest-service + flight-service)
-    - ``kubectl`` configured with access to the target cluster
     - pip install httpx  (already a dependency of the SDK)
 
 Set environment variables to override defaults:
     DCH_REST_URL, DCH_FLIGHT_URL, DCH_TENANT_ID,
-    K8S_NAMESPACE, K8S_SERVICE_ACCOUNT, K8S_SA_ISSUER
+    K8S_NAMESPACE, K8S_SERVICE_ACCOUNT, K8S_SA_ISSUER,
+    K8S_API, K8S_CA_CERT
 """
 
 import os
