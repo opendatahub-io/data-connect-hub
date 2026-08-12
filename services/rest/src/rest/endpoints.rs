@@ -152,11 +152,16 @@ pub async fn delete_connection(
 }
 
 pub async fn delete_connection_type(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _path: web::Path<String>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("delete_connection_type: for tenant {:?}", ctx.tenant_id);
+    service
+        .meta_store
+        .delete_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 pub async fn get_ingestion_data(
@@ -291,9 +296,15 @@ mod tests {
         async fn delete_data_connection_type(
             &self,
             _t: &str,
-            _u: &str,
+            uid: &str,
         ) -> Result<(), commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            if uid == "ct-1" {
+                Ok(())
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection type '{uid}' not found"
+                )))
+            }
         }
     }
 
@@ -320,6 +331,7 @@ mod tests {
                 .route("/connections/{id}", web::delete().to(delete_connection))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
+                .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                 .route("/ingestion/{id}", web::get().to(get_ingestion_data))
                 .default_service(web::route().to(not_found)),
         );
@@ -460,6 +472,32 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "unimplemented");
         assert_eq!(body["message"], "Unimplemented");
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_type() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_type_not_found() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri("/api/v1/data/connection-types/nonexistent")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
     }
 
     #[actix_web::test]
