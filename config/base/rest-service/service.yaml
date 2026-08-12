@@ -10,6 +10,6 @@ spec:
   selector:
     app.kubernetes.io/name: rest-service
   ports:
-    - name: http
-      port: 8080
-      targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https

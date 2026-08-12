@@ -20,7 +20,6 @@ from data_connect_hub.exceptions import (
 from data_connect_hub.models import (
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
-    DataLocation,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
@@ -87,7 +86,7 @@ class TestListConnections:
         result = client.list_connections()
         assert len(result) == 1
         assert result[0].id == "123"
-        assert result[0].namespace == "test-ns"
+        assert result[0].data_connection_type_id == "postgres"
 
     def test_empty_list(self) -> None:
         transport = _make_transport(body=[])
@@ -106,7 +105,7 @@ class TestGetConnection:
         client = _make_client(transport)
         result = client.get_connection("123")
         assert result.id == "123"
-        assert result.provider == "postgres"
+        assert result.data_connection_type_id == "postgres"
 
 
 class TestCreateConnection:
@@ -116,17 +115,16 @@ class TestCreateConnection:
             assert request.url.path == "/api/v1/data/connections"
             body = json.loads(request.content)
             assert body["name"] == "new-conn"
-            assert body["provider"] == "postgres"
+            assert body["data_connection_type_id"] == "postgres"
+            assert body["format"] == "tabular"
             return httpx.Response(201, json=SAMPLE_CONNECTION_JSON)
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
         req = CreateConnectionRequest(
-            namespace="ns",
             name="new-conn",
-            provider="postgres",
-            format="arrow",
-            location=DataLocation(url="pg://localhost"),
+            data_connection_type_id="postgres",
+            format="tabular",
         )
         result = client.create_connection(req)
         assert result.id == "123"
@@ -359,8 +357,10 @@ class TestWrappedResourceFormat:
         client = _make_client(transport)
         result = client.get_connection("123")
         assert result.id == "123"
-        assert result.namespace == "test-ns"
-        assert result.provider == "postgres"
+        assert result.data_connection_type_id == "postgres"
+        from data_connect_hub.models import AdminSecretRef
+
+        assert result.admin == AdminSecretRef(secret_ref="secret/test-conn")
 
     def test_get_connection_type_wrapped(self) -> None:
         transport = _make_transport(
@@ -443,14 +443,12 @@ class TestRetry:
         transport = httpx.MockTransport(handler)
         client = _make_client(transport, max_retries=3, backoff_base=0.0)
         from data_connect_hub.exceptions import DCHServerError
-        from data_connect_hub.models import CreateConnectionRequest, DataLocation
+        from data_connect_hub.models import CreateConnectionRequest
 
         req = CreateConnectionRequest(
-            namespace="ns",
             name="c",
-            provider="pg",
-            format="arrow",
-            location=DataLocation(url="pg://localhost"),
+            data_connection_type_id="pg",
+            format="tabular",
         )
         with pytest.raises(DCHServerError):
             client.create_connection(req)

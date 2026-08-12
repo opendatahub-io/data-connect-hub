@@ -38,7 +38,6 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
-	dataconnecthubv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
 	// +kubebuilder:scaffold:imports
 )
@@ -48,10 +47,12 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+const DefaultKubeRbacProxyImage = "quay.io/opendatahub/odh-kube-rbac-proxy@" +
+	"sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3"
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(dataconnecthubv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(dchv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 	// +kubebuilder:scaffold:scheme
@@ -191,7 +192,7 @@ func main() {
 		namespace = "opendatahub"
 	}
 
-	if err := (&controller.DataConnectHubReconciler{
+	if err := (&controller.DataConnectServiceReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		ManifestsPath: manifestsPath,
@@ -204,8 +205,12 @@ func main() {
 			controller.EnvFlightImage,
 			controller.DefaultFlightImage,
 		),
+		KubeRbacProxyImage: controller.EnvOrDefault(
+			controller.EnvKubeRbacProxyImage,
+			DefaultKubeRbacProxyImage,
+		),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "dataconnecthub")
+		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
 	}
 

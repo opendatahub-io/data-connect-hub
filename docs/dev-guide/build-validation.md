@@ -54,11 +54,9 @@ runs the Containerfile's `cargo build --release` natively, and pushes the
 result on success — surfacing real compile errors exactly like a local
 `cargo build` would, just server-side.
 
-The repo's `.dockerignore`/`.containerignore` excludes the locally-generated
-Postgres credential files (`config/db/postgres/postgres-credentials.env`,
-`secret-config.toml`) from this upload — verified against both `podman build`
-and `oc start-build --from-dir`. If you ever add a new generated-secret file
-elsewhere, add it there too.
+The repo's `.dockerignore`/`.containerignore` excludes generated files
+from this upload — verified against both `podman build` and
+`oc start-build --from-dir`.
 
 If `--follow` disconnects mid-build (transient network blip), the build
 itself keeps running — check with `oc get builds -n <your-namespace>` and

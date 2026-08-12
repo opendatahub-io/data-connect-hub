@@ -5,7 +5,7 @@ Usage:
 
 Requires a running DCH rest-service (default: http://localhost:8080).
 Set environment variables to override defaults:
-    DCH_REST_URL, DCH_TOKEN, DCH_TENANT_ID
+    DCH_REST_URL, DCH_TOKEN, DCH_TENANT_ID, DCH_CA_CERT, DCH_INSECURE
 """
 
 import os
@@ -16,6 +16,8 @@ client = DataConnectClient(
     rest_url=os.getenv("DCH_REST_URL", "http://localhost:8080"),
     token=os.getenv("DCH_TOKEN", ""),
     tenant_id=os.getenv("DCH_TENANT_ID", "default"),
+    ca_cert=os.getenv("DCH_CA_CERT") or None,
+    insecure=os.getenv("DCH_INSECURE", "").lower() in ("1", "true", "yes"),
 )
 
 # List connection types

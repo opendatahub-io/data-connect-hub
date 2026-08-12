@@ -46,6 +46,8 @@ spec:
           value: {{ .Values.relatedImages.restService | quote }}
         - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           value: {{ .Values.relatedImages.flightService | quote }}
+        - name: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
+          value: {{ .Values.relatedImages.kubeRbacProxy | quote }}
         ports:
         - name: health
           containerPort: 8081

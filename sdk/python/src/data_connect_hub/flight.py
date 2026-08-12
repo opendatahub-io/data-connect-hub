@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -13,6 +14,9 @@ import pyarrow as pa
 
 from ._auth import ADBC_HEADER_PREFIX, build_flight_headers
 from .exceptions import DCHConnectionError, DCHQueryError
+
+_QUERY_TIMEOUT_KEY = "adbc.flight.sql.rpc.timeout_seconds.query"
+_FETCH_TIMEOUT_KEY = "adbc.flight.sql.rpc.timeout_seconds.fetch"
 
 
 class FlightSQLClient:
@@ -26,13 +30,25 @@ class FlightSQLClient:
         Raw Bearer token value.
     tenant_id : str
         Tenant identifier.
+    timeout : float, optional
+        Timeout in seconds for Flight SQL RPC calls (applies to both query and fetch).
     """
 
-    def __init__(self, flight_url: str, token: str = "", tenant_id: str = "") -> None:
+    def __init__(
+        self,
+        flight_url: str,
+        token: str = "",
+        tenant_id: str = "",
+        *,
+        timeout: float | None = None,
+    ) -> None:
         self._flight_url = flight_url
         self._token = token
         self._tenant_id = tenant_id
         self._base_kwargs = build_flight_headers(token=token, tenant_id=tenant_id)
+        if timeout is not None:
+            self._base_kwargs[_QUERY_TIMEOUT_KEY] = str(timeout)
+            self._base_kwargs[_FETCH_TIMEOUT_KEY] = str(timeout)
 
     def _connect(self, connection_id: str) -> flight_dbapi.Connection:
         db_kwargs = {
@@ -44,13 +60,13 @@ class FlightSQLClient:
         except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:
             raise DCHConnectionError(str(exc)) from exc
 
-    def read(self, sql: str, connection_id: str) -> pa.Table:
+    def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* and return the full result as a PyArrow Table."""
         conn = self._connect(connection_id)
         try:
             cursor = conn.cursor()
             try:
-                cursor.execute(sql)
+                cursor.execute(sql, parameters)
                 return cursor.fetch_arrow_table()
             except flight_dbapi.Error as exc:
                 raise DCHQueryError(str(exc)) from exc
@@ -60,9 +76,9 @@ class FlightSQLClient:
         finally:
             conn.close()
 
-    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
+    def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* and return the result as a pandas DataFrame."""
-        return self.read(sql, connection_id).to_pandas()
+        return self.read(sql, connection_id, parameters=parameters).to_pandas()
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""

@@ -4,16 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from data_connect_hub.models import DataConnection, DataLocation
+from data_connect_hub.models import DataConnection
 
 SAMPLE_CONNECTION_JSON = {
     "id": "123",
-    "namespace": "test-ns",
     "name": "test-conn",
-    "provider": "postgres",
+    "data_connection_type_id": "postgres",
     "format": "tabular",
     "tenant_id": "tenant-1",
-    "location": {"url": "postgresql://localhost:5432/db"},
+    "admin": {"secret_ref": "secret/test-conn"},
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",
     "properties": {"key": "value"},
@@ -27,11 +26,10 @@ SAMPLE_CONNECTION_WRAPPED_JSON = {
         "updated_at": "2026-01-01T00:00:00Z",
     },
     "resource": {
-        "namespace": "test-ns",
         "name": "test-conn",
-        "provider": "postgres",
+        "data_connection_type_id": "postgres",
         "format": "tabular",
-        "location": {"url": "postgresql://localhost:5432/db"},
+        "admin": {"secret_ref": "secret/test-conn"},
         "properties": {"key": "value"},
     },
 }
@@ -68,8 +66,3 @@ def sample_connection() -> DataConnection:
 @pytest.fixture()
 def sample_connection_json() -> dict[str, object]:
     return dict(SAMPLE_CONNECTION_JSON)
-
-
-@pytest.fixture()
-def sample_location() -> DataLocation:
-    return DataLocation(url="postgresql://localhost:5432/db")

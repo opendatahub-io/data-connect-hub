@@ -68,14 +68,6 @@ type ServiceOverrides struct {
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 }
 
-// DatabaseSpec configures an external database backend for the DataConnectHub.
-// Only used when devMode is false.
-type DatabaseSpec struct {
-	// externalSecret is the name of a Secret containing database connection details.
-	// +optional
-	ExternalSecret *string `json:"externalSecret,omitempty"`
-}
-
 // DistributionStatus identifies the platform distribution context.
 type DistributionStatus struct {
 	// name is the distribution name (e.g., SelfManagedRHOAI, OpenDataHub, Standalone)
@@ -102,15 +94,8 @@ type ReleaseStatus struct {
 	Version string `json:"version,omitempty"`
 }
 
-// DataConnectHubSpec defines the desired state of DataConnectHub
-// +kubebuilder:validation:XValidation:rule="self.devMode != false || (has(self.database) && has(self.database.externalSecret))",message="database.externalSecret is required when devMode is false"
-type DataConnectHubSpec struct {
-	// devMode when true deploys a built-in single-instance Postgres.
-	// When false, the user provides an external database via the database field.
-	// +kubebuilder:default=true
-	// +optional
-	DevMode *bool `json:"devMode,omitempty"`
-
+// DataConnectServiceSpec defines the desired state of DataConnectService
+type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
 	// +optional
 	RestService *ServiceOverrides `json:"restService,omitempty"`
@@ -119,18 +104,14 @@ type DataConnectHubSpec struct {
 	// +optional
 	FlightService *ServiceOverrides `json:"flightService,omitempty"`
 
-	// database configures the external database backend (used when devMode is false)
-	// +optional
-	Database *DatabaseSpec `json:"database,omitempty"`
-
 	// gateway is a reference to a Kubernetes Gateway for external traffic.
 	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
 }
 
-// DataConnectHubStatus defines the observed state of DataConnectHub.
-type DataConnectHubStatus struct {
+// DataConnectServiceStatus defines the observed state of DataConnectService.
+type DataConnectServiceStatus struct {
 	// observedGeneration is the last generation observed by the controller
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
@@ -143,7 +124,7 @@ type DataConnectHubStatus struct {
 	// +optional
 	Releases []ReleaseStatus `json:"releases,omitempty"`
 
-	// phase represents the current lifecycle phase of the DataConnectHub
+	// phase represents the current lifecycle phase of the DataConnectService
 	// +optional
 	Phase string `json:"phase,omitempty"`
 
@@ -159,7 +140,7 @@ type DataConnectHubStatus struct {
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
 
-	// conditions represent the current state of the DataConnectHub resource.
+	// conditions represent the current state of the DataConnectService resource.
 	// +listType=map
 	// +listMapKey=type
 	// +optional
@@ -168,40 +149,38 @@ type DataConnectHubStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,categories=opendatahub,shortName=dch
+// +kubebuilder:resource:scope=Namespaced,categories=opendatahub,shortName=dchs
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-// +kubebuilder:validation:XValidation:rule="self.metadata.name == 'default-dataconnecthub'",message="DataConnectHub must be named 'default-dataconnecthub'"
-
-// DataConnectHub is the Schema for the dataconnecthubs API
-type DataConnectHub struct {
+// DataConnectService is the Schema for the dataconnectservices API
+type DataConnectService struct {
 	metav1.TypeMeta `json:",inline"`
 
 	// metadata is a standard object metadata
 	// +optional
 	metav1.ObjectMeta `json:"metadata,omitzero"`
 
-	// spec defines the desired state of DataConnectHub
+	// spec defines the desired state of DataConnectService
 	// +required
-	Spec DataConnectHubSpec `json:"spec"`
+	Spec DataConnectServiceSpec `json:"spec"`
 
-	// status defines the observed state of DataConnectHub
+	// status defines the observed state of DataConnectService
 	// +optional
-	Status DataConnectHubStatus `json:"status,omitzero"`
+	Status DataConnectServiceStatus `json:"status,omitzero"`
 }
 
 // +kubebuilder:object:root=true
 
-// DataConnectHubList contains a list of DataConnectHub
-type DataConnectHubList struct {
+// DataConnectServiceList contains a list of DataConnectService
+type DataConnectServiceList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitzero"`
-	Items           []DataConnectHub `json:"items"`
+	Items           []DataConnectService `json:"items"`
 }
 
 func init() {
 	SchemeBuilder.Register(func(s *runtime.Scheme) error {
-		s.AddKnownTypes(SchemeGroupVersion, &DataConnectHub{}, &DataConnectHubList{})
+		s.AddKnownTypes(SchemeGroupVersion, &DataConnectService{}, &DataConnectServiceList{})
 		return nil
 	})
 }

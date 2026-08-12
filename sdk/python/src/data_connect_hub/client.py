@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import DCHConfigError
 from .models import (
+    Admin,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     CredentialField,
     DataConnection,
-    DataLocation,
+    DataFormat,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
@@ -39,14 +41,20 @@ class DataConnectClient:
         Tenant identifier sent via ``x-tenant-id`` header.
     api_base : str
         API path prefix (default ``/api/v1/data``).
-    timeout : float
-        HTTP request timeout in seconds.
+    rest_timeout : float
+        HTTP request timeout in seconds (default 30.0).
+    ca_cert : str, optional
+        Path to a CA certificate file for TLS verification.
+    insecure : bool
+        Skip TLS certificate verification (default False).
     max_retries : int
         Maximum retry attempts for transient errors (default 3, 0 to disable).
     backoff_base : float
         Base delay in seconds for exponential backoff (default 0.5).
     backoff_max : float
         Maximum backoff delay in seconds (default 30.0).
+    flight_timeout : float, optional
+        Timeout in seconds for Flight SQL RPC calls.
     """
 
     def __init__(
@@ -57,10 +65,13 @@ class DataConnectClient:
         tenant_id: str = "",
         *,
         api_base: str = "/api/v1/data",
-        timeout: float = 30.0,
+        rest_timeout: float = 30.0,
+        ca_cert: str | None = None,
+        insecure: bool = False,
         max_retries: int = 3,
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
+        flight_timeout: float | None = None,
     ) -> None:
         self._rest: RestClient | None = None
         self._flight: FlightSQLClient | None = None
@@ -71,7 +82,9 @@ class DataConnectClient:
                 token=token,
                 tenant_id=tenant_id,
                 api_base=api_base,
-                timeout=timeout,
+                timeout=rest_timeout,
+                ca_cert=ca_cert,
+                insecure=insecure,
                 max_retries=max_retries,
                 backoff_base=backoff_base,
                 backoff_max=backoff_max,
@@ -84,6 +97,7 @@ class DataConnectClient:
                 flight_url=flight_url,
                 token=token,
                 tenant_id=tenant_id,
+                timeout=flight_timeout,
             )
 
     # -- context manager --
@@ -125,18 +139,16 @@ class DataConnectClient:
         self,
         *,
         name: str,
-        namespace: str,
-        provider: str,
-        data_format: str,
-        location_url: str,
+        connection_type_id: str,
+        data_format: DataFormat,
+        admin: Admin | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
         req = CreateConnectionRequest(
             name=name,
-            namespace=namespace,
-            provider=provider,
+            data_connection_type_id=connection_type_id,
             format=data_format,
-            location=DataLocation(url=location_url),
+            admin=admin,
             properties=properties or {},
         )
         return self._require_rest().create_connection(req)
@@ -146,21 +158,18 @@ class DataConnectClient:
         connection_id: str,
         *,
         name: str | None = None,
-        namespace: str | None = None,
-        provider: str | None = None,
-        data_format: str | None = None,
-        location_url: str | None = None,
+        connection_type_id: str | None = None,
+        data_format: DataFormat | None = None,
+        admin: Admin | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
-        if all(v is None for v in (name, namespace, provider, data_format, location_url, properties)):
+        if all(v is None for v in (name, connection_type_id, data_format, admin, properties)):
             raise DCHConfigError("at least one field must be provided for update")
-        location = DataLocation(url=location_url) if location_url is not None else None
         req = UpdateConnectionRequest(
             name=name,
-            namespace=namespace,
-            provider=provider,
+            data_connection_type_id=connection_type_id,
             format=data_format,
-            location=location,
+            admin=admin,
             properties=properties,
         )
         return self._require_rest().update_connection(connection_id, req)
@@ -216,13 +225,13 @@ class DataConnectClient:
 
     # -- Flight SQL queries --
 
-    def read(self, sql: str, connection_id: str) -> pa.Table:
+    def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
-        return self._require_flight().read(sql, connection_id)
+        return self._require_flight().read(sql, connection_id, parameters=parameters)
 
-    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
+    def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
-        return self._require_flight().read_pandas(sql, connection_id)
+        return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""

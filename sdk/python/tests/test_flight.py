@@ -189,3 +189,101 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-data-connection-id"] == "my-conn"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer tok"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
+
+
+class TestTimeouts:
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_timeouts_injected(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            token="tok",
+            tenant_id="t1",
+            timeout=10.0,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs.get("db_kwargs", {})
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            token="tok",
+            tenant_id="t1",
+            timeout=10.0,
+        )
+        mock_conn = MagicMock()
+        mock_conn.adbc_get_info.return_value = {"vendor": "DCH"}
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.server_info()
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs.get("db_kwargs", {})
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_no_timeouts_by_default(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        flight_client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs.get("db_kwargs", {})
+        assert "adbc.flight.sql.rpc.timeout_seconds.query" not in db_kwargs
+        assert "adbc.flight.sql.rpc.timeout_seconds.fetch" not in db_kwargs
+
+
+class TestParameters:
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        cursor = _mock_cursor(table)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        params = [42]
+        flight_client.read("SELECT $1", "conn-1", parameters=params)
+
+        cursor.execute.assert_called_once_with("SELECT $1", [42])
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_none_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        cursor = _mock_cursor(table)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        flight_client.read("SELECT 1", "conn-1")
+
+        cursor.execute.assert_called_once_with("SELECT 1", None)
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_read_pandas_forwards_parameters(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        cursor = _mock_cursor(table)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        result = flight_client.read_pandas("SELECT $1", "conn-1", parameters=[42])
+
+        assert isinstance(result, pd.DataFrame)
+        cursor.execute.assert_called_once_with("SELECT $1", [42])

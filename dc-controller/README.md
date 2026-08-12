@@ -19,20 +19,21 @@ helm install dc-controller chart/ \
 
 ## Custom Resource
 
-The `DataConnectHub` CR is cluster-scoped and singleton (must be named
-`default-dataconnecthub`). Helm creates it automatically. A minimal spec:
+The `DataConnectService` CR is namespace-scoped and singleton (must be named
+`default-dataconnectservice`). Helm creates it automatically. A minimal spec:
 
 ```yaml
-apiVersion: components.platform.opendatahub.io/v1alpha1
-kind: DataConnectHub
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
 metadata:
-  name: default-dataconnecthub
+  name: default-dataconnectservice
 spec: {}
 ```
 
-`devMode` defaults to `true` (deploys a built-in Postgres). Set
-`devMode: false` and provide `database.externalSecret` for an external
-database.
+The controller requires a `dch-database-config` Secret in the operand
+namespace. Provision PostgreSQL (e.g., via CloudNativePG on OpenShift
+or an external service) and create the secret before installing.
+See [deploy.md](../docs/user-guide/deploy.md) for full instructions.
 
 ### Status
 

@@ -4,19 +4,19 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: dataconnecthubs.components.platform.opendatahub.io
+  name: dataconnectservices.dataconnecthub.opendatahub.io
 spec:
-  group: components.platform.opendatahub.io
+  group: dataconnecthub.opendatahub.io
   names:
     categories:
     - opendatahub
-    kind: DataConnectHub
-    listKind: DataConnectHubList
-    plural: dataconnecthubs
+    kind: DataConnectService
+    listKind: DataConnectServiceList
+    plural: dataconnectservices
     shortNames:
-    - dch
-    singular: dataconnecthub
-  scope: Cluster
+    - dchs
+    singular: dataconnectservice
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .status.phase
@@ -28,7 +28,8 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: DataConnectHub is the Schema for the dataconnecthubs API
+        description: DataConnectService is the Schema for the dataconnectservices
+          API
         properties:
           apiVersion:
             description: |-
@@ -48,23 +49,8 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of DataConnectHub
+            description: spec defines the desired state of DataConnectService
             properties:
-              database:
-                description: database configures the external database backend (used
-                  when devMode is false)
-                properties:
-                  externalSecret:
-                    description: externalSecret is the name of a Secret containing
-                      database connection details.
-                    type: string
-                type: object
-              devMode:
-                default: true
-                description: |-
-                  devMode when true deploys a built-in single-instance Postgres.
-                  When false, the user provides an external database via the database field.
-                type: boolean
               flightService:
                 description: flightService configures the Flight gRPC API deployment
                 properties:
@@ -4627,14 +4613,11 @@ spec:
                     type: array
                 type: object
             type: object
-            x-kubernetes-validations:
-            - message: database.externalSecret is required when devMode is false
-              rule: self.devMode != false || (has(self.database) && has(self.database.externalSecret))
           status:
-            description: status defines the observed state of DataConnectHub
+            description: status defines the observed state of DataConnectService
             properties:
               conditions:
-                description: conditions represent the current state of the DataConnectHub
+                description: conditions represent the current state of the DataConnectService
                   resource.
                 items:
                   description: Condition contains details for one aspect of the current
@@ -4733,7 +4716,7 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: phase represents the current lifecycle phase of the DataConnectHub
+                description: phase represents the current lifecycle phase of the DataConnectService
                 type: string
               releases:
                 description: releases lists the deployed component versions
@@ -4755,9 +4738,6 @@ spec:
         required:
         - spec
         type: object
-        x-kubernetes-validations:
-        - message: DataConnectHub must be named 'default-dataconnecthub'
-          rule: self.metadata.name == 'default-dataconnecthub'
     served: true
     storage: true
     subresources:

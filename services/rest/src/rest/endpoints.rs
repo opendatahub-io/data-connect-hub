@@ -60,10 +60,17 @@ pub async fn get_connection(
 }
 
 pub async fn create_connection(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
     connection: web::Json<DataConnection>,
 ) -> Result<HttpResponse, RestErrorResponse> {
+    info!("create_connection: for tenant {:?}", ctx.tenant_id);
+
+    let connection = service
+        .meta_store
+        .create_data_connection(ctx.tenant_id.as_str(), &connection)
+        .await?;
+
     Ok(HttpResponse::Created().json(connection))
 }
 

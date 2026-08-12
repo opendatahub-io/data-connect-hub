@@ -1,0 +1,23 @@
+{{- if .Values.dataConnectService.enabled }}
+{{- $spec := dict }}
+{{- with .Values.dataConnectService.restService }}
+  {{- $_ := set $spec "restService" . }}
+{{- end }}
+{{- with .Values.dataConnectService.flightService }}
+  {{- $_ := set $spec "flightService" . }}
+{{- end }}
+{{- with .Values.dataConnectService.gateway }}
+  {{- $_ := set $spec "gateway" . }}
+{{- end }}
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
+metadata:
+  name: default-dataconnectservice
+  namespace: {{ .Values.operandNamespace | default .Release.Namespace }}
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec: {{- if $spec }}
+  {{- toYaml $spec | nindent 2 }}
+{{- else }} {}
+{{- end }}
+{{- end }}
