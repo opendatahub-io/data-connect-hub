@@ -80,6 +80,7 @@ spec:
                   type: string
                 description: properties holds optional non-secret metadata for the
                   connection
+                maxProperties: 64
                 type: object
               secretRef:
                 description: |-
@@ -91,6 +92,7 @@ spec:
                   name:
                     description: name is the name of the Secret
                     maxLength: 253
+                    minLength: 1
                     type: string
                 required:
                 - name

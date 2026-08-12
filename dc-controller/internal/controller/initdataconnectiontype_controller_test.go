@@ -94,14 +94,14 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 			},
 			Spec: dchv1alpha1.InitDataConnectionTypeSpec{
 				Name:        "TestType",
-				Provider:    "test",
+				Provider:    testProvider,
 				Description: &desc,
 				CredentialsFields: []dchv1alpha1.CredentialsField{
 					{
-						Name:     "HOST",
-						Label:    "Host",
+						Name:     testFieldName,
+						Label:    testFieldLabel,
 						Required: true,
-						Type:     "string",
+						Type:     testFieldType,
 					},
 				},
 			},
@@ -200,10 +200,10 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 				Metadata: ResourceMetadata{ID: id},
 				Resource: ConnectionType{
 					Name:        "TestType",
-					Provider:    "test",
+					Provider:    testProvider,
 					Description: &oldDesc,
 					CredentialsFields: []Field{
-						{Name: "HOST", Label: "Host", Required: true, Type: "string"},
+						{Name: testFieldName, Label: testFieldLabel, Required: true, Type: testFieldType},
 					},
 				},
 			}, nil

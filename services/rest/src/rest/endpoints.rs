@@ -127,16 +127,17 @@ pub async fn create_connection_type(
     Ok(HttpResponse::Created().json(connection_type))
 }
 
-pub async fn patch_connection_type(
+pub async fn update_connection_type(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
     body: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("patch_connection_type: for tenant {:?}", ctx.tenant_id);
+    info!("update_connection_type: for tenant {:?}", ctx.tenant_id);
     let replacement = body.into_inner();
-    let update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError> + Send + Sync> =
-        Arc::new(move |_existing| Ok(replacement.clone()));
+    let update_fn: Arc<
+        dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError> + Send + Sync,
+    > = Arc::new(move |_existing| Ok(replacement.clone()));
     let updated = service
         .meta_store
         .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)

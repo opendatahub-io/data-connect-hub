@@ -27,6 +27,8 @@ import (
 	"time"
 )
 
+const maxResponseBodyBytes = 1 << 20 // 1 MiB
+
 var (
 	ErrNotFound           = errors.New("resource not found")
 	ErrServiceUnavailable = errors.New("rest service unavailable")
@@ -112,11 +114,11 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct 
 	if err != nil {
 		return nil, ErrServiceUnavailable
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusCreated {
 		var resource ConnectionTypeResource
-		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
 			return nil, fmt.Errorf("decoding response: %w", err)
 		}
 		return &resource, nil
@@ -136,11 +138,11 @@ func (c *httpConnectionTypeClient) GetConnectionType(ctx context.Context, id str
 	if err != nil {
 		return nil, ErrServiceUnavailable
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusOK {
 		var resource ConnectionTypeResource
-		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
 			return nil, fmt.Errorf("decoding response: %w", err)
 		}
 		return &resource, nil
@@ -155,7 +157,7 @@ func (c *httpConnectionTypeClient) UpdateConnectionType(ctx context.Context, id 
 		return nil, fmt.Errorf("marshaling connection type: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, c.baseURL+"/api/v1/data/connection-types/"+id, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/api/v1/data/connection-types/"+id, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -165,11 +167,11 @@ func (c *httpConnectionTypeClient) UpdateConnectionType(ctx context.Context, id 
 	if err != nil {
 		return nil, ErrServiceUnavailable
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusOK {
 		var resource ConnectionTypeResource
-		if err := json.NewDecoder(resp.Body).Decode(&resource); err != nil {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
 			return nil, fmt.Errorf("decoding response: %w", err)
 		}
 		return &resource, nil
@@ -189,7 +191,7 @@ func (c *httpConnectionTypeClient) DeleteConnectionType(ctx context.Context, id 
 	if err != nil {
 		return ErrServiceUnavailable
 	}
-	defer resp.Body.Close()
+	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusNoContent {
 		return nil
@@ -210,6 +212,6 @@ func (c *httpConnectionTypeClient) handleErrorResponse(resp *http.Response) erro
 	if resp.StatusCode >= 500 {
 		return ErrServiceUnavailable
 	}
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 }

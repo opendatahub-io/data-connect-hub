@@ -27,18 +27,25 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	testProvider   = "test"
+	testFieldName  = "HOST"
+	testFieldLabel = "Host"
+	testFieldType  = "string"
+)
+
 func testConnectionType() ConnectionType {
 	desc := "Test connection type"
 	return ConnectionType{
 		Name:        "test-type",
-		Provider:    "test",
+		Provider:    testProvider,
 		Description: &desc,
 		CredentialsFields: []Field{
 			{
-				Name:     "HOST",
-				Label:    "Host",
+				Name:     testFieldName,
+				Label:    testFieldLabel,
 				Required: true,
-				Type:     "string",
+				Type:     testFieldType,
 			},
 		},
 	}
@@ -69,7 +76,7 @@ func TestCreateConnectionType(t *testing.T) {
 		assert.Equal(t, "test-type", body.Name)
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resource)
+		_ = json.NewEncoder(w).Encode(resource)
 	}))
 	defer server.Close()
 
@@ -87,7 +94,7 @@ func TestGetConnectionType(t *testing.T) {
 		assert.Equal(t, "/api/v1/data/connection-types/uuid-123", r.URL.Path)
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resource)
+		_ = json.NewEncoder(w).Encode(resource)
 	}))
 	defer server.Close()
 
@@ -111,7 +118,7 @@ func TestGetConnectionTypeNotFound(t *testing.T) {
 func TestUpdateConnectionType(t *testing.T) {
 	resource := testConnectionTypeResource()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, http.MethodPut, r.Method)
 		assert.Equal(t, "/api/v1/data/connection-types/uuid-123", r.URL.Path)
 
 		var body ConnectionType
@@ -119,7 +126,7 @@ func TestUpdateConnectionType(t *testing.T) {
 		assert.Equal(t, "test-type", body.Name)
 
 		w.WriteHeader(http.StatusOK)
-		json.NewEncoder(w).Encode(resource)
+		_ = json.NewEncoder(w).Encode(resource)
 	}))
 	defer server.Close()
 

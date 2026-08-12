@@ -24,6 +24,7 @@ import (
 // SecretRef is a reference to a Kubernetes Secret in the same namespace.
 type SecretRef struct {
 	// name is the name of the Secret
+	// +kubebuilder:validation:MinLength=1
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 }
@@ -52,6 +53,7 @@ type InitDataConnectionSpec struct {
 	SecretRef SecretRef `json:"secretRef"`
 
 	// properties holds optional non-secret metadata for the connection
+	// +kubebuilder:validation:MaxProperties=64
 	// +optional
 	Properties map[string]string `json:"properties,omitempty"`
 }

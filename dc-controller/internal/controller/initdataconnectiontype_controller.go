@@ -19,7 +19,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
+	"regexp"
 	"slices"
 	"time"
 
@@ -42,6 +44,8 @@ const (
 
 	requeueOnServiceUnavailable = 15 * time.Second
 )
+
+var validResourceID = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
 
 // InitDataConnectionTypeReconciler reconciles InitDataConnectionType objects.
 type InitDataConnectionTypeReconciler struct {
@@ -71,7 +75,7 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 		if controllerutil.ContainsFinalizer(&cr, idctFinalizerName) {
 			if err := r.handleDeletion(ctx, &cr); err != nil {
 				if errors.Is(err, ErrServiceUnavailable) {
-					log.Info("REST service unavailable during deletion, requeueing", "name", req.Name)
+					log.Info("REST service unavailable during deletion, requeuing", "name", req.Name)
 					return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
 				}
 				log.Error(err, "failed to delete connection type from REST", "name", req.Name)
@@ -95,7 +99,7 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	result, err := r.syncToREST(ctx, &cr)
 	if err != nil {
 		if errors.Is(err, ErrServiceUnavailable) {
-			log.Info("REST service unavailable, requeueing", "name", req.Name)
+			log.Info("REST service unavailable, requeuing", "name", req.Name)
 			r.setConditionAndStatus(ctx, &cr, "Pending", metav1.ConditionFalse, "ServiceUnavailable", "REST service is not reachable")
 			return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
 		}
@@ -125,6 +129,9 @@ func (r *InitDataConnectionTypeReconciler) syncToREST(ctx context.Context, cr *d
 	resourceID := cr.Annotations[annotationResourceID]
 
 	if resourceID != "" {
+		if !validResourceID.MatchString(resourceID) {
+			return "", fmt.Errorf("invalid resource ID annotation: %q", resourceID)
+		}
 		existing, err := r.RestClient.GetConnectionType(ctx, resourceID)
 		if err != nil {
 			if !errors.Is(err, ErrNotFound) {
@@ -165,6 +172,9 @@ func (r *InitDataConnectionTypeReconciler) handleDeletion(ctx context.Context, c
 	resourceID := cr.Annotations[annotationResourceID]
 	if resourceID == "" {
 		return nil
+	}
+	if !validResourceID.MatchString(resourceID) {
+		return fmt.Errorf("invalid resource ID annotation: %q", resourceID)
 	}
 
 	err := r.RestClient.DeleteConnectionType(ctx, resourceID)
