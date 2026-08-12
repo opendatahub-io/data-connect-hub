@@ -54,6 +54,7 @@ rules:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices/finalizers
+  - initdataconnectiontypes/finalizers
   verbs:
   - update
 - apiGroups:
@@ -72,6 +73,8 @@ rules:
   verbs:
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - gateway.networking.k8s.io

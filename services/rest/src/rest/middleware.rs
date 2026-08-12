@@ -19,14 +19,7 @@ pub async fn validate_headers(
 ) -> Result<ServiceResponse<impl MessageBody>, actix_web::Error> {
     let tenant_id = match req.headers().get(X_TENANT_ID) {
         Some(value) => match value.to_str() {
-            Ok(v) if !v.is_empty() => v.to_string(),
-            Ok(_) => {
-                return Ok(req
-                    .into_response(error_response(EndpointError::InvalidHeaderValue(
-                        X_TENANT_ID.to_string(),
-                    )))
-                    .map_into_right_body());
-            },
+            Ok(v) => v.to_string(),
             Err(_) => {
                 return Ok(req
                     .into_response(error_response(EndpointError::InvalidHeaderValue(

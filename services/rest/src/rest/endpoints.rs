@@ -1,7 +1,6 @@
 use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
-use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
 use commons::api::connections::MetaStore;
@@ -129,12 +128,20 @@ pub async fn create_connection_type(
 }
 
 pub async fn patch_connection_type(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _path: web::Path<String>,
-    _body: Bytes,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+    body: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("patch_connection_type: for tenant {:?}", ctx.tenant_id);
+    let replacement = body.into_inner();
+    let update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError> + Send + Sync> =
+        Arc::new(move |_existing| Ok(replacement.clone()));
+    let updated = service
+        .meta_store
+        .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
+        .await?;
+    Ok(HttpResponse::Ok().json(updated))
 }
 
 pub async fn delete_connection(
@@ -146,11 +153,16 @@ pub async fn delete_connection(
 }
 
 pub async fn delete_connection_type(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _path: web::Path<String>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("delete_connection_type: for tenant {:?}", ctx.tenant_id);
+    service
+        .meta_store
+        .delete_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 pub async fn get_ingestion_data(
@@ -439,5 +451,17 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "invalid_json");
+    }
+
+    #[actix_web::test]
+    async fn test_empty_tenant_header_accepted() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connection-types")
+            .insert_header(("x-tenant-id", ""))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
     }
 }

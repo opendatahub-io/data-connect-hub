@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -214,9 +215,16 @@ func main() {
 		os.Exit(1)
 	}
 
+	restServiceURL := os.Getenv("REST_SERVICE_URL")
+	if restServiceURL == "" {
+		restServiceURL = fmt.Sprintf("http://rest-service.%s.svc.cluster.local:8080", namespace)
+	}
+	setupLog.Info("REST service URL for InitDataConnectionType", "url", restServiceURL)
+
 	if err := (&controller.InitDataConnectionTypeReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL, ""),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)
