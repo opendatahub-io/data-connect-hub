@@ -313,6 +313,10 @@ func (r *DataConnectServiceReconciler) applyResources(
 	for _, obj := range resources {
 		obj.SetNamespace(r.Namespace)
 
+		if obj.GetKind() == "ClusterRoleBinding" {
+			r.patchClusterRoleBindingSubjects(obj)
+		}
+
 		labels := obj.GetLabels()
 		if labels == nil {
 			labels = map[string]string{}
@@ -412,6 +416,27 @@ func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Contex
 		}
 	}
 	return nil
+}
+
+// patchClusterRoleBindingSubjects updates ServiceAccount subject namespaces
+// to match the operand namespace. The Kustomize manifests hardcode a default
+// namespace that may differ from the actual deployment.
+func (r *DataConnectServiceReconciler) patchClusterRoleBindingSubjects(obj *unstructured.Unstructured) {
+	subjects, found, _ := unstructured.NestedSlice(obj.Object, "subjects")
+	if !found {
+		return
+	}
+	for i, s := range subjects {
+		sub, ok := s.(map[string]any)
+		if !ok {
+			continue
+		}
+		if kind, _ := sub["kind"].(string); kind == "ServiceAccount" {
+			sub["namespace"] = r.Namespace
+			subjects[i] = sub
+		}
+	}
+	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
 }
 
 func indent(s string, spaces int) string {

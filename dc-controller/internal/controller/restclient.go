@@ -19,15 +19,21 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"strings"
 	"time"
 )
 
-const maxResponseBodyBytes = 1 << 20 // 1 MiB
+const (
+	maxResponseBodyBytes = 1 << 20 // 1 MiB
+	saTokenPath          = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+)
 
 var (
 	ErrNotFound           = errors.New("resource not found")
@@ -82,18 +88,29 @@ type ConnectionTypeResource struct {
 }
 
 type httpConnectionTypeClient struct {
-	baseURL    string
+	baseURL   string
+	tenantID  string
+	tokenPath string
+
 	httpClient *http.Client
-	tenantID   string
 }
 
-// NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the REST service over HTTP.
+// NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
+// rest-service through kube-rbac-proxy over HTTPS. It reads the service
+// account token on each request (Kubernetes rotates projected tokens).
 func NewHTTPConnectionTypeClient(baseURL, tenantID string) ConnectionTypeClient {
 	return &httpConnectionTypeClient{
-		baseURL:  baseURL,
-		tenantID: tenantID,
+		baseURL:   baseURL,
+		tenantID:  tenantID,
+		tokenPath: saTokenPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true, //nolint:gosec // in-cluster service communication
+					NextProtos:        []string{"http/1.1"},
+				},
+			},
 		},
 	}
 }
@@ -108,7 +125,9 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct 
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	c.setHeaders(req)
+	if err := c.setHeaders(req); err != nil {
+		return nil, err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -132,7 +151,9 @@ func (c *httpConnectionTypeClient) GetConnectionType(ctx context.Context, id str
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	c.setHeaders(req)
+	if err := c.setHeaders(req); err != nil {
+		return nil, err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -161,7 +182,9 @@ func (c *httpConnectionTypeClient) UpdateConnectionType(ctx context.Context, id 
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	c.setHeaders(req)
+	if err := c.setHeaders(req); err != nil {
+		return nil, err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -185,7 +208,9 @@ func (c *httpConnectionTypeClient) DeleteConnectionType(ctx context.Context, id 
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
-	c.setHeaders(req)
+	if err := c.setHeaders(req); err != nil {
+		return err
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -200,14 +225,39 @@ func (c *httpConnectionTypeClient) DeleteConnectionType(ctx context.Context, id 
 	return c.handleErrorResponse(resp)
 }
 
-func (c *httpConnectionTypeClient) setHeaders(req *http.Request) {
+func (c *httpConnectionTypeClient) setHeaders(req *http.Request) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-tenant-id", c.tenantID)
+
+	token, err := c.readToken()
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return nil
+}
+
+// readToken reads the SA token from disk on each call so rotated tokens
+// are picked up automatically.
+func (c *httpConnectionTypeClient) readToken() (string, error) {
+	data, err := os.ReadFile(c.tokenPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading service account token: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
 }
 
 func (c *httpConnectionTypeClient) handleErrorResponse(resp *http.Response) error {
 	if resp.StatusCode == http.StatusNotFound {
 		return ErrNotFound
+	}
+	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		return fmt.Errorf("authentication/authorization failed (HTTP %d)", resp.StatusCode)
 	}
 	if resp.StatusCode >= 500 {
 		return ErrServiceUnavailable
