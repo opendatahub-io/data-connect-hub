@@ -5,6 +5,7 @@ members = [
     "libs/pg-meta-store",
     "connectors/postgres",
     "connectors/sqlite",
+    "connectors/s3",
     "services/flight",
     "services/rest",
 ]
@@ -20,6 +21,7 @@ unsafe_code = "deny"
 commons = { path = "libs/commons" }
 postgres-connector = { path = "connectors/postgres" }
 sqlite-connector = { path = "connectors/sqlite" }
+s3-connector = { path = "connectors/s3" }
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
 arrow = "59.1.0"
@@ -54,3 +56,6 @@ http-body = "1"
 http-body-util = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
+opendal = { version = "0.58", features = ["services-s3"] }
+parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
+arrow-csv = "59.1"

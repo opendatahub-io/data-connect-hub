@@ -49,10 +49,18 @@ impl From<ConnectorError> for RestErrorResponse {
             ConnectorError::ConfigError(_) => ("config", 500),
             ConnectorError::ConnectionError(_) => ("connection", 503),
             ConnectorError::SQLError(_) => ("sql_error", 400),
+            ConnectorError::IOError(_) => ("io_error", 500),
+        };
+        let message = match &err {
+            ConnectorError::IOError(_) => {
+                tracing::error!("{err}");
+                "data source I/O error".to_string()
+            },
+            _ => err.to_string(),
         };
         RestErrorResponse {
             code: code.to_string(),
-            message: err.to_string(),
+            message,
             status,
         }
     }

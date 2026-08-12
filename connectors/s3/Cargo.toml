@@ -1,0 +1,21 @@
+[package]
+name = "s3-connector"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+commons = { workspace = true }
+arrow = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+async-stream = { workspace = true }
+moka = { workspace = true, features = ["future"] }
+opendal = { workspace = true }
+parquet = { workspace = true }
+arrow-csv = { workspace = true }
+tracing = { workspace = true }
+bytes = { workspace = true }

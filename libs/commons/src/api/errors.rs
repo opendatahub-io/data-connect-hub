@@ -12,6 +12,8 @@ pub enum ConnectorError {
     InvalidRequest(String),
     #[error("Config error: {0}")]
     ConfigError(String),
+    #[error("IO error: {0}")]
+    IOError(String),
 }
 
 #[derive(Error, Debug)]

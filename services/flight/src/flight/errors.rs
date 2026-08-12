@@ -29,5 +29,9 @@ pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
         ConnectorError::NoDataError() => Status::not_found("no data found"),
         ConnectorError::SQLError(_) => Status::invalid_argument("query rejected"),
         ConnectorError::ConfigError(_) => Status::internal("connector configuration error"),
+        ConnectorError::IOError(_) => {
+            tracing::error!("{e}");
+            Status::internal("data source IO error")
+        },
     }
 }

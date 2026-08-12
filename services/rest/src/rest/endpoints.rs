@@ -209,6 +209,7 @@ mod tests {
                         admin: None,
                         properties: std::collections::HashMap::new(),
                     },
+                    status: Default::default(),
                 })
             } else {
                 Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(

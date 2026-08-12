@@ -17,6 +17,7 @@ path = "src/main.rs"
 [dependencies]
 postgres-connector = { workspace = true }
 sqlite-connector = { workspace = true }
+s3-connector = { workspace = true }
 async-trait = { workspace = true }
 commons = { workspace = true }
 pg-meta-store = { workspace = true }
@@ -39,6 +40,7 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 kube-utils = { workspace = true }
 tower = { workspace = true }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -48,3 +50,6 @@ metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
 
 [dev-dependencies]
 sqlx = { workspace = true }
+opendal = { workspace = true }
+parquet = { workspace = true }
+arrow-csv = { workspace = true }
