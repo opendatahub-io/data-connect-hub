@@ -77,6 +77,42 @@ To grant a user access to a tenant's data, an admin must:
         name: alice
     ```
 
+4. **Grant Flight access to tenant secrets.** Data connection credentials are stored as Kubernetes secrets in tenant namespaces.
+
+    - Data Connect Hub does **not** create secret-read RBAC manifests by default.
+    - For each tenant namespace, an admin must create explicit RBAC for `flight-service-sa`.
+    - Prefer namespace-local `Role` + `RoleBinding` with `resourceNames` for least privilege:
+
+    ```yaml
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata:
+      name: dch-flight-secret-reader
+      namespace: team-alpha
+    rules:
+      - apiGroups: [""]
+        resources: ["secrets"]
+        verbs: ["get"]
+        resourceNames:
+          - <allowed-connection-secret-name>
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata:
+      name: dch-flight-secret-reader
+      namespace: team-alpha
+    roleRef:
+      apiGroup: rbac.authorization.k8s.io
+      kind: Role
+      name: dch-flight-secret-reader
+    subjects:
+      - kind: ServiceAccount
+        name: flight-service-sa
+        namespace: dch-services
+    ```
+
+    Replace `<allowed-connection-secret-name>` with your connection secret name and `dch-services` with the namespace where DCH services run. This cross-namespace ServiceAccount binding is valid because `RoleBinding` subjects include both `name` and `namespace`. If secret names are dynamic, create/update this tenant-local `Role` as needed.
+
 ## 5. Auth Flow
 
 1. Client sends a request with `Authorization: Bearer <token>` and `X-Tenant-Id: <namespace>` headers.
