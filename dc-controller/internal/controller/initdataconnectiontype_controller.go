@@ -103,6 +103,12 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 			r.setConditionAndStatus(ctx, &cr, "Pending", metav1.ConditionFalse, "ServiceUnavailable", "REST service is not reachable")
 			return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
 		}
+		if errors.Is(err, ErrConflict) {
+			log.Error(err, "connection type already exists in REST service — manual resolution required", "name", req.Name)
+			r.setConditionAndStatus(ctx, &cr, "Error", metav1.ConditionFalse, "Conflict",
+				"A connection type with this name already exists. Delete the duplicate from the REST API or remove this CR.")
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "failed to sync connection type", "name", req.Name)
 		r.setConditionAndStatus(ctx, &cr, "Error", metav1.ConditionFalse, "SyncFailed", err.Error())
 		return ctrl.Result{RequeueAfter: requeueOnError}, nil
@@ -153,11 +159,6 @@ func (r *InitDataConnectionTypeReconciler) syncToREST(ctx context.Context, cr *d
 	// Create new resource
 	resource, err := r.RestClient.CreateConnectionType(ctx, desired)
 	if err != nil {
-		if errors.Is(err, ErrConflict) {
-			logf.FromContext(ctx).Info("connection type already exists in REST service, will retry",
-				"name", cr.Spec.Name)
-			return "", err
-		}
 		return "", err
 	}
 
