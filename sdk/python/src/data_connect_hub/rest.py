@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from ._auth import build_rest_headers
+from ._auth import TokenCache, build_rest_headers
 from .exceptions import DCHConfigError, DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
 from .models import (
     ConnectionType,
@@ -49,6 +49,13 @@ class RestClient:
 
     Parameters
     ----------
+    token : str
+        Static Bearer token value (without the "Bearer " prefix).
+    token_provider : Callable[[], str], optional
+        A callable that returns a valid Bearer token string.  The SDK calls
+        this once and caches the result.  On HTTP 401, the token is refreshed
+        automatically and the request is retried once.  Mutually exclusive
+        with *token*.
     max_retries : int
         Maximum number of retry attempts (default 3). Set to 0 to disable.
     backoff_base : float
@@ -86,7 +93,7 @@ class RestClient:
 
         self._base_url = base_url.rstrip("/")
         self._token = token
-        self._token_provider = token_provider
+        self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
         self._tenant_id = tenant_id
         self._api_base = api_base
         self._max_retries = max_retries
@@ -111,7 +118,7 @@ class RestClient:
             self._client.close()
 
     def _headers(self) -> dict[str, str]:
-        token = self._token_provider() if self._token_provider else self._token
+        token = self._token_cache.get() if self._token_cache else self._token
         return build_rest_headers(
             token=token,
             tenant_id=self._tenant_id,
@@ -127,6 +134,22 @@ class RestClient:
         return delay * random.uniform(0.5, 1.0)
 
     def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, object] | None = None,
+    ) -> httpx.Response:
+        resp = self._do_request(method, path, json=json)
+        if resp.status_code == 401 and self._token_cache is not None:
+            _log.debug("Received 401; refreshing token and retrying")
+            self._token_cache.refresh()
+            resp = self._do_request(method, path, json=json)
+        if resp.status_code >= 400:
+            raise map_http_error(resp)
+        return resp
+
+    def _do_request(
         self,
         method: str,
         path: str,
@@ -174,12 +197,9 @@ class RestClient:
                 time.sleep(delay)
                 continue
 
-            if resp.status_code >= 400:
-                raise map_http_error(resp)
             return resp
 
         # Unreachable: every loop iteration returns, raises, or continues.
-        # Kept as a safety net for future refactors.
         raise last_exc or DCHError("Request failed after retries")  # pragma: no cover
 
     def _retry_after(self, resp: httpx.Response, attempt: int) -> float:

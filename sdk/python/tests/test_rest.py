@@ -517,7 +517,7 @@ class TestTokenProviderGuard:
 
 
 class TestTokenProvider:
-    def test_provider_called_per_request(self) -> None:
+    def test_provider_called_once_and_cached(self) -> None:
         call_count = 0
 
         def provider() -> str:
@@ -544,6 +544,64 @@ class TestTokenProvider:
         client.list_connections()
         client.list_connections()
 
-        assert call_count == 2
+        assert call_count == 1
         assert captured_headers[0]["authorization"] == "Bearer token-1"
-        assert captured_headers[1]["authorization"] == "Bearer token-2"
+        assert captured_headers[1]["authorization"] == "Bearer token-1"
+
+    def test_401_triggers_token_refresh_and_retry(self) -> None:
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        request_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            if request_count == 1:
+                return httpx.Response(401, json={"error": "unauthorized"})
+            return httpx.Response(200, json=[])
+
+        transport = httpx.MockTransport(handler)
+        http_client = httpx.Client(transport=transport, base_url="http://test")
+        client = RestClient(
+            base_url="http://test",
+            token="",
+            tenant_id="t1",
+            token_provider=provider,
+            http_client=http_client,
+            max_retries=0,
+        )
+
+        result = client.list_connections()
+
+        assert call_count == 2
+        assert request_count == 2
+        assert result == []
+
+    def test_401_after_refresh_raises(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, json={"error": "unauthorized"})
+
+        transport = httpx.MockTransport(handler)
+        http_client = httpx.Client(transport=transport, base_url="http://test")
+        client = RestClient(
+            base_url="http://test",
+            token="",
+            tenant_id="t1",
+            token_provider=lambda: "bad-token",
+            http_client=http_client,
+            max_retries=0,
+        )
+
+        with pytest.raises(DCHAuthenticationError):
+            client.list_connections()
+
+    def test_401_without_provider_raises_immediately(self) -> None:
+        transport = _make_transport(status=401, body={"error": "unauthorized"})
+        client = _make_client(transport)
+        with pytest.raises(DCHAuthenticationError):
+            client.list_connections()

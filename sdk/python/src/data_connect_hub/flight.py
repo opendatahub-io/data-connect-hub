@@ -12,8 +12,15 @@ if TYPE_CHECKING:
 import adbc_driver_flightsql.dbapi as flight_dbapi
 import pyarrow as pa
 
-from ._auth import ADBC_HEADER_PREFIX, build_flight_headers
+from ._auth import ADBC_HEADER_PREFIX, TokenCache, build_flight_headers
 from .exceptions import DCHConnectionError, DCHQueryError
+
+_GRPC_UNAUTHENTICATED = "unauthenticated"
+
+
+def _is_auth_error(exc: Exception) -> bool:
+    return _GRPC_UNAUTHENTICATED in str(exc).lower()
+
 
 _QUERY_TIMEOUT_KEY = "adbc.flight.sql.rpc.timeout_seconds.query"
 _FETCH_TIMEOUT_KEY = "adbc.flight.sql.rpc.timeout_seconds.fetch"
@@ -31,7 +38,9 @@ class FlightSQLClient:
     tenant_id : str
         Tenant identifier.
     token_provider : Callable[[], str], optional
-        Called per-request to obtain a fresh token. Mutually exclusive with *token*.
+        A callable that returns a valid Bearer token string.  The SDK calls
+        this once and caches the result.  On authentication failure, the
+        token is refreshed automatically.  Mutually exclusive with *token*.
     timeout : float, optional
         Timeout in seconds for Flight SQL RPC calls (applies to both query and fetch).
     """
@@ -47,7 +56,7 @@ class FlightSQLClient:
     ) -> None:
         self._flight_url = flight_url
         self._tenant_id = tenant_id
-        self._token_provider = token_provider
+        self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
         self._static_kwargs: dict[str, str] = {}
         if timeout is not None:
             self._static_kwargs[_QUERY_TIMEOUT_KEY] = str(timeout)
@@ -56,8 +65,8 @@ class FlightSQLClient:
             self._static_kwargs.update(build_flight_headers(token=token, tenant_id=tenant_id))
 
     def _base_kwargs(self) -> dict[str, str]:
-        if self._token_provider:
-            headers = build_flight_headers(token=self._token_provider(), tenant_id=self._tenant_id)
+        if self._token_cache:
+            headers = build_flight_headers(token=self._token_cache.get(), tenant_id=self._tenant_id)
             return {**self._static_kwargs, **headers}
         return dict(self._static_kwargs)
 
@@ -73,6 +82,15 @@ class FlightSQLClient:
 
     def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* and return the full result as a PyArrow Table."""
+        try:
+            return self._do_read(sql, connection_id, parameters=parameters)
+        except (DCHConnectionError, DCHQueryError) as exc:
+            if self._token_cache is not None and _is_auth_error(exc):
+                self._token_cache.refresh()
+                return self._do_read(sql, connection_id, parameters=parameters)
+            raise
+
+    def _do_read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         conn = self._connect(connection_id)
         try:
             cursor = conn.cursor()
@@ -93,6 +111,15 @@ class FlightSQLClient:
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""
+        try:
+            return self._do_server_info()
+        except DCHConnectionError as exc:
+            if self._token_cache is not None and _is_auth_error(exc):
+                self._token_cache.refresh()
+                return self._do_server_info()
+            raise
+
+    def _do_server_info(self) -> dict[str, Any]:
         try:
             conn = flight_dbapi.connect(self._flight_url, db_kwargs=self._base_kwargs())
         except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:

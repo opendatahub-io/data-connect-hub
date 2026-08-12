@@ -38,7 +38,11 @@ class DataConnectClient:
     token : str
         Static Bearer token value (without the "Bearer " prefix).
     token_provider : Callable[[], str], optional
-        Called per-request to obtain a fresh token. Mutually exclusive with *token*.
+        A callable that returns a valid Bearer token string.  The SDK calls
+        this once and caches the result.  If a request receives a 401
+        Unauthorized response, the SDK automatically refreshes the token
+        by calling the provider again and retries the request.  Mutually
+        exclusive with *token*.
     tenant_id : str
         Tenant identifier sent via ``x-tenant-id`` header.
     api_base : str
