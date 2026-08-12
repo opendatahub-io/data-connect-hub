@@ -54,6 +54,7 @@ rules:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices/finalizers
+  - initdataconnections/finalizers
   - initdataconnectiontypes/finalizers
   verbs:
   - update
@@ -61,6 +62,7 @@ rules:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices/status
+  - initdataconnections/status
   - initdataconnectiontypes/status
   verbs:
   - get
@@ -69,6 +71,7 @@ rules:
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
+  - initdataconnections
   - initdataconnectiontypes
   verbs:
   - get
