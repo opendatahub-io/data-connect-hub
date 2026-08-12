@@ -57,7 +57,6 @@ pub async fn get_connection(
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("get_connection: for tenant {:?}", ctx.tenant_id);
-    let id = id.clone();
     let connection = service
         .meta_store
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
@@ -98,7 +97,6 @@ pub async fn get_connection_type(
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("get_connection_type: for tenant {:?}", ctx.tenant_id);
-    let id = id.clone();
     let connection_type = service
         .meta_store
         .get_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
