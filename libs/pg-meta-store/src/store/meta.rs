@@ -33,11 +33,21 @@ fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
 
 impl PgMetaStore {
     pub async fn new(config: DatabaseConfig) -> Result<Self, MetaStoreError> {
-        Ok(Self {
-            pool: PgPool::connect(&config.url)
-                .await
-                .map_err(|e| MetaStoreError::Connection(e.to_string()))?,
-        })
+        let pool = PgPool::connect(&config.url)
+            .await
+            .map_err(|e| MetaStoreError::Connection(e.to_string()))?;
+
+        Self::init_schema(&pool).await?;
+
+        Ok(Self { pool })
+    }
+
+    async fn init_schema(pool: &PgPool) -> Result<(), MetaStoreError> {
+        sqlx::raw_sql(include_str!("../../schema/connections.sql"))
+            .execute(pool)
+            .await
+            .map_err(|e| MetaStoreError::Query(format!("schema initialization failed: {e}")))?;
+        Ok(())
     }
 
     async fn can_store(data_connection: &DataConnection) -> Result<(), MetaStoreError> {
