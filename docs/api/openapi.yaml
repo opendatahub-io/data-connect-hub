@@ -1,0 +1,489 @@
+openapi: 3.0.3
+info:
+  title: Data Connect Hub REST API
+  description: REST API for managing data connections and connection types.
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: /api/v1/data
+
+security:
+  - tenantHeader: []
+
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /connections:
+    get:
+      operationId: listConnections
+      summary: List connections
+      tags: [connections]
+      responses:
+        "200":
+          description: Connection list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionResourceList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: createConnection
+      summary: Create a connection
+      tags: [connections]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataConnection"
+      responses:
+        "201":
+          description: Connection created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /connections/{id}:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: getConnection
+      summary: Get a connection
+      tags: [connections]
+      responses:
+        "200":
+          description: Connection details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Unimplemented"
+    patch:
+      operationId: patchConnection
+      summary: Update a connection
+      tags: [connections]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/JsonPatch"
+      responses:
+        "200":
+          description: Connection updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Unimplemented"
+    delete:
+      operationId: deleteConnection
+      summary: Delete a connection
+      tags: [connections]
+      responses:
+        "204":
+          description: Connection deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Unimplemented"
+
+  /connection-types:
+    get:
+      operationId: listConnectionTypes
+      summary: List connection types
+      tags: [connection-types]
+      responses:
+        "200":
+          description: Connection type list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionTypeResourceList"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      operationId: createConnectionType
+      summary: Create a connection type
+      tags: [connection-types]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataConnectionType"
+      responses:
+        "201":
+          description: Connection type created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionTypeResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /connection-types/{id}:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: getConnectionType
+      summary: Get a connection type
+      tags: [connection-types]
+      responses:
+        "200":
+          description: Connection type details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionTypeResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: patchConnectionType
+      summary: Update a connection type
+      tags: [connection-types]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/JsonPatch"
+      responses:
+        "200":
+          description: Connection type updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataConnectionTypeResource"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Unimplemented"
+    delete:
+      operationId: deleteConnectionType
+      summary: Delete a connection type
+      tags: [connection-types]
+      responses:
+        "204":
+          description: Connection type deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "501":
+          $ref: "#/components/responses/Unimplemented"
+
+components:
+  securitySchemes:
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: x-tenant-id
+      description: Tenant identifier. Required on all endpoints except /health.
+
+  parameters:
+    resourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource unique identifier
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unimplemented:
+      description: Endpoint not yet implemented
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ServiceUnavailable:
+      description: Backend service unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Machine-readable error code
+          example: not_found
+        message:
+          type: string
+          description: Human-readable error description
+          example: "Data connection 'abc' not found for tenant 't1'"
+
+    HealthResponse:
+      type: object
+      required: [service]
+      properties:
+        service:
+          type: string
+          example: Data Connect Hub
+
+    JsonPatch:
+      type: object
+      required: [op, path]
+      properties:
+        op:
+          type: string
+          description: Patch operation
+          enum: [add, remove, replace, move, copy, test]
+        path:
+          type: string
+          description: JSON Pointer to the target field
+          example: /resource/name
+        value:
+          description: Value to apply (required for add, replace, test)
+
+    ResourceMetadata:
+      type: object
+      required: [id, tenant_id, created_at, updated_at]
+      properties:
+        id:
+          type: string
+          description: Unique identifier (UUID)
+          example: 550e8400-e29b-41d4-a716-446655440000
+        tenant_id:
+          type: string
+          example: tenant-1
+        created_at:
+          type: string
+          format: date-time
+          example: "2026-01-01T00:00:00Z"
+        updated_at:
+          type: string
+          format: date-time
+          example: "2026-01-01T00:00:00Z"
+
+    DataFormat:
+      type: string
+      enum: [tabular, binary]
+
+    DataConnectionState:
+      type: string
+      enum: [ingestion_ready, ingestion_not_ready]
+
+    DataConnectionStatus:
+      type: object
+      required: [state]
+      properties:
+        state:
+          $ref: "#/components/schemas/DataConnectionState"
+        message:
+          type: string
+          nullable: true
+          description: Optional human-readable status message
+
+    Admin:
+      description: >
+        Credentials reference. Exactly one of secret_ref or secret must be provided.
+      oneOf:
+        - type: object
+          required: [secret_ref]
+          properties:
+            secret_ref:
+              type: string
+              description: Reference to an existing secret
+              example: secret/my-conn
+          additionalProperties: false
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: object
+              additionalProperties:
+                type: string
+              description: Inline secret key-value pairs
+          additionalProperties: false
+
+    DataConnection:
+      type: object
+      required: [name, data_connection_type_id, format, properties]
+      properties:
+        name:
+          type: string
+          example: my-postgres
+        data_connection_type_id:
+          type: string
+          description: References a connection type id
+          example: 550e8400-e29b-41d4-a716-446655440000
+        format:
+          $ref: "#/components/schemas/DataFormat"
+        admin:
+          $ref: "#/components/schemas/Admin"
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            host: localhost
+            port: "5432"
+
+    DataConnectionResource:
+      type: object
+      required: [metadata, resource, status]
+      properties:
+        metadata:
+          $ref: "#/components/schemas/ResourceMetadata"
+        resource:
+          $ref: "#/components/schemas/DataConnection"
+        status:
+          $ref: "#/components/schemas/DataConnectionStatus"
+
+    DataConnectionResourceList:
+      type: object
+      required: [total_count, items]
+      properties:
+        total_count:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataConnectionResource"
+
+    EnumValue:
+      type: object
+      required: [value, label]
+      properties:
+        value:
+          type: string
+          example: us-east-1
+        label:
+          type: string
+          example: US East
+
+    Field:
+      type: object
+      required: [name, label, required, type]
+      properties:
+        name:
+          type: string
+          example: url
+        label:
+          type: string
+          example: Connection URL
+        description:
+          type: string
+          nullable: true
+        required:
+          type: boolean
+        type:
+          type: string
+          example: string
+        enum_values:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/EnumValue"
+        default_value:
+          type: string
+          nullable: true
+
+    DataConnectionType:
+      type: object
+      required: [name, provider, credentials_fields]
+      properties:
+        name:
+          type: string
+          example: PostgreSQL
+        provider:
+          type: string
+          example: postgres
+        description:
+          type: string
+          nullable: true
+        credentials_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/Field"
+
+    DataConnectionTypeResource:
+      type: object
+      required: [metadata, resource]
+      properties:
+        metadata:
+          $ref: "#/components/schemas/ResourceMetadata"
+        resource:
+          $ref: "#/components/schemas/DataConnectionType"
+
+    DataConnectionTypeResourceList:
+      type: object
+      required: [total_count, items]
+      properties:
+        total_count:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataConnectionTypeResource"
+
+tags:
+  - name: connections
+    description: Data connection management
+  - name: connection-types
+    description: Connection type definitions
