@@ -138,11 +138,16 @@ pub async fn patch_connection_type(
 }
 
 pub async fn delete_connection(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _path: web::Path<String>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("delete_connection: for tenant {:?}", ctx.tenant_id);
+    service
+        .meta_store
+        .delete_data_connection(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+    Ok(HttpResponse::NoContent().finish())
 }
 
 pub async fn delete_connection_type(
@@ -234,8 +239,14 @@ mod tests {
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
-        async fn delete_data_connection(&self, _t: &str, _u: &str) -> Result<(), commons::api::errors::MetaStoreError> {
-            unimplemented!()
+        async fn delete_data_connection(&self, _t: &str, uid: &str) -> Result<(), commons::api::errors::MetaStoreError> {
+            if uid == "conn-1" {
+                Ok(())
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection '{uid}' not found"
+                )))
+            }
         }
         async fn get_data_connection_types(
             &self,
@@ -301,6 +312,7 @@ mod tests {
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))
+                .route("/connections/{id}", web::delete().to(delete_connection))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
                 .route("/ingestion/{id}", web::get().to(get_ingestion_data))
@@ -368,6 +380,32 @@ mod tests {
     async fn test_get_connection_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
+            .uri("/api/v1/data/connections/nonexistent")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_not_found() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
             .uri("/api/v1/data/connections/nonexistent")
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
