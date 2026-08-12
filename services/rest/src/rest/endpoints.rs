@@ -239,7 +239,11 @@ mod tests {
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
-        async fn delete_data_connection(&self, _t: &str, uid: &str) -> Result<(), commons::api::errors::MetaStoreError> {
+        async fn delete_data_connection(
+            &self,
+            _t: &str,
+            uid: &str,
+        ) -> Result<(), commons::api::errors::MetaStoreError> {
             if uid == "conn-1" {
                 Ok(())
             } else {
