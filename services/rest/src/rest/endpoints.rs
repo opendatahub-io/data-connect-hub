@@ -213,9 +213,9 @@ mod tests {
                     },
                 })
             } else {
-                Err(commons::api::errors::MetaStoreError::ResourceNotFound(
-                    format!("Data connection '{uid}' not found"),
-                ))
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection '{uid}' not found"
+                )))
             }
         }
         async fn create_data_connection(
