@@ -5,6 +5,9 @@ metadata:
   name: s3
   labels:
     {{- include "dc-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
 spec:
   name: S3
   provider: s3
@@ -43,6 +46,9 @@ metadata:
   name: postgres
   labels:
     {{- include "dc-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
 spec:
   name: Postgres
   provider: postgres
@@ -60,6 +66,9 @@ metadata:
   name: uri
   labels:
     {{- include "dc-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
 spec:
   name: URI
   provider: uri
@@ -87,6 +96,9 @@ metadata:
   name: huggingface
   labels:
     {{- include "dc-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
 spec:
   name: HuggingFace
   provider: huggingface
@@ -109,6 +121,9 @@ metadata:
   name: oci
   labels:
     {{- include "dc-controller.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "2"
 spec:
   name: OCI
   provider: oci
