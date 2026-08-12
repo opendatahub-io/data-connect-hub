@@ -2,7 +2,8 @@ use chrono::Utc;
 use commons::api::ResourceMetadata;
 use commons::api::connections::Admin;
 use commons::api::connections::{
-    DataConnection, DataConnectionResource, DataConnectionType, DataConnectionTypeResource, MetaStore,
+    DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus, DataConnectionType,
+    DataConnectionTypeResource, MetaStore,
 };
 use commons::api::errors::MetaStoreError;
 use serde::Deserialize;
@@ -98,6 +99,10 @@ impl MetaStore for PgMetaStore {
                 updated_at: now,
             },
             resource: data_connection.clone(),
+            status: DataConnectionStatus {
+                state: DataConnectionState::IngestionNotReady,
+                message: None,
+            },
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
@@ -149,6 +154,9 @@ impl MetaStore for PgMetaStore {
                 ..existing.metadata
             },
             resource: data_connection,
+
+            // TODO: For now we preserve the same status but since the connection changed we'll need to revalidate the connection and set the connection statud.
+            status: existing.status.clone(),
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
