@@ -1,7 +1,7 @@
 controllerManager:
   image:
-    repository: ghcr.io/opendatahub-io/data-connect-hub/dc-controller
-    tag: latest
+    repository: quay.io/opendatahub/odh-data-connect-hub-controller
+    tag: odh-stable
     pullPolicy: IfNotPresent
   replicas: 1
   resources:
@@ -13,8 +13,8 @@ controllerManager:
       memory: 64Mi
 
 relatedImages:
-  restService: ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest
-  flightService: ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest
+  restService: quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable
+  flightService: quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable
   kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3
 
 leaderElection: true
@@ -25,7 +25,7 @@ dataConnectService:
   enabled: true
 
   restService: {}
-    # image: "ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest"
+    # image: "quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable"
     # replicas: 1
     # resources:
     #   requests:
@@ -44,7 +44,7 @@ dataConnectService:
     #   - name: my-pull-secret
 
   flightService: {}
-    # image: "ghcr.io/opendatahub-io/data-connect-hub/flight-service:latest"
+    # image: "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
     # replicas: 1
     # resources:
     #   requests:

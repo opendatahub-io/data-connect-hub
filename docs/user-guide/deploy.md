@@ -15,8 +15,8 @@ management automatically.
 ### Image pulls
 
 - `rest-service` / `flight-service` images live at
-  `ghcr.io/opendatahub-io/data-connect-hub/{rest-service,flight-service}:latest`,
-  built by this repo's CI with `imagePullPolicy: Always`.
+  `quay.io/opendatahub/odh-data-connect-hub-{rest,flight}:odh-stable`,
+  built by Konflux CI with `imagePullPolicy: Always`.
 
 ### Database
 
@@ -149,7 +149,7 @@ helm install dc-controller chart/ \
 Image resolution priority (highest wins):
 1. CR spec override (`spec.restService.image`)
 2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
-3. Default (`ghcr.io/opendatahub-io/data-connect-hub/rest-service:latest`)
+3. Default (`quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable`)
 
 ## Verify
 

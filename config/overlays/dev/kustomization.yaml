@@ -9,10 +9,10 @@ resources:
 # Override container images for all services.
 # Change newName/newTag per environment (e.g., pin a SHA or use a private registry).
 images:
-  - name: ghcr.io/opendatahub-io/data-connect-hub/rest-service
-    newTag: latest
-  - name: ghcr.io/opendatahub-io/data-connect-hub/flight-service
-    newTag: latest
+  - name: quay.io/opendatahub/odh-data-connect-hub-rest
+    newTag: odh-stable
+  - name: quay.io/opendatahub/odh-data-connect-hub-flight
+    newTag: odh-stable
 
 patches:
   # -- ImagePullSecrets --
