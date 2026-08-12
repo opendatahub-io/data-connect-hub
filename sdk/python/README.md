@@ -29,7 +29,7 @@ client = DataConnectClient(
 # Or use a token provider for automatic refresh on 401:
 client = DataConnectClient(
     rest_url="https://dch.example.com",
-    token_provider=lambda: get_fresh_token(),  # called once, cached, refreshed on 401
+    token_provider=lambda: get_fresh_token(),  # your function; called once, cached, refreshed on 401
     tenant_id="my-tenant",
 )
 

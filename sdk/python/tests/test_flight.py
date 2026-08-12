@@ -9,7 +9,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from data_connect_hub.exceptions import DCHConnectionError, DCHQueryError
+from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
 from data_connect_hub.flight import FlightSQLClient
 
 
@@ -191,6 +191,16 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
 
 
+class TestTokenProviderGuard:
+    def test_token_and_provider_raises(self) -> None:
+        with pytest.raises(DCHConfigError, match="Cannot specify both"):
+            FlightSQLClient(
+                flight_url="grpc://localhost:50051",
+                token="tok",
+                token_provider=lambda: "fresh",
+            )
+
+
 class TestTokenProvider:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_provider_called_once_and_cached(self, mock_dbapi: MagicMock) -> None:
@@ -289,7 +299,7 @@ class TestTokenProvider:
         assert result.equals(table)
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_query_auth_error_triggers_refresh_and_retry(self, mock_dbapi: MagicMock) -> None:
+    def test_query_auth_error_not_retried(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
 
@@ -303,22 +313,16 @@ class TestTokenProvider:
             tenant_id="t1",
             token_provider=provider,
         )
-        table = pa.table({"col": [1]})
 
         cursor_fail = MagicMock()
         cursor_fail.execute.side_effect = _Error("UNAUTHENTICATED: token expired")
-        mock_conn_fail = MagicMock()
-        mock_conn_fail.cursor.return_value = cursor_fail
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_fail
+        mock_dbapi.connect.return_value = mock_conn
 
-        mock_conn_ok = MagicMock()
-        mock_conn_ok.cursor.return_value = _mock_cursor(table)
-
-        mock_dbapi.connect.side_effect = [mock_conn_fail, mock_conn_ok]
-
-        result = client.read("SELECT 1", "conn-1")
-
-        assert call_count == 2
-        assert result.equals(table)
+        with pytest.raises(DCHQueryError, match="UNAUTHENTICATED"):
+            client.read("SELECT 1", "conn-1")
+        assert call_count == 1
 
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_auth_error_after_refresh_raises(self, mock_dbapi: MagicMock) -> None:

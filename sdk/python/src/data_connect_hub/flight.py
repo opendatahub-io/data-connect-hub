@@ -13,7 +13,7 @@ import adbc_driver_flightsql.dbapi as flight_dbapi
 import pyarrow as pa
 
 from ._auth import ADBC_HEADER_PREFIX, TokenCache, build_flight_headers
-from .exceptions import DCHConnectionError, DCHQueryError
+from .exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
 
 _GRPC_UNAUTHENTICATED = "unauthenticated"
 
@@ -54,6 +54,11 @@ class FlightSQLClient:
         token_provider: Callable[[], str] | None = None,
         timeout: float | None = None,
     ) -> None:
+        if token and token_provider:
+            raise DCHConfigError(
+                "Cannot specify both 'token' and 'token_provider'."
+                " Please provide either a static token or a token_provider callable, not both."
+            )
         self._flight_url = flight_url
         self._tenant_id = tenant_id
         self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
@@ -84,7 +89,7 @@ class FlightSQLClient:
         """Execute *sql* and return the full result as a PyArrow Table."""
         try:
             return self._do_read(sql, connection_id, parameters=parameters)
-        except (DCHConnectionError, DCHQueryError) as exc:
+        except DCHConnectionError as exc:
             if self._token_cache is not None and _is_auth_error(exc):
                 self._token_cache.refresh()
                 return self._do_read(sql, connection_id, parameters=parameters)
