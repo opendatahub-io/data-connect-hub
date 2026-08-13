@@ -1,28 +1,26 @@
-# Data Connect Hub (DCH) - User Guide
+# Data Connect Hub (DCH) - User Guide for RHOAI OpenShift
 The purpose of this document is to provide **end-users** steps to install, configure, use DCH in an **OpenShift** cluster, as such this document can be used by doc team to build official doc. This approach is similar to other services.
 
 ## Content
-- [ ] Prerequisites
+- [x] Prerequisites
   - [x] CLI tools
   - [x] Gateway 
   - [x] Postgres Db
-- [ ] Install DCH Operator
+- [x] Install DCH Operator
 - [ ] Install `DataConnectService`
 - [x] Verify `DataConnectService`
-- [ ] DCH Service Authentication/Authorization
-  - [x] Configure kube-rbac-proxy 
-  - [x] Create Roles
+- [x] Prepare Test Users
   - [x] Create Test User
   - [x] Authorize Test User
-  - [x] Verify Rest Service Authentication
-  - [x] Verify Flight Service Authentication
+  - [x] Get User Token
+- [x] Making REST calls from Gateway
+- [ ] Create New Connection Type
+- [ ] Get Connection Types
+- [ ] Create New Connection
+- [ ] Get Connection Data
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
-- [ ] Create Connections and Connection Types
-- [ ] DCH Rest Swagger
-- [ ] DCH REST Service
-- [ ] DCH Flight Service
-- [ ] Flight Service jsonl files ingestion - S3
 - [ ] Verify S3 Data Connection
+- [ ] Flight Service jsonl files ingestion - S3
 - [ ] DCH Python SDK
 - [ ] Trouble Shooting
 
@@ -71,12 +69,12 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - For Dev Preview (DP), you can install the operator as follows:
   - Clone the repo `https://github.com/red-hat-data-services/data-connect-hub`
   - Change directory to `data-connect-hub`.
-  - Run the [scripts/install-operator.sh](scripts/install-operator.sh). This script installs the operator in `redhat-ods-applications` namespace.
-- You can use the following commands to delete the `helm` chart:
-  ```bash
-    $ helm delete dc-controller -n redhat-ods-applications --no-hooks
-    $ oc delete secret sh.helm.release.v1.dc-controller.v1 -n redhat-ods-applications
-  ```
+  - Run the [scripts/install-operator.sh](scripts/install-operator.sh). This script installs the operator in `redhat-ods-applications` namespace. You can check the DCH operator as follows:
+    ```console
+    $ oc get po -n redhat-ods-applications -l app.kubernetes.io/name=dc-controller
+    NAME                                                READY   STATUS    RESTARTS   AGE
+    dc-controller-controller-manager-849cc9b557-5zjdx   1/1     Running   0          100s
+    ```
   
 ### Install with `DataScienceCluster` (DSC)
   - This will be supported in Technical Preview (TP)
@@ -105,27 +103,20 @@ You can verify the `DataConnectService` as follows:
   ```
   $ oc get po -n dch-example -l app.kubernetes.io/part-of=data-connect-hub
   NAME                              READY   STATUS    RESTARTS   AGE
-  flight-service-789d77c878-m94nh   1/1     Running   0          46m
-  postgres-7f46bcbd7b-77t5h         1/1     Running   0          67m
-  rest-service-7f4cc4948b-n6llb     1/1     Running   0          73m
+  flight-service-7475479d7-6gq7w   1/1     Running   0          23h
+  rest-service-5987596fcf-4r4b8    2/2     Running   0          27h
   ```
 - Verify the REST service in the pod is responding by running the script [scripts/verify-rest-from-pod.sh](./scripts/verify-rest-from-pod.sh)
 
 - Verify the flight service in the pod is responding by running the script [scripts/verify-flight-from-pod.sh](./scripts/verify-flight-from-pod.sh)
 
-### DCH Service Authentication/Authorization
-#### Config `kube-rbac-proxy`
-You  can run the script [scripts/config-kube-rbac-proxy.sh](scripts/config-kube-rbac-proxy.sh) to configure `kube-rbac-proxy` for authentication/authorization. This step will be done automatically when creating the `DataConnectService`.
-
-
-#### Create Roles
-There are 2 cluster roles in DCH; namely, `dch-ingest` and `dch-admin`. The `dch-ingest` role has read-only permissions. The `dch-admin` role has all permissions.
-You can create roles in `dch-example` namespace by running the script [scripts/create-roles.sh](scripts/create-roles.sh). This step will be done automatically when creating the `DataConnectService`.
+### Prepare Test Users
+There are 2 cluster roles in DCH; namely, `dch-read` and `dch-read-write`. The `dch-read` role has read-only permissions. The `dch-read-write` role has all permissions.
 
 #### Create Test Users
 For the purpose of the demo, we create `serviceaccount` (SA) instead of users.
 You can run the script [scripts/create-test-users.sh](scripts/create-test-users.sh). This script creates two service accounts in `dch-example` namespace:
-- `dch-test-user` — authorized user (bound to `dch-ingest` role)
+- `dch-test-user` — authorized user (bound to `dch-read` role)
 - `dch-test-noauth` — unauthorized user (no RoleBinding)
 
 You can verify the users as follows:
@@ -137,7 +128,17 @@ dch-test-noauth    1         3m7s
 ```
 
 #### Authorize Test User
-To allow `dch-test-user` to have `dch-ingest` role, you can run the script the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh).
+To allow `dch-test-user` to have `dch-read` role, you can run the script the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh).
+
+#### Get User Token
+You will need to get user token in order to make calls to REST and flight services. To get the token for the user in this demo, run the script [scripts/get-token.sh](scripts/get-token.sh).
+
+### Making REST/flight calls from Gateway
+- Making REST/flight calls from Gateway requires user to pass in the obtained token. You can run the script [scripts/get-connection-types.sh](scripts/get-connection-types.sh) to see how an example works.
+- To simplify, for the rest of the document, when possible, we will directly hit the REST/flight services instead of the gateway.
+
+### Create New Connection Type
+### Get Connection Types
 
 #### Verify Rest Service Security
 You can run the script [scripts/verify-rest-sec.sh](scripts/verify-rest-sec.sh) to verify REST service authentication, authorization, and TLS. You should see the following output:
