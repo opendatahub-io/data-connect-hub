@@ -49,8 +49,8 @@ const (
 	EnvRestImage          = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
 	EnvFlightImage        = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
 	EnvKubeRbacProxyImage = "RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"
-	DefaultRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68"
-	DefaultFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856"
+	DefaultRestImage      = "quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68"
+	DefaultFlightImage    = "quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856"
 
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"

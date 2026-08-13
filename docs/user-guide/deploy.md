@@ -328,7 +328,7 @@ oc apply -k config/base/flight-service -n <your-namespace>
 ### Updating images
 
 `imagePullPolicy: Always` is set on both services. To pick up a new image
-pushed to `:latest`:
+pushed to the configured tag:
 
 ```console
 oc rollout restart deployment/rest-service -n <your-namespace>
