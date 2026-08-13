@@ -46,9 +46,6 @@ import (
 )
 
 const (
-	DefaultRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68"
-	DefaultFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856"
-
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"
 	defaultNamespace        = "opendatahub"
