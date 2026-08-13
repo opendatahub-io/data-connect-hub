@@ -87,78 +87,15 @@ func TestCreateConnectionType(t *testing.T) {
 	assert.Equal(t, "test-type", result.Resource.Name)
 }
 
-func TestGetConnectionType(t *testing.T) {
-	resource := testConnectionTypeResource()
+func TestCreateConnectionTypeConflict(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/data/connection-types/uuid-123", r.URL.Path)
-
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resource)
+		w.WriteHeader(http.StatusConflict)
 	}))
 	defer server.Close()
 
 	client := NewHTTPConnectionTypeClient(server.URL, "")
-	result, err := client.GetConnectionType(context.Background(), "uuid-123")
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-123", result.Metadata.ID)
-}
-
-func TestGetConnectionTypeNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	_, err := client.GetConnectionType(context.Background(), "missing-id")
-	assert.ErrorIs(t, err, ErrNotFound)
-}
-
-func TestUpdateConnectionType(t *testing.T) {
-	resource := testConnectionTypeResource()
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodPut, r.Method)
-		assert.Equal(t, "/api/v1/data/connection-types/uuid-123", r.URL.Path)
-
-		var body ConnectionType
-		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
-		assert.Equal(t, "test-type", body.Name)
-
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(resource)
-	}))
-	defer server.Close()
-
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	result, err := client.UpdateConnectionType(context.Background(), "uuid-123", testConnectionType())
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-123", result.Metadata.ID)
-}
-
-func TestDeleteConnectionType(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, http.MethodDelete, r.Method)
-		assert.Equal(t, "/api/v1/data/connection-types/uuid-123", r.URL.Path)
-
-		w.WriteHeader(http.StatusNoContent)
-	}))
-	defer server.Close()
-
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	err := client.DeleteConnectionType(context.Background(), "uuid-123")
-	assert.NoError(t, err)
-}
-
-func TestDeleteConnectionTypeNotFound(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer server.Close()
-
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	err := client.DeleteConnectionType(context.Background(), "missing-id")
-	assert.ErrorIs(t, err, ErrNotFound)
+	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
+	assert.ErrorIs(t, err, ErrConflict)
 }
 
 func TestServiceUnavailable(t *testing.T) {
@@ -168,20 +105,12 @@ func TestServiceUnavailable(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPConnectionTypeClient(server.URL, "")
-
 	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
-	assert.ErrorIs(t, err, ErrServiceUnavailable)
-
-	_, err = client.GetConnectionType(context.Background(), "id")
-	assert.ErrorIs(t, err, ErrServiceUnavailable)
-
-	err = client.DeleteConnectionType(context.Background(), "id")
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
 func TestConnectionRefused(t *testing.T) {
 	client := NewHTTPConnectionTypeClient("http://localhost:1", "")
-
 	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }

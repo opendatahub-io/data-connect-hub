@@ -1,6 +1,7 @@
 use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
 use commons::api::connections::MetaStore;
@@ -127,22 +128,13 @@ pub async fn create_connection_type(
     Ok(HttpResponse::Created().json(connection_type))
 }
 
-pub async fn update_connection_type(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    id: web::Path<String>,
-    body: web::Json<DataConnectionType>,
+pub async fn patch_connection_type(
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _path: web::Path<String>,
+    _body: Bytes,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("update_connection_type: for tenant {:?}", ctx.tenant_id);
-    let replacement = body.into_inner();
-    let update_fn: Arc<
-        dyn Fn(DataConnectionType) -> Result<DataConnectionType, commons::api::errors::MetaStoreError> + Send + Sync,
-    > = Arc::new(move |_existing| Ok(replacement.clone()));
-    let updated = service
-        .meta_store
-        .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
-        .await?;
-    Ok(HttpResponse::Ok().json(updated))
+    Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn delete_connection(

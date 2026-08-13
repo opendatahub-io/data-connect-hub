@@ -36,7 +36,6 @@ const (
 )
 
 var (
-	ErrNotFound           = errors.New("resource not found")
 	ErrConflict           = errors.New("resource already exists")
 	ErrServiceUnavailable = errors.New("rest service unavailable")
 )
@@ -44,9 +43,6 @@ var (
 // ConnectionTypeClient abstracts REST calls to the connection-type endpoints.
 type ConnectionTypeClient interface {
 	CreateConnectionType(ctx context.Context, ct ConnectionType) (*ConnectionTypeResource, error)
-	GetConnectionType(ctx context.Context, id string) (*ConnectionTypeResource, error)
-	UpdateConnectionType(ctx context.Context, id string, ct ConnectionType) (*ConnectionTypeResource, error)
-	DeleteConnectionType(ctx context.Context, id string) error
 }
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
@@ -147,85 +143,6 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct 
 	return nil, c.handleErrorResponse(resp)
 }
 
-func (c *httpConnectionTypeClient) GetConnectionType(ctx context.Context, id string) (*ConnectionTypeResource, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/data/connection-types/"+id, nil)
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	if err := c.setHeaders(req); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, ErrServiceUnavailable
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode == http.StatusOK {
-		var resource ConnectionTypeResource
-		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
-		}
-		return &resource, nil
-	}
-
-	return nil, c.handleErrorResponse(resp)
-}
-
-func (c *httpConnectionTypeClient) UpdateConnectionType(ctx context.Context, id string, ct ConnectionType) (*ConnectionTypeResource, error) {
-	body, err := json.Marshal(ct)
-	if err != nil {
-		return nil, fmt.Errorf("marshaling connection type: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, c.baseURL+"/api/v1/data/connection-types/"+id, bytes.NewReader(body))
-	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
-	}
-	if err := c.setHeaders(req); err != nil {
-		return nil, err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, ErrServiceUnavailable
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode == http.StatusOK {
-		var resource ConnectionTypeResource
-		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
-		}
-		return &resource, nil
-	}
-
-	return nil, c.handleErrorResponse(resp)
-}
-
-func (c *httpConnectionTypeClient) DeleteConnectionType(ctx context.Context, id string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, c.baseURL+"/api/v1/data/connection-types/"+id, nil)
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	if err := c.setHeaders(req); err != nil {
-		return err
-	}
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return ErrServiceUnavailable
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode == http.StatusNoContent {
-		return nil
-	}
-
-	return c.handleErrorResponse(resp)
-}
-
 func (c *httpConnectionTypeClient) setHeaders(req *http.Request) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-tenant-id", c.tenantID)
@@ -254,9 +171,6 @@ func (c *httpConnectionTypeClient) readToken() (string, error) {
 }
 
 func (c *httpConnectionTypeClient) handleErrorResponse(resp *http.Response) error {
-	if resp.StatusCode == http.StatusNotFound {
-		return ErrNotFound
-	}
 	if resp.StatusCode == http.StatusConflict {
 		return ErrConflict
 	}

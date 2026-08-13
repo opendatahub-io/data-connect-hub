@@ -43,7 +43,7 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                     .route("/connection-types", web::get().to(list_connection_types))
                     .route("/connection-types", web::post().to(create_connection_type))
                     .route("/connection-types/{id}", web::get().to(get_connection_type))
-                    .route("/connection-types/{id}", web::put().to(update_connection_type))
+                    .route("/connection-types/{id}", web::patch().to(patch_connection_type))
                     .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                     .route("/connections", web::get().to(list_connections))
                     .route("/connections", web::post().to(create_connection))

@@ -19,10 +19,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
-	"reflect"
-	"regexp"
-	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -31,32 +27,30 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
 const (
-	idctFinalizerName    = "dataconnecthub.opendatahub.io/connection-type-finalizer"
-	annotationResourceID = "dataconnecthub.opendatahub.io/resource-id"
-	conditionTypeSynced  = "Synced"
+	conditionTypeSynced = "Synced"
 
 	requeueOnServiceUnavailable = 15 * time.Second
 )
 
-var validResourceID = regexp.MustCompile(`^[a-zA-Z0-9\-]+$`)
-
 // InitDataConnectionTypeReconciler reconciles InitDataConnectionType objects.
+// It is a one-shot controller: on first reconcile it POSTs the connection type
+// to the REST service. Once completed (or if the type already exists), it sets
+// a terminal status and does not reconcile again. Deleting the CR has no effect
+// on the REST service — the connection type lives on independently.
 type InitDataConnectionTypeReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
 	RestClient ConnectionTypeClient
 }
 
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=get;list;watch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes/finalizers,verbs=update
 
 func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -64,133 +58,45 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	var cr dchv1alpha1.InitDataConnectionType
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		if apierrors.IsNotFound(err) {
-			log.Info("InitDataConnectionType deleted", "name", req.Name)
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
 	}
 
-	// Handle deletion — clean up the REST resource then remove finalizer
-	if !cr.DeletionTimestamp.IsZero() {
-		if controllerutil.ContainsFinalizer(&cr, idctFinalizerName) {
-			if err := r.handleDeletion(ctx, &cr); err != nil {
-				if errors.Is(err, ErrServiceUnavailable) {
-					log.Info("REST service unavailable during deletion, requeuing", "name", req.Name)
-					return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
-				}
-				log.Error(err, "failed to delete connection type from REST", "name", req.Name)
-				return ctrl.Result{RequeueAfter: requeueOnError}, nil
-			}
-			controllerutil.RemoveFinalizer(&cr, idctFinalizerName)
-			return ctrl.Result{}, r.Update(ctx, &cr)
-		}
+	// Terminal states — nothing left to do
+	if cr.Status.Phase == "Completed" || cr.Status.Phase == "AlreadyExists" {
 		return ctrl.Result{}, nil
 	}
 
-	// Ensure finalizer is present
-	if !controllerutil.ContainsFinalizer(&cr, idctFinalizerName) {
-		controllerutil.AddFinalizer(&cr, idctFinalizerName)
-		if err := r.Update(ctx, &cr); err != nil {
-			return ctrl.Result{}, err
-		}
-	}
+	log.Info("registering connection type", "name", cr.Spec.Name, "provider", cr.Spec.Provider)
 
-	// Sync the connection type to the REST service
-	result, err := r.syncToREST(ctx, &cr)
-	if err != nil {
-		if errors.Is(err, ErrServiceUnavailable) {
-			log.Info("REST service unavailable, requeuing", "name", req.Name)
-			r.setConditionAndStatus(ctx, &cr, "Pending", metav1.ConditionFalse, "ServiceUnavailable", "REST service is not reachable")
-			return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
-		}
-		if errors.Is(err, ErrConflict) {
-			log.Error(err, "connection type already exists in REST service — manual resolution required", "name", req.Name)
-			r.setConditionAndStatus(ctx, &cr, "Error", metav1.ConditionFalse, "Conflict",
-				"A connection type with this name already exists. Delete the duplicate from the REST API or remove this CR.")
-			return ctrl.Result{}, nil
-		}
-		log.Error(err, "failed to sync connection type", "name", req.Name)
-		r.setConditionAndStatus(ctx, &cr, "Error", metav1.ConditionFalse, "SyncFailed", err.Error())
-		return ctrl.Result{RequeueAfter: requeueOnError}, nil
-	}
-
-	if result == syncCreated || result == syncUpdated {
-		log.Info("InitDataConnectionType synced", "name", req.Name, "action", result)
-	}
-
-	r.setConditionAndStatus(ctx, &cr, "Synced", metav1.ConditionTrue, "Synced", "Connection type is synced to the REST service")
-	return ctrl.Result{}, nil
-}
-
-type syncResult string
-
-const (
-	syncCreated   syncResult = "created"
-	syncUpdated   syncResult = "updated"
-	syncUnchanged syncResult = "unchanged"
-)
-
-func (r *InitDataConnectionTypeReconciler) syncToREST(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType) (syncResult, error) {
 	desired := specToConnectionType(&cr.Spec)
-	resourceID := cr.Annotations[annotationResourceID]
+	_, err := r.RestClient.CreateConnectionType(ctx, desired)
 
-	if resourceID != "" {
-		if !validResourceID.MatchString(resourceID) {
-			return "", fmt.Errorf("invalid resource ID annotation: %q", resourceID)
-		}
-		existing, err := r.RestClient.GetConnectionType(ctx, resourceID)
-		if err != nil {
-			if !errors.Is(err, ErrNotFound) {
-				return "", err
-			}
-			// Resource was deleted externally — re-create
-		} else {
-			// Resource exists — check for delta
-			if connectionTypesEqual(desired, existing.Resource) {
-				return syncUnchanged, nil
-			}
-			if _, err := r.RestClient.UpdateConnectionType(ctx, resourceID, desired); err != nil {
-				return "", err
-			}
-			return syncUpdated, nil
-		}
+	if err == nil {
+		log.Info("connection type registered", "name", cr.Spec.Name)
+		r.setStatus(ctx, &cr, "Completed", metav1.ConditionTrue, "Created", "Connection type registered in the REST service")
+		return ctrl.Result{}, nil
 	}
 
-	// Create new resource
-	resource, err := r.RestClient.CreateConnectionType(ctx, desired)
-	if err != nil {
-		return "", err
+	if errors.Is(err, ErrConflict) {
+		log.Info("connection type already exists", "name", cr.Spec.Name)
+		r.setStatus(ctx, &cr, "AlreadyExists", metav1.ConditionTrue, "AlreadyExists", "Connection type already exists in the REST service")
+		return ctrl.Result{}, nil
 	}
 
-	// Store the resource ID in an annotation
-	if cr.Annotations == nil {
-		cr.Annotations = make(map[string]string)
-	}
-	cr.Annotations[annotationResourceID] = resource.Metadata.ID
-	if err := r.Update(ctx, cr); err != nil {
-		return "", err
+	if errors.Is(err, ErrServiceUnavailable) {
+		log.Info("REST service unavailable, requeuing", "name", cr.Spec.Name)
+		r.setStatus(ctx, &cr, "Pending", metav1.ConditionFalse, "ServiceUnavailable", "REST service is not reachable")
+		return ctrl.Result{RequeueAfter: requeueOnServiceUnavailable}, nil
 	}
 
-	return syncCreated, nil
+	log.Error(err, "failed to register connection type", "name", cr.Spec.Name)
+	r.setStatus(ctx, &cr, "Error", metav1.ConditionFalse, "SyncFailed", err.Error())
+	return ctrl.Result{RequeueAfter: requeueOnError}, nil
 }
 
-func (r *InitDataConnectionTypeReconciler) handleDeletion(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType) error {
-	resourceID := cr.Annotations[annotationResourceID]
-	if resourceID == "" {
-		return nil
-	}
-	if !validResourceID.MatchString(resourceID) {
-		return fmt.Errorf("invalid resource ID annotation: %q", resourceID)
-	}
-
-	err := r.RestClient.DeleteConnectionType(ctx, resourceID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return err
-	}
-	return nil
-}
-
-func (r *InitDataConnectionTypeReconciler) setConditionAndStatus(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType, phase string, status metav1.ConditionStatus, reason, message string) {
+func (r *InitDataConnectionTypeReconciler) setStatus(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType, phase string, status metav1.ConditionStatus, reason, message string) {
 	cr.Status.Phase = phase
 	meta.SetStatusCondition(&cr.Status.Conditions, metav1.Condition{
 		Type:               conditionTypeSynced,
@@ -202,23 +108,6 @@ func (r *InitDataConnectionTypeReconciler) setConditionAndStatus(ctx context.Con
 	if err := r.Status().Update(ctx, cr); err != nil {
 		logf.FromContext(ctx).Error(err, "failed to update status", "name", cr.Name)
 	}
-}
-
-// connectionTypesEqual compares two ConnectionType structs, normalizing
-// nil vs empty slices to avoid false deltas from JSON deserialization.
-func connectionTypesEqual(a, b ConnectionType) bool {
-	normalizeFields := func(fields []Field) []Field {
-		result := slices.Clone(fields)
-		for i := range result {
-			if result[i].EnumValues == nil {
-				result[i].EnumValues = []EnumValue{}
-			}
-		}
-		return result
-	}
-	a.CredentialsFields = normalizeFields(a.CredentialsFields)
-	b.CredentialsFields = normalizeFields(b.CredentialsFields)
-	return reflect.DeepEqual(a, b)
 }
 
 // specToConnectionType maps a CRD spec to the REST API payload.
