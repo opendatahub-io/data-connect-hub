@@ -1,10 +1,11 @@
 # Data Connect Hub (DCH) - User Guide
-The purpose of this document is to provide **end-users** steps to install, configure, use DCH as such this document can be used by doc team to build official doc. This approach is similar to other services.
+The purpose of this document is to provide **end-users** steps to install, configure, use DCH in an **OpenShift** cluster, as such this document can be used by doc team to build official doc. This approach is similar to other services.
 
 ## Content
 - [ ] Prerequisites
+  - [x] CLI tools
   - [x] Gateway 
-  - [ ] Postgres 
+  - [x] Postgres Db
 - [ ] Install DCH Operator
 - [ ] Install `DataConnectService`
 - [x] Verify `DataConnectService`
@@ -39,12 +40,31 @@ The purpose of this document is to provide **end-users** steps to install, confi
   NAME           AGE   PHASE   CREATED AT
   default-dsci   83d   Ready   2026-05-08T12:41:52Z
   ```
-- A `Gateway` which will be referred to by `DataConnectService` CR. You can use an existing `Gateway`. For the purpose of this demo, we will create a `Gateway` called `dch-gateway` in `openshift-ingress` namespace by running the [scripts/create-gateway.sh](scripts/create-gateway.sh)
+- A `Gateway` which will be referred to by `DataConnectService` CR. You can use an existing `Gateway`. For the purpose of this demo, we will create a `Gateway` called `dch-gateway` in `openshift-ingress` namespace by running the [scripts/create-gateway.sh](scripts/create-gateway.sh). You can run the script [scripts/verify-gateway.sh](scripts/verify-gateway.sh) to verify the gateway.
  
 - A namespace called `dch-example` for this demo. You can create a namespace as follows:
   ```
   $ oc new-project dch-example
   ```
+
+- A Postgres database to store data for this demo:
+  - First, run the script [scripts/install-postgres-operator.sh](scripts/install-postgres-operator.sh) to install the Postgres operator. You can check the operator as follows:
+    ```console
+    $ oc get csv -n openshift-operators -l operators.coreos.com/cloudnative-pg.openshift-operators=
+    NAME                     DISPLAY         VERSION   REPLACES                 PHASE
+    cloudnative-pg.v1.30.0   CloudNativePG   1.30.0    cloudnative-pg.v1.29.2   Succeeded
+    ``` 
+  - Next, run the script [scripts/create-postgres-db.sh](scripts/create-postgres-db.sh) to install the database. You can check the database as follows:
+    ```console
+    $ oc get cluster dch-postgres -n dch-example -o jsonpath='{.status.phase}'
+    Cluster in healthy state
+    ```
+  - Next, run the script [scripts/create-postgres-secret.sh](scripts/create-postgres-secret.sh) to extract the database URI which is then used to create a secret for DCH to use to access this database instance. You can check the secret as follows:
+    ```console
+    $ oc get secret -n dch-example dch-database-config
+    NAME                  TYPE     DATA   AGE
+    dch-database-config   Opaque   3      25h
+    ```
 
 ## Install DCH Operator
 ### Install with `Helm`
