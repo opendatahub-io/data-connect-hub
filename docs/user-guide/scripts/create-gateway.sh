@@ -3,7 +3,11 @@ set -euo pipefail
 
 NAMESPACE="${1:-openshift-ingress}"
 
-echo "============================ Creating dch-gateway in $NAMESPACE ==="
+echo ""
+echo ""
+echo "================================== INSTALL GATEWAY ============================="
+echo "  Creating dch-gateway in namespace '$NAMESPACE'..."
+
 oc apply -f - <<EOF
 apiVersion: v1
 kind: ConfigMap

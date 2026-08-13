@@ -6,7 +6,7 @@ GATEWAY_NS="${2:-${DCH_GATEWAY_NS:-openshift-ingress}}"
 
 echo ""
 echo ""
-echo "================================== VERIFY FLIGHT AUTH ============================="
+echo "================================== VERIFY FLIGHT SEC ============================="
 
 GW_HOST="dch-gateway-data-science-gateway-class.${GATEWAY_NS}.svc"
 CA_CM_NAME="dch-service-ca"
@@ -39,7 +39,7 @@ grpc_method="arrow.flight.protocol.FlightService/ListFlights"
 grpc_opts="-cacert $CA_CERT -import-path /tmp -proto Flight.proto"
 
 run_grpcurl() {
-  oc exec "$POD_NAME" -n "$NAMESPACE" -- grpcurl $grpc_opts "$@" "$GW_HOST:443" "$grpc_method" 2>&1
+  oc exec "$POD_NAME" -n "$NAMESPACE" -- /tmp/grpcurl $grpc_opts "$@" "$GW_HOST:443" "$grpc_method" 2>&1
 }
 
 echo "--- Setup ---"
@@ -80,7 +80,7 @@ oc run "$POD_NAME" -n "$NAMESPACE" \
       "name": "$POD_NAME",
       "image": "registry.access.redhat.com/ubi9/ubi:latest",
       "command": ["bash", "-c",
-        "ARCH=\$(uname -m); if [ \"\$ARCH\" = \"x86_64\" ]; then GA=linux_x86_64; elif [ \"\$ARCH\" = \"aarch64\" ]; then GA=linux_arm64; fi; curl -sL https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_\${GA}.tar.gz | tar xz -C /usr/local/bin grpcurl && curl -sL -o /tmp/Flight.proto https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto && sleep infinity"
+        "ARCH=\$(uname -m); if [ \"\$ARCH\" = \"x86_64\" ]; then GA=linux_x86_64; elif [ \"\$ARCH\" = \"aarch64\" ]; then GA=linux_arm64; fi; curl -fsSL -o /tmp/grpcurl.tar.gz https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_\${GA}.tar.gz && tar xz -C /tmp grpcurl -f /tmp/grpcurl.tar.gz && rm -f /tmp/grpcurl.tar.gz && curl -fsSL -o /tmp/Flight.proto https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto && sleep infinity"
       ],
       "volumeMounts": [
         {"name": "ca-bundle", "mountPath": "/etc/ssl/dch", "readOnly": true}
@@ -99,12 +99,12 @@ echo "  Waiting for test runner pod..."
 oc wait --for=condition=Ready pod/"$POD_NAME" -n "$NAMESPACE" --timeout=120s
 
 echo "  Ensuring grpcurl and Flight.proto are available..."
-if ! oc exec "$POD_NAME" -n "$NAMESPACE" -- grpcurl --version &>/dev/null; then
+if ! oc exec "$POD_NAME" -n "$NAMESPACE" -- /tmp/grpcurl --version &>/dev/null; then
   echo "  Installing grpcurl..."
   oc exec "$POD_NAME" -n "$NAMESPACE" -- bash -c '
     ARCH=$(uname -m)
     if [ "$ARCH" = "x86_64" ]; then GA=linux_x86_64; elif [ "$ARCH" = "aarch64" ]; then GA=linux_arm64; fi
-    curl -sL "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_${GA}.tar.gz" | tar xz -C /usr/local/bin grpcurl
+    curl -fsSL -o /tmp/grpcurl.tar.gz "https://github.com/fullstorydev/grpcurl/releases/download/v1.9.1/grpcurl_1.9.1_${GA}.tar.gz" && tar xz -C /tmp grpcurl -f /tmp/grpcurl.tar.gz && rm -f /tmp/grpcurl.tar.gz
   '
 fi
 if ! oc exec "$POD_NAME" -n "$NAMESPACE" -- test -f /tmp/Flight.proto; then
@@ -112,7 +112,7 @@ if ! oc exec "$POD_NAME" -n "$NAMESPACE" -- test -f /tmp/Flight.proto; then
   oc exec "$POD_NAME" -n "$NAMESPACE" -- curl -sL -o /tmp/Flight.proto \
     "https://raw.githubusercontent.com/apache/arrow/main/format/Flight.proto"
 fi
-oc exec "$POD_NAME" -n "$NAMESPACE" -- grpcurl --version 2>&1 || true
+oc exec "$POD_NAME" -n "$NAMESPACE" -- /tmp/grpcurl --version 2>&1 || true
 
 echo "--- Obtaining tokens ---"
 PROXY_PORT=18081
@@ -211,7 +211,7 @@ fi
 
 echo "Test 7: TLS verification — no cacert (expect TLS error)"
 echo "  CMD: grpcurl -import-path /tmp -proto Flight.proto -d '{}' $GW_HOST:443 $grpc_method"
-no_ca_output=$(oc exec "$POD_NAME" -n "$NAMESPACE" -- grpcurl \
+no_ca_output=$(oc exec "$POD_NAME" -n "$NAMESPACE" -- /tmp/grpcurl \
   -import-path /tmp -proto Flight.proto -d '{}' "$GW_HOST:443" "$grpc_method" 2>&1) || true
 check_result "No CA cert" \
   "certificate\|tls\|x509\|transport" \
@@ -219,7 +219,7 @@ check_result "No CA cert" \
 
 echo "Test 8: TLS verification — skip with -insecure (expect missing bearer token)"
 echo "  CMD: grpcurl -insecure -import-path /tmp -proto Flight.proto -d '{}' $GW_HOST:443 $grpc_method"
-insecure_output=$(oc exec "$POD_NAME" -n "$NAMESPACE" -- grpcurl \
+insecure_output=$(oc exec "$POD_NAME" -n "$NAMESPACE" -- /tmp/grpcurl \
   -insecure -import-path /tmp -proto Flight.proto -d '{}' "$GW_HOST:443" "$grpc_method" 2>&1) || true
 check_result "Skip TLS verification" \
   "missing bearer token" \
