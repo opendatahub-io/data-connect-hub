@@ -198,15 +198,15 @@ func main() {
 		ManifestsPath: manifestsPath,
 		Namespace:     namespace,
 		RestImage: controller.EnvOrDefault(
-			controller.EnvRestImage,
+			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE",
 			controller.DefaultRestImage,
 		),
 		FlightImage: controller.EnvOrDefault(
-			controller.EnvFlightImage,
+			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE",
 			controller.DefaultFlightImage,
 		),
 		KubeRbacProxyImage: controller.EnvOrDefault(
-			controller.EnvKubeRbacProxyImage,
+			"RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
 			DefaultKubeRbacProxyImage,
 		),
 	}).SetupWithManager(mgr); err != nil {
