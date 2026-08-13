@@ -51,20 +51,7 @@ func testConnectionType() ConnectionType {
 	}
 }
 
-func testConnectionTypeResource() ConnectionTypeResource {
-	return ConnectionTypeResource{
-		Metadata: ResourceMetadata{
-			ID:        "uuid-123",
-			TenantID:  "",
-			CreatedAt: "2026-01-01T00:00:00Z",
-			UpdatedAt: "2026-01-01T00:00:00Z",
-		},
-		Resource: testConnectionType(),
-	}
-}
-
 func TestCreateConnectionType(t *testing.T) {
-	resource := testConnectionTypeResource()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/data/connection-types", r.URL.Path)
@@ -76,15 +63,12 @@ func TestCreateConnectionType(t *testing.T) {
 		assert.Equal(t, "test-type", body.Name)
 
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(resource)
 	}))
 	defer server.Close()
 
 	client := NewHTTPConnectionTypeClient(server.URL)
-	result, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
-	require.NoError(t, err)
-	assert.Equal(t, "uuid-123", result.Metadata.ID)
-	assert.Equal(t, "test-type", result.Resource.Name)
+	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
+	assert.NoError(t, err)
 }
 
 func TestCreateConnectionTypeConflict(t *testing.T) {
@@ -94,7 +78,7 @@ func TestCreateConnectionTypeConflict(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPConnectionTypeClient(server.URL)
-	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
+	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrConflict)
 }
 
@@ -105,12 +89,12 @@ func TestServiceUnavailable(t *testing.T) {
 	defer server.Close()
 
 	client := NewHTTPConnectionTypeClient(server.URL)
-	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
+	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
 func TestConnectionRefused(t *testing.T) {
 	client := NewHTTPConnectionTypeClient("http://localhost:1")
-	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
+	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }

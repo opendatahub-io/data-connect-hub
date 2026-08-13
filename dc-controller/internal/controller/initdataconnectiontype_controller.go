@@ -71,7 +71,7 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	log.Info("registering connection type", "name", cr.Spec.Name, "provider", cr.Spec.Provider)
 
 	desired := specToConnectionType(&cr.Spec)
-	_, err := r.RestClient.CreateConnectionType(ctx, cr.Namespace, desired)
+	err := r.RestClient.CreateConnectionType(ctx, cr.Namespace, desired)
 
 	if err == nil {
 		log.Info("connection type registered", "name", cr.Spec.Name)
@@ -93,7 +93,7 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 
 	log.Error(err, "failed to register connection type", "name", cr.Spec.Name)
 	r.setStatus(ctx, &cr, "Error", metav1.ConditionFalse, "SyncFailed", err.Error())
-	return ctrl.Result{RequeueAfter: requeueOnError}, nil
+	return ctrl.Result{}, nil
 }
 
 func (r *InitDataConnectionTypeReconciler) setStatus(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType, phase string, status metav1.ConditionStatus, reason, message string) {

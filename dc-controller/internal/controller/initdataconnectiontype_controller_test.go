@@ -31,19 +31,16 @@ import (
 
 // mockConnectionTypeClient is a test double for ConnectionTypeClient.
 type mockConnectionTypeClient struct {
-	createFn    func(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error)
+	createFn    func(ctx context.Context, tenantID string, ct ConnectionType) error
 	createCalls int
 }
 
-func (m *mockConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error) {
+func (m *mockConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
 	m.createCalls++
 	if m.createFn != nil {
 		return m.createFn(ctx, tenantID, ct)
 	}
-	return &ConnectionTypeResource{
-		Metadata: ResourceMetadata{ID: "generated-uuid"},
-		Resource: ct,
-	}, nil
+	return nil
 }
 
 var _ = Describe("InitDataConnectionType Controller", func() {
@@ -138,8 +135,8 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
 		mock := &mockConnectionTypeClient{
-			createFn: func(_ context.Context, _ string, _ ConnectionType) (*ConnectionTypeResource, error) {
-				return nil, ErrConflict
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrConflict
 			},
 		}
 		r := reconciler(mock)
@@ -156,8 +153,8 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
 		mock := &mockConnectionTypeClient{
-			createFn: func(_ context.Context, _ string, _ ConnectionType) (*ConnectionTypeResource, error) {
-				return nil, ErrConflict
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrConflict
 			},
 		}
 		r := reconciler(mock)
@@ -178,8 +175,8 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
 		mock := &mockConnectionTypeClient{
-			createFn: func(_ context.Context, _ string, _ ConnectionType) (*ConnectionTypeResource, error) {
-				return nil, ErrServiceUnavailable
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrServiceUnavailable
 			},
 		}
 		r := reconciler(mock)
@@ -197,15 +194,14 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
 		mock := &mockConnectionTypeClient{
-			createFn: func(_ context.Context, _ string, _ ConnectionType) (*ConnectionTypeResource, error) {
-				return nil, fmt.Errorf("unexpected error from REST")
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return fmt.Errorf("unexpected error from REST")
 			},
 		}
 		r := reconciler(mock)
 
-		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(result.RequeueAfter).To(Equal(requeueOnError))
 
 		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 		Expect(cr.Status.Phase).To(Equal("Error"))

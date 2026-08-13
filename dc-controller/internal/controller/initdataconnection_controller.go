@@ -34,9 +34,8 @@ type InitDataConnectionReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnections,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnections,verbs=get;list;watch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnections/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnections/finalizers,verbs=update
 
 func (r *InitDataConnectionReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)

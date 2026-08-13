@@ -42,7 +42,7 @@ var (
 
 // ConnectionTypeClient abstracts REST calls to the connection-type endpoints.
 type ConnectionTypeClient interface {
-	CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error)
+	CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error
 }
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
@@ -68,20 +68,6 @@ type Field struct {
 type EnumValue struct {
 	Value string `json:"value"`
 	Label string `json:"label"`
-}
-
-// ResourceMetadata mirrors the Rust ResourceMetadata JSON structure.
-type ResourceMetadata struct {
-	ID        string `json:"id"`
-	TenantID  string `json:"tenant_id"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
-}
-
-// ConnectionTypeResource is the REST API response for a connection type.
-type ConnectionTypeResource struct {
-	Metadata ResourceMetadata `json:"metadata"`
-	Resource ConnectionType   `json:"resource"`
 }
 
 type httpConnectionTypeClient struct {
@@ -110,74 +96,54 @@ func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
 	}
 }
 
-func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error) {
+func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
 	body, err := json.Marshal(ct)
 	if err != nil {
-		return nil, fmt.Errorf("marshaling connection type: %w", err)
+		return fmt.Errorf("marshaling connection type: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/data/connection-types", bytes.NewReader(body))
 	if err != nil {
-		return nil, fmt.Errorf("creating request: %w", err)
+		return fmt.Errorf("creating request: %w", err)
 	}
-	if err := c.setHeaders(req, tenantID); err != nil {
-		return nil, err
-	}
+	c.setHeaders(req, tenantID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, ErrServiceUnavailable
+		return ErrServiceUnavailable
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
 	if resp.StatusCode == http.StatusCreated {
-		var resource ConnectionTypeResource
-		if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&resource); err != nil {
-			return nil, fmt.Errorf("decoding response: %w", err)
-		}
-		return &resource, nil
+		return nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode >= 500 {
+		return ErrServiceUnavailable
 	}
 
-	return nil, c.handleErrorResponse(resp)
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
 }
 
-func (c *httpConnectionTypeClient) setHeaders(req *http.Request, tenantID string) error {
+func (c *httpConnectionTypeClient) setHeaders(req *http.Request, tenantID string) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-tenant-id", tenantID)
 
-	token, err := c.readToken()
-	if err != nil {
-		return err
-	}
-	if token != "" {
+	if token, err := c.readToken(); err == nil && token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	return nil
 }
 
-// readToken reads the SA token from disk on each call so rotated tokens
-// are picked up automatically.
 func (c *httpConnectionTypeClient) readToken() (string, error) {
 	data, err := os.ReadFile(c.tokenPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil
 		}
-		return "", fmt.Errorf("reading service account token: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(string(data)), nil
-}
-
-func (c *httpConnectionTypeClient) handleErrorResponse(resp *http.Response) error {
-	if resp.StatusCode == http.StatusConflict {
-		return ErrConflict
-	}
-	if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-		return fmt.Errorf("authentication/authorization failed (HTTP %d)", resp.StatusCode)
-	}
-	if resp.StatusCode >= 500 {
-		return ErrServiceUnavailable
-	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 }
