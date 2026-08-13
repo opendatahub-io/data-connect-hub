@@ -12,6 +12,8 @@ pub enum ConnectorError {
     InvalidRequest(String),
     #[error("Config error: {0}")]
     ConfigError(String),
+    #[error("IO error: {0}")]
+    IOError(String),
 }
 
 #[derive(Error, Debug)]
@@ -26,6 +28,8 @@ pub enum MetaStoreError {
     Config(String),
     #[error("Query error: {0}")]
     Query(String),
+    #[error("Resource conflict: {0}")]
+    Conflict(String),
     #[error("Serialization error: {0}")]
     Serialization(String),
     #[error("Deserialization error: {0}")]

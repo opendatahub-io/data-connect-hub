@@ -22,7 +22,14 @@ from data_connect_hub import AdminSecretRef, DataConnectClient
 client = DataConnectClient(
     rest_url="https://dch.example.com",
     flight_url="grpc://dch.example.com:50051",
-    token="<your-token>",  # raw token value, "Bearer" prefix added automatically
+    token="<your-token>",  # or use token_provider= for auto-refresh
+    tenant_id="my-tenant",
+)
+
+# Or use a token provider for automatic refresh on 401:
+client = DataConnectClient(
+    rest_url="https://dch.example.com",
+    token_provider=lambda: get_fresh_token(),  # your function; called once, cached, refreshed on 401
     tenant_id="my-tenant",
 )
 

@@ -18,3 +18,8 @@ max_rows = 1000000
 enabled = false
 cache_ttl_secs = 300
 token_review_audiences = ["https://kubernetes.default.svc"]
+
+[metrics]
+enabled = false
+address = "0.0.0.0"
+port = 9090

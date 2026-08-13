@@ -8,11 +8,52 @@ metadata:
 data:
   config-file.yaml: |
     authorization:
-      rewrites:
-        byHttpHeader:
-          name: X-Tenant-Id
-      resourceAttributes:
-        namespace: "{{ .Value }}"
-        apiGroup: dataconnecthub.opendatahub.io
-        resource: data-connections
-        verb: get
+      endpoints:
+        - path: /api/v1/data/connections/*
+          mappings:
+            - methods: [get, post, patch, delete]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: "{{.FromMethod}}"
+        - path: /api/v1/data/connections
+          mappings:
+            - methods: [get, post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: "{{.FromMethod}}"
+        - path: /api/v1/data/connection-types/*
+          mappings:
+            - methods: [get, post, patch, delete]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    verb: "{{.FromMethod}}"
+        - path: /api/v1/data/connection-types
+          mappings:
+            - methods: [get, post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    verb: "{{.FromMethod}}"

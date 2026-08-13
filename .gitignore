@@ -50,6 +50,8 @@ docs/**/
 !docs/user-guide/**
 !docs/dev-guide/
 !docs/dev-guide/**
+!docs/api/
+!docs/api/**
 
 # Generated Postgres credentials (run config/db/postgres/generate-secrets.sh)
 config/db/postgres/postgres-credentials.env

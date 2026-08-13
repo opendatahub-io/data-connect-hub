@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from .exceptions import DCHConfigError
@@ -36,7 +36,13 @@ class DataConnectClient:
     flight_url : str, optional
         gRPC endpoint of the DCH Flight SQL service.
     token : str
-        Raw Bearer token value (without the "Bearer " prefix).
+        Static Bearer token value (without the "Bearer " prefix).
+    token_provider : Callable[[], str], optional
+        A callable that returns a valid Bearer token string.  The SDK calls
+        this once and caches the result.  If a request receives a 401
+        Unauthorized response, the SDK automatically refreshes the token
+        by calling the provider again and retries the request.  Mutually
+        exclusive with *token*.
     tenant_id : str
         Tenant identifier sent via ``x-tenant-id`` header.
     api_base : str
@@ -64,6 +70,7 @@ class DataConnectClient:
         token: str = "",
         tenant_id: str = "",
         *,
+        token_provider: Callable[[], str] | None = None,
         api_base: str = "/api/v1/data",
         rest_timeout: float = 30.0,
         ca_cert: str | None = None,
@@ -73,6 +80,12 @@ class DataConnectClient:
         backoff_max: float = 30.0,
         flight_timeout: float | None = None,
     ) -> None:
+        if token and token_provider:
+            raise DCHConfigError(
+                "Cannot specify both 'token' and 'token_provider'."
+                " Please provide either a static token or a token_provider callable, not both."
+            )
+
         self._rest: RestClient | None = None
         self._flight: FlightSQLClient | None = None
 
@@ -81,6 +94,7 @@ class DataConnectClient:
                 base_url=rest_url,
                 token=token,
                 tenant_id=tenant_id,
+                token_provider=token_provider,
                 api_base=api_base,
                 timeout=rest_timeout,
                 ca_cert=ca_cert,
@@ -97,6 +111,7 @@ class DataConnectClient:
                 flight_url=flight_url,
                 token=token,
                 tenant_id=tenant_id,
+                token_provider=token_provider,
                 timeout=flight_timeout,
             )
 

@@ -2,7 +2,8 @@ use chrono::Utc;
 use commons::api::ResourceMetadata;
 use commons::api::connections::Admin;
 use commons::api::connections::{
-    DataConnection, DataConnectionResource, DataConnectionType, DataConnectionTypeResource, MetaStore,
+    DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus, DataConnectionType,
+    DataConnectionTypeResource, MetaStore,
 };
 use commons::api::errors::MetaStoreError;
 use serde::Deserialize;
@@ -19,6 +20,15 @@ pub struct DatabaseConfig {
 
 pub struct PgMetaStore {
     pool: PgPool,
+}
+
+fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
+    if let sqlx::Error::Database(ref db_err) = e
+        && db_err.code().as_deref() == Some("23505")
+    {
+        return MetaStoreError::Conflict(db_err.message().to_string());
+    }
+    MetaStoreError::Query(e.to_string())
 }
 
 impl PgMetaStore {
@@ -98,6 +108,10 @@ impl MetaStore for PgMetaStore {
                 updated_at: now,
             },
             resource: data_connection.clone(),
+            status: DataConnectionStatus {
+                state: DataConnectionState::IngestionNotReady,
+                message: None,
+            },
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
@@ -106,7 +120,7 @@ impl MetaStore for PgMetaStore {
             .bind(&json_value)
             .execute(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(map_sqlx_error)?;
 
         Ok(resource)
     }
@@ -149,6 +163,9 @@ impl MetaStore for PgMetaStore {
                 ..existing.metadata
             },
             resource: data_connection,
+
+            // TODO: For now we preserve the same status but since the connection changed we'll need to revalidate the connection and set the connection statud.
+            status: existing.status.clone(),
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
@@ -253,7 +270,7 @@ impl MetaStore for PgMetaStore {
             .bind(&json_value)
             .execute(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(map_sqlx_error)?;
 
         Ok(resource)
     }

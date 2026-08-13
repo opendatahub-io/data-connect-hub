@@ -60,6 +60,34 @@ impl Default for AuthConfig {
     }
 }
 
+#[derive(Debug, Deserialize)]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_metrics_address")]
+    pub address: String,
+    #[serde(default = "default_metrics_port")]
+    pub port: u16,
+}
+
+fn default_metrics_address() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_metrics_port() -> u16 {
+    9090
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            address: default_metrics_address(),
+            port: default_metrics_port(),
+        }
+    }
+}
+
 impl QueryConfig {
     pub fn validate(&self) -> Result<(), String> {
         if self.batch_size == 0 {
@@ -78,4 +106,6 @@ pub struct ServerConfig {
     pub query: QueryConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }

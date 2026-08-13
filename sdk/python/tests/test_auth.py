@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from data_connect_hub._auth import (
+    TokenCache,
     _normalize_token,
     build_flight_headers,
     build_rest_headers,
@@ -58,6 +59,59 @@ class TestBuildRestHeaders:
     def test_bearer_prefixed_token_not_doubled(self) -> None:
         headers = build_rest_headers(token="Bearer mytoken", tenant_id="t1")
         assert headers["Authorization"] == "Bearer mytoken"
+
+
+class TestTokenCache:
+    def test_calls_provider_once(self) -> None:
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        cache = TokenCache(provider)
+        assert cache.get() == "token-1"
+        assert cache.get() == "token-1"
+        assert call_count == 1
+
+    def test_refresh_calls_provider_again(self) -> None:
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        cache = TokenCache(provider)
+        assert cache.get() == "token-1"
+        assert cache.refresh() == "token-2"
+        assert cache.get() == "token-2"
+        assert call_count == 2
+
+    def test_provider_error_wrapped(self) -> None:
+        def bad_provider() -> str:
+            raise RuntimeError("login failed")
+
+        cache = TokenCache(bad_provider)
+        with pytest.raises(DCHConfigError, match=r"Token provider failed.*login failed"):
+            cache.get()
+
+    def test_provider_error_on_refresh_preserves_old_token(self) -> None:
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                raise RuntimeError("refresh failed")
+            return f"token-{call_count}"
+
+        cache = TokenCache(provider)
+        assert cache.get() == "token-1"
+        with pytest.raises(DCHConfigError, match="Token provider failed"):
+            cache.refresh()
+        assert cache.get() == "token-1"
 
 
 class TestBuildFlightHeaders:

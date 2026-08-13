@@ -49,7 +49,8 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                     .route("/connections", web::post().to(create_connection))
                     .route("/connections/{id}", web::get().to(get_connection))
                     .route("/connections/{id}", web::patch().to(patch_connection))
-                    .route("/connections/{id}", web::delete().to(delete_connection)),
+                    .route("/connections/{id}", web::delete().to(delete_connection))
+                    .route("/ingestion/{id}", web::get().to(get_ingestion_data)),
             ),
         )
         .default_service(web::route().to(not_found));

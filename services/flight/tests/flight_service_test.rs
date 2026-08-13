@@ -5,6 +5,8 @@ use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::Flig
 use commons::api::ResourceList;
 use commons::api::ResourceMetadata;
 use commons::api::connections::DataConnectionResource;
+use commons::api::connections::DataConnectionState;
+use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
 use commons::api::connections::{
     Admin, DataConnection, DataConnectionType, DataConnectionTypeResource, MetaStore, Secret,
@@ -51,6 +53,10 @@ impl MetaStore for TestMetaStore {
                     secret_ref: "sqlite_creds".to_string(),
                 }),
                 properties: HashMap::new(),
+            },
+            status: DataConnectionStatus {
+                state: DataConnectionState::IngestionNotReady,
+                message: None,
             },
         })
     }

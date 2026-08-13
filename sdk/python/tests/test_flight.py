@@ -9,7 +9,7 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
-from data_connect_hub.exceptions import DCHConnectionError, DCHQueryError
+from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
 from data_connect_hub.flight import FlightSQLClient
 
 
@@ -189,6 +189,202 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-data-connection-id"] == "my-conn"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer tok"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
+
+
+class TestTokenProviderGuard:
+    def test_token_and_provider_raises(self) -> None:
+        with pytest.raises(DCHConfigError, match="Cannot specify both"):
+            FlightSQLClient(
+                flight_url="grpc://localhost:50051",
+                token="tok",
+                token_provider=lambda: "fresh",
+            )
+
+
+class TestTokenProvider:
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_called_once_and_cached(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+        kwargs1 = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert kwargs1["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-1"
+
+        client.read("SELECT 1", "conn-1")
+        kwargs2 = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert kwargs2["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-1"
+        assert call_count == 1
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_used_for_server_info(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=lambda: "fresh-token",
+        )
+        mock_conn = MagicMock()
+        mock_conn.adbc_get_info.return_value = {"vendor": "DCH"}
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.server_info()
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer fresh-token"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_provider_with_timeout(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=lambda: "fresh-token",
+            timeout=10.0,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer fresh-token"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
+        assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_connect_auth_error_triggers_refresh_and_retry(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn_ok = MagicMock()
+        mock_conn_ok.cursor.return_value = _mock_cursor(table)
+
+        mock_dbapi.connect.side_effect = [
+            _OperationalError("UNAUTHENTICATED: token expired"),
+            mock_conn_ok,
+        ]
+
+        result = client.read("SELECT 1", "conn-1")
+
+        assert call_count == 2
+        assert result.equals(table)
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_query_auth_error_not_retried(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+
+        cursor_fail = MagicMock()
+        cursor_fail.execute.side_effect = _Error("UNAUTHENTICATED: token expired")
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor_fail
+        mock_dbapi.connect.return_value = mock_conn
+
+        with pytest.raises(DCHQueryError, match="UNAUTHENTICATED"):
+            client.read("SELECT 1", "conn-1")
+        assert call_count == 1
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_auth_error_after_refresh_raises(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=lambda: "bad-token",
+        )
+        mock_dbapi.connect.side_effect = _OperationalError("UNAUTHENTICATED: invalid")
+
+        with pytest.raises(DCHConnectionError, match="UNAUTHENTICATED"):
+            client.read("SELECT 1", "conn-1")
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_non_auth_error_not_retried(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        mock_dbapi.connect.side_effect = _OperationalError("connection refused")
+
+        with pytest.raises(DCHConnectionError, match="connection refused"):
+            client.read("SELECT 1", "conn-1")
+        assert call_count == 1
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_server_info_auth_error_triggers_refresh(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightSQLClient(
+            flight_url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        mock_conn_ok = MagicMock()
+        mock_conn_ok.adbc_get_info.return_value = {"vendor": "DCH"}
+
+        mock_dbapi.connect.side_effect = [
+            _OperationalError("UNAUTHENTICATED: token expired"),
+            mock_conn_ok,
+        ]
+
+        result = client.server_info()
+
+        assert call_count == 2
+        assert result == {"vendor": "DCH"}
 
 
 class TestTimeouts:

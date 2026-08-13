@@ -8,6 +8,7 @@ pub(crate) fn map_meta_store_error(e: MetaStoreError) -> Status {
         MetaStoreError::Connection(_) => Status::unavailable("metadata service unavailable"),
         MetaStoreError::Config(_) => Status::internal("metadata service configuration error"),
         MetaStoreError::Query(_) => Status::internal("metadata query error"),
+        MetaStoreError::Conflict(_) => Status::already_exists("resource already exists"),
         MetaStoreError::Serialization(_) => Status::invalid_argument("invalid metadata payload"),
         MetaStoreError::Deserialization(_) => Status::invalid_argument("invalid metadata payload"),
         MetaStoreError::Validation(_) => Status::invalid_argument("validation error"),
@@ -28,5 +29,9 @@ pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
         ConnectorError::NoDataError() => Status::not_found("no data found"),
         ConnectorError::SQLError(_) => Status::invalid_argument("query rejected"),
         ConnectorError::ConfigError(_) => Status::internal("connector configuration error"),
+        ConnectorError::IOError(_) => {
+            tracing::error!("{e}");
+            Status::internal("data source IO error")
+        },
     }
 }

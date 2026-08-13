@@ -29,6 +29,29 @@ pub enum DataFormat {
     #[serde(rename = "binary")]
     Binary,
 }
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum DataConnectionState {
+    /// The data connection has been tested for ingestion.
+    #[serde(rename = "ingestion_ready")]
+    IngestionReady,
+    /// The data connection has not been tested for ingestion.
+    #[serde(rename = "ingestion_not_ready")]
+    IngestionNotReady,
+}
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct DataConnectionStatus {
+    pub state: DataConnectionState,
+    pub message: Option<String>,
+}
+
+impl Default for DataConnectionStatus {
+    fn default() -> Self {
+        Self {
+            state: DataConnectionState::IngestionNotReady,
+            message: None,
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DataConnection {
@@ -44,6 +67,8 @@ pub struct DataConnection {
 pub struct DataConnectionResource {
     pub metadata: ResourceMetadata,
     pub resource: DataConnection,
+    #[serde(default)]
+    pub status: DataConnectionStatus,
 }
 
 impl std::fmt::Debug for DataConnection {
@@ -199,6 +224,10 @@ mod tests {
                 }),
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
+            status: DataConnectionStatus {
+                state: DataConnectionState::IngestionNotReady,
+                message: None,
+            },
         }
     }
 
@@ -232,6 +261,10 @@ mod tests {
                 "format": "tabular",
                 "admin": { "secret_ref": "secret/test-conn" },
                 "properties": { "key": "value" }
+            },
+            "status": {
+                "state": "ingestion_not_ready",
+                "message": null
             }
         });
 
@@ -387,5 +420,108 @@ mod tests {
         assert_eq!(enums.len(), 2);
         assert_eq!(enums[0].value, "us-east-1");
         assert_eq!(enums[1].label, "EU West");
+    }
+
+    #[test]
+    fn test_status_serialize_ingestion_not_ready() {
+        let status = DataConnectionStatus {
+            state: DataConnectionState::IngestionNotReady,
+            message: None,
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["state"], "ingestion_not_ready");
+        assert_eq!(json["message"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_status_serialize_ingestion_ready_with_message() {
+        let status = DataConnectionStatus {
+            state: DataConnectionState::IngestionReady,
+            message: Some("All checks passed".to_string()),
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(json["state"], "ingestion_ready");
+        assert_eq!(json["message"], "All checks passed");
+    }
+
+    #[test]
+    fn test_status_roundtrip() {
+        let status = DataConnectionStatus {
+            state: DataConnectionState::IngestionReady,
+            message: Some("ready".to_string()),
+        };
+        let json = serde_json::to_string(&status).unwrap();
+        let deserialized: DataConnectionStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized, status);
+    }
+
+    #[test]
+    fn test_status_deserialize_from_json() {
+        let json = serde_json::json!({
+            "state": "ingestion_not_ready",
+            "message": "Connection timeout"
+        });
+        let status: DataConnectionStatus = serde_json::from_value(json).unwrap();
+        assert_eq!(status.state, DataConnectionState::IngestionNotReady);
+        assert_eq!(status.message.as_deref(), Some("Connection timeout"));
+    }
+
+    #[test]
+    fn test_status_deserialize_null_message() {
+        let json = serde_json::json!({
+            "state": "ingestion_ready",
+            "message": null
+        });
+        let status: DataConnectionStatus = serde_json::from_value(json).unwrap();
+        assert_eq!(status.state, DataConnectionState::IngestionReady);
+        assert!(status.message.is_none());
+    }
+
+    #[test]
+    fn test_status_equality() {
+        let a = DataConnectionStatus {
+            state: DataConnectionState::IngestionReady,
+            message: Some("ok".to_string()),
+        };
+        let b = DataConnectionStatus {
+            state: DataConnectionState::IngestionReady,
+            message: Some("ok".to_string()),
+        };
+        let c = DataConnectionStatus {
+            state: DataConnectionState::IngestionNotReady,
+            message: Some("ok".to_string()),
+        };
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn test_connection_resource_includes_status() {
+        let res = sample_connection_resource();
+        let json = serde_json::to_value(&res).unwrap();
+        assert_eq!(json["status"]["state"], "ingestion_not_ready");
+        assert_eq!(json["status"]["message"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn test_deserialize_legacy_resource_without_status() {
+        let json = serde_json::json!({
+            "metadata": {
+                "id": "legacy-1",
+                "tenant_id": "tenant-1",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z"
+            },
+            "resource": {
+                "name": "old-conn",
+                "data_connection_type_id": "postgres",
+                "format": "tabular",
+                "properties": {}
+            }
+        });
+
+        let res: DataConnectionResource = serde_json::from_value(json).unwrap();
+        assert_eq!(res.status.state, DataConnectionState::IngestionNotReady);
+        assert!(res.status.message.is_none());
     }
 }

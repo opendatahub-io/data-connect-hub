@@ -6,11 +6,13 @@ use clap::Parser;
 use config::{Config, File};
 use flight_service::flight::TabularDataService;
 use flight_service::flight::auth::AuthLayer;
+use flight_service::flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
 use flight_service::flight::registry::ConnectorsRegistry;
 use kube_utils::KubeAuthClient;
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use postgres_connector::PgConnector;
+use s3_connector::S3Connector;
 use sqlite_connector::SqliteConnector;
 use std::sync::Arc;
 use std::time::Duration;
@@ -70,6 +72,12 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Both aws-lc-rs (opendal/reqwest) and ring (kube-client) features are
+    // enabled on rustls, so it cannot auto-select a CryptoProvider.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
+
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
@@ -83,7 +91,12 @@ async fn main() -> Result<()> {
             Duration::from_secs(config.ingestion_cache_pools.idle_secs),
             config.ingestion_cache_pools.max_capacity,
         )))
-        .with_connector(Arc::new(SqliteConnector::new()));
+        .with_connector(Arc::new(SqliteConnector::new()))
+        .with_connector(Arc::new(S3Connector::new(
+            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
+            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
+            config.ingestion_cache_pools.max_capacity,
+        )));
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
 
@@ -107,6 +120,18 @@ async fn main() -> Result<()> {
         .await;
 
     let mut builder = tonic::transport::Server::builder();
+
+    if config.metrics.enabled {
+        tracing::info!(
+            "Prometheus metrics enabled on {}:{}",
+            config.metrics.address,
+            config.metrics.port
+        );
+        install_prometheus_recorder()?;
+        spawn_metrics_server(config.metrics.address.clone(), config.metrics.port);
+    } else {
+        tracing::info!("Prometheus metrics disabled");
+    }
 
     if config.auth.enabled {
         tracing::info!(
