@@ -20,6 +20,7 @@ pub struct DatabaseConfig {
 
 pub struct PgMetaStore {
     pool: PgPool,
+    global_tenant_id: String,
 }
 
 fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
@@ -32,14 +33,14 @@ fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
 }
 
 impl PgMetaStore {
-    pub async fn new(config: DatabaseConfig) -> Result<Self, MetaStoreError> {
+    pub async fn new(config: DatabaseConfig, global_tenant_id: String) -> Result<Self, MetaStoreError> {
         let pool = PgPool::connect(&config.url)
             .await
             .map_err(|e| MetaStoreError::Connection(e.to_string()))?;
 
         Self::init_schema(&pool).await?;
 
-        Ok(Self { pool })
+        Ok(Self { pool, global_tenant_id })
     }
 
     async fn init_schema(pool: &PgPool) -> Result<(), MetaStoreError> {
@@ -113,7 +114,7 @@ impl MetaStore for PgMetaStore {
         let resource = DataConnectionResource {
             metadata: ResourceMetadata {
                 id: Uuid::new_v4().to_string(),
-                tenant_id: tenant_id.to_string(),
+                tenant_id: Some(tenant_id.to_string()),
                 created_at: now.clone(),
                 updated_at: now,
             },
@@ -216,8 +217,9 @@ impl MetaStore for PgMetaStore {
         &self,
         tenant_id: &str,
     ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = ''")
+        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = $2")
             .bind(tenant_id)
+            .bind(&self.global_tenant_id)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| MetaStoreError::Query(e.to_string()))?;
@@ -227,7 +229,15 @@ impl MetaStore for PgMetaStore {
             .map(|row| {
                 let json_value: serde_json::Value =
                     row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-                serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+                let mut dct: DataConnectionTypeResource =
+                    serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+                if let Some(tenant) = dct.metadata.tenant_id.clone()
+                    && tenant == self.global_tenant_id
+                {
+                    // Discard the tenant field for global connection types
+                    dct.metadata.tenant_id = None;
+                }
+                Ok(dct)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -242,9 +252,10 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         id: &str,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = '')")
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3)")
             .bind(id)
             .bind(tenant_id)
+            .bind(&self.global_tenant_id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| match e {
@@ -267,7 +278,7 @@ impl MetaStore for PgMetaStore {
         let resource = DataConnectionTypeResource {
             metadata: ResourceMetadata {
                 id: Uuid::new_v4().to_string(),
-                tenant_id: tenant_id.to_string(),
+                tenant_id: Some(tenant_id.to_string()),
                 created_at: now.clone(),
                 updated_at: now,
             },

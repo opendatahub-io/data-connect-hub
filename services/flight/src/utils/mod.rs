@@ -1,3 +1,4 @@
+use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 
@@ -108,4 +109,6 @@ pub struct ServerConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(rename = "global-connection-types")]
+    pub global_connection_types: GlobalConnectionTypes,
 }

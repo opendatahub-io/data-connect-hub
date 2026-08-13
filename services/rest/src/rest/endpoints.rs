@@ -88,6 +88,7 @@ pub async fn list_connection_types(
         .meta_store
         .get_data_connection_types(ctx.tenant_id.as_str())
         .await?;
+
     Ok(HttpResponse::Ok().json(connection_types))
 }
 
@@ -198,7 +199,7 @@ mod tests {
                 Ok(DataConnectionResource {
                     metadata: commons::api::ResourceMetadata {
                         id: "conn-1".to_string(),
-                        tenant_id: "test-tenant".to_string(),
+                        tenant_id: Some("test-tenant".to_string()),
                         created_at: "2026-01-01T00:00:00Z".to_string(),
                         updated_at: "2026-01-01T00:00:00Z".to_string(),
                     },

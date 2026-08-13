@@ -41,7 +41,7 @@ impl MetaStore for TestMetaStore {
         Ok(DataConnectionResource {
             metadata: ResourceMetadata {
                 id: "1234".to_string(),
-                tenant_id: "default".to_string(),
+                tenant_id: Some("default".to_string()),
                 created_at: "2026-07-21T00:00:00Z".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
             },
@@ -117,7 +117,7 @@ impl MetaStore for TestMetaStore {
         Ok(DataConnectionTypeResource {
             metadata: ResourceMetadata {
                 id: "sqlite".to_string(),
-                tenant_id: "default".to_string(),
+                tenant_id: Some("default".to_string()),
                 created_at: "2026-07-21T00:00:00Z".to_string(),
                 updated_at: "2026-07-21T00:00:00Z".to_string(),
             },

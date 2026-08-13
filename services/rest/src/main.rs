@@ -74,7 +74,8 @@ async fn main() -> Result<()> {
     commons::utils::init_tracing(args.json_logs);
     tracing::info!("Starting DataConnectorHub API service");
 
-    let pg_meta_store = Arc::new(PgMetaStore::new(config.database).await?);
+    let pg_meta_store =
+        Arc::new(PgMetaStore::new(config.database, config.global_connection_types.tenant_id.clone()).await?);
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
