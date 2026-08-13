@@ -42,7 +42,7 @@ var (
 
 // ConnectionTypeClient abstracts REST calls to the connection-type endpoints.
 type ConnectionTypeClient interface {
-	CreateConnectionType(ctx context.Context, ct ConnectionType) (*ConnectionTypeResource, error)
+	CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error)
 }
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
@@ -86,7 +86,6 @@ type ConnectionTypeResource struct {
 
 type httpConnectionTypeClient struct {
 	baseURL   string
-	tenantID  string
 	tokenPath string
 
 	httpClient *http.Client
@@ -95,10 +94,9 @@ type httpConnectionTypeClient struct {
 // NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
 // rest-service through kube-rbac-proxy over HTTPS. It reads the service
 // account token on each request (Kubernetes rotates projected tokens).
-func NewHTTPConnectionTypeClient(baseURL, tenantID string) ConnectionTypeClient {
+func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
 	return &httpConnectionTypeClient{
 		baseURL:   baseURL,
-		tenantID:  tenantID,
 		tokenPath: saTokenPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
@@ -112,7 +110,7 @@ func NewHTTPConnectionTypeClient(baseURL, tenantID string) ConnectionTypeClient 
 	}
 }
 
-func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct ConnectionType) (*ConnectionTypeResource, error) {
+func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) (*ConnectionTypeResource, error) {
 	body, err := json.Marshal(ct)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling connection type: %w", err)
@@ -122,7 +120,7 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct 
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
-	if err := c.setHeaders(req); err != nil {
+	if err := c.setHeaders(req, tenantID); err != nil {
 		return nil, err
 	}
 
@@ -143,9 +141,9 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ct 
 	return nil, c.handleErrorResponse(resp)
 }
 
-func (c *httpConnectionTypeClient) setHeaders(req *http.Request) error {
+func (c *httpConnectionTypeClient) setHeaders(req *http.Request, tenantID string) error {
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-tenant-id", c.tenantID)
+	req.Header.Set("x-tenant-id", tenantID)
 
 	token, err := c.readToken()
 	if err != nil {

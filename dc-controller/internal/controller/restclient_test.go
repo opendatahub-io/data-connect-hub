@@ -69,7 +69,7 @@ func TestCreateConnectionType(t *testing.T) {
 		assert.Equal(t, http.MethodPost, r.Method)
 		assert.Equal(t, "/api/v1/data/connection-types", r.URL.Path)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
-		assert.Equal(t, "", r.Header.Get("x-tenant-id"))
+		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
 
 		var body ConnectionType
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
@@ -80,8 +80,8 @@ func TestCreateConnectionType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	result, err := client.CreateConnectionType(context.Background(), testConnectionType())
+	client := NewHTTPConnectionTypeClient(server.URL)
+	result, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	require.NoError(t, err)
 	assert.Equal(t, "uuid-123", result.Metadata.ID)
 	assert.Equal(t, "test-type", result.Resource.Name)
@@ -93,8 +93,8 @@ func TestCreateConnectionTypeConflict(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
+	client := NewHTTPConnectionTypeClient(server.URL)
+	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrConflict)
 }
 
@@ -104,13 +104,13 @@ func TestServiceUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL, "")
-	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
+	client := NewHTTPConnectionTypeClient(server.URL)
+	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
 func TestConnectionRefused(t *testing.T) {
-	client := NewHTTPConnectionTypeClient("http://localhost:1", "")
-	_, err := client.CreateConnectionType(context.Background(), testConnectionType())
+	client := NewHTTPConnectionTypeClient("http://localhost:1")
+	_, err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }

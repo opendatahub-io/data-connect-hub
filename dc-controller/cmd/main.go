@@ -224,7 +224,7 @@ func main() {
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL, ""),
+		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)

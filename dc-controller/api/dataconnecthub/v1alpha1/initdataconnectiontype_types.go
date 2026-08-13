@@ -98,7 +98,7 @@ type InitDataConnectionTypeStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:resource:scope=Cluster,categories=opendatahub,shortName=idct
+// +kubebuilder:resource:categories=opendatahub,shortName=idct
 // +kubebuilder:printcolumn:name="Provider",type=string,JSONPath=`.spec.provider`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 

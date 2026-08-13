@@ -71,7 +71,7 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	log.Info("registering connection type", "name", cr.Spec.Name, "provider", cr.Spec.Provider)
 
 	desired := specToConnectionType(&cr.Spec)
-	_, err := r.RestClient.CreateConnectionType(ctx, desired)
+	_, err := r.RestClient.CreateConnectionType(ctx, cr.Namespace, desired)
 
 	if err == nil {
 		log.Info("connection type registered", "name", cr.Spec.Name)

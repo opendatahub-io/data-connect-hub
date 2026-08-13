@@ -146,16 +146,11 @@ pub async fn delete_connection(
 }
 
 pub async fn delete_connection_type(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    id: web::Path<String>,
+    _service: web::Data<ApiService>,
+    _ctx: web::ReqData<ApiContext>,
+    _path: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("delete_connection_type: for tenant {:?}", ctx.tenant_id);
-    service
-        .meta_store
-        .delete_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
-        .await?;
-    Ok(HttpResponse::NoContent().finish())
+    Err(EndpointError::Unimplemented.into())
 }
 
 pub async fn get_ingestion_data(
@@ -444,17 +439,5 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "invalid_json");
-    }
-
-    #[actix_web::test]
-    async fn test_empty_tenant_header_accepted() {
-        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
-        let req = test::TestRequest::get()
-            .uri("/api/v1/data/connection-types")
-            .insert_header(("x-tenant-id", ""))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 200);
     }
 }
