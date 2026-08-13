@@ -23,13 +23,9 @@ If your cluster uses a different service account token audience (for example, ki
 
 ## 3. Deployment Prerequisites
 
-The Flight service's ServiceAccount must be able to call the Kubernetes TokenReview and SubjectAccessReview APIs. Bind the built-in `system:auth-delegator` ClusterRole:
-
-```bash
-kubectl create clusterrolebinding flight-auth-delegator \
-  --clusterrole=system:auth-delegator \
-  --serviceaccount=<NAMESPACE>:flight-service-sa
-```
+The Flight service's ServiceAccount must be able to call the Kubernetes TokenReview and SubjectAccessReview APIs.
+The default Data Connect Hub manifests already include the required `ClusterRoleBinding`
+(`dch-flight-auth-delegator`) to the built-in `system:auth-delegator` ClusterRole.
 
 Without this, the Flight service will return internal errors on every auth attempt.
 
