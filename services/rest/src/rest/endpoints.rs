@@ -232,10 +232,19 @@ mod tests {
 
         async fn create_data_connection(
             &self,
-            _t: &str,
-            _d: &DataConnection,
+            tenant_id: &str,
+            data_connection: &DataConnection,
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            Ok(DataConnectionResource {
+                metadata: commons::api::ResourceMetadata {
+                    id: "new-conn".to_string(),
+                    tenant_id: Some(tenant_id.to_string()),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                },
+                resource: data_connection.clone(),
+                status: Default::default(),
+            })
         }
 
         async fn update_data_connection(
@@ -433,6 +442,35 @@ mod tests {
         assert_eq!(resp.status(), 404);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/api/v1/data/connections")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "my-pg",
+                "data_connection_type_id": "postgres",
+                "format": "tabular",
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["metadata"]["id"], "new-conn");
+        assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
+        assert_eq!(body["resource"]["name"], "my-pg");
     }
 
     #[actix_web::test]
