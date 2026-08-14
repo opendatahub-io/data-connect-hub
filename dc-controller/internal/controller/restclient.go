@@ -38,11 +38,18 @@ const (
 var (
 	ErrConflict           = errors.New("resource already exists")
 	ErrServiceUnavailable = errors.New("rest service unavailable")
+	ErrNotFound           = errors.New("resource not found")
 )
 
 // ConnectionTypeClient abstracts REST calls to the connection-type endpoints.
 type ConnectionTypeClient interface {
 	CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error
+}
+
+// ConnectionMigrationClient abstracts REST calls needed by the Secret migration watcher.
+type ConnectionMigrationClient interface {
+	ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
+	CreateConnection(ctx context.Context, tenantID string, conn Connection) error
 }
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
@@ -70,6 +77,40 @@ type EnumValue struct {
 	Label string `json:"label"`
 }
 
+// Connection mirrors the Rust DataConnection JSON structure.
+type Connection struct {
+	Name                 string            `json:"name"`
+	DataConnectionTypeID string            `json:"data_connection_type_id"`
+	Format               string            `json:"format"`
+	Admin                *ConnectionAdmin  `json:"admin,omitempty"`
+	Properties           map[string]string `json:"properties"`
+}
+
+// ConnectionAdmin holds a reference to a Kubernetes Secret.
+type ConnectionAdmin struct {
+	SecretRef string `json:"secret_ref"`
+}
+
+// ResourceMetadata mirrors the Rust ResourceMetadata JSON structure.
+type ResourceMetadata struct {
+	ID        string `json:"id"`
+	TenantID  string `json:"tenant_id"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// ConnectionTypeResource mirrors the Rust DataConnectionTypeResource JSON structure.
+type ConnectionTypeResource struct {
+	Metadata ResourceMetadata `json:"metadata"`
+	Resource ConnectionType   `json:"resource"`
+}
+
+// connectionTypeListResponse is the envelope for GET /connection-types.
+type connectionTypeListResponse struct {
+	TotalCount int                      `json:"total_count"`
+	Items      []ConnectionTypeResource `json:"items"`
+}
+
 type httpConnectionTypeClient struct {
 	baseURL   string
 	tokenPath string
@@ -77,10 +118,7 @@ type httpConnectionTypeClient struct {
 	httpClient *http.Client
 }
 
-// NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
-// rest-service through kube-rbac-proxy over HTTPS. It reads the service
-// account token on each request (Kubernetes rotates projected tokens).
-func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
+func newHTTPClient(baseURL string) *httpConnectionTypeClient {
 	return &httpConnectionTypeClient{
 		baseURL:   baseURL,
 		tokenPath: saTokenPath,
@@ -96,6 +134,19 @@ func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
 	}
 }
 
+// NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
+// rest-service through kube-rbac-proxy over HTTPS. It reads the service
+// account token on each request (Kubernetes rotates projected tokens).
+func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
+	return newHTTPClient(baseURL)
+}
+
+// NewHTTPMigrationClient creates a ConnectionMigrationClient for the
+// Secret watcher to list connection types and create connections.
+func NewHTTPMigrationClient(baseURL string) ConnectionMigrationClient {
+	return newHTTPClient(baseURL)
+}
+
 func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
 	body, err := json.Marshal(ct)
 	if err != nil {
@@ -103,6 +154,67 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/data/connection-types", bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	c.setHeaders(req, tenantID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode >= 500 {
+		return ErrServiceUnavailable
+	}
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/data/connection-types", nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+	c.setHeaders(req, tenantID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+
+	if resp.StatusCode >= 500 {
+		return nil, ErrServiceUnavailable
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp connectionTypeListResponse
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return nil, fmt.Errorf("decoding connection types: %w", err)
+	}
+	return listResp.Items, nil
+}
+
+func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) error {
+	body, err := json.Marshal(conn)
+	if err != nil {
+		return fmt.Errorf("marshaling connection: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/data/connections", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}

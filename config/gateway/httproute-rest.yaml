@@ -14,12 +14,12 @@ spec:
             type: PathPrefix
             value: /api/v1/data
       backendRefs:
-        - name: dch-rest-service
+        - name: rest-service
           port: 8443
     - matches:
         - path:
             type: PathPrefix
             value: /arrow.flight.protocol.FlightService
       backendRefs:
-        - name: dch-flight-service
+        - name: flight-service
           port: 50051

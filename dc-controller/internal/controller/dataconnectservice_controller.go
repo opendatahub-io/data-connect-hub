@@ -351,6 +351,7 @@ func (r *DataConnectServiceReconciler) reconcileService(
 	if name == nameRestService {
 		setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 	}
+	setConfigMapGlobalNamespace(resources, name+"-config", r.Namespace)
 
 	return r.applyResources(ctx, cr, resources)
 }

@@ -30,6 +30,8 @@ spec:
             - --upstream=http://127.0.0.1:8080
             - --config-file=/etc/kube-rbac-proxy/config-file.yaml
             - --ignore-paths=/api/v1/data/health
+            - --tls-cert-file=/etc/tls/private/tls.crt
+            - --tls-private-key-file=/etc/tls/private/tls.key
             - --logtostderr=true
           ports:
             - name: https
@@ -50,14 +52,21 @@ spec:
           volumeMounts:
             - name: kube-rbac-proxy-config
               mountPath: /etc/kube-rbac-proxy
+            - name: proxy-tls
+              mountPath: /etc/tls/private
+              readOnly: true
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/v1/data/health
               port: https
+              scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /api/v1/data/health
               port: https
+              scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 15
         - name: rest-service
@@ -110,6 +119,9 @@ spec:
         - name: kube-rbac-proxy-config
           configMap:
             name: rest-service-kube-rbac-proxy-config
+        - name: proxy-tls
+          secret:
+            secretName: rest-service-tls
         - name: db-secret
           secret:
             secretName: dch-database-config

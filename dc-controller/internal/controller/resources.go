@@ -280,6 +280,24 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 	}
 }
 
+func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, configMapName, namespace string) {
+	for _, obj := range resources {
+		if obj.GetKind() != "ConfigMap" || obj.GetName() != configMapName {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		if toml, ok := data["config.toml"]; ok {
+			data["config.toml"] = strings.ReplaceAll(toml,
+				`tenant-id = "opendatahub"`,
+				fmt.Sprintf(`tenant-id = "%s"`, namespace))
+			_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		}
+	}
+}
+
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
 	if gw == nil {
 		return nil

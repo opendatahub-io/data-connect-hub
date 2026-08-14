@@ -15,37 +15,6 @@ images:
     digest: sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856
 
 patches:
-  # -- ImagePullSecrets --
-  # Add pull secrets to both service deployments.
-  # The base ServiceAccounts already reference dch-pull-secret;
-  # this ensures the Deployment pod specs also carry it.
-  - target:
-      kind: Deployment
-      name: dch-rest-service
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: dch-rest-service
-      spec:
-        template:
-          spec:
-            imagePullSecrets:
-              - name: dch-pull-secret
-  - target:
-      kind: Deployment
-      name: dch-flight-service
-    patch: |
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: dch-flight-service
-      spec:
-        template:
-          spec:
-            imagePullSecrets:
-              - name: dch-pull-secret
-
   # -- Environment variables --
   # Add or override env vars on each service container.
   # Uncomment and modify as needed.
