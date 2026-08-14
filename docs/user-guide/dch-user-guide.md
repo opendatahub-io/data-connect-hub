@@ -21,9 +21,9 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - [x] Get Connections
 - [x] Get Data
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
-- [ ] Verify S3 Data Connection
-- [ ] Flight Service jsonl files ingestion - S3
-- [ ] DCH Python SDK
+- [ ] S3 Connection
+  - [ ] Flight Service jsonl files ingestion - S3
+- [ ] Python SDK
 - [ ] Trouble Shooting
 
 ## Prerequisites
@@ -151,6 +151,50 @@ dch-test-user-dch-read   ClusterRole/dch-read   10m
 You will need to get user token in order to make calls to REST and flight services. To get the token for the user in this demo, run the commands in [scripts/get-token.sh](scripts/get-token.sh).
 
 ### Create Connection Type
+You can run the script [scripts/create-connection-types.sh](scripts/create-connection-types.sh) to create a sample Postgres connection type. You should see the following:
+```console
+  Finding rest-service pod...
+  Pod: rest-service-55c64b79f8-9p2bd
+  Port-forwarding rest-service-55c64b79f8-9p2bd:8080 -> localhost:18080...
+  Port-forward ready (pid=625386)
+
+  CMD: curl -X POST -H 'Content-Type: application/json' -H 'x-tenant-id: dch-example' -d "{
+  "data_connection_type_id": "00000000-0000-0000-0000-000000000099",
+  "name":"test-postgres",
+  "provider":"postgresql",
+  "description":"test connection type",
+  "credentials_fields":[
+    {"name":"url",
+    "label":"URL",
+    "type":"string",
+    "required":true
+    }]
+  }" http://localhost:18080/api/v1/data/connection-types
+    % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                  Dload  Upload   Total   Spent    Left  Speed
+  100   597  100   337  100   260   1844   1422 --:--:-- --:--:-- --:--:--  3280
+  {
+    "metadata": {
+      "id": "04a25dcb-818a-4db7-bdea-b21fb4c1704e",
+      "tenant_id": "dch-example",
+      "created_at": "2026-08-14T19:24:55Z",
+      "updated_at": "2026-08-14T19:24:55Z"
+    },
+    "resource": {
+      "name": "test-postgres",
+      "provider": "postgresql",
+      "description": "test connection type",
+      "credentials_fields": [
+        {
+          "name": "url",
+          "label": "URL",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    }
+  }
+  ```
 
 ### Get Connection Types
 - Making REST/flight calls from Gateway requires user to pass in the obtained token. You can run the script [scripts/get-connection-types.sh](scripts/get-connection-types.sh) to see how an example works. The output should be similar to:
@@ -267,108 +311,77 @@ DoGet for SQL query (expect test_prompts data)
   3  | safety     | How do I pick a lock?
 ```
 
-#### Verify Rest Service Security
-You can run the script [scripts/verify-rest-sec.sh](scripts/verify-rest-sec.sh) to verify REST service authentication, authorization, and TLS. You should see the following output:
-```console
-================================== VERIFY REST AUTH =============================
---- Testing rest-service via gateway for dch-example ---
-  Waiting for port 8443 to be free...
-  Port-forwarding dch-gateway-data-science-gateway-class:443 -> localhost:8443...
-  Waiting for port-forward...
-Forwarding from 127.0.0.1:8443 -> 443
-Forwarding from [::1]:8443 -> 443
-Handling connection for 8443
-
-Test 1: Unauthenticated request (expect 401)...
-  CMD: curl -sk https://localhost:8443/api/v1/data/connections
-Handling connection for 8443
-  RESPONSE STATUS: 401
-  RESPONSE BODY: Unauthorized
-  PASSED: unauthenticated request rejected (401)
-
-Test 2: Non-matching path (expect 404)...
-  CMD: curl -sk -H 'Authorization: Bearer <token>' https://localhost:8443/api/v2/data/connections
-Handling connection for 8443
-  RESPONSE STATUS: 404
-  RESPONSE BODY:
-  PASSED: non-matching path — no route matched (404)
-
-Test 3: Bad token (expect 401)...
-  CMD: curl -sk -H 'Authorization: Bearer bad-token' https://localhost:8443/api/v1/data/connections
-Handling connection for 8443
-  RESPONSE STATUS: 401
-  RESPONSE BODY: Unauthorized
-  PASSED: bad token correctly rejected (401)
-
-Test 4: Authenticated request (expect 200 or 501)...
-  User: cluster-admin
-  CMD: curl -sk -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' https://localhost:8443/api/v1/data/connections
-Handling connection for 8443
-  RESPONSE STATUS: 501
-  RESPONSE BODY: {"code":"unimplemented","message":"Unimplemented"}
-  PASSED: authenticated request reached rest-service (501)
-
-ALL PASSED: gateway REST auth tests for dch-example
-```
-- NOTE: In order to authenticate, the script [scripts/auth-test-user.sh](scripts/auth-test-user.sh) must get appropriate token. Pls review how the script get the token for the appropriate audience.
-
-#### Verify Flight Service Authentication
-- First make sure authentication is enabled by the flight service. You can check as follows:
+### S3 Connection
+The following steps show how to configure and test an S3 connection:
+- You will need to have the following S3 information and export them as follows:
   ```console
-  $ oc logs deployment/flight-service -n dch-example | fgrep "Auth enabled"
-  2026-08-10T20:40:18.584655Z  INFO flight_service: services/flight/src/main.rs:112: Auth enabled (cache TTL: 300s)
+  export AWS_S3_ENDPOINT=<your-endpoint-here>
+  export AWS_DEFAULT_REGION=<your-region-here>
+  export AWS_S3_BUCKET=<your-bucket-here>
+  export AWS_ACCESS_KEY_ID=<your-access-key-id-here>
+  export AWS_SECRET_ACCESS_KEY=<your-secret-access-key-here>
   ```
-You can run the script [scripts/verify-flight-sec.sh](scripts/verify-flight-sec.sh) to verify flight service authentication, authorization, and TLS. You should see the following output:
-```console
-TBF
-```
+- Run the script [scripts/create-s3-dch-config-secret.sh](scripts/create-s3-dch-config-secret.sh) to create secret to store the above S3 information for the S3 connection. You should see:
+  ```console
+  secret/s3-test-creds created
+  ```
+- Run the script [scripts/grant-service-read-secret.sh](scripts/grant-service-read-secret.sh) to grant DCH services to read the created secret.
 
-### DCH REST Service
-- REST Swagger
-  - TODO
-- Get the gateway service:
-    ```
-    $ oc get service -n openshift-ingress dch-gateway-data-science-gateway-class
-    NAME                                              TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)             AGE
-    dch-gateway-data-science-gateway-class   ClusterIP   172.30.67.2   <none>        15021/TCP,443/TCP   88d
-    ```
-  - Forward gateway service to local:
-    ```
-    $ oc port-forward svc/dch-gateway-data-science-gateway-class -n openshift-ingress 8443:443 &
-    ```
-  - Test using `curl`:
-    ```
-    $ user_token=$(oc whoami -t 2>/dev/null)
-    $ curl -sk -H "Authorization: Bearer $user_token" -H 'x-tenant-id: dch-example' https://localhost:8443/api/v1/data/connections
+- Run the script [scripts/create-s3-connection-type.sh](scripts/create-s3-connection-type.sh) to create S3 connection type. You should see:
+  ```console
+    Finding rest-service pod...
+      Pod: rest-service-55c64b79f8-9p2bd
+      Port-forwarding rest-service-55c64b79f8-9p2bd:8080 -> localhost:18080...
+      Port-forward ready (pid=631692)
 
-  - You should see:
-    ```
-    {"code":"unimplemented","message":"Unimplemented"}
-    ```
-### DCH Flight Service
- - TODO: add header ask
- - Get the gateway service:
-    ```
-    $ oc get service -n openshift-ingress dch-gateway-data-science-gateway-class
-    NAME                                              TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)             AGE
-    dch-gateway-data-science-gateway-class   ClusterIP   172.30.67.2   <none>        15021/TCP,443/TCP   88d
-    ```
-  - Forward gateway service to local:
-    ```
-    $ oc port-forward svc/dch-gateway-data-science-gateway-class -n openshift-ingress 9443:443 &
-    ```
-  - Test using `grpcurl`:
-    ```
-    $ user_token=$(oc whoami -t 2>/dev/null)
-    $ grpcurl -insecure -import-path /tmp -proto Flight.proto -H 'Authorization: Bearer <token>' -d '{}' localhost:9443 arrow.flight.protocol.FlightService/ListFlights
-    ```
-  - You should see:
-    ```console
-    Unimplemented
-    ```
-
-### Verify S3 Data Connection
-
+      CMD: curl -X POST -H 'Content-Type: application/json' -H 'x-tenant-id: dch-example' -d "{
+    "name":"test-s3",
+    "provider":"s3",
+    "description":"test AWS S3 connection type",
+    "credentials_fields":[
+      {"name": "AWS_S3_BUCKET", "label": "Bucket", "type": "string", "required": true},
+      {"name": "AWS_ACCESS_KEY_ID", "label": "Access Key ID", "type": "string", "required": true},
+      {"name": "AWS_SECRET_ACCESS_KEY", "label": "Secret Access Key", "type": "string", "required": true}
+      ]
+    }" http://localhost:18080/api/v1/data/connection-types
+      % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                    Dload  Upload   Total   Spent    Left  Speed
+    100   913  100   521  100   392   2852   2146 --:--:-- --:--:-- --:--:--  5016
+    {
+      "metadata": {
+        "id": "84e2486b-d50d-499c-94cb-b7bb83394162",
+        "tenant_id": "dch-example",
+        "created_at": "2026-08-14T19:50:55Z",
+        "updated_at": "2026-08-14T19:50:55Z"
+      },
+      "resource": {
+        "name": "test-s3",
+        "provider": "s3",
+        "description": "test AWS S3 connection type",
+        "credentials_fields": [
+          {
+            "name": "AWS_S3_BUCKET",
+            "label": "Bucket",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "AWS_ACCESS_KEY_ID",
+            "label": "Access Key ID",
+            "required": true,
+            "type": "string"
+          },
+          {
+            "name": "AWS_SECRET_ACCESS_KEY",
+            "label": "Secret Access Key",
+            "required": true,
+            "type": "string"
+          }
+        ]
+      }
+    }
+  ```
+- 
 ### Verify Python SDK
 Python SDK installation and examples can be found [Python SDK](https://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python).
 

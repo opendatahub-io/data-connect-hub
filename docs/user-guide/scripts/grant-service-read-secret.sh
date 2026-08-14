@@ -13,6 +13,7 @@ rules:
     verbs: ["get"]
     resourceNames:
       - dch-database-config
+      - s3-test-creds
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
