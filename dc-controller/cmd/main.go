@@ -48,8 +48,7 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-const DefaultKubeRbacProxyImage = "quay.io/opendatahub/odh-kube-rbac-proxy@" +
-	"sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3"
+const DefaultKubeRbacProxyImage = "quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable"
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -200,11 +199,11 @@ func main() {
 		Namespace:     namespace,
 		RestImage: controller.EnvOrDefault(
 			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE",
-			"quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68", //nolint:lll
+			"quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable",
 		),
 		FlightImage: controller.EnvOrDefault(
 			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE",
-			"quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856", //nolint:lll
+			"quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable",
 		),
 		KubeRbacProxyImage: controller.EnvOrDefault(
 			"RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
