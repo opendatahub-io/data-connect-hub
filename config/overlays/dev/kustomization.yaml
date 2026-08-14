@@ -21,12 +21,12 @@ patches:
   # this ensures the Deployment pod specs also carry it.
   - target:
       kind: Deployment
-      name: rest-service
+      name: dch-rest-service
     patch: |
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: rest-service
+        name: dch-rest-service
       spec:
         template:
           spec:
@@ -34,12 +34,12 @@ patches:
               - name: dch-pull-secret
   - target:
       kind: Deployment
-      name: flight-service
+      name: dch-flight-service
     patch: |
       apiVersion: apps/v1
       kind: Deployment
       metadata:
-        name: flight-service
+        name: dch-flight-service
       spec:
         template:
           spec:
@@ -52,12 +52,12 @@ patches:
   #
   # - target:
   #     kind: Deployment
-  #     name: rest-service
+  #     name: dch-rest-service
   #   patch: |
   #     apiVersion: apps/v1
   #     kind: Deployment
   #     metadata:
-  #       name: rest-service
+  #       name: dch-rest-service
   #     spec:
   #       template:
   #         spec:
@@ -69,12 +69,12 @@ patches:
   #
   # - target:
   #     kind: Deployment
-  #     name: flight-service
+  #     name: dch-flight-service
   #   patch: |
   #     apiVersion: apps/v1
   #     kind: Deployment
   #     metadata:
-  #       name: flight-service
+  #       name: dch-flight-service
   #     spec:
   #       template:
   #         spec:
