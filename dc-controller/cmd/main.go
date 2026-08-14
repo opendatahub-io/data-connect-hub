@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -198,15 +199,15 @@ func main() {
 		ManifestsPath: manifestsPath,
 		Namespace:     namespace,
 		RestImage: controller.EnvOrDefault(
-			controller.EnvRestImage,
-			controller.DefaultRestImage,
+			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE",
+			"quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68", //nolint:lll
 		),
 		FlightImage: controller.EnvOrDefault(
-			controller.EnvFlightImage,
-			controller.DefaultFlightImage,
+			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE",
+			"quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856", //nolint:lll
 		),
 		KubeRbacProxyImage: controller.EnvOrDefault(
-			controller.EnvKubeRbacProxyImage,
+			"RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
 			DefaultKubeRbacProxyImage,
 		),
 	}).SetupWithManager(mgr); err != nil {
@@ -214,11 +215,25 @@ func main() {
 		os.Exit(1)
 	}
 
+	restServiceURL := os.Getenv("REST_SERVICE_URL")
+	if restServiceURL == "" {
+		restServiceURL = fmt.Sprintf("https://rest-service.%s.svc.cluster.local:8443", namespace)
+	}
+	setupLog.Info("REST service URL for InitDataConnectionType", "url", restServiceURL)
+
 	if err := (&controller.InitDataConnectionTypeReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
+		os.Exit(1)
+	}
+	if err := (&controller.InitDataConnectionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
+		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnection")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

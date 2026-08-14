@@ -15,7 +15,7 @@ spec:
             value: /api/v1/data
       backendRefs:
         - name: rest-service
-          port: 8080
+          port: 8443
     - matches:
         - path:
             type: PathPrefix

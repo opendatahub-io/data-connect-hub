@@ -16,7 +16,7 @@ spec:
     shortNames:
     - idct
     singular: initdataconnectiontype
-  scope: Cluster
+  scope: Namespaced
   versions:
   - additionalPrinterColumns:
     - jsonPath: .spec.provider

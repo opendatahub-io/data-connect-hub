@@ -60,6 +60,7 @@ rules:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices/status
+  - initdataconnections/status
   - initdataconnectiontypes/status
   verbs:
   - get
@@ -68,6 +69,7 @@ rules:
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
+  - initdataconnections
   - initdataconnectiontypes
   verbs:
   - get

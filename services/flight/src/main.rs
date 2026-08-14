@@ -107,7 +107,7 @@ async fn main() -> Result<()> {
     let addr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let service = TabularDataService::new(
         Arc::new(connectors_registry),
-        Arc::new(PgMetaStore::new(config.database).await?),
+        Arc::new(PgMetaStore::new(config.database, config.global_connection_types.tenant_id).await?),
         Arc::new(secret_store),
         query_options,
     );

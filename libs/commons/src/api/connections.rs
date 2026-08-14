@@ -211,7 +211,7 @@ mod tests {
         DataConnectionResource {
             metadata: ResourceMetadata {
                 id: "123".to_string(),
-                tenant_id: "tenant-1".to_string(),
+                tenant_id: Some("tenant-1".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -271,7 +271,7 @@ mod tests {
         let res: DataConnectionResource = serde_json::from_value(fixture.clone()).unwrap();
 
         assert_eq!(res.metadata.id, "123");
-        assert_eq!(res.metadata.tenant_id, "tenant-1");
+        assert_eq!(res.metadata.tenant_id, Some("tenant-1".to_string()));
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, DataFormat::Tabular);
@@ -304,7 +304,7 @@ mod tests {
         DataConnectionTypeResource {
             metadata: ResourceMetadata {
                 id: "dct-001".to_string(),
-                tenant_id: "tenant-1".to_string(),
+                tenant_id: Some("tenant-1".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },

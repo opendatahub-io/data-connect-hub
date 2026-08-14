@@ -4,23 +4,26 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.21.0
-  name: initdataconnectiontypes.dataconnecthub.opendatahub.io
+  name: initdataconnections.dataconnecthub.opendatahub.io
 spec:
   group: dataconnecthub.opendatahub.io
   names:
     categories:
     - opendatahub
-    kind: InitDataConnectionType
-    listKind: InitDataConnectionTypeList
-    plural: initdataconnectiontypes
+    kind: InitDataConnection
+    listKind: InitDataConnectionList
+    plural: initdataconnections
     shortNames:
-    - idct
-    singular: initdataconnectiontype
+    - idc
+    singular: initdataconnection
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.provider
-      name: Provider
+    - jsonPath: .spec.connectionTypeName
+      name: Type
+      type: string
+    - jsonPath: .spec.secretRef.name
+      name: Secret
       type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
@@ -28,8 +31,12 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: InitDataConnectionType is the Schema for the initdataconnectiontypes
-          API
+        description: |-
+          InitDataConnection is the Schema for the initdataconnections API.
+          It declares a data connection for GitOps-driven provisioning.
+          The controller registers the connection with the DCH REST service,
+          storing only a reference to the credentials Secret — the Secret
+          data is never persisted in the database.
         properties:
           apiVersion:
             description: |-
@@ -49,88 +56,54 @@ spec:
           metadata:
             type: object
           spec:
-            description: spec defines the desired state of InitDataConnectionType
+            description: spec defines the desired state of InitDataConnection
             properties:
-              credentialsFields:
-                description: credentialsFields defines the fields required to configure
-                  credentials for this connection type
-                items:
-                  description: CredentialsField describes a single field in a connection
-                    type's credentials form.
-                  properties:
-                    defaultValue:
-                      description: defaultValue is the default value for the field
-                      maxLength: 1024
-                      type: string
-                    description:
-                      description: description is an optional help text for the field
-                      maxLength: 1024
-                      type: string
-                    enumValues:
-                      description: enumValues lists the allowed values when type is
-                        "enum"
-                      items:
-                        description: EnumValue represents a selectable option for
-                          an enumerated field.
-                        properties:
-                          label:
-                            description: label is the human-readable label for the
-                              option
-                            maxLength: 256
-                            type: string
-                          value:
-                            description: value is the internal value of the option
-                            maxLength: 256
-                            type: string
-                        required:
-                        - label
-                        - value
-                        type: object
-                      type: array
-                    label:
-                      description: label is the human-readable label for the field
-                      maxLength: 256
-                      type: string
-                    name:
-                      description: name is the field identifier
-                      maxLength: 253
-                      type: string
-                    required:
-                      description: required indicates whether the field must be provided
-                      type: boolean
-                    type:
-                      description: type is the data type of the field
-                      enum:
-                      - string
-                      - enum
-                      type: string
-                  required:
-                  - label
-                  - name
-                  - required
-                  - type
-                  type: object
-                type: array
-              description:
-                description: description is an optional human-readable description
-                maxLength: 1024
+              connectionTypeName:
+                description: |-
+                  connectionTypeName references the InitDataConnectionType by spec.name
+                  (e.g. "S3", "Postgres")
+                maxLength: 253
+                type: string
+              format:
+                default: tabular
+                description: format is the data format of the connection
+                enum:
+                - tabular
+                - binary
                 type: string
               name:
-                description: name is the unique name of the connection type
+                description: name is the human-readable display name for the connection
                 maxLength: 253
                 type: string
-              provider:
-                description: provider identifies the backing data provider (e.g. "postgres",
-                  "s3")
-                maxLength: 253
-                type: string
+              properties:
+                additionalProperties:
+                  type: string
+                description: properties holds optional non-secret metadata for the
+                  connection
+                maxProperties: 64
+                type: object
+              secretRef:
+                description: |-
+                  secretRef points to a Kubernetes Secret in the same namespace
+                  containing the connection credentials. The Secret data keys
+                  must match the credential field names defined by the connection type.
+                  The Secret is never copied — only this reference is stored.
+                properties:
+                  name:
+                    description: name is the name of the Secret
+                    maxLength: 253
+                    minLength: 1
+                    type: string
+                required:
+                - name
+                type: object
             required:
-            - credentialsFields
+            - connectionTypeName
             - name
-            - provider
+            - secretRef
             type: object
           status:
-            description: status defines the observed state of InitDataConnectionType
+            description: status defines the observed state of InitDataConnection
             properties:
               conditions:
                 description: conditions represent the current state of the resource

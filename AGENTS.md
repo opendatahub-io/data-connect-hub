@@ -132,8 +132,8 @@ make container-rest     # rest-service image
 make container-all      # both service images
 ```
 
-The dc-controller has a separate `Dockerfile` and
-is built from its own Makefile:
+The dc-controller has its own `Containerfile.konflux`
+and is built from its own Makefile:
 
 ```console
 cd dc-controller && make docker-build
@@ -149,11 +149,6 @@ Workflows under `.github/workflows/`:
   `Swatinem/rust-cache` for dependency caching.
 - **`python-sdk.yml`** — runs on PRs touching `sdk/python/`.
   Lint, typecheck, and unit tests for the Python SDK.
-- **`container-publish.yml`** — runs on push to `main`
-  and version tags (`v*.*.*`). Builds multi-arch
-  container images and pushes to `ghcr.io`. Images are
-  tagged with the short commit SHA and either `latest`
-  (main) or the version tag.
 - **`ci-dco-signoff.yml`** — runs on PRs. Verifies all
   commits have a `Signed-off-by:` trailer (DCO). Use
   `git commit -s` to sign off.

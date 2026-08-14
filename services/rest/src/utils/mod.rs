@@ -1,3 +1,4 @@
+use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 
@@ -11,6 +12,8 @@ pub struct Server {
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
+    #[serde(rename = "global-connection-types")]
+    pub global_connection_types: GlobalConnectionTypes,
 }
 
 #[cfg(test)]
@@ -29,6 +32,8 @@ mod tests {
             address = "127.0.0.1"
             port = 8080
 
+            [global-connection-types]
+            tenant-id = "opendatahub"
         "#;
 
         let config = Config::builder()

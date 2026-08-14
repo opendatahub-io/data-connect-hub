@@ -41,7 +41,7 @@ impl MetaStore for S3TestMetaStore {
         Ok(DataConnectionResource {
             metadata: ResourceMetadata {
                 id: "s3-conn-1".to_string(),
-                tenant_id: "default".to_string(),
+                tenant_id: Some("default".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },
@@ -94,7 +94,7 @@ impl MetaStore for S3TestMetaStore {
         Ok(DataConnectionTypeResource {
             metadata: ResourceMetadata {
                 id: "s3-type".to_string(),
-                tenant_id: "default".to_string(),
+                tenant_id: Some("default".to_string()),
                 created_at: "2026-01-01T00:00:00Z".to_string(),
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
             },

@@ -40,6 +40,8 @@ var _ = Describe("DataConnectService Controller", func() {
 	const (
 		resourceName    = "default-dataconnectservice"
 		targetNamespace = "default"
+		testRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68"
+		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856"
 	)
 
 	ctx := context.Background()
@@ -54,8 +56,8 @@ var _ = Describe("DataConnectService Controller", func() {
 			Scheme:             k8sClient.Scheme(),
 			ManifestsPath:      manifestsPath,
 			Namespace:          targetNamespace,
-			RestImage:          DefaultRestImage,
-			FlightImage:        DefaultFlightImage,
+			RestImage:          testRestImage,
+			FlightImage:        testFlightImage,
 			KubeRbacProxyImage: "quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3",
 		}
 	}
@@ -180,12 +182,12 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
 			restContainer := findContainer(restDeploy, nameRestService)
 			Expect(restContainer).NotTo(BeNil())
-			Expect(restContainer.Image).To(Equal(DefaultRestImage))
+			Expect(restContainer.Image).To(Equal(testRestImage))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(DefaultFlightImage))
+			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(testFlightImage))
 		})
 
 		It("should create services for rest and flight", func() {
