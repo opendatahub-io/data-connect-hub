@@ -275,10 +275,29 @@ mod tests {
 
         async fn get_data_connection_type(
             &self,
-            _t: &str,
-            _i: &str,
+            tenant_id: &str,
+            uid: &str,
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            if tenant_id == "test-tenant" && uid == "ct-1" {
+                Ok(DataConnectionTypeResource {
+                    metadata: commons::api::ResourceMetadata {
+                        id: "ct-1".to_string(),
+                        tenant_id: Some("test-tenant".to_string()),
+                        created_at: "2026-01-01T00:00:00Z".to_string(),
+                        updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    },
+                    resource: DataConnectionType {
+                        name: "PostgreSQL".to_string(),
+                        provider: "postgres".to_string(),
+                        description: Some("PostgreSQL database connection".to_string()),
+                        credentials_fields: vec![],
+                    },
+                })
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection type '{uid}' not found"
+                )))
+            }
         }
 
         async fn create_data_connection_type(
@@ -502,6 +521,48 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["total_count"], 0);
         assert_eq!(body["items"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_get_connection_type() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["metadata"]["id"], "ct-1");
+        assert_eq!(body["resource"]["name"], "PostgreSQL");
+        assert_eq!(body["resource"]["provider"], "postgres");
+    }
+
+    #[actix_web::test]
+    async fn test_get_connection_type_not_found() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connection-types/nonexistent")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_get_connection_type_cross_tenant() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "other-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
     }
 
     #[actix_web::test]
