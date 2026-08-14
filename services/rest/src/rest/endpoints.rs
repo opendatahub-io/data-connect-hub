@@ -200,12 +200,13 @@ mod tests {
                 items: vec![],
             })
         }
+
         async fn get_data_connection(
             &self,
-            _t: &str,
+            tenant_id: &str,
             uid: &str,
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
-            if uid == "conn-1" {
+            if tenant_id == "test-tenant" && uid == "conn-1" {
                 Ok(DataConnectionResource {
                     metadata: commons::api::ResourceMetadata {
                         id: "conn-1".to_string(),
@@ -228,6 +229,7 @@ mod tests {
                 )))
             }
         }
+
         async fn create_data_connection(
             &self,
             _t: &str,
@@ -235,6 +237,7 @@ mod tests {
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+
         async fn update_data_connection(
             &self,
             _t: &str,
@@ -245,12 +248,13 @@ mod tests {
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+
         async fn delete_data_connection(
             &self,
-            _t: &str,
+            tenant_id: &str,
             uid: &str,
         ) -> Result<(), commons::api::errors::MetaStoreError> {
-            if uid == "conn-1" {
+            if tenant_id == "test-tenant" && uid == "conn-1" {
                 Ok(())
             } else {
                 Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
@@ -258,6 +262,7 @@ mod tests {
                 )))
             }
         }
+
         async fn get_data_connection_types(
             &self,
             _t: &str,
@@ -267,6 +272,7 @@ mod tests {
                 items: vec![],
             })
         }
+
         async fn get_data_connection_type(
             &self,
             _t: &str,
@@ -274,6 +280,7 @@ mod tests {
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+
         async fn create_data_connection_type(
             &self,
             _t: &str,
@@ -281,6 +288,7 @@ mod tests {
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+
         async fn update_data_connection_type(
             &self,
             _t: &str,
@@ -293,12 +301,13 @@ mod tests {
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
             unimplemented!()
         }
+
         async fn delete_data_connection_type(
             &self,
-            _t: &str,
+            tenant_id: &str,
             uid: &str,
         ) -> Result<(), commons::api::errors::MetaStoreError> {
-            if uid == "ct-1" {
+            if tenant_id == "test-tenant" && uid == "ct-1" {
                 Ok(())
             } else {
                 Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
@@ -431,6 +440,42 @@ mod tests {
         assert_eq!(resp.status(), 404);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_get_connection_cross_tenant() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::get()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "other-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_cross_tenant() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "other-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_type_cross_tenant() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "other-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
     }
 
     #[actix_web::test]
