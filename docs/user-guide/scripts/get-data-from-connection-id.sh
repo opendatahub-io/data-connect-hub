@@ -3,10 +3,6 @@ set -euo pipefail
 
 NAMESPACE="${1:-dch-example}"
 
-echo ""
-echo ""
-echo "================================== GET DATA FROM CONNECTION ID ============================="
-
 LOCAL_PORT=15051
 TENANT_ID="$NAMESPACE"
 SA_NAME="${SA_NAME:-dch-test-user}"
@@ -132,8 +128,6 @@ except Exception as e:
 " <<< "$1" 2>/dev/null || echo "$1"
 }
 
-echo "--- Setup ---"
-
 echo "  Finding flight-service pod..."
 flight_pod=$(oc get po -n "$NAMESPACE" -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
 if [ -z "$flight_pod" ]; then
@@ -155,21 +149,7 @@ fi
 echo "  Port-forward ready (pid=$pf_pid)"
 echo ""
 
-echo "--- Obtaining token ---"
-PROXY_PORT=18082
-lsof -ti :$PROXY_PORT 2>/dev/null | xargs kill 2>/dev/null || true
-oc proxy --port=$PROXY_PORT &>/dev/null &
-proxy_pid=$!
-sleep 1
-
-user_token=$(curl -s -X POST "http://127.0.0.1:${PROXY_PORT}/api/v1/namespaces/${NAMESPACE}/serviceaccounts/${SA_NAME}/token" \
-  -H "Content-Type: application/json" \
-  -d "{\"apiVersion\":\"authentication.k8s.io/v1\",\"kind\":\"TokenRequest\",\"spec\":{\"audiences\":[\"https://kubernetes.default.svc\"],\"expirationSeconds\":3600}}" \
-  | python3 -c "import sys,json; print(json.load(sys.stdin)['status']['token'])" 2>/dev/null) || true
-
-kill $proxy_pid 2>/dev/null || true
-wait $proxy_pid 2>/dev/null || true
-proxy_pid=""
+. ./get-token.sh
 
 if [ -z "$user_token" ]; then
   echo "  FAILED: could not obtain token for $SA_NAME (run create-test-users.sh first)"
@@ -178,8 +158,6 @@ if [ -z "$user_token" ]; then
 fi
 echo "  Token obtained for $SA_NAME"
 echo ""
-
-echo "--- Installing grpcurl ---"
 
 GRPCURL_VERSION="1.9.1"
 PROTO_DIR="/tmp/dch-flight-proto"
@@ -238,11 +216,6 @@ any_bytes = encode_field(1, type_url) + encode_field(2, inner)
 print(base64.b64encode(any_bytes).decode())
 " "$SQL_QUERY")
 
-echo "--- Testing flight-service API (localhost:$LOCAL_PORT) for $NAMESPACE ---"
-echo ""
-
-# Test 4: GetFlightInfo for SQL query
-echo "Test 4: GetFlightInfo for SQL query (via grpcurl)"
 echo "  SQL: $SQL_QUERY"
 echo "  CMD: grpcurl -plaintext -H 'Authorization: Bearer <token>' -H 'x-tenant-id: $TENANT_ID' -H 'x-data-connection-id: $CONN_ID' -d '{\"type\":\"CMD\",\"cmd\":\"<base64>\"}' localhost:$LOCAL_PORT arrow.flight.protocol.FlightService/GetFlightInfo"
 get_info_output=$(grpcurl -plaintext \
@@ -259,14 +232,13 @@ else
   check_result "false"
 fi
 
-# Extract ticket for Test 5
+# Extract ticket 
 sql_ticket=$(echo "$get_info_output" | python3 -c "import sys,json; print(json.load(sys.stdin)['endpoint'][0]['ticket']['ticket'])" 2>/dev/null) || true
 
-# Test 5: DoGet for SQL query (expect test_prompts data)
-echo "Test 5: DoGet for SQL query (expect test_prompts data)"
+echo "DoGet for SQL query (expect test_prompts data)"
 echo "  SQL: $SQL_QUERY"
 if [ -z "$sql_ticket" ]; then
-  echo "  SKIPPED  could not extract ticket from Test 4"
+  echo "  SKIPPED  could not extract ticket"
   echo ""
 else
   echo "  CMD: grpcurl -plaintext -H 'Authorization: Bearer <token>' -H 'x-tenant-id: $TENANT_ID' -H 'x-data-connection-id: $CONN_ID' -d '{\"ticket\":\"<ticket>\"}' localhost:$LOCAL_PORT arrow.flight.protocol.FlightService/DoGet"
@@ -286,12 +258,7 @@ else
 fi
 
 echo ""
-echo "---"
-echo "ALL PASSED: flight API tests for $NAMESPACE"
-
-echo ""
 echo "--- Cleanup ---"
 cleanup
 echo "  Port-forward stopped"
-
 exit 0

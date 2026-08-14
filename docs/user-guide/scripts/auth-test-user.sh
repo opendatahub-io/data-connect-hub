@@ -1,14 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAMESPACE="${1:-dch-example}"
 ROLE="${2:-dch-read}"
 SA_NAME="${3:-dch-test-user}"
 
-echo ""
-echo ""
-echo "================================== AUTH TEST USER ============================="
 echo "  Binding '$SA_NAME' to role '$ROLE' in namespace '$NAMESPACE'..."
 oc apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1

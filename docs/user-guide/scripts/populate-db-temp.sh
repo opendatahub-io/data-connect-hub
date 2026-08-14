@@ -62,7 +62,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # TEMP TEMP !!!
-oc create role dch-secret-reader --verb=get,list --resource=secrets -n dch-example
-oc create rolebinding dch-secret-reader --role=dch-secret-reader --serviceaccount=dch-example:flight-service-sa -n dch-example
+#oc create role dch-secret-reader --verb=get,list --resource=secrets -n dch-example
+#oc create rolebinding dch-secret-reader --role=dch-secret-reader --serviceaccount=dch-example:flight-service-sa -n dch-example
 
 echo "  Database populated successfully"

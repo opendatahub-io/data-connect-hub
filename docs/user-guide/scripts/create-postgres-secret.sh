@@ -3,10 +3,6 @@ set -euo pipefail
 
 NS="${1:-dch-example}"
 
-echo ""
-echo ""
-echo "================================== CREATE POSTGRES SECRET ============================="
-
 echo "  Extracting database URI from secret 'dch-postgres-app' in namespace '$NS'..."
 URI=$(oc get secret dch-postgres-app -n "$NS" -o jsonpath='{.data.uri}' 2>/dev/null | base64 -d) || true
 
@@ -29,5 +25,3 @@ stringData:
     [database]
     url = "$URI"
 EOF
-
-echo "  Secret 'dch-database-config' created successfully"
