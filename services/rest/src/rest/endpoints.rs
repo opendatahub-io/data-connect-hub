@@ -373,10 +373,12 @@ mod tests {
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))
+                .route("/connections/{id}", web::patch().to(patch_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types", web::post().to(create_connection_type))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
+                .route("/connection-types/{id}", web::patch().to(patch_connection_type))
                 .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                 .route("/ingestion/{id}", web::get().to(get_ingestion_data))
                 .default_service(web::route().to(not_found)),
@@ -480,6 +482,28 @@ mod tests {
         assert_eq!(body["metadata"]["id"], "new-conn");
         assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
         assert_eq!(body["resource"]["name"], "my-pg");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_unimplemented() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_payload("[]")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 501);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unimplemented");
     }
 
     #[actix_web::test]
@@ -655,6 +679,28 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "unimplemented");
         assert_eq!(body["message"], "Unimplemented");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_type_unimplemented() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_payload("{}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 501);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unimplemented");
     }
 
     #[actix_web::test]
