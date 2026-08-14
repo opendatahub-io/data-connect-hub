@@ -110,6 +110,10 @@ impl MetaStore for PgMetaStore {
     ) -> Result<DataConnectionResource, MetaStoreError> {
         Self::can_store(data_connection).await?;
 
+        // Validate that the data connection type exists and is owned by the tenant or global tenant
+        self.get_data_connection_type(tenant_id, &data_connection.data_connection_type_id)
+            .await?;
+
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let resource = DataConnectionResource {
             metadata: ResourceMetadata {
