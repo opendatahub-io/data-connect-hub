@@ -311,10 +311,18 @@ mod tests {
 
         async fn create_data_connection_type(
             &self,
-            _t: &str,
-            _d: &DataConnectionType,
+            tenant_id: &str,
+            data_connection_type: &DataConnectionType,
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            Ok(DataConnectionTypeResource {
+                metadata: commons::api::ResourceMetadata {
+                    id: "new-ct".to_string(),
+                    tenant_id: Some(tenant_id.to_string()),
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                },
+                resource: data_connection_type.clone(),
+            })
         }
 
         async fn update_data_connection_type(
@@ -367,6 +375,7 @@ mod tests {
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))
                 .route("/connection-types", web::get().to(list_connection_types))
+                .route("/connection-types", web::post().to(create_connection_type))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
                 .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                 .route("/ingestion/{id}", web::get().to(get_ingestion_data))
@@ -559,6 +568,36 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["total_count"], 0);
         assert_eq!(body["items"], serde_json::json!([]));
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_type() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/api/v1/data/connection-types")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "PostgreSQL",
+                "provider": "postgres",
+                "description": "PostgreSQL database connection",
+                "credentials_fields": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["metadata"]["id"], "new-ct");
+        assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
+        assert_eq!(body["resource"]["name"], "PostgreSQL");
+        assert_eq!(body["resource"]["provider"], "postgres");
     }
 
     #[actix_web::test]
