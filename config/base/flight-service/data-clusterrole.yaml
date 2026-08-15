@@ -14,7 +14,6 @@ metadata:
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types"]
-    # Include both Kubernetes-style verbs and HTTP-method verbs for kube-rbac-proxy mappings.
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -24,4 +23,4 @@ metadata:
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types"]
-    verbs: ["*"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]

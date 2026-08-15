@@ -24,11 +24,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	apimachtypes "k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -236,7 +238,7 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 		patches = append(patches, kustypes.Patch{
 			Target: &kustypes.Selector{
 				ResId: resid.ResId{
-					Gvk:  resid.Gvk{Group: "apps", Version: "v1", Kind: "Deployment"},
+					Gvk:  resid.Gvk{Group: "apps", Version: "v1", Kind: kindDeployment},
 					Name: name,
 				},
 			},
@@ -259,7 +261,7 @@ func resolveServiceImage(name string, overrides *dchv1alpha1.ServiceOverrides, r
 
 func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
 	for _, obj := range resources {
-		if obj.GetKind() != "Deployment" {
+		if obj.GetKind() != kindDeployment {
 			continue
 		}
 		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
@@ -321,12 +323,34 @@ spec:
 
 // --- Apply resources with SSA and owner references ---
 
+// resourcePriority returns a sort key that ensures infrastructure resources
+// (ServiceAccount, ConfigMap, …) are applied before workloads (Deployment).
+// On OpenShift the SA's dockercfg pull-secret is generated asynchronously;
+// creating the Deployment first produces pods without imagePullSecrets.
+func resourcePriority(kind string) int {
+	switch kind {
+	case "ServiceAccount":
+		return 0
+	case "ConfigMap", "Secret", "Service", "NetworkPolicy",
+		"ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding":
+		return 1
+	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
+		return 2
+	default:
+		return 3
+	}
+}
+
 func (r *DataConnectServiceReconciler) applyResources(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
 	resources []*unstructured.Unstructured,
 ) error {
 	log := logf.FromContext(ctx)
+
+	slices.SortStableFunc(resources, func(a, b *unstructured.Unstructured) int {
+		return resourcePriority(a.GetKind()) - resourcePriority(b.GetKind())
+	})
 
 	for _, obj := range resources {
 		obj.SetNamespace(r.Namespace)
@@ -377,7 +401,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 			existingHash = existingAnn["dataconnecthub/spec-hash"]
 		}
 		if existingHash == desiredHash {
-			if existing.GetOwnerReferences() == nil || len(existing.GetOwnerReferences()) == 0 {
+			if !hasControllerOwner(existing, cr.GetUID()) {
 				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err == nil {
 					if updateErr := r.Update(ctx, existing); updateErr != nil {
 						return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
@@ -396,6 +420,15 @@ func (r *DataConnectServiceReconciler) applyResources(
 		log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
 	}
 	return nil
+}
+
+func hasControllerOwner(obj *unstructured.Unstructured, uid apimachtypes.UID) bool {
+	for _, ref := range obj.GetOwnerReferences() {
+		if ref.UID == uid && ref.Controller != nil && *ref.Controller {
+			return true
+		}
+	}
+	return false
 }
 
 func specHash(obj *unstructured.Unstructured) string {

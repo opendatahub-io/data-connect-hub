@@ -44,13 +44,13 @@ LABEL org.opencontainers.image.description="Data Connection Hub — REST Service
 
 RUN microdnf install -y shadow-utils ca-certificates curl-minimal \
     && microdnf clean all \
-    && groupadd -r dch \
-    && useradd -r -g dch -d /nonexistent -s /sbin/nologin dch
+    && groupadd -g 1001 -r dch \
+    && useradd -u 1001 -r -g dch -d /nonexistent -s /sbin/nologin dch
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /usr/local/bin/rest-service
 
-USER dch:dch
+USER 1001:1001
 
 EXPOSE 8080
 

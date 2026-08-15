@@ -63,6 +63,8 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	nameDatabaseConfig = "dch-database-config"
 
+	kindDeployment = "Deployment"
+
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
 	platformConfigName = "opendatahub-dataconnecthub-config"
@@ -141,12 +143,16 @@ func EnvOrDefault(key, fallback string) string {
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;list;watch;create;update;patch;delete;post;put
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
@@ -234,7 +240,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// All manifests applied successfully
 	// Phase 4: Check all deployments are ready before declaring Ready
-	pendingDeployments, err := r.pendingDeployments(ctx, r.Namespace)
+	pendingDeployments, err := r.pendingDeployments(ctx, r.Namespace, cr.UID)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
@@ -416,35 +422,39 @@ func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Contex
 	return ""
 }
 
-// isDeploymentReady checks if a deployment has all replicas available.
-func (r *DataConnectServiceReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
-	deploy := &appsv1.Deployment{}
-	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, deploy); err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
+// pendingDeployments returns the names of managed deployments that are not yet ready.
+func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string, ownerUID types.UID) ([]string, error) {
+	deployList := &appsv1.DeploymentList{}
+	if err := r.List(ctx, deployList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"dataconnecthub.opendatahub.io/managed-by": "dataconnectservice"},
+	); err != nil {
+		return nil, fmt.Errorf("listing managed deployments: %w", err)
 	}
-	ready := deploy.Status.ReadyReplicas == deploy.Status.Replicas &&
-		deploy.Status.UpdatedReplicas == deploy.Status.Replicas &&
-		deploy.Generation == deploy.Status.ObservedGeneration
-	return ready, nil
-}
 
-// pendingDeployments returns the names of deployments that are not yet ready.
-func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string) ([]string, error) {
-	names := []string{nameRestService, nameFlightService}
 	var pending []string
-	for _, name := range names {
-		ready, err := r.isDeploymentReady(ctx, namespace, name)
-		if err != nil {
-			return nil, fmt.Errorf("checking deployment %s: %w", name, err)
+	for i := range deployList.Items {
+		d := &deployList.Items[i]
+		if !isOwnedBy(d, ownerUID) {
+			continue
 		}
+		ready := d.Status.ReadyReplicas == d.Status.Replicas &&
+			d.Status.UpdatedReplicas == d.Status.Replicas &&
+			d.Generation == d.Status.ObservedGeneration
 		if !ready {
-			pending = append(pending, name)
+			pending = append(pending, d.Name)
 		}
 	}
 	return pending, nil
+}
+
+func isOwnedBy(obj metav1.ObjectMetaAccessor, uid types.UID) bool {
+	for _, ref := range obj.GetObjectMeta().GetOwnerReferences() {
+		if ref.UID == uid {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *DataConnectServiceReconciler) setCondition(cr *dchv1alpha1.DataConnectService, condType string, status metav1.ConditionStatus, reason, message string) {
