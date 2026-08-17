@@ -63,6 +63,7 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	nameDatabaseConfig = "dch-database-config"
 
+	kindConfigMap  = "ConfigMap"
 	kindDeployment = "Deployment"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
@@ -206,7 +207,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Services (only after database is ready)
-	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
+	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService, nil); err != nil {
 		log.Error(err, "failed to reconcile RestService")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
@@ -215,7 +216,14 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
+	var flightOverrides *dchv1alpha1.ServiceOverrides
+	var tokenReviewAudiences []string
+	if cr.Spec.FlightService != nil {
+		flightOverrides = &cr.Spec.FlightService.ServiceOverrides
+		tokenReviewAudiences = cr.Spec.FlightService.TokenReviewAudiences
+	}
+
+	if err := r.reconcileService(ctx, &cr, nameFlightService, flightOverrides, tokenReviewAudiences); err != nil {
 		log.Error(err, "failed to reconcile FlightService")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
@@ -342,6 +350,7 @@ func (r *DataConnectServiceReconciler) reconcileService(
 	cr *dchv1alpha1.DataConnectService,
 	name string,
 	overrides *dchv1alpha1.ServiceOverrides,
+	tokenReviewAudiences []string,
 ) error {
 	basePath := filepath.Join(r.ManifestsPath, "base", name)
 
@@ -358,6 +367,10 @@ func (r *DataConnectServiceReconciler) reconcileService(
 		setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 	}
 	setConfigMapGlobalNamespace(resources, name+"-config", r.Namespace)
+
+	if len(tokenReviewAudiences) > 0 {
+		setConfigMapAudiences(resources, tokenReviewAudiences)
+	}
 
 	return r.applyResources(ctx, cr, resources)
 }

@@ -62,6 +62,8 @@ dataConnectService:
     # volumeMounts: []
     # imagePullSecrets:
     #   - name: my-pull-secret
+    # tokenReviewAudiences:
+    #   - "https://kubernetes.default.svc"  # default; on ROSA set to the cluster OIDC provider URL
 
   gateway: {}
     # name: odh-gateway

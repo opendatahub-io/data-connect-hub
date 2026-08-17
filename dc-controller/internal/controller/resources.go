@@ -284,7 +284,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 
 func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, configMapName, namespace string) {
 	for _, obj := range resources {
-		if obj.GetKind() != "ConfigMap" || obj.GetName() != configMapName {
+		if obj.GetKind() != kindConfigMap || obj.GetName() != configMapName {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
@@ -331,7 +331,7 @@ func resourcePriority(kind string) int {
 	switch kind {
 	case "ServiceAccount":
 		return 0
-	case "ConfigMap", "Secret", "Service", "NetworkPolicy",
+	case kindConfigMap, "Secret", "Service", "NetworkPolicy",
 		"ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding":
 		return 1
 	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
@@ -488,6 +488,39 @@ func (r *DataConnectServiceReconciler) patchClusterRoleBindingSubjects(obj *unst
 		}
 	}
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
+}
+
+func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) {
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml, ok := data["config.toml"]
+		if !ok || !strings.Contains(toml, "token_review_audiences") {
+			continue
+		}
+
+		quoted := make([]string, len(audiences))
+		for i, a := range audiences {
+			quoted[i] = fmt.Sprintf("%q", a)
+		}
+		audienceLine := fmt.Sprintf("    token_review_audiences = [%s]", strings.Join(quoted, ", "))
+
+		var result []string
+		for line := range strings.SplitSeq(toml, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "token_review_audiences") {
+				result = append(result, audienceLine)
+			} else {
+				result = append(result, line)
+			}
+		}
+		data["config.toml"] = strings.Join(result, "\n")
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+	}
 }
 
 func indent(s string, spaces int) string {

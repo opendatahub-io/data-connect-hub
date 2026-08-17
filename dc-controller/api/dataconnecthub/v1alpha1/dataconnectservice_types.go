@@ -94,6 +94,17 @@ type ReleaseStatus struct {
 	Version string `json:"version,omitempty"`
 }
 
+// FlightServiceOverrides extends ServiceOverrides with flight-specific configuration.
+type FlightServiceOverrides struct {
+	ServiceOverrides `json:",inline"`
+
+	// tokenReviewAudiences overrides the audiences used in Kubernetes TokenReview
+	// for flight service authentication. On ROSA clusters this must be set to the
+	// cluster's OIDC provider URL. Defaults to ["https://kubernetes.default.svc"].
+	// +optional
+	TokenReviewAudiences []string `json:"tokenReviewAudiences,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
@@ -102,7 +113,7 @@ type DataConnectServiceSpec struct {
 
 	// flightService configures the Flight gRPC API deployment
 	// +optional
-	FlightService *ServiceOverrides `json:"flightService,omitempty"`
+	FlightService *FlightServiceOverrides `json:"flightService,omitempty"`
 
 	// gateway is a reference to a Kubernetes Gateway for external traffic.
 	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).

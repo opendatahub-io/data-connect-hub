@@ -367,10 +367,12 @@ var _ = Describe("DataConnectService Controller", func() {
 							{Name: "my-registry-secret"},
 						},
 					},
-					FlightService: &dchv1alpha1.ServiceOverrides{
-						ImagePullSecrets: []corev1.LocalObjectReference{
-							{Name: "flight-pull-secret"},
-							{Name: "shared-secret"},
+					FlightService: &dchv1alpha1.FlightServiceOverrides{
+						ServiceOverrides: dchv1alpha1.ServiceOverrides{
+							ImagePullSecrets: []corev1.LocalObjectReference{
+								{Name: "flight-pull-secret"},
+								{Name: "shared-secret"},
+							},
 						},
 					},
 				},
@@ -396,6 +398,41 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("flight-pull-secret"))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[1].Name).To(Equal("shared-secret"))
+		})
+	})
+
+	Context("When tokenReviewAudiences is specified", func() {
+		BeforeEach(func() {
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					FlightService: &dchv1alpha1.FlightServiceOverrides{
+						TokenReviewAudiences: []string{
+							"https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should patch flight-service configmap with custom audiences", func() {
+			reconcileUntilReady()
+
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "dch-flight-service-config", Namespace: targetNamespace}, cm)).To(Succeed())
+			toml := cm.Data["config.toml"]
+			Expect(toml).To(ContainSubstring(`token_review_audiences = ["https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id"]`))
+			Expect(toml).NotTo(ContainSubstring("kubernetes.default.svc"))
 		})
 	})
 

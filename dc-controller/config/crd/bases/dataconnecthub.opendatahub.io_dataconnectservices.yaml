@@ -349,6 +349,14 @@ spec:
                           More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
                         type: object
                     type: object
+                  tokenReviewAudiences:
+                    description: |-
+                      tokenReviewAudiences overrides the audiences used in Kubernetes TokenReview
+                      for flight service authentication. On ROSA clusters this must be set to the
+                      cluster's OIDC provider URL. Defaults to ["https://kubernetes.default.svc"].
+                    items:
+                      type: string
+                    type: array
                   volumeMounts:
                     description: volumeMounts is a list of additional volume mounts
                       to add to the container
