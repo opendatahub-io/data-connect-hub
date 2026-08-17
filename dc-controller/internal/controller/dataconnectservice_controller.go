@@ -41,6 +41,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kustypes "sigs.k8s.io/kustomize/api/types"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -205,35 +206,16 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	// Phase 2: Services (only after database is ready)
-	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
-		log.Error(err, "failed to reconcile RestService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "RestServiceError", err.Error())
-			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "RestServiceError", "Failed to apply rest-service manifests")
-		})
-	}
-
-	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
-		log.Error(err, "failed to reconcile FlightService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightServiceError", err.Error())
-			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "FlightServiceError", "Failed to apply flight-service manifests")
-		})
-	}
-
-	// Phase 3: Gateway (skipped if Gateway API CRDs are not installed)
-	if err := r.reconcileHTTPRoute(ctx, &cr, &platCfg); err != nil {
+	// Phase 2: Render and apply all manifests (services + gateway)
+	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
-			log.Error(err, "failed to reconcile HTTPRoute")
+			log.Error(err, "failed to reconcile manifests")
 			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "HTTPRouteError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "HTTPRouteError", "Failed to apply gateway manifests")
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "ManifestError", err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "ManifestError", err.Error())
+				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "ManifestError", "Failed to apply manifests")
 			})
 		}
 	}
@@ -337,41 +319,32 @@ func (r *DataConnectServiceReconciler) buildReleases(
 	return append(releases, platformRelease)
 }
 
-func (r *DataConnectServiceReconciler) reconcileService(
+func (r *DataConnectServiceReconciler) reconcileManifests(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
-	name string,
-	overrides *dchv1alpha1.ServiceOverrides,
+	platCfg *platformConfig,
 ) error {
-	basePath := filepath.Join(r.ManifestsPath, "base", name)
+	basePath := filepath.Join(r.ManifestsPath, "base")
 
-	patches := buildServicePatches(name, overrides)
+	var patches []kustypes.Patch
+	patches = append(patches, buildServicePatches(nameRestService, cr.Spec.RestService)...)
+	patches = append(patches, buildServicePatches(nameFlightService, cr.Spec.FlightService)...)
+	gw := r.resolveGateway(cr, platCfg)
+	patches = append(patches, buildGatewayPatches(&gw)...)
 
 	resources, err := renderKustomization(basePath, patches, nil)
 	if err != nil {
-		return fmt.Errorf("rendering %s manifests: %w", name, err)
+		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	image := resolveServiceImage(name, overrides, r.RestImage, r.FlightImage)
-	setDeploymentImage(resources, name, image)
-	if name == nameRestService {
-		setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
-	}
-	setConfigMapGlobalNamespace(resources, name+"-config", r.Namespace)
+	restImage := resolveServiceImage(nameRestService, cr.Spec.RestService, r.RestImage, r.FlightImage)
+	setDeploymentImage(resources, nameRestService, restImage)
+	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
-	return r.applyResources(ctx, cr, resources)
-}
+	flightImage := resolveServiceImage(nameFlightService, cr.Spec.FlightService, r.RestImage, r.FlightImage)
+	setDeploymentImage(resources, nameFlightService, flightImage)
 
-func (r *DataConnectServiceReconciler) reconcileHTTPRoute(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) error {
-	gwPath := filepath.Join(r.ManifestsPath, "gateway")
-
-	gw := r.resolveGateway(cr, platCfg)
-	patches := buildGatewayPatches(&gw)
-
-	resources, err := renderKustomization(gwPath, patches, nil)
-	if err != nil {
-		return fmt.Errorf("rendering gateway manifests: %w", err)
-	}
+	setConfigMapGlobalNamespace(resources, r.Namespace)
 
 	return r.applyResources(ctx, cr, resources)
 }

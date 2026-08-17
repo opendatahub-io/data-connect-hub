@@ -282,21 +282,23 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 	}
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, configMapName, namespace string) {
+func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {
 	for _, obj := range resources {
-		if obj.GetKind() != "ConfigMap" || obj.GetName() != configMapName {
+		if obj.GetKind() != "ConfigMap" {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
 		if !found {
 			continue
 		}
-		if toml, ok := data["config.toml"]; ok {
-			data["config.toml"] = strings.ReplaceAll(toml,
-				`tenant-id = "opendatahub"`,
-				fmt.Sprintf(`tenant-id = "%s"`, namespace))
-			_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		toml, ok := data["config.toml"]
+		if !ok || !strings.Contains(toml, "tenant-id") {
+			continue
 		}
+		data["config.toml"] = strings.ReplaceAll(toml,
+			`tenant-id = "opendatahub"`,
+			fmt.Sprintf(`tenant-id = "%s"`, namespace))
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 	}
 }
 
