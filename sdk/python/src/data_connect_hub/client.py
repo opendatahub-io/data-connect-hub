@@ -113,6 +113,8 @@ class DataConnectClient:
                 tenant_id=tenant_id,
                 token_provider=token_provider,
                 timeout=flight_timeout,
+                ca_cert=ca_cert,
+                insecure=insecure,
             )
 
     # -- context manager --

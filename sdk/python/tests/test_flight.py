@@ -442,6 +442,96 @@ class TestTimeouts:
         assert "adbc.flight.sql.rpc.timeout_seconds.fetch" not in db_kwargs
 
 
+class TestTLS:
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_insecure_sets_tls_skip_verify(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightSQLClient(
+            flight_url="grpc+tls://localhost:50051",
+            token="tok",
+            tenant_id="t1",
+            insecure=True,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.client_option.tls_skip_verify"] == "true"
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_ca_cert_sets_tls_root_certs(self, mock_dbapi: MagicMock, tmp_path: Any) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        cert_file = tmp_path / "ca.pem"
+        cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
+
+        client = FlightSQLClient(
+            flight_url="grpc+tls://localhost:50051",
+            token="tok",
+            tenant_id="t1",
+            ca_cert=str(cert_file),
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert "-----BEGIN CERTIFICATE-----" in db_kwargs["adbc.flight.sql.client_option.tls_root_certs"]
+
+    def test_ca_cert_file_not_found_raises(self) -> None:
+        with pytest.raises(DCHConfigError, match="CA certificate file not found"):
+            FlightSQLClient(
+                flight_url="grpc+tls://localhost:50051",
+                token="tok",
+                tenant_id="t1",
+                ca_cert="/nonexistent/ca.pem",
+            )
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_insecure_overrides_ca_cert(self, mock_dbapi: MagicMock, tmp_path: Any) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        cert_file = tmp_path / "ca.pem"
+        cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
+
+        client = FlightSQLClient(
+            flight_url="grpc+tls://localhost:50051",
+            token="tok",
+            tenant_id="t1",
+            ca_cert=str(cert_file),
+            insecure=True,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert db_kwargs["adbc.flight.sql.client_option.tls_skip_verify"] == "true"
+        assert "adbc.flight.sql.client_option.tls_root_certs" not in db_kwargs
+
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_no_tls_options_by_default(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        flight_client.read("SELECT 1", "conn-1")
+
+        db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
+        assert "adbc.flight.sql.client_option.tls_skip_verify" not in db_kwargs
+        assert "adbc.flight.sql.client_option.tls_root_certs" not in db_kwargs
+
+
 class TestParameters:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
