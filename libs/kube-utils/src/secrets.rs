@@ -57,6 +57,15 @@ impl SecretStore for KubeSecretStore {
                             .into_iter()
                             .collect(),
                     ),
+                    annotations: Arc::new(
+                        k8s_secret
+                            .metadata
+                            .annotations
+                            .clone()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect(),
+                    ),
                 })
             })
             .await
@@ -68,10 +77,24 @@ impl SecretStore for KubeSecretStore {
 
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), &ns);
 
+        let labels = if secret.labels.is_empty() {
+            None
+        } else {
+            Some(secret.labels.as_ref().clone().into_iter().collect())
+        };
+
+        let annotations = if secret.annotations.is_empty() {
+            None
+        } else {
+            Some(secret.annotations.as_ref().clone().into_iter().collect())
+        };
+
         let k8s_secret = K8sSecret {
             metadata: ObjectMeta {
                 name: Some(secret.name.clone()),
                 namespace: Some(ns.to_string()),
+                labels,
+                annotations,
                 ..Default::default()
             },
             string_data: Some(secret.properties.as_ref().clone().into_iter().collect()),

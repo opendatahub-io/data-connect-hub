@@ -84,7 +84,12 @@ pub async fn create_connection(
     if let Some(secret) = connection.1 {
         let secret = &mut secret.clone();
         secret.labels = Arc::new(HashMap::from([(
-            "dataconnecthub.opendatahub.io/data-connection-id".to_string(),
+            "dataconnecthub.opendatahub.io/attached".to_string(),
+            "true".to_string(),
+        )]));
+
+        secret.annotations = Arc::new(HashMap::from([(
+            "dataconnecthub.opendatahub.io/data-connection-ids".to_string(),
             connection_res.metadata.id.clone(),
         )]));
 

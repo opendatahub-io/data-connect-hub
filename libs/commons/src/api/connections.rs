@@ -140,6 +140,7 @@ pub struct Secret {
     pub namespace: String,
     pub properties: Arc<HashMap<String, String>>,
     pub labels: Arc<HashMap<String, String>>,
+    pub annotations: Arc<HashMap<String, String>>,
 }
 
 impl std::fmt::Debug for Secret {

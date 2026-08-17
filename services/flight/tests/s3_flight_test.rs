@@ -200,6 +200,7 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
         namespace: "default".to_string(),
         properties: Arc::new(test_credentials()),
         labels: Arc::new(HashMap::new()),
+        annotations: Arc::new(HashMap::new()),
     }]);
 
     let service = TabularDataService::new(

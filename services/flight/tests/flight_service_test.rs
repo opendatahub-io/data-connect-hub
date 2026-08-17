@@ -255,6 +255,7 @@ async fn test_flight_sql_select_prompts() {
         namespace: "default".to_string(),
         properties: Arc::new(HashMap::from([("url".to_string(), sqlite_url)])),
         labels: Arc::new(HashMap::new()),
+        annotations: Arc::new(HashMap::new()),
     }]);
 
     let service = TabularDataService::new(

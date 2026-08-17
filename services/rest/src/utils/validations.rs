@@ -21,6 +21,7 @@ pub async fn transform_data_connection(
                 namespace: tenant_id.to_string(),
                 properties: properties.clone(),
                 labels: Arc::new(HashMap::new()),
+                annotations: Arc::new(HashMap::new()),
             };
             data_connection.admin = Some(Admin::SecretRef {
                 secret_ref: name.to_string(),
