@@ -1,5 +1,5 @@
 [files]
 extend-exclude = [
     "dc-controller/config/crd/",
-    "dc-controller/chart/crds/",
+    "dc-controller/charts/crds/",
 ]
