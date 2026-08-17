@@ -19,6 +19,9 @@ relatedImages:
 
 leaderElection: true
 
+initDataConnectionTypes:
+  enabled: true
+
 # restServiceURL: ""  # auto-derived from namespace if unset
 # operandNamespace: ""  # defaults to the controller's namespace if unset
 
