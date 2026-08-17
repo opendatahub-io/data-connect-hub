@@ -42,6 +42,10 @@ spec:
           args:
             - --config
             - /config/config.toml
+            - --tls-cert-file
+            - /etc/tls/private/tls.crt
+            - --tls-private-key-file
+            - /etc/tls/private/tls.key
           ports:
             - name: grpc
               containerPort: 50051
@@ -56,14 +60,17 @@ spec:
             - name: db-secret
               mountPath: /secrets
               readOnly: true
+            - name: tls
+              mountPath: /etc/tls/private
+              readOnly: true
           readinessProbe:
-            grpc:
-              port: 50051
+            tcpSocket:
+              port: grpc
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
-            grpc:
-              port: 50051
+            tcpSocket:
+              port: grpc
             initialDelaySeconds: 5
             periodSeconds: 15
       volumes:
@@ -76,3 +83,6 @@ spec:
             items:
               - key: secret-config.toml
                 path: secret-config.toml
+        - name: tls
+          secret:
+            secretName: flight-service-tls

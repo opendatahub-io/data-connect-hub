@@ -35,6 +35,15 @@ struct CommandLineArgs {
     /// of `config`; missing values here fall back to `config`.
     #[arg(long, default_value = "/secrets/secret-config.toml")]
     secret_config: String,
+
+    /// Path to a PEM-encoded TLS certificate. When both --tls-cert-file and
+    /// --tls-private-key-file are provided, the server enables TLS.
+    #[arg(long)]
+    tls_cert_file: Option<String>,
+
+    /// Path to a PEM-encoded TLS private key.
+    #[arg(long)]
+    tls_private_key_file: Option<String>,
 }
 
 pub async fn shutdown_signal() {
@@ -120,6 +129,23 @@ async fn main() -> Result<()> {
         .await;
 
     let mut builder = tonic::transport::Server::builder();
+
+    match (&args.tls_cert_file, &args.tls_private_key_file) {
+        (Some(cert_file), Some(key_file)) => {
+            let cert = tokio::fs::read(cert_file).await?;
+            let key = tokio::fs::read(key_file).await?;
+            let identity = tonic::transport::Identity::from_pem(cert, key);
+            let tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
+            builder = builder.tls_config(tls_config)?;
+            tracing::info!("TLS enabled (cert: {}, key: {})", cert_file, key_file);
+        },
+        (None, None) => {
+            tracing::warn!("TLS is DISABLED — gRPC traffic is unencrypted");
+        },
+        _ => {
+            anyhow::bail!("Both --tls-cert-file and --tls-private-key-file must be provided to enable TLS");
+        },
+    }
 
     if config.metrics.enabled {
         tracing::info!(

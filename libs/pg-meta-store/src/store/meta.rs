@@ -51,6 +51,27 @@ impl PgMetaStore {
         Ok(())
     }
 
+    async fn validate_connection_type<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
+        executor: E,
+        global_tenant_id: &str,
+        tenant_id: &str,
+        connection_type_id: &str,
+    ) -> Result<(), MetaStoreError> {
+        sqlx::query("SELECT 1 FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3) FOR SHARE")
+            .bind(connection_type_id)
+            .bind(tenant_id)
+            .bind(global_tenant_id)
+            .fetch_one(executor)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("connection type '{connection_type_id}' not found"))
+                }
+                e => MetaStoreError::Query(e.to_string()),
+            })?;
+        Ok(())
+    }
+
     async fn can_store(data_connection: &DataConnection) -> Result<(), MetaStoreError> {
         if let Some(Admin::Secret { .. }) = &data_connection.admin {
             return Err(MetaStoreError::Validation(
@@ -110,6 +131,20 @@ impl MetaStore for PgMetaStore {
     ) -> Result<DataConnectionResource, MetaStoreError> {
         Self::can_store(data_connection).await?;
 
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+
+        Self::validate_connection_type(
+            &mut *tx,
+            &self.global_tenant_id,
+            tenant_id,
+            &data_connection.data_connection_type_id,
+        )
+        .await?;
+
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let resource = DataConnectionResource {
             metadata: ResourceMetadata {
@@ -129,9 +164,11 @@ impl MetaStore for PgMetaStore {
 
         sqlx::query("INSERT INTO data_connections (data) VALUES ($1)")
             .bind(&json_value)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await
             .map_err(map_sqlx_error)?;
+
+        tx.commit().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
 
         Ok(resource)
     }
@@ -165,6 +202,14 @@ impl MetaStore for PgMetaStore {
         let data_connection = update_fn(existing.resource)?;
 
         Self::can_store(&data_connection).await?;
+
+        Self::validate_connection_type(
+            &mut *tx,
+            &self.global_tenant_id,
+            tenant_id,
+            &data_connection.data_connection_type_id,
+        )
+        .await?;
 
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 

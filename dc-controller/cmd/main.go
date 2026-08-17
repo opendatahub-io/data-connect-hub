@@ -236,6 +236,24 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnection")
 		os.Exit(1)
 	}
+
+	if err := (&controller.ConfigMapWatcherReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "configmapwatcher")
+		os.Exit(1)
+	}
+
+	if err := (&controller.SecretWatcherReconciler{
+		Client:     mgr.GetClient(),
+		Scheme:     mgr.GetScheme(),
+		RestClient: controller.NewHTTPMigrationClient(restServiceURL),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
+		os.Exit(1)
+	}
 	// +kubebuilder:scaffold:builder
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

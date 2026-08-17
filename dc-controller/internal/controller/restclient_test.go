@@ -98,3 +98,81 @@ func TestConnectionRefused(t *testing.T) {
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
+
+func TestListConnectionTypes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Equal(t, "/api/v1/data/connection-types", r.URL.Path)
+		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
+
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{
+			"total_count": 1,
+			"items": [{
+				"metadata": {"id": "abc-123", "tenant_id": "test-ns", "created_at": "2026-01-01", "updated_at": "2026-01-01"},
+				"resource": {"name": "s3", "provider": "s3", "credentials_fields": []}
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	c := NewHTTPMigrationClient(server.URL)
+	types, err := c.ListConnectionTypes(context.Background(), "test-ns")
+	require.NoError(t, err)
+	assert.Len(t, types, 1)
+	assert.Equal(t, "abc-123", types[0].Metadata.ID)
+	assert.Equal(t, "s3", types[0].Resource.Name)
+}
+
+func TestListConnectionTypesServiceUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	c := NewHTTPMigrationClient(server.URL)
+	_, err := c.ListConnectionTypes(context.Background(), "test-ns")
+	assert.ErrorIs(t, err, ErrServiceUnavailable)
+}
+
+func TestCreateConnection(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api/v1/data/connections", r.URL.Path)
+		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
+
+		var body Connection
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "my-conn", body.Name)
+		assert.Equal(t, "type-id", body.DataConnectionTypeID)
+		assert.Equal(t, "my-secret", body.Admin.SecretRef)
+
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	c := NewHTTPMigrationClient(server.URL)
+	err := c.CreateConnection(context.Background(), "test-ns", Connection{
+		Name:                 "my-conn",
+		DataConnectionTypeID: "type-id",
+		Format:               "tabular",
+		Admin:                &ConnectionAdmin{SecretRef: "my-secret"},
+		Properties:           map[string]string{},
+	})
+	assert.NoError(t, err)
+}
+
+func TestCreateConnectionConflict(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer server.Close()
+
+	c := NewHTTPMigrationClient(server.URL)
+	err := c.CreateConnection(context.Background(), "test-ns", Connection{
+		Name:       "my-conn",
+		Properties: map[string]string{},
+	})
+	assert.ErrorIs(t, err, ErrConflict)
+}

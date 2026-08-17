@@ -23,7 +23,7 @@ commons = { workspace = true }
 pg-meta-store = { workspace = true }
 arrow = { workspace = true }
 arrow-flight = { workspace = true, features = ["flight-sql"] }
-tonic = { workspace = true }
+tonic = { workspace = true, features = ["tls-aws-lc"] }
 tonic-health = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "signal"] }
 futures = { workspace = true }

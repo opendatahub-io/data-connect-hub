@@ -5,6 +5,8 @@ metadata:
   labels:
     app.kubernetes.io/name: flight-service
     app.kubernetes.io/part-of: data-connect-hub
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: flight-service-tls
 spec:
   type: ClusterIP
   selector:

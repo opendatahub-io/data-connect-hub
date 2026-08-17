@@ -10,7 +10,7 @@ rules:
   verbs: [create, delete, get, list, patch, update, watch]
 - apiGroups: [""]
   resources: [secrets]
-  verbs: [get, list, watch]
+  verbs: [get, list, watch, update, patch]
 - apiGroups: [apps]
   resources: [deployments]
   verbs: [create, delete, get, list, patch, update, watch]

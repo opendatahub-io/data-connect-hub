@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: dch-read
+  name: read
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types"]
@@ -10,7 +10,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: dch-read-write
+  name: read-write
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types"]
@@ -20,7 +20,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: dch-admin
+  name: admin
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types"]
