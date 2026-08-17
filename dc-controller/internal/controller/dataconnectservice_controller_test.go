@@ -59,7 +59,6 @@ var _ = Describe("DataConnectService Controller", func() {
 			Client:             k8sClient,
 			Scheme:             k8sClient.Scheme(),
 			ManifestsPath:      manifestsPath,
-			Namespace:          targetNamespace,
 			RestImage:          testRestImage,
 			FlightImage:        testFlightImage,
 			KubeRbacProxyImage: "quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3",
