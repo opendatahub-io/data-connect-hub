@@ -490,7 +490,8 @@ func (r *DataConnectServiceReconciler) patchClusterRoleBindingSubjects(obj *unst
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
 }
 
-func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) {
+func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) bool {
+	const key = "token_review_audiences"
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
@@ -500,7 +501,7 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 			continue
 		}
 		toml, ok := data["config.toml"]
-		if !ok || !strings.Contains(toml, "token_review_audiences") {
+		if !ok || !strings.Contains(toml, key) {
 			continue
 		}
 
@@ -508,11 +509,12 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 		for i, a := range audiences {
 			quoted[i] = fmt.Sprintf("%q", a)
 		}
-		audienceLine := fmt.Sprintf("    token_review_audiences = [%s]", strings.Join(quoted, ", "))
+		audienceLine := fmt.Sprintf("    %s = [%s]", key, strings.Join(quoted, ", "))
 
 		var result []string
 		for line := range strings.SplitSeq(toml, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "token_review_audiences") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, key) && (len(trimmed) == len(key) || trimmed[len(key)] == ' ' || trimmed[len(key)] == '=') {
 				result = append(result, audienceLine)
 			} else {
 				result = append(result, line)
@@ -520,7 +522,9 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 		}
 		data["config.toml"] = strings.Join(result, "\n")
 		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		return true
 	}
+	return false
 }
 
 func indent(s string, spaces int) string {

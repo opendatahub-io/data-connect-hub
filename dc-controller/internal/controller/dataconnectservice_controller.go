@@ -369,7 +369,9 @@ func (r *DataConnectServiceReconciler) reconcileService(
 	setConfigMapGlobalNamespace(resources, name+"-config", r.Namespace)
 
 	if len(tokenReviewAudiences) > 0 {
-		setConfigMapAudiences(resources, tokenReviewAudiences)
+		if !setConfigMapAudiences(resources, tokenReviewAudiences) {
+			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with token_review_audiences found in rendered manifests")
+		}
 	}
 
 	return r.applyResources(ctx, cr, resources)
