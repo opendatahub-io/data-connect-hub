@@ -60,3 +60,4 @@ chrono = "0.4"
 opendal = { version = "0.58", features = ["services-s3"] }
 parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
 arrow-csv = "59.1"
+arrow-json = "59.1"

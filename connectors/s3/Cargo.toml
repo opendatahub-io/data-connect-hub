@@ -17,5 +17,6 @@ moka = { workspace = true, features = ["future"] }
 opendal = { workspace = true }
 parquet = { workspace = true }
 arrow-csv = { workspace = true }
+arrow-json = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
