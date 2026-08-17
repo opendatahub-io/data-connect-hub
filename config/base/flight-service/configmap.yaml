@@ -16,6 +16,10 @@ data:
     ttl_secs = 30
     idle_secs = 30
 
+    [tls]
+    cert_file = "/etc/tls/private/tls.crt"
+    key_file = "/etc/tls/private/tls.key"
+
     [auth]
     enabled = true
     cache_ttl_secs = 60

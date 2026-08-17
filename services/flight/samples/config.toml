@@ -14,6 +14,10 @@ idle_secs = 30
 batch_size = 512
 max_rows = 1000000
 
+[tls]
+# cert_file = "/etc/tls/private/tls.crt"
+# key_file = "/etc/tls/private/tls.key"
+
 [auth]
 enabled = false
 cache_ttl_secs = 300
