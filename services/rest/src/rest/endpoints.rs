@@ -88,11 +88,6 @@ pub async fn create_connection(
             "true".to_string(),
         )]));
 
-        secret.annotations = Arc::new(HashMap::from([(
-            "dataconnecthub.opendatahub.io/data-connection-ids".to_string(),
-            connection_res.metadata.id.clone(),
-        )]));
-
         service.secret_store.create_secret(secret).await?;
     }
 
