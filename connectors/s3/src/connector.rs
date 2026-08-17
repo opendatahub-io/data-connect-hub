@@ -41,7 +41,7 @@ fn extract_credentials(
     data_connection: &DataConnectionResource,
 ) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
     match &data_connection.resource.admin {
-        Some(Admin::Secret { secret }) => Ok(secret.clone()),
+        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
         _ => Err(ConnectorError::ConnectionError(
             "S3 credentials are required".to_string(),
         )),
@@ -194,7 +194,10 @@ mod tests {
                 name: "test-s3".to_string(),
                 data_connection_type_id: "s3-type".to_string(),
                 format: DataFormat::Tabular,
-                admin: Some(Admin::Secret { secret: credentials }),
+                admin: Some(Admin::Secret {
+                    name: "test-s3".to_string(),
+                    secret: credentials,
+                }),
                 properties: HashMap::new(),
             },
             status: Default::default(),

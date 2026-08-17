@@ -324,7 +324,30 @@ components:
 
     DataConnectionState:
       type: string
-      enum: [ingestion_ready, ingestion_not_ready]
+      enum: [ready, not_ready]
+
+    PhaseState:
+      type: string
+      enum:
+        - secret_ready
+        - secret_valid
+        - secret_not_found
+        - ingestion_ready
+        - ingestion_not_ready
+
+    PhaseCondition:
+      type: object
+      required: [state, message, timestamp]
+      properties:
+        state:
+          $ref: "#/components/schemas/PhaseState"
+        message:
+          type: string
+          description: Human-readable phase description
+        timestamp:
+          type: string
+          format: date-time
+          description: When this phase was last evaluated
 
     DataConnectionStatus:
       type: object
@@ -336,10 +359,15 @@ components:
           type: string
           nullable: true
           description: Optional human-readable status message
+        phases:
+          type: array
+          items:
+            $ref: "#/components/schemas/PhaseCondition"
+          description: Detailed phase conditions for this connection
 
     Admin:
       description: >
-        Credentials reference. Exactly one of secret_ref or secret must be provided.
+        Credentials reference. Exactly one of secret_ref or (name + secret) must be provided.
       oneOf:
         - type: object
           required: [secret_ref]
@@ -350,8 +378,12 @@ components:
               example: secret/my-conn
           additionalProperties: false
         - type: object
-          required: [secret]
+          required: [name, secret]
           properties:
+            name:
+              type: string
+              description: Name for the secret to create
+              example: my-conn-secret
             secret:
               type: object
               additionalProperties:

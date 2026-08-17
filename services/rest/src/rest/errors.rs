@@ -1,5 +1,6 @@
 use actix_web::web::{JsonConfig, PathConfig, QueryConfig};
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
+use commons::api::errors::SecretStoreError;
 use commons::api::errors::{ConnectorError, MetaStoreError};
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -78,6 +79,23 @@ impl From<MetaStoreError> for RestErrorResponse {
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
             MetaStoreError::Validation(_) => ("validation", 400),
+        };
+        RestErrorResponse {
+            code: code.to_string(),
+            message: err.to_string(),
+            status,
+        }
+    }
+}
+
+impl From<SecretStoreError> for RestErrorResponse {
+    fn from(err: SecretStoreError) -> Self {
+        let (code, status) = match &err {
+            SecretStoreError::SecretNotFound(_) => ("secret_not_found", 404),
+            SecretStoreError::Forbidden(_) => ("forbidden", 403),
+            SecretStoreError::CannotCreateSecret(_) => ("cannot_create_secret", 400),
+            SecretStoreError::CannotDeleteSecret(_) => ("cannot_delete_secret", 400),
+            SecretStoreError::CannotSetSecretLabels(_) => ("cannot_set_secret_labels", 400),
         };
         RestErrorResponse {
             code: code.to_string(),

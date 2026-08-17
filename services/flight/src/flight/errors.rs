@@ -19,6 +19,9 @@ pub(crate) fn map_secret_store_error(e: SecretStoreError) -> Status {
     match e {
         SecretStoreError::SecretNotFound(_) => Status::not_found("secret not found"),
         SecretStoreError::Forbidden(_) => Status::permission_denied("access denied"),
+        SecretStoreError::CannotCreateSecret(_) => Status::internal("cannot create secret"),
+        SecretStoreError::CannotDeleteSecret(_) => Status::internal("cannot delete secret"),
+        SecretStoreError::CannotSetSecretLabels(_) => Status::internal("cannot set secret labels"),
     }
 }
 

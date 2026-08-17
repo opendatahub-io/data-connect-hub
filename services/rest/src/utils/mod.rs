@@ -1,3 +1,5 @@
+pub mod validations;
+
 use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;

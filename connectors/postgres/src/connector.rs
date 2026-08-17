@@ -46,7 +46,7 @@ impl FlightConnector for PgConnector {
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { secret }) => Some(secret.clone()),
+            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
             _ => None,
         }
         .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;

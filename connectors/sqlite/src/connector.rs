@@ -3,13 +3,14 @@ use std::sync::Arc;
 use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::{Admin, DataConnectionResource};
+
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
 use commons::api::tabular::{QueryOutput, TabularReader};
 
 use futures::StreamExt;
 
+use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::tabular::FlightConnector;
 use moka::future::Cache;
 use sqlx::sqlite::SqliteRow;
@@ -44,7 +45,7 @@ impl FlightConnector for SqliteConnector {
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { secret }) => Some(secret.clone()),
+            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
             _ => None,
         }
         .ok_or_else(|| ConnectorError::ConnectionError("SQLite credentials are required".to_string()))?;
