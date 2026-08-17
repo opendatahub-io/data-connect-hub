@@ -1,0 +1,238 @@
+"""E2E test fixtures for Data Connect Hub.
+
+Configuration is read from environment variables, typically written
+by setup.sh into .env and loaded at the top of this file.
+
+    DCH_REST_URL           REST service URL
+    DCH_FLIGHT_URL         Flight gRPC URL
+    DCH_TENANT_ID          Tenant namespace
+    DCH_AUTH_TOKEN         Bearer token
+    DCH_INSECURE           Skip TLS verify          (default: false)
+    DCH_CA_CERT            CA cert path              (optional)
+    DCH_E2E_PG_SECRET      K8s secret name for PG    (set by setup.sh, enables query tests)
+"""
+
+from __future__ import annotations
+
+import contextlib
+import os
+import uuid
+from pathlib import Path
+
+import httpx
+import pytest
+
+from data_connect_hub import AdminSecretRef, DataConnectClient
+
+# ---------------------------------------------------------------------------
+# Load .env written by setup.sh (does not override existing env vars)
+# ---------------------------------------------------------------------------
+
+_ENV_FILE = Path(__file__).parent / ".env"
+if _ENV_FILE.exists():
+    for line in _ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key, value)
+
+
+# ---------------------------------------------------------------------------
+# Config fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def rest_url() -> str:
+    return os.environ.get("DCH_REST_URL", "http://localhost:8080")
+
+
+@pytest.fixture(scope="session")
+def flight_url() -> str:
+    return os.environ.get("DCH_FLIGHT_URL", "grpc://localhost:50051")
+
+
+@pytest.fixture(scope="session")
+def tenant_id() -> str:
+    return os.environ.get("DCH_TENANT_ID", "e2e-test")
+
+
+@pytest.fixture(scope="session")
+def auth_token() -> str:
+    return os.environ.get("DCH_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def ca_cert() -> str | None:
+    return os.environ.get("DCH_CA_CERT")
+
+
+@pytest.fixture(scope="session")
+def insecure() -> bool:
+    return os.environ.get("DCH_INSECURE", "false").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture(scope="session")
+def e2e_pg_secret() -> str | None:
+    return os.environ.get("DCH_E2E_PG_SECRET") or None
+
+
+# ---------------------------------------------------------------------------
+# Client fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def rest_client(rest_url: str, tenant_id: str, auth_token: str, ca_cert: str | None, insecure: bool) -> DataConnectClient:
+    client = DataConnectClient(
+        rest_url=rest_url,
+        token=auth_token,
+        tenant_id=tenant_id,
+        ca_cert=ca_cert,
+        insecure=insecure,
+        max_retries=1,
+        rest_timeout=15.0,
+    )
+    yield client  # type: ignore[misc]
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def dch_client(
+    rest_url: str,
+    flight_url: str,
+    tenant_id: str,
+    auth_token: str,
+    ca_cert: str | None,
+    insecure: bool,
+) -> DataConnectClient:
+    client = DataConnectClient(
+        rest_url=rest_url,
+        flight_url=flight_url,
+        token=auth_token,
+        tenant_id=tenant_id,
+        ca_cert=ca_cert,
+        insecure=insecure,
+        max_retries=1,
+        rest_timeout=15.0,
+    )
+    yield client  # type: ignore[misc]
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def http_client(rest_url: str, ca_cert: str | None, insecure: bool) -> httpx.Client:
+    if insecure:
+        verify: str | bool = False
+    elif ca_cert:
+        verify = ca_cert
+    else:
+        verify = True
+    client = httpx.Client(base_url=rest_url, timeout=10.0, verify=verify)
+    yield client  # type: ignore[misc]
+    client.close()
+
+
+# ---------------------------------------------------------------------------
+# Factory fixtures (auto-cleanup)
+# ---------------------------------------------------------------------------
+
+
+def _unique_name(prefix: str) -> str:
+    return f"{prefix}-{uuid.uuid4().hex[:8]}"
+
+
+@pytest.fixture()
+def create_connection_type(rest_client: DataConnectClient):
+    """Factory: creates connection types, deletes them after the test."""
+    created_ids: list[str] = []
+
+    def _factory(
+        *,
+        name: str | None = None,
+        provider: str = "postgres",
+        description: str | None = "e2e test connection type",
+    ):
+        ct = rest_client.create_connection_type(
+            name=name or _unique_name("e2e-ct"),
+            provider=provider,
+            description=description,
+        )
+        created_ids.append(ct.id)
+        return ct
+
+    yield _factory
+
+    for ct_id in reversed(created_ids):
+        with contextlib.suppress(Exception):
+            rest_client.delete_connection_type(ct_id)
+
+
+@pytest.fixture()
+def create_connection(rest_client: DataConnectClient):
+    """Factory: creates connections, deletes them after the test."""
+    created_ids: list[str] = []
+
+    def _factory(
+        *,
+        name: str | None = None,
+        connection_type_id: str,
+        data_format: str = "tabular",
+        admin=None,
+        properties: dict[str, str] | None = None,
+    ):
+        conn = rest_client.create_connection(
+            name=name or _unique_name("e2e-conn"),
+            connection_type_id=connection_type_id,
+            data_format=data_format,
+            admin=admin,
+            properties=properties,
+        )
+        created_ids.append(conn.id)
+        return conn
+
+    yield _factory
+
+    for conn_id in reversed(created_ids):
+        with contextlib.suppress(Exception):
+            rest_client.delete_connection(conn_id)
+
+
+# ---------------------------------------------------------------------------
+# Flight query fixture (module-scoped)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def pg_flight_connection(
+    e2e_pg_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight SQL query tests.
+
+    The K8s secret and test data are prepared by setup.sh.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not e2e_pg_secret:
+        pytest.skip("DCH_E2E_PG_SECRET not set (run e2e/setup.sh first)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-pg-type"),
+        provider="postgres",
+        description="e2e query test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-pg-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=e2e_pg_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
