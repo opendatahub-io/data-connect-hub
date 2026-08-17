@@ -23,6 +23,7 @@ endif
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
 	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-all \
+	e2e-install e2e-test \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -183,6 +184,33 @@ sdk-build: sdk-venv
 sdk-all: sdk-lint sdk-typecheck sdk-test
 
 # -------------------------------------------------------------------
+# E2E Tests
+# -------------------------------------------------------------------
+
+E2E_DIR := e2e
+
+ifdef VIRTUAL_ENV
+  E2E_PYTHON       := python3
+  E2E_BIN          :=
+  E2E_VENV_PREREQ  :=
+else
+  E2E_PYTHON       := $(E2E_DIR)/.venv/bin/python3
+  E2E_BIN          := .venv/bin/
+  E2E_VENV_PREREQ  := $(E2E_PYTHON)
+endif
+
+$(E2E_DIR)/.venv/bin/python3:
+	python3 -m venv $(E2E_DIR)/.venv
+
+e2e-venv: $(E2E_VENV_PREREQ)
+
+e2e-install: e2e-venv
+	$(E2E_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[flight]" -e "$(E2E_DIR)"
+
+e2e-test: e2e-venv
+	cd $(E2E_DIR) && $(E2E_BIN)pytest tests/ -v
+
+# -------------------------------------------------------------------
 # Dev Setup
 # -------------------------------------------------------------------
 
@@ -245,3 +273,7 @@ help:
 	@echo "  sdk-typecheck        run mypy on SDK"
 	@echo "  sdk-build            build SDK distribution"
 	@echo "  sdk-all              lint + typecheck + test SDK"
+	@echo ""
+	@echo "E2E Tests (env-var driven, see e2e/conftest.py for config):"
+	@echo "  e2e-install          install e2e deps (SDK + test framework)"
+	@echo "  e2e-test             run e2e tests against DCH_REST_URL / DCH_FLIGHT_URL"

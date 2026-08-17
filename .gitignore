@@ -36,6 +36,11 @@ coverage.json
 .claude/*
 !.claude/CLAUDE.md
 
+# E2E test env (contains tokens) and build artifacts
+e2e/.env
+e2e/.venv/
+e2e/*.egg-info/
+
 # Python SDK build artifacts
 sdk/python/dist/
 sdk/python/src/*.egg-info/
