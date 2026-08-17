@@ -217,7 +217,7 @@ func main() {
 
 	restServiceURL := os.Getenv("REST_SERVICE_URL")
 	if restServiceURL == "" {
-		restServiceURL = fmt.Sprintf("https://rest-service.%s.svc.cluster.local:8443", namespace)
+		restServiceURL = fmt.Sprintf("https://dch-rest-service.%s.svc.cluster.local:8443", namespace)
 	}
 	setupLog.Info("REST service URL for InitDataConnectionType", "url", restServiceURL)
 
