@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
-NAMESPACE="${1:-dch-example}"
+INFRA_NAMESPACE="${1:-dch-infra-example}"
+TENANT_ID="${2:-dch-example}"
+CONN_ID="${3}"
 
 LOCAL_PORT=15051
-TENANT_ID="$NAMESPACE"
 SA_NAME="${SA_NAME:-dch-test-user}"
 pf_pid=""
 proxy_pid=""
@@ -129,16 +130,16 @@ except Exception as e:
 }
 
 echo "  Finding flight-service pod..."
-flight_pod=$(oc get po -n "$NAMESPACE" -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
+flight_pod=$(oc get po -n "$INFRA_NAMESPACE" -l app.kubernetes.io/name=flight-service -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || true
 if [ -z "$flight_pod" ]; then
-  echo "  FAILED: no flight-service pod found in namespace '$NAMESPACE'"
+  echo "  FAILED: no flight-service pod found in namespace '$INFRA_NAMESPACE'"
   exit 1
 fi
 echo "  Pod: $flight_pod"
 
 echo "  Port-forwarding $flight_pod:50051 -> localhost:$LOCAL_PORT..."
 lsof -ti :$LOCAL_PORT 2>/dev/null | xargs kill 2>/dev/null || true
-oc port-forward "pod/$flight_pod" -n "$NAMESPACE" "$LOCAL_PORT:50051" &>/dev/null &
+oc port-forward "pod/$flight_pod" -n "$INFRA_NAMESPACE" "$LOCAL_PORT:50051" &>/dev/null &
 pf_pid=$!
 sleep 2
 
@@ -149,10 +150,10 @@ fi
 echo "  Port-forward ready (pid=$pf_pid)"
 echo ""
 
-. ./get-token.sh
+source ./get-token.sh "$TENANT_ID"
 
 if [ -z "$user_token" ]; then
-  echo "  FAILED: could not obtain token for $SA_NAME (run create-test-users.sh first)"
+  echo "  FAILED: could not obtain token for $SA_NAME (run create-test-user.sh first)"
   cleanup
   exit 1
 fi
@@ -186,7 +187,6 @@ fi
 echo "  Proto files ready"
 echo ""
 
-CONN_ID="${CONN_ID:-00000000-0000-0000-0000-000000000002}"
 SQL_QUERY="SELECT * FROM test_prompts"
 
 # Build protobuf commands as base64

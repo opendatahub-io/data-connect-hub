@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-NS="${1:-dch-example}"
+NS="${1:-dch-infra-example}"
 
 echo ""
 echo ""
@@ -17,9 +17,6 @@ fi
 echo "  Pod: $pg_pod"
 
 tenant_ns="$NS"
-type_id="00000000-0000-0000-0000-000000000001"
-conn_id="00000000-0000-0000-0000-000000000002"
-secret_name="dch-database-config"
 
 echo "  Populating database..."
 oc exec -i "$pg_pod" -n "$NS" -- \
@@ -45,24 +42,11 @@ INSERT INTO test_prompts VALUES
 GRANT ALL ON data_connections TO dch;
 GRANT ALL ON data_connection_types TO dch;
 GRANT ALL ON test_prompts TO dch;
-
-DELETE FROM data_connection_types WHERE data->'metadata'->>'id' = '${type_id}';
-INSERT INTO data_connection_types (data) VALUES (
-'{"metadata":{"id":"${type_id}","tenant_id":"${tenant_ns}","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"},"resource":{"name":"test-postgres-${type_id}","provider":"postgres","description":"Test PostgreSQL","credentials_fields":[{"name":"url","label":"URL","type":"string","required":true}]}}'
-);
-DELETE FROM data_connections WHERE data->'metadata'->>'id' = '${conn_id}';
-INSERT INTO data_connections (data) VALUES (
-'{"metadata":{"id":"${conn_id}","tenant_id":"${tenant_ns}","created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"},"resource":{"name":"test-pg-conn-${conn_id}","data_connection_type_id":"${type_id}","format":"tabular","admin":{"secret_ref":"${secret_name}"},"properties":{}}}'
-);
 EOF
 
 if [ $? -ne 0 ]; then
   echo "  FAILED: database population failed"
   exit 1
 fi
-
-# TEMP TEMP !!!
-#oc create role dch-secret-reader --verb=get,list --resource=secrets -n dch-example
-#oc create rolebinding dch-secret-reader --role=dch-secret-reader --serviceaccount=dch-example:flight-service-sa -n dch-example
 
 echo "  Database populated successfully"

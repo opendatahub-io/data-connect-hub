@@ -3,7 +3,6 @@ set -euo pipefail
 
 NAMESPACE="${1:-dch-example}"
 SA_NAME="${2:-dch-test-user}"
-SA_NOAUTH="${3:-dch-test-noauth}"
 
 create_sa() {
   local sa_name="$1"
@@ -23,4 +22,3 @@ EOF
 }
 
 create_sa "$SA_NAME" "$NAMESPACE"
-create_sa "$SA_NOAUTH" "$NAMESPACE"

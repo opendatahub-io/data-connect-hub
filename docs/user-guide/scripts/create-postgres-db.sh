@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NS="${1:-dch-example}"
+NS="${1:-dch-infra-example}"
 
 oc apply -n "$NS" -f - <<'EOF'
 apiVersion: postgresql.cnpg.io/v1

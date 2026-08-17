@@ -1,33 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-NAMESPACE="${1:-dch-example}"
+NAMESPACE="${1:-dch-infra-example}"
 GATEWAY_NS="${2:-openshift-ingress}"
 
 echo ""
 echo ""
 echo "================================== CREATE ROUTES ============================="
-echo "=== Checking prerequisites ==="
-if ! oc get gateway dch-gateway -n "$GATEWAY_NS" &>/dev/null; then
-  echo "ERROR: Gateway 'dch-gateway' does not exist in namespace '$GATEWAY_NS'."
-  echo "  Run './docs/user-guide/scripts/create-gateway.sh' first."
-  exit 1
-fi
-
-if ! oc get service rest-service -n "$NAMESPACE" &>/dev/null; then
-  echo "ERROR: Service 'rest-service' does not exist in namespace '$NAMESPACE'."
-  exit 1
-fi
-
-if ! oc get service flight-service -n "$NAMESPACE" &>/dev/null; then
-  echo "ERROR: Service 'flight-service' does not exist in namespace '$NAMESPACE'."
-  exit 1
-fi
-
-echo "  All prerequisites met."
-
-echo ""
-echo "=== Creating HTTPRoute in $NAMESPACE ==="
 oc apply -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -42,11 +21,11 @@ spec:
   - matches:
     - path:
         type: PathPrefix
-        value: /api/v1
+        value: /api/v1/data
     backendRefs:
     - group: ""
       kind: Service
-      name: rest-service
+      name: dch-rest-service
       port: 8443
   - matches:
     - path:
@@ -55,7 +34,7 @@ spec:
     backendRefs:
     - group: ""
       kind: Service
-      name: flight-service
+      name: dch-flight-service
       port: 50051
 EOF
 

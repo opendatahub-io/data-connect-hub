@@ -2,7 +2,7 @@
 set -euo pipefail
 
 NAMESPACE="${1:-dch-example}"
-ROLE="${2:-dch-read}"
+ROLE="${2:-dch-read-write}"
 SA_NAME="${3:-dch-test-user}"
 
 echo "  Binding '$SA_NAME' to role '$ROLE' in namespace '$NAMESPACE'..."

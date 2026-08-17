@@ -1,12 +1,12 @@
 #!/bin/bash
 set -euo pipefail
 
-NAMESPACE="${1:-dch-example}"
+INFRA_NAMESPACE="${1:-dch-infra-example}"
 
 echo ""
 echo ""
 echo "================================== CONFIG KUBE-RBAC-PROXY ============================="
-echo "--- Creating ClusterRole and ClusterRoleBinding for kube-rbac-proxy in $NAMESPACE ---"
+echo "--- Creating ClusterRole and ClusterRoleBinding for kube-rbac-proxy in $INFRA_NAMESPACE ---"
 oc apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -30,10 +30,10 @@ roleRef:
   name: dch-rbac-proxy
 subjects:
 - kind: ServiceAccount
-  name: data-connect-hub-sa
-  namespace: $NAMESPACE
+  name: dch-data-connect-hub-sa
+  namespace: $INFRA_NAMESPACE
 - kind: ServiceAccount
-  name: flight-service-sa
-  namespace: $NAMESPACE
+  name: dch-flight-service-sa
+  namespace: $INFRA_NAMESPACE
 EOF
 echo "PASSED: kube-rbac-proxy RBAC configured"
