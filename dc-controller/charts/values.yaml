@@ -1,7 +1,7 @@
 controllerManager:
   image:
-    repository: ""
-    tag: ""
+    repository: quay.io/opendatahub/odh-data-connect-hub-controller
+    tag: odh-stable
     pullPolicy: IfNotPresent
   replicas: 1
   resources:

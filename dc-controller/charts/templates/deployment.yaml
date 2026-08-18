@@ -25,7 +25,7 @@ spec:
       terminationGracePeriodSeconds: 10
       containers:
       - name: manager
-        image: "{{ required "controllerManager.image.repository is required" .Values.controllerManager.image.repository }}:{{ required "controllerManager.image.tag is required" .Values.controllerManager.image.tag }}"
+        image: "{{ .Values.controllerManager.image.repository }}:{{ .Values.controllerManager.image.tag }}"
         imagePullPolicy: {{ .Values.controllerManager.image.pullPolicy }}
         command: ["/manager"]
         args:
