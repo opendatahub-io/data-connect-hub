@@ -41,6 +41,33 @@ rules:
   - update
   - watch
 - apiGroups:
+  - authentication.k8s.io
+  resources:
+  - tokenreviews
+  verbs:
+  - create
+- apiGroups:
+  - authorization.k8s.io
+  resources:
+  - subjectaccessreviews
+  verbs:
+  - create
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - data-connection-types
+  - data-connections
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - post
+  - put
+  - update
+  - watch
+- apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices
@@ -101,6 +128,19 @@ rules:
   - networking.k8s.io
   resources:
   - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - clusterrolebindings
+  - clusterroles
   verbs:
   - create
   - delete

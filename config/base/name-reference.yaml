@@ -1,0 +1,9 @@
+nameReference:
+  - kind: ServiceAccount
+    fieldSpecs:
+      - kind: ClusterRoleBinding
+        path: subjects/name
+  - kind: Service
+    fieldSpecs:
+      - kind: HTTPRoute
+        path: spec/rules/backendRefs/name

@@ -98,6 +98,23 @@ impl QueryConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct TlsConfig {
+    pub cert_file: Option<String>,
+    pub key_file: Option<String>,
+}
+
+impl TlsConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        match (&self.cert_file, &self.key_file) {
+            (Some(_), None) | (None, Some(_)) => {
+                Err("Both tls.cert_file and tls.key_file must be provided to enable TLS".to_string())
+            },
+            _ => Ok(()),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub server: Server,
@@ -109,6 +126,8 @@ pub struct ServerConfig {
     pub auth: AuthConfig,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub tls: TlsConfig,
     #[serde(rename = "global-connection-types")]
     pub global_connection_types: GlobalConnectionTypes,
 }

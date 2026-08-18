@@ -10,8 +10,11 @@ use commons::api::connections::{
 use commons::api::connections::{DataConnectionResource, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
+use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::flight::service::TabularDataService;
-use flight_service::flight::{InMemorySecretStore, registry::ConnectorsRegistry};
+
+mod common;
+use common::InMemorySecretStore;
 use futures::TryStreamExt;
 use opendal::{Operator, services::Memory};
 use s3_connector::S3Connector;
@@ -195,7 +198,9 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
     let secret_store = InMemorySecretStore::new(vec![Secret {
         name: "s3_creds".to_string(),
         namespace: "default".to_string(),
-        properties: test_credentials(),
+        properties: Arc::new(test_credentials()),
+        labels: Arc::new(HashMap::new()),
+        annotations: Arc::new(HashMap::new()),
     }]);
 
     let service = TabularDataService::new(

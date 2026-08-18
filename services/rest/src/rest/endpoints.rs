@@ -1,6 +1,7 @@
 use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use crate::utils::validations::transform_data_connection;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connections::DataConnection;
@@ -11,6 +12,7 @@ use std::sync::Arc;
 use tracing::info;
 
 use commons::api::connections::DataConnectionType;
+use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -24,14 +26,14 @@ struct HealthResponse {
 
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
-    _secret_store: Arc<dyn SecretStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
 }
 
 impl ApiService {
     pub fn new(meta_store: Arc<dyn MetaStore + Send + Sync>, secret_store: Arc<dyn SecretStore + Send + Sync>) -> Self {
         Self {
             meta_store,
-            _secret_store: secret_store,
+            secret_store,
         }
     }
 }
@@ -70,13 +72,26 @@ pub async fn create_connection(
     connection: web::Json<DataConnection>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("create_connection: for tenant {:?}", ctx.tenant_id);
+    let tenant_id = ctx.tenant_id.clone();
 
-    let connection = service
+    let connection = transform_data_connection(&tenant_id, &connection).await;
+
+    let connection_res = service
         .meta_store
-        .create_data_connection(ctx.tenant_id.as_str(), &connection)
+        .create_data_connection(ctx.tenant_id.as_str(), &connection.0)
         .await?;
 
-    Ok(HttpResponse::Created().json(connection))
+    if let Some(secret) = connection.1 {
+        let secret = &mut secret.clone();
+        secret.labels = Arc::new(HashMap::from([(
+            "dataconnecthub.opendatahub.io/attached".to_string(),
+            "true".to_string(),
+        )]));
+
+        service.secret_store.create_secret(secret).await?;
+    }
+
+    Ok(HttpResponse::Created().json(connection_res))
 }
 
 pub async fn list_connection_types(
@@ -182,6 +197,7 @@ mod tests {
     use commons::api::ResourceList;
     use commons::api::connections::{DataConnectionResource, DataConnectionTypeResource, Secret};
     use commons::api::errors::SecretStoreError;
+    use std::collections::HashMap;
 
     use super::*;
     use crate::rest::errors::json_config;
@@ -358,6 +374,20 @@ mod tests {
     #[async_trait::async_trait]
     impl SecretStore for StubSecretStore {
         async fn get_secret(&self, _n: &str, _k: &str) -> Result<Secret, SecretStoreError> {
+            unimplemented!()
+        }
+        async fn create_secret(&self, _s: &Secret) -> Result<(), SecretStoreError> {
+            unimplemented!()
+        }
+        async fn delete_secret(&self, _n: &str, _k: &str) -> Result<(), SecretStoreError> {
+            unimplemented!()
+        }
+        async fn set_secret_labels(
+            &self,
+            _n: &str,
+            _k: &str,
+            _l: HashMap<String, String>,
+        ) -> Result<(), SecretStoreError> {
             unimplemented!()
         }
     }

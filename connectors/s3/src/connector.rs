@@ -41,7 +41,7 @@ fn extract_credentials(
     data_connection: &DataConnectionResource,
 ) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
     match &data_connection.resource.admin {
-        Some(Admin::Secret { secret }) => Ok(secret.clone()),
+        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
         _ => Err(ConnectorError::ConnectionError(
             "S3 credentials are required".to_string(),
         )),
@@ -138,6 +138,7 @@ impl TabularReader for S3Reader {
         let schema = match format {
             FileFormat::Parquet => format::read_parquet_schema(&data)?,
             FileFormat::Csv => format::read_csv_schema(&data)?,
+            FileFormat::JsonLines => format::read_jsonl_schema(&data)?,
         };
 
         Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
@@ -152,6 +153,7 @@ impl TabularReader for S3Reader {
         let batches = match format {
             FileFormat::Parquet => format::read_parquet_batches(data, batch_size)?,
             FileFormat::Csv => format::read_csv_batches(data, &schema, batch_size)?,
+            FileFormat::JsonLines => format::read_jsonl_batches(data, &schema, batch_size)?,
         };
 
         let stream = async_stream::try_stream! {
@@ -194,7 +196,10 @@ mod tests {
                 name: "test-s3".to_string(),
                 data_connection_type_id: "s3-type".to_string(),
                 format: DataFormat::Tabular,
-                admin: Some(Admin::Secret { secret: credentials }),
+                admin: Some(Admin::Secret {
+                    name: "test-s3".to_string(),
+                    secret: credentials,
+                }),
                 properties: HashMap::new(),
             },
             status: Default::default(),
@@ -279,6 +284,8 @@ mod tests {
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
         assert_eq!(reader.detect_format("data/file.csv").unwrap(), FileFormat::Csv);
+        assert_eq!(reader.detect_format("data/file.jsonl").unwrap(), FileFormat::JsonLines);
+        assert_eq!(reader.detect_format("data/file.ndjson").unwrap(), FileFormat::JsonLines);
     }
 
     #[test]
@@ -288,5 +295,14 @@ mod tests {
             format_hint: Some("parquet".to_string()),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
+
+        let reader = S3Reader {
+            operator: build_operator(&make_credentials()).unwrap(),
+            format_hint: Some("jsonl".to_string()),
+        };
+        assert_eq!(
+            reader.detect_format("data/no-extension").unwrap(),
+            FileFormat::JsonLines
+        );
     }
 }

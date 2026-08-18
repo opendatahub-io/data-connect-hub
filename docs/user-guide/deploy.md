@@ -1,8 +1,12 @@
 # Deploying Data Connect Hub
 
-Data Connect Hub is deployed via the `dc-controller` operator using Helm.
-The operator handles rest-service, flight-service, networking, and lifecycle
-management automatically.
+Data Connect Hub is deployed in two steps:
+
+1. **Install the operator** via Helm — deploys the controller, CRDs, and RBAC.
+2. **Create the DataConnectService CR** — the admin creates the CR in the
+   namespace where services should run. The controller watches all namespaces
+   and provisions the operand resources (rest-service, flight-service,
+   networking) in the CR's namespace.
 
 ---
 
@@ -22,7 +26,7 @@ management automatically.
 
 Data Connect Hub requires a PostgreSQL database. Provision an instance
 using one of the methods below, then create the `dch-database-config`
-secret the services use to connect.
+secret in the namespace where you will create the DataConnectService CR.
 
 #### Option A: CloudNativePG on OpenShift (recommended for dev/test)
 
@@ -51,11 +55,11 @@ oc get csv -n openshift-operators | grep cloudnative-pg
 # Wait until PHASE shows "Succeeded"
 ```
 
-Set the controller and operand namespaces, then create them:
+Set the namespaces, then create them:
 
 ```console
 export CONTROLLER_NS=dc-controller-system
-export NS=dch-services            # where services and postgres run
+export NS=opendatahub               # where services and postgres run
 oc create namespace $CONTROLLER_NS
 oc create namespace $NS
 
@@ -119,57 +123,59 @@ or malformed.
 
 ---
 
-## Install
-
-Using the namespaces from the database setup above:
+## Step 1: Install the operator
 
 ```console
 cd dc-controller
 
-helm install dc-controller chart/ \
+helm install dc-controller charts/ \
   --namespace $CONTROLLER_NS \
-  --set operandNamespace=$NS
+  --create-namespace
 ```
 
-## Override images
+### Override controller images
 
 To use custom images (e.g. for dev/testing with a private registry):
 
 ```console
-helm install dc-controller chart/ \
+helm install dc-controller charts/ \
   --namespace $CONTROLLER_NS \
-  --set operandNamespace=$NS \
+  --create-namespace \
   --set controllerManager.image.repository=quay.io/YOUR_ORG/dc-controller \
   --set controllerManager.image.tag=latest \
   --set relatedImages.restService=quay.io/YOUR_ORG/rest-service:latest \
   --set relatedImages.flightService=quay.io/YOUR_ORG/flight-service:latest
 ```
 
+## Step 2: Create the DataConnectService CR
 
-Image resolution priority (highest wins):
-1. CR spec override (`spec.restService.image`)
-2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
-3. Default (`quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable`)
-
-## Verify
+Create the CR in the namespace where you want the services deployed.
+The `dch-database-config` secret must already exist in this namespace.
 
 ```console
-oc get pods -n $NS
-oc get dchs default-dataconnectservice -n $NS
+oc apply -f - <<EOF
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
+metadata:
+  name: default-dataconnectservice
+  namespace: $NS
+spec:
+  restService: {}
+  flightService: {}
+EOF
 ```
 
-The `Phase` column progresses through `Progressing` to `Ready`.
+### Customising the CR
 
-## Customising via values.yaml
-
-All `DataConnectService` CR fields are configurable through Helm values.
-The CR is created automatically with `dataConnectService.enabled: true`
-(the default).
+All service configuration is done directly on the CR spec:
 
 ```yaml
-dataConnectService:
-  enabled: true        # set false to skip CR creation
-
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: DataConnectService
+metadata:
+  name: default-dataconnectservice
+  namespace: opendatahub
+spec:
   restService:
     image: "my-registry/rest-service:v1.2.3"
     replicas: 3
@@ -198,6 +204,20 @@ dataConnectService:
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
 
+Image resolution priority (highest wins):
+1. CR spec override (`spec.restService.image`)
+2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
+3. Default (`quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable`)
+
+## Verify
+
+```console
+oc get pods -n $NS
+oc get dchs default-dataconnectservice -n $NS
+```
+
+The `Phase` column progresses through `Progressing` to `Ready`.
+
 ## Monitor status
 
 ```console
@@ -210,30 +230,54 @@ Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`.
 
 | Resource | Name | Notes |
 |----------|------|-------|
-| Deployment | `rest-service` | HTTP API on port 8080 |
-| Deployment | `flight-service` | Arrow Flight gRPC on port 50051 |
-| Service | `rest-service` | ClusterIP, port 8080 |
-| Service | `flight-service` | ClusterIP, port 50051 |
-| ServiceAccount | `data-connect-hub-sa` | For rest-service |
-| ServiceAccount | `flight-service-sa` | For flight-service |
-| ConfigMap | `rest-service-config` | Server config (config.toml) |
-| ConfigMap | `flight-service-config` | Server config (config.toml) |
-| NetworkPolicy | `rest-service` | Ingress/egress rules |
-| NetworkPolicy | `flight-service` | Ingress/egress rules |
-| HTTPRoute | `data-connect-hub` | Routes traffic via gateway |
+| Deployment | `dch-rest-service` | HTTP API on port 8080 |
+| Deployment | `dch-flight-service` | Arrow Flight gRPC on port 50051 |
+| Service | `dch-rest-service` | ClusterIP, port 8443 |
+| Service | `dch-flight-service` | ClusterIP, port 50051 |
+| ServiceAccount | `dch-data-connect-hub-sa` | For rest-service |
+| ServiceAccount | `dch-flight-service-sa` | For flight-service |
+| ConfigMap | `dch-rest-service-config` | Server config (config.toml) |
+| ConfigMap | `dch-flight-service-config` | Server config (config.toml) |
+| NetworkPolicy | `dch-rest-service` | Ingress/egress rules |
+| NetworkPolicy | `dch-flight-service` | Ingress/egress rules |
+| HTTPRoute | `dch-data-connect-hub` | Routes traffic via gateway |
 
-All resources have owner references back to the CR. The CR carries a
-finalizer, so deleting the CR cleans up everything.
+All resources have owner references back to the CR and carry the `dch-`
+name prefix. Deleting the CR cleans up everything.
+
+### Gateway configuration
+
+| Platform | Gateway name | Namespace |
+|----------|-------------|-----------|
+| ODH | `odh-gateway` | `opendatahub` |
+| RHOAI | `data-science-gateway` | `openshift-ingress` |
+
+### Platform integration
+
+When running under the ODH operator, platform configuration is delivered
+via the `opendatahub-dataconnecthub-config` ConfigMap. The controller
+watches this ConfigMap and reconciles on changes.
+
+---
 
 ## Uninstall
 
 ### 1. Delete the DataConnectService CR
 
-The CR carries a finalizer, so deleting it cleans up all managed
-resources (deployments, services, configmaps, networkpolicies, etc.):
+The CR carries a finalizer, so deleting it cleans up all namespace-scoped
+managed resources (deployments, services, configmaps, networkpolicies).
+Cluster-scoped resources (ClusterRoles, ClusterRoleBindings) are also
+cleaned up via owner references:
 
 ```console
 oc delete dchs default-dataconnectservice -n $NS
+```
+
+If cluster-scoped resources are not garbage-collected (e.g. after a
+forced deletion), clean them up manually:
+
+```console
+oc delete clusterrole,clusterrolebinding -l dataconnecthub.opendatahub.io/managed-by=dataconnectservice
 ```
 
 ### 2. Remove the operator
@@ -276,7 +320,7 @@ oc delete namespace $CONTROLLER_NS
 
 ```console
 # REST health check
-oc exec deploy/rest-service -n $NS -- \
+oc exec deploy/dch-rest-service -n $NS -- \
   curl -s http://localhost:8080/api/v1/data/health
 
 # Flight gRPC health (pod readiness uses built-in gRPC probe)
@@ -304,9 +348,9 @@ config/
   base/
     rest-service/      # HTTP API (actix-web), port 8080
     flight-service/    # Arrow Flight gRPC service, port 50051
-  gateway/             # HTTPRoute for external traffic
+    gateway/           # HTTPRoute for external traffic
   overlays/
-    dev/               # Dev overlay aggregating base + gateway
+    dev/               # Dev overlay aggregating base (includes gateway)
 ```
 
 ### Deploy
@@ -314,15 +358,14 @@ config/
 ```console
 # Ensure dch-database-config secret exists first
 oc apply -k config/overlays/dev -n <your-namespace>
-oc rollout status deployment/rest-service -n <your-namespace>
-oc rollout status deployment/flight-service -n <your-namespace>
+oc rollout status deployment/dch-rest-service -n <your-namespace>
+oc rollout status deployment/dch-flight-service -n <your-namespace>
 ```
 
 Or deploy components individually:
 
 ```console
-oc apply -k config/base/rest-service -n <your-namespace>
-oc apply -k config/base/flight-service -n <your-namespace>
+oc apply -k config/base -n <your-namespace>
 ```
 
 ### Updating images
@@ -331,8 +374,8 @@ oc apply -k config/base/flight-service -n <your-namespace>
 pushed to the configured tag:
 
 ```console
-oc rollout restart deployment/rest-service -n <your-namespace>
-oc rollout restart deployment/flight-service -n <your-namespace>
+oc rollout restart deployment/dch-rest-service -n <your-namespace>
+oc rollout restart deployment/dch-flight-service -n <your-namespace>
 ```
 
 ---
@@ -341,5 +384,3 @@ oc rollout restart deployment/flight-service -n <your-namespace>
 
 - **NetworkPolicy** resources allow all ingress/egress -- real restriction
   is pending a defined gateway/client topology.
-- **Operand namespace** is not auto-created by the controller -- create it
-  before installing if using `operandNamespace`.

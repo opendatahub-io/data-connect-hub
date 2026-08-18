@@ -155,8 +155,9 @@ impl MetaStore for PgMetaStore {
             },
             resource: data_connection.clone(),
             status: DataConnectionStatus {
-                state: DataConnectionState::IngestionNotReady,
+                state: DataConnectionState::NotReady,
                 message: None,
+                phases: vec![],
             },
         };
 

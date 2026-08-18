@@ -9,9 +9,14 @@ use crate::api::ResourceList;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Admin {
-    SecretRef { secret_ref: String },
+    SecretRef {
+        secret_ref: String,
+    },
 
-    Secret { secret: Arc<HashMap<String, String>> },
+    Secret {
+        name: String,
+        secret: Arc<HashMap<String, String>>,
+    },
 }
 
 impl std::fmt::Debug for Admin {
@@ -31,24 +36,49 @@ pub enum DataFormat {
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DataConnectionState {
-    /// The data connection has been tested for ingestion.
+    /// The data connection can be used either for ingestion or for secret consumption
+    #[serde(rename = "ready")]
+    Ready,
+    /// The data connection points to a secret that is not valid or missing.
+    #[serde(rename = "not_ready")]
+    NotReady,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum PhaseState {
+    #[serde(rename = "secret_ready")]
+    SecretReady,
+    #[serde(rename = "secret_valid")]
+    SecretInvalid(String),
+    #[serde(rename = "secret_not_found")]
+    SecretNotFound,
     #[serde(rename = "ingestion_ready")]
     IngestionReady,
-    /// The data connection has not been tested for ingestion.
     #[serde(rename = "ingestion_not_ready")]
     IngestionNotReady,
 }
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct PhaseCondition {
+    pub state: PhaseState,
+    pub message: String,
+    pub timestamp: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct DataConnectionStatus {
     pub state: DataConnectionState,
     pub message: Option<String>,
+    #[serde(default)]
+    pub phases: Vec<PhaseCondition>,
 }
 
 impl Default for DataConnectionStatus {
     fn default() -> Self {
         Self {
-            state: DataConnectionState::IngestionNotReady,
+            state: DataConnectionState::NotReady,
             message: None,
+            phases: vec![],
         }
     }
 }
@@ -108,7 +138,9 @@ pub struct Field {
 pub struct Secret {
     pub name: String,
     pub namespace: String,
-    pub properties: HashMap<String, String>,
+    pub properties: Arc<HashMap<String, String>>,
+    pub labels: Arc<HashMap<String, String>>,
+    pub annotations: Arc<HashMap<String, String>>,
 }
 
 impl std::fmt::Debug for Secret {
@@ -117,6 +149,7 @@ impl std::fmt::Debug for Secret {
             .field("name", &self.name)
             .field("namespace", &self.namespace)
             .field("properties", &"[REDACTED]")
+            .field("labels", &self.labels)
             .finish()
     }
 }
@@ -201,6 +234,14 @@ pub trait MetaStore {
 #[async_trait::async_trait]
 pub trait SecretStore {
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError>;
+    async fn create_secret(&self, secret: &Secret) -> Result<(), SecretStoreError>;
+    async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError>;
+    async fn set_secret_labels(
+        &self,
+        namespace: &str,
+        name: &str,
+        labels: HashMap<String, String>,
+    ) -> Result<(), SecretStoreError>;
 }
 
 #[cfg(test)]
@@ -225,8 +266,9 @@ mod tests {
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
             status: DataConnectionStatus {
-                state: DataConnectionState::IngestionNotReady,
+                state: DataConnectionState::NotReady,
                 message: None,
+                phases: vec![],
             },
         }
     }
@@ -263,8 +305,9 @@ mod tests {
                 "properties": { "key": "value" }
             },
             "status": {
-                "state": "ingestion_not_ready",
-                "message": null
+                "state": "not_ready",
+                "message": null,
+                "phases": []
             }
         });
 
@@ -425,30 +468,33 @@ mod tests {
     #[test]
     fn test_status_serialize_ingestion_not_ready() {
         let status = DataConnectionStatus {
-            state: DataConnectionState::IngestionNotReady,
+            state: DataConnectionState::NotReady,
             message: None,
+            phases: vec![],
         };
         let json = serde_json::to_value(&status).unwrap();
-        assert_eq!(json["state"], "ingestion_not_ready");
+        assert_eq!(json["state"], "not_ready");
         assert_eq!(json["message"], serde_json::Value::Null);
     }
 
     #[test]
     fn test_status_serialize_ingestion_ready_with_message() {
         let status = DataConnectionStatus {
-            state: DataConnectionState::IngestionReady,
+            state: DataConnectionState::Ready,
             message: Some("All checks passed".to_string()),
+            phases: vec![],
         };
         let json = serde_json::to_value(&status).unwrap();
-        assert_eq!(json["state"], "ingestion_ready");
+        assert_eq!(json["state"], "ready");
         assert_eq!(json["message"], "All checks passed");
     }
 
     #[test]
     fn test_status_roundtrip() {
         let status = DataConnectionStatus {
-            state: DataConnectionState::IngestionReady,
+            state: DataConnectionState::NotReady,
             message: Some("ready".to_string()),
+            phases: vec![],
         };
         let json = serde_json::to_string(&status).unwrap();
         let deserialized: DataConnectionStatus = serde_json::from_str(&json).unwrap();
@@ -458,38 +504,41 @@ mod tests {
     #[test]
     fn test_status_deserialize_from_json() {
         let json = serde_json::json!({
-            "state": "ingestion_not_ready",
+            "state": "not_ready",
             "message": "Connection timeout"
         });
         let status: DataConnectionStatus = serde_json::from_value(json).unwrap();
-        assert_eq!(status.state, DataConnectionState::IngestionNotReady);
+        assert_eq!(status.state, DataConnectionState::NotReady);
         assert_eq!(status.message.as_deref(), Some("Connection timeout"));
     }
 
     #[test]
     fn test_status_deserialize_null_message() {
         let json = serde_json::json!({
-            "state": "ingestion_ready",
+            "state": "ready",
             "message": null
         });
         let status: DataConnectionStatus = serde_json::from_value(json).unwrap();
-        assert_eq!(status.state, DataConnectionState::IngestionReady);
+        assert_eq!(status.state, DataConnectionState::Ready);
         assert!(status.message.is_none());
     }
 
     #[test]
     fn test_status_equality() {
         let a = DataConnectionStatus {
-            state: DataConnectionState::IngestionReady,
+            state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
+            phases: vec![],
         };
         let b = DataConnectionStatus {
-            state: DataConnectionState::IngestionReady,
+            state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
+            phases: vec![],
         };
         let c = DataConnectionStatus {
-            state: DataConnectionState::IngestionNotReady,
+            state: DataConnectionState::NotReady,
             message: Some("ok".to_string()),
+            phases: vec![],
         };
         assert_eq!(a, b);
         assert_ne!(a, c);
@@ -499,7 +548,7 @@ mod tests {
     fn test_connection_resource_includes_status() {
         let res = sample_connection_resource();
         let json = serde_json::to_value(&res).unwrap();
-        assert_eq!(json["status"]["state"], "ingestion_not_ready");
+        assert_eq!(json["status"]["state"], "not_ready");
         assert_eq!(json["status"]["message"], serde_json::Value::Null);
     }
 
@@ -521,7 +570,7 @@ mod tests {
         });
 
         let res: DataConnectionResource = serde_json::from_value(json).unwrap();
-        assert_eq!(res.status.state, DataConnectionState::IngestionNotReady);
+        assert_eq!(res.status.state, DataConnectionState::NotReady);
         assert!(res.status.message.is_none());
     }
 }

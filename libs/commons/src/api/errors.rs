@@ -38,10 +38,16 @@ pub enum MetaStoreError {
     Validation(String),
 }
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum SecretStoreError {
     #[error("Secret not found: {0}")]
     SecretNotFound(String),
     #[error("Access denied: {0}")]
     Forbidden(String),
+    #[error("Cannot create secret: {0}")]
+    CannotCreateSecret(String),
+    #[error("Cannot delete secret: {0}")]
+    CannotDeleteSecret(String),
+    #[error("Cannot set secret labels: {0}")]
+    CannotSetSecretLabels(String),
 }

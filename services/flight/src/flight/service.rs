@@ -114,9 +114,11 @@ impl TabularDataService {
                 .await
                 .map_err(map_secret_store_error)?;
             r.resource.admin = Some(Admin::Secret {
-                secret: Arc::new(secret.properties),
+                name: secret.name.clone(),
+                secret: secret.properties.clone(),
             });
         }
+
         Ok(r)
     }
 

@@ -1,0 +1,18 @@
+{{- if .Values.initDataConnectionTypes.enabled }}
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: InitDataConnectionType
+metadata:
+  name: postgres
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  name: Postgres
+  provider: postgres
+  description: "Postgres data connection type"
+  credentialsFields:
+    - name: URI
+      label: Uri
+      description: "Postgres connection URI"
+      required: true
+      type: string
+{{- end }}

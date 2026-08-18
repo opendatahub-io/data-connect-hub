@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub enum FileFormat {
     Parquet,
     Csv,
+    JsonLines,
 }
 
 impl FileFormat {
@@ -19,6 +20,7 @@ impl FileFormat {
             return match fmt.to_lowercase().as_str() {
                 "parquet" => Ok(FileFormat::Parquet),
                 "csv" => Ok(FileFormat::Csv),
+                "jsonl" | "ndjson" | "jsonlines" => Ok(FileFormat::JsonLines),
                 other => Err(ConnectorError::InvalidRequest(format!("Unsupported format: {other}"))),
             };
         }
@@ -28,6 +30,8 @@ impl FileFormat {
             Ok(FileFormat::Parquet)
         } else if lower.ends_with(".csv") {
             Ok(FileFormat::Csv)
+        } else if lower.ends_with(".jsonl") || lower.ends_with(".ndjson") || lower.ends_with(".jsonlines") {
+            Ok(FileFormat::JsonLines)
         } else {
             Err(ConnectorError::InvalidRequest(format!(
                 "Cannot detect format for path: {path}. Set 'format' in connection properties."
@@ -82,6 +86,30 @@ pub fn read_csv_batches(
         .collect()
 }
 
+pub fn read_jsonl_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
+    let cursor = std::io::BufReader::new(Cursor::new(data.as_ref()));
+    let (schema, _) = arrow_json::reader::infer_json_schema(cursor, None)
+        .map_err(|e| ConnectorError::IOError(format!("Failed to infer JSONL schema: {e}")))?;
+    Ok(schema)
+}
+
+pub fn read_jsonl_batches(
+    data: Bytes,
+    schema: &Arc<Schema>,
+    batch_size: usize,
+) -> Result<Vec<RecordBatch>, ConnectorError> {
+    let cursor = std::io::BufReader::new(Cursor::new(data.as_ref()));
+    let reader = arrow_json::ReaderBuilder::new(schema.clone())
+        .with_batch_size(batch_size)
+        .build(cursor)
+        .map_err(|e| ConnectorError::IOError(format!("Failed to build JSONL reader: {e}")))?;
+
+    reader
+        .into_iter()
+        .map(|batch| batch.map_err(|e| ConnectorError::IOError(format!("JSONL read error: {e}"))))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -96,6 +124,18 @@ mod tests {
         );
         assert_eq!(FileFormat::detect("anything", Some("csv")).unwrap(), FileFormat::Csv);
         assert_eq!(
+            FileFormat::detect("anything", Some("jsonl")).unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::detect("anything", Some("ndjson")).unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::detect("anything", Some("jsonlines")).unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
             FileFormat::detect("anything", Some("Parquet")).unwrap(),
             FileFormat::Parquet
         );
@@ -108,6 +148,18 @@ mod tests {
             FileFormat::Parquet
         );
         assert_eq!(FileFormat::detect("data/train.csv", None).unwrap(), FileFormat::Csv);
+        assert_eq!(
+            FileFormat::detect("data/train.jsonl", None).unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::detect("data/train.ndjson", None).unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::detect("data/train.jsonlines", None).unwrap(),
+            FileFormat::JsonLines
+        );
         assert_eq!(
             FileFormat::detect("data/train.PARQUET", None).unwrap(),
             FileFormat::Parquet
@@ -186,6 +238,80 @@ mod tests {
 
         let scores = batches[0].column(2).as_any().downcast_ref::<Float64Array>().unwrap();
         assert!((scores.value(0) - 95.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_jsonl_roundtrip() {
+        let jsonl_data = Bytes::from(
+            "{\"id\":1,\"name\":\"alice\",\"score\":95.5}\n{\"id\":2,\"name\":\"bob\",\"score\":87.0}\n{\"id\":3,\"name\":\"charlie\",\"score\":92.3}\n",
+        );
+
+        let schema = read_jsonl_schema(&jsonl_data).unwrap();
+        assert_eq!(schema.fields().len(), 3);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int64, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("score", DataType::Float64, true),
+        ]));
+
+        let batches = read_jsonl_batches(jsonl_data, &schema, 1024).unwrap();
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].num_rows(), 3);
+
+        let names = batches[0]
+            .column_by_name("name")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(names.value(0), "alice");
+        assert_eq!(names.value(1), "bob");
+        assert_eq!(names.value(2), "charlie");
+
+        let scores = batches[0]
+            .column_by_name("score")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<Float64Array>()
+            .unwrap();
+        assert!((scores.value(0) - 95.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn test_jsonl_batch_size() {
+        let lines: String = (0..100).map(|i| format!("{{\"id\":{i}}}\n")).collect();
+        let data = Bytes::from(lines);
+
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+
+        let batches = read_jsonl_batches(data, &schema, 30).unwrap();
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 100);
+        assert!(batches.len() >= 3);
+    }
+
+    #[test]
+    fn test_jsonl_malformed_line() {
+        let data = Bytes::from("{\"id\":1}\nnot valid json\n{\"id\":3}\n");
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let result = read_jsonl_batches(data, &schema, 1024);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_jsonl_empty_input() {
+        let data = Bytes::from("");
+        let schema = read_jsonl_schema(&data).unwrap();
+        assert_eq!(schema.fields().len(), 0);
+    }
+
+    #[test]
+    fn test_jsonl_type_conflict() {
+        let data = Bytes::from("{\"id\":1}\n{\"id\":\"not_a_number\"}\n");
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
+        let result = read_jsonl_batches(data, &schema, 1024);
+        assert!(result.is_err());
     }
 
     #[test]

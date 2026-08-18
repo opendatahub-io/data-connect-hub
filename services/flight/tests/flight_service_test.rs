@@ -13,8 +13,11 @@ use commons::api::connections::{
 };
 use commons::api::errors::MetaStoreError;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
+use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::flight::service::TabularDataService;
-use flight_service::flight::{InMemorySecretStore, registry::ConnectorsRegistry};
+
+mod common;
+use common::InMemorySecretStore;
 use futures::TryStreamExt;
 use sqlite_connector::SqliteConnector;
 use sqlx::SqlitePool;
@@ -55,8 +58,9 @@ impl MetaStore for TestMetaStore {
                 properties: HashMap::new(),
             },
             status: DataConnectionStatus {
-                state: DataConnectionState::IngestionNotReady,
+                state: DataConnectionState::NotReady,
                 message: None,
+                phases: vec![],
             },
         })
     }
@@ -249,7 +253,9 @@ async fn test_flight_sql_select_prompts() {
     let secret_store = InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),
         namespace: "default".to_string(),
-        properties: HashMap::from([("url".to_string(), sqlite_url)]),
+        properties: Arc::new(HashMap::from([("url".to_string(), sqlite_url)])),
+        labels: Arc::new(HashMap::new()),
+        annotations: Arc::new(HashMap::new()),
     }]);
 
     let service = TabularDataService::new(

@@ -1,6 +1,8 @@
 use commons::api::connections::{Secret, SecretStore};
 use commons::api::errors::SecretStoreError;
 use k8s_openapi::api::core::v1::Secret as K8sSecret;
+use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
+use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::{Api, Client};
 use moka::future::Cache;
 use std::collections::HashMap;
@@ -46,24 +48,107 @@ impl SecretStore for KubeSecretStore {
                     name: n,
                     namespace: ns,
                     properties,
+                    labels: Arc::new(
+                        k8s_secret
+                            .metadata
+                            .labels
+                            .clone()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect(),
+                    ),
+                    annotations: Arc::new(
+                        k8s_secret
+                            .metadata
+                            .annotations
+                            .clone()
+                            .unwrap_or_default()
+                            .into_iter()
+                            .collect(),
+                    ),
                 })
             })
             .await
-            .map_err(|e: Arc<SecretStoreError>| match e.as_ref() {
-                SecretStoreError::SecretNotFound(msg) => SecretStoreError::SecretNotFound(msg.clone()),
-                SecretStoreError::Forbidden(msg) => SecretStoreError::Forbidden(msg.clone()),
-            })
+            .map_err(|e: Arc<SecretStoreError>| e.as_ref().clone())
+    }
+
+    async fn create_secret(&self, secret: &Secret) -> Result<(), SecretStoreError> {
+        let ns = Arc::new(secret.namespace.clone());
+
+        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), &ns);
+
+        let labels = if secret.labels.is_empty() {
+            None
+        } else {
+            Some(secret.labels.as_ref().clone().into_iter().collect())
+        };
+
+        let annotations = if secret.annotations.is_empty() {
+            None
+        } else {
+            Some(secret.annotations.as_ref().clone().into_iter().collect())
+        };
+
+        let k8s_secret = K8sSecret {
+            metadata: ObjectMeta {
+                name: Some(secret.name.clone()),
+                namespace: Some(ns.to_string()),
+                labels,
+                annotations,
+                ..Default::default()
+            },
+            string_data: Some(secret.properties.as_ref().clone().into_iter().collect()),
+            ..Default::default()
+        };
+
+        api.create(&PostParams::default(), &k8s_secret)
+            .await
+            .map_err(|e| SecretStoreError::CannotCreateSecret(e.to_string()))?;
+
+        Ok(())
+    }
+
+    async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError> {
+        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
+        api.delete(name, &DeleteParams::default())
+            .await
+            .map_err(|_| SecretStoreError::SecretNotFound(format!("{namespace}/{name}")))?;
+
+        let key = format!("{namespace}/{name}");
+        self.cache.invalidate(&key).await;
+
+        Ok(())
+    }
+
+    async fn set_secret_labels(
+        &self,
+        namespace: &str,
+        name: &str,
+        labels: HashMap<String, String>,
+    ) -> Result<(), SecretStoreError> {
+        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
+        let patch = serde_json::json!({
+            "metadata": {
+                "labels": labels
+            }
+        });
+        api.patch(name, &PatchParams::default(), &Patch::Merge(&patch))
+            .await
+            .map_err(|_| SecretStoreError::SecretNotFound(format!("{namespace}/{name}")))?;
+
+        Ok(())
     }
 }
 
-fn extract_properties(k8s_secret: &K8sSecret) -> HashMap<String, String> {
-    k8s_secret
+fn extract_properties(k8s_secret: &K8sSecret) -> Arc<HashMap<String, String>> {
+    let props = k8s_secret
         .data
         .clone()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(key, value)| String::from_utf8(value.0).ok().map(|v| (key, v)))
-        .collect()
+        .collect();
+    Arc::new(props)
 }
 
 #[cfg(test)]

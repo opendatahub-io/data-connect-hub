@@ -41,6 +41,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	kustypes "sigs.k8s.io/kustomize/api/types"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -48,7 +49,6 @@ import (
 const (
 	defaultGatewayName      = "odh-gateway"
 	defaultGatewayNamespace = "opendatahub"
-	defaultNamespace        = "opendatahub"
 
 	conditionTypeReady                 = "Ready"
 	conditionTypeProvisioningSucceeded = "ProvisioningSucceeded"
@@ -63,13 +63,14 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	nameDatabaseConfig = "dch-database-config"
 
+	kindDeployment = "Deployment"
+	kindConfigMap  = "ConfigMap"
+
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
 	platformConfigName = "opendatahub-dataconnecthub-config"
 
 	finalizerName = "dataconnecthub.opendatahub.io/finalizer"
-
-	singletonCRName = "default-dataconnectservice"
 
 	releasePlatform = "platform"
 )
@@ -82,7 +83,6 @@ type DataConnectServiceReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	ManifestsPath      string
-	Namespace          string // target namespace for deploying workloads
 	RestImage          string // resolved from RELATED_IMAGE or default
 	FlightImage        string // resolved from RELATED_IMAGE or default
 	KubeRbacProxyImage string // resolved from RELATED_IMAGE or default
@@ -95,7 +95,7 @@ type platformConfig struct {
 	GatewayNamespace string
 }
 
-func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context) platformConfig {
+func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, namespace string) platformConfig {
 	cfg := platformConfig{
 		Distribution: dchv1alpha1.DistributionStatus{
 			Name:    "Standalone",
@@ -106,7 +106,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context) p
 	}
 
 	cm := &corev1.ConfigMap{}
-	if err := r.Get(ctx, types.NamespacedName{Name: platformConfigName, Namespace: r.Namespace}, cm); err != nil {
+	if err := r.Get(ctx, types.NamespacedName{Name: platformConfigName, Namespace: namespace}, cm); err != nil {
 		if !apierrors.IsNotFound(err) {
 			logf.FromContext(ctx).Error(err, "failed to read platform ConfigMap, using defaults")
 		}
@@ -141,21 +141,19 @@ func EnvOrDefault(key, fallback string) string {
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;list;watch;create;update;patch;delete;post;put
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch
+// +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
 func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
-
-	// Only reconcile CRs in the operand namespace
-	if req.Namespace != r.Namespace {
-		log.Info("ignoring DataConnectService outside operand namespace", "namespace", req.Namespace)
-		return ctrl.Result{}, nil
-	}
 
 	var cr dchv1alpha1.DataConnectService
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
@@ -183,13 +181,13 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	log.Info("reconciling DataConnectService", "name", cr.Name)
+	log.Info("reconciling DataConnectService", "name", cr.Name, "namespace", cr.Namespace)
 
-	// Read platform configuration from ConfigMap
-	platCfg := r.readPlatformConfig(ctx)
+	// Read platform configuration from ConfigMap in the CR's namespace
+	platCfg := r.readPlatformConfig(ctx, cr.Namespace)
 
 	// Phase 1: Validate database secret exists
-	if err := r.validateDatabaseSecret(ctx); err != nil {
+	if err := r.validateDatabaseSecret(ctx, cr.Namespace); err != nil {
 		log.Error(err, "database secret validation failed")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseSecretMissing", err.Error())
@@ -199,42 +197,23 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	// Phase 2: Services (only after database is ready)
-	if err := r.reconcileService(ctx, &cr, nameRestService, cr.Spec.RestService); err != nil {
-		log.Error(err, "failed to reconcile RestService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "RestServiceError", err.Error())
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "RestServiceError", err.Error())
-			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "RestServiceError", "Failed to apply rest-service manifests")
-		})
-	}
-
-	if err := r.reconcileService(ctx, &cr, nameFlightService, cr.Spec.FlightService); err != nil {
-		log.Error(err, "failed to reconcile FlightService")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightServiceError", err.Error())
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightServiceError", err.Error())
-			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "FlightServiceError", "Failed to apply flight-service manifests")
-		})
-	}
-
-	// Phase 3: Gateway (skipped if Gateway API CRDs are not installed)
-	if err := r.reconcileHTTPRoute(ctx, &cr, &platCfg); err != nil {
+	// Phase 2: Render and apply all manifests (services + gateway)
+	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
-			log.Error(err, "failed to reconcile HTTPRoute")
+			log.Error(err, "failed to reconcile manifests")
 			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "HTTPRouteError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "HTTPRouteError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "HTTPRouteError", "Failed to apply gateway manifests")
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "ManifestError", err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "ManifestError", err.Error())
+				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "ManifestError", "Failed to apply manifests")
 			})
 		}
 	}
 
 	// All manifests applied successfully
 	// Phase 4: Check all deployments are ready before declaring Ready
-	pendingDeployments, err := r.pendingDeployments(ctx, r.Namespace)
+	pendingDeployments, err := r.pendingDeployments(ctx, cr.Namespace, cr.UID)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
@@ -331,43 +310,38 @@ func (r *DataConnectServiceReconciler) buildReleases(
 	return append(releases, platformRelease)
 }
 
-func (r *DataConnectServiceReconciler) reconcileService(
+func (r *DataConnectServiceReconciler) reconcileManifests(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
-	name string,
-	overrides *dchv1alpha1.ServiceOverrides,
+	platCfg *platformConfig,
 ) error {
-	basePath := filepath.Join(r.ManifestsPath, "base", name)
+	basePath := filepath.Join(r.ManifestsPath, "base")
 
-	patches := buildServicePatches(name, overrides)
+	gw := r.resolveGateway(cr, platCfg)
+	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
+	flightPatches := buildServicePatches(nameFlightService, cr.Spec.FlightService)
+	gwPatches := buildGatewayPatches(&gw)
+
+	patches := make([]kustypes.Patch, 0, len(restPatches)+len(flightPatches)+len(gwPatches))
+	patches = append(patches, restPatches...)
+	patches = append(patches, flightPatches...)
+	patches = append(patches, gwPatches...)
 
 	resources, err := renderKustomization(basePath, patches, nil)
 	if err != nil {
-		return fmt.Errorf("rendering %s manifests: %w", name, err)
+		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	image := resolveServiceImage(name, overrides, r.RestImage, r.FlightImage)
-	setDeploymentImage(resources, name, image)
-	if name == nameRestService {
-		setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
-	}
-	setConfigMapGlobalNamespace(resources, name+"-config", r.Namespace)
+	restImage := resolveServiceImage(nameRestService, cr.Spec.RestService, r.RestImage, r.FlightImage)
+	setDeploymentImage(resources, nameRestService, restImage)
+	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
-	return r.applyResources(ctx, cr, resources)
-}
+	flightImage := resolveServiceImage(nameFlightService, cr.Spec.FlightService, r.RestImage, r.FlightImage)
+	setDeploymentImage(resources, nameFlightService, flightImage)
 
-func (r *DataConnectServiceReconciler) reconcileHTTPRoute(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) error {
-	gwPath := filepath.Join(r.ManifestsPath, "gateway")
+	setConfigMapGlobalNamespace(resources, cr.Namespace)
 
-	gw := r.resolveGateway(cr, platCfg)
-	patches := buildGatewayPatches(&gw)
-
-	resources, err := renderKustomization(gwPath, patches, nil)
-	if err != nil {
-		return fmt.Errorf("rendering gateway manifests: %w", err)
-	}
-
-	return r.applyResources(ctx, cr, resources)
+	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
 
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.
@@ -390,7 +364,13 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 		Name:      gw.Name,
 		Namespace: gw.Namespace,
 	}
-	cr.Status.Hostname = r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
+	hostname := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
+	cr.Status.Addresses = []dchv1alpha1.Addresses{
+		{
+			Type:  "hostname",
+			Value: hostname,
+		},
+	}
 }
 
 func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
@@ -416,35 +396,39 @@ func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Contex
 	return ""
 }
 
-// isDeploymentReady checks if a deployment has all replicas available.
-func (r *DataConnectServiceReconciler) isDeploymentReady(ctx context.Context, namespace, name string) (bool, error) {
-	deploy := &appsv1.Deployment{}
-	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, deploy); err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
+// pendingDeployments returns the names of managed deployments that are not yet ready.
+func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string, ownerUID types.UID) ([]string, error) {
+	deployList := &appsv1.DeploymentList{}
+	if err := r.List(ctx, deployList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{"dataconnecthub.opendatahub.io/managed-by": "dataconnectservice"},
+	); err != nil {
+		return nil, fmt.Errorf("listing managed deployments: %w", err)
 	}
-	ready := deploy.Status.ReadyReplicas == deploy.Status.Replicas &&
-		deploy.Status.UpdatedReplicas == deploy.Status.Replicas &&
-		deploy.Generation == deploy.Status.ObservedGeneration
-	return ready, nil
-}
 
-// pendingDeployments returns the names of deployments that are not yet ready.
-func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, namespace string) ([]string, error) {
-	names := []string{nameRestService, nameFlightService}
 	var pending []string
-	for _, name := range names {
-		ready, err := r.isDeploymentReady(ctx, namespace, name)
-		if err != nil {
-			return nil, fmt.Errorf("checking deployment %s: %w", name, err)
+	for i := range deployList.Items {
+		d := &deployList.Items[i]
+		if !isOwnedBy(d, ownerUID) {
+			continue
 		}
+		ready := d.Status.ReadyReplicas == d.Status.Replicas &&
+			d.Status.UpdatedReplicas == d.Status.Replicas &&
+			d.Generation == d.Status.ObservedGeneration
 		if !ready {
-			pending = append(pending, name)
+			pending = append(pending, d.Name)
 		}
 	}
 	return pending, nil
+}
+
+func isOwnedBy(obj metav1.ObjectMetaAccessor, uid types.UID) bool {
+	for _, ref := range obj.GetObjectMeta().GetOwnerReferences() {
+		if ref.UID == uid {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *DataConnectServiceReconciler) setCondition(cr *dchv1alpha1.DataConnectService, condType string, status metav1.ConditionStatus, reason, message string) {
@@ -481,6 +465,20 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		Complete(r)
 }
 
-func (r *DataConnectServiceReconciler) platformConfigToReconcile(_ context.Context, _ client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: singletonCRName, Namespace: r.Namespace}}}
+func (r *DataConnectServiceReconciler) platformConfigToReconcile(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list dchv1alpha1.DataConnectServiceList
+	if err := r.List(ctx, &list); err != nil {
+		logf.FromContext(ctx).Error(err, "failed to list DataConnectService CRs for ConfigMap trigger")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      list.Items[i].Name,
+				Namespace: list.Items[i].Namespace,
+			},
+		})
+	}
+	return requests
 }

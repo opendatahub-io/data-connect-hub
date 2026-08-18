@@ -32,6 +32,10 @@ SAMPLE_CONNECTION_WRAPPED_JSON = {
         "admin": {"secret_ref": "secret/test-conn"},
         "properties": {"key": "value"},
     },
+    "status": {
+        "state": "ready",
+        "message": "Connected",
+    },
 }
 
 SAMPLE_CONNECTION_TYPE_JSON = {

@@ -28,6 +28,10 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
 const (
@@ -111,17 +115,22 @@ type connectionTypeListResponse struct {
 	Items      []ConnectionTypeResource `json:"items"`
 }
 
+// URLResolver returns the base URL for the REST service. It is called on
+// each request so the URL can be derived dynamically (e.g. from the
+// DataConnectService CR's namespace).
+type URLResolver func() (string, error)
+
 type httpConnectionTypeClient struct {
-	baseURL   string
-	tokenPath string
+	resolveURL URLResolver
+	tokenPath  string
 
 	httpClient *http.Client
 }
 
-func newHTTPClient(baseURL string) *httpConnectionTypeClient {
+func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
 	return &httpConnectionTypeClient{
-		baseURL:   baseURL,
-		tokenPath: saTokenPath,
+		resolveURL: resolver,
+		tokenPath:  saTokenPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
@@ -135,25 +144,34 @@ func newHTTPClient(baseURL string) *httpConnectionTypeClient {
 }
 
 // NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
-// rest-service through kube-rbac-proxy over HTTPS. It reads the service
-// account token on each request (Kubernetes rotates projected tokens).
-func NewHTTPConnectionTypeClient(baseURL string) ConnectionTypeClient {
-	return newHTTPClient(baseURL)
+// rest-service through kube-rbac-proxy over HTTPS. The URL is resolved
+// dynamically via the provided resolver.
+func NewHTTPConnectionTypeClient(resolver URLResolver) ConnectionTypeClient {
+	return newHTTPClient(resolver)
 }
 
 // NewHTTPMigrationClient creates a ConnectionMigrationClient for the
 // Secret watcher to list connection types and create connections.
-func NewHTTPMigrationClient(baseURL string) ConnectionMigrationClient {
-	return newHTTPClient(baseURL)
+func NewHTTPMigrationClient(resolver URLResolver) ConnectionMigrationClient {
+	return newHTTPClient(resolver)
+}
+
+func (c *httpConnectionTypeClient) baseURL() (string, error) {
+	return c.resolveURL()
 }
 
 func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
+	url, err := c.baseURL()
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+
 	body, err := json.Marshal(ct)
 	if err != nil {
 		return fmt.Errorf("marshaling connection type: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/data/connection-types", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1/data/connection-types", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -180,7 +198,12 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 }
 
 func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/data/connection-types", nil)
+	url, err := c.baseURL()
+	if err != nil {
+		return nil, ErrServiceUnavailable
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/v1/data/connection-types", nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -209,12 +232,17 @@ func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tena
 }
 
 func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) error {
+	url, err := c.baseURL()
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+
 	body, err := json.Marshal(conn)
 	if err != nil {
 		return fmt.Errorf("marshaling connection: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/api/v1/data/connections", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1/data/connections", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -238,6 +266,23 @@ func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantI
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+// NewRestServiceURLResolver returns a URLResolver that discovers the REST service
+// URL by listing DataConnectService CRs and constructing the in-cluster service URL
+// from the singleton CR's namespace.
+func NewRestServiceURLResolver(k8sClient client.Client) URLResolver {
+	return func() (string, error) {
+		var list dchv1alpha1.DataConnectServiceList
+		if err := k8sClient.List(context.Background(), &list); err != nil {
+			return "", fmt.Errorf("listing DataConnectService CRs: %w", err)
+		}
+		if len(list.Items) == 0 {
+			return "", fmt.Errorf("no DataConnectService CR found")
+		}
+		ns := list.Items[0].Namespace
+		return fmt.Sprintf("https://dch-rest-service.%s.svc.cluster.local:8443", ns), nil
+	}
 }
 
 func (c *httpConnectionTypeClient) setHeaders(req *http.Request, tenantID string) {

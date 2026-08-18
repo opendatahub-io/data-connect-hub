@@ -13,6 +13,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DataFormat = Literal["tabular", "binary"]
+DataConnectionState = Literal["ready", "not_ready"]
 
 
 class AdminSecretRef(BaseModel):
@@ -20,10 +21,17 @@ class AdminSecretRef(BaseModel):
 
 
 class AdminSecret(BaseModel):
+    name: str
     secret: dict[str, str]
 
 
 Admin = AdminSecretRef | AdminSecret
+
+
+class DataConnectionStatus(BaseModel):
+    state: DataConnectionState = "not_ready"
+    message: str | None = None
+    phases: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class DataConnection(BaseModel):
@@ -33,17 +41,20 @@ class DataConnection(BaseModel):
     name: str
     data_connection_type_id: str
     format: DataFormat
-    tenant_id: str
+    tenant_id: str = ""
     created_at: datetime
     updated_at: datetime
     admin: Admin | None = None
     properties: dict[str, str] = Field(default_factory=dict)
+    status: DataConnectionStatus = Field(default_factory=DataConnectionStatus)
 
     @model_validator(mode="before")
     @classmethod
     def _flatten_resource(cls, data: Any) -> Any:
         if isinstance(data, dict) and "metadata" in data and "resource" in data:
             flat = {**data["metadata"], **data["resource"]}
+            if "status" in data:
+                flat["status"] = data["status"]
             return flat
         return data
 

@@ -4,6 +4,10 @@ namePrefix: dch-
 resources:
   - rest-service
   - flight-service
+  - gateway
+
+configurations:
+  - name-reference.yaml
 
 configMapGenerator:
 - name: params

@@ -35,15 +35,6 @@ struct CommandLineArgs {
     /// of `config`; missing values here fall back to `config`.
     #[arg(long, default_value = "/secrets/secret-config.toml")]
     secret_config: String,
-
-    /// Path to a PEM-encoded TLS certificate. When both --tls-cert-file and
-    /// --tls-private-key-file are provided, the server enables TLS.
-    #[arg(long)]
-    tls_cert_file: Option<String>,
-
-    /// Path to a PEM-encoded TLS private key.
-    #[arg(long)]
-    tls_private_key_file: Option<String>,
 }
 
 pub async fn shutdown_signal() {
@@ -62,7 +53,6 @@ pub async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
-    // Wait until either Ctrl+C (SIGINT) or SIGTERM is received
     tokio::select! {
         _ = ctrl_c => println!("\nReceived Ctrl+C, shutting down gracefully..."),
         _ = terminate => println!("\nReceived SIGTERM, shutting down gracefully..."),
@@ -79,22 +69,8 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
     Ok(config)
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    // Both aws-lc-rs (opendal/reqwest) and ring (kube-client) features are
-    // enabled on rustls, so it cannot auto-select a CryptoProvider.
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
-
-    let args = CommandLineArgs::parse();
-    let config = load_config(args.config, args.secret_config)?;
-    config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
-    commons::utils::init_tracing(args.json_logs);
-
-    tracing::info!("Starting DataConnectorHub Flight service");
-
-    let connectors_registry = ConnectorsRegistry::new()
+fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
+    ConnectorsRegistry::new()
         .with_connector(Arc::new(PgConnector::new(
             Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
             Duration::from_secs(config.ingestion_cache_pools.idle_secs),
@@ -105,48 +81,28 @@ async fn main() -> Result<()> {
             Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
             Duration::from_secs(config.ingestion_cache_pools.idle_secs),
             config.ingestion_cache_pools.max_capacity,
-        )));
+        )))
+}
 
-    let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
-
-    let query_options = commons::api::tabular::QueryOptions {
-        batch_size: config.query.batch_size,
-    };
-
-    let addr = format!("{}:{}", config.server.address, config.server.port).parse()?;
-    let service = TabularDataService::new(
-        Arc::new(connectors_registry),
-        Arc::new(PgMetaStore::new(config.database, config.global_connection_types.tenant_id).await?),
-        Arc::new(secret_store),
-        query_options,
-    );
-
-    let service = FlightServiceServer::new(service);
-
-    let (health_reporter, health_service) = tonic_health::server::health_reporter();
-    health_reporter
-        .set_serving::<FlightServiceServer<TabularDataService>>()
-        .await;
-
-    let mut builder = tonic::transport::Server::builder();
-
-    match (&args.tls_cert_file, &args.tls_private_key_file) {
-        (Some(cert_file), Some(key_file)) => {
-            let cert = tokio::fs::read(cert_file).await?;
-            let key = tokio::fs::read(key_file).await?;
-            let identity = tonic::transport::Identity::from_pem(cert, key);
-            let tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
-            builder = builder.tls_config(tls_config)?;
-            tracing::info!("TLS enabled (cert: {}, key: {})", cert_file, key_file);
-        },
-        (None, None) => {
-            tracing::warn!("TLS is DISABLED — gRPC traffic is unencrypted");
-        },
-        _ => {
-            anyhow::bail!("Both --tls-cert-file and --tls-private-key-file must be provided to enable TLS");
-        },
+async fn configure_tls(
+    mut builder: tonic::transport::Server,
+    tls: &utils::TlsConfig,
+) -> Result<tonic::transport::Server> {
+    tls.validate().map_err(|e| anyhow::anyhow!(e))?;
+    if let (Some(cert_file), Some(key_file)) = (&tls.cert_file, &tls.key_file) {
+        let cert = tokio::fs::read(cert_file).await?;
+        let key = tokio::fs::read(key_file).await?;
+        let identity = tonic::transport::Identity::from_pem(cert, key);
+        let tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
+        builder = builder.tls_config(tls_config)?;
+        tracing::info!("TLS enabled (cert: {}, key: {})", cert_file, key_file);
+    } else {
+        tracing::warn!("TLS is DISABLED — gRPC traffic is unencrypted");
     }
+    Ok(builder)
+}
 
+fn configure_metrics(config: &ServerConfig) -> Result<()> {
     if config.metrics.enabled {
         tracing::info!(
             "Prometheus metrics enabled on {}:{}",
@@ -158,16 +114,29 @@ async fn main() -> Result<()> {
     } else {
         tracing::info!("Prometheus metrics disabled");
     }
+    Ok(())
+}
 
-    if config.auth.enabled {
+async fn start_server(
+    mut builder: tonic::transport::Server,
+    auth: &utils::AuthConfig,
+    service: FlightServiceServer<TabularDataService>,
+    addr: std::net::SocketAddr,
+) -> Result<()> {
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<FlightServiceServer<TabularDataService>>()
+        .await;
+
+    if auth.enabled {
         tracing::info!(
             "Auth enabled (cache TTL: {}s, token_review_audiences: {:?})",
-            config.auth.cache_ttl_secs,
-            config.auth.token_review_audiences
+            auth.cache_ttl_secs,
+            auth.token_review_audiences
         );
         let kube_auth = KubeAuthClient::try_default(
-            Duration::from_secs(config.auth.cache_ttl_secs),
-            config.auth.token_review_audiences.clone(),
+            Duration::from_secs(auth.cache_ttl_secs),
+            auth.token_review_audiences.clone(),
         )
         .await?;
         let auth_layer = AuthLayer::new(Arc::new(kube_auth));
@@ -186,7 +155,45 @@ async fn main() -> Result<()> {
             .await?;
     }
 
-    tracing::info!("DataConnectorHub Flight service stopped");
+    Ok(())
+}
 
+#[tokio::main]
+async fn main() -> Result<()> {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
+
+    let args = CommandLineArgs::parse();
+    let config = load_config(args.config, args.secret_config)?;
+    config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
+    commons::utils::init_tracing(args.json_logs);
+
+    tracing::info!("Starting DataConnectorHub Flight service");
+
+    let addr: std::net::SocketAddr = format!("{}:{}", config.server.address, config.server.port).parse()?;
+    let builder = tonic::transport::Server::builder();
+    let builder = configure_tls(builder, &config.tls).await?;
+    configure_metrics(&config)?;
+
+    let connectors_registry = Arc::new(build_connectors_registry(&config));
+    let secret_store = Arc::new(KubeSecretStore::try_default(Duration::from_secs(300)).await?);
+    let query_options = commons::api::tabular::QueryOptions {
+        batch_size: config.query.batch_size,
+    };
+
+    let tenant_id = config.global_connection_types.tenant_id.clone();
+    let auth = config.auth;
+    let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
+
+    let service = FlightServiceServer::new(TabularDataService::new(
+        connectors_registry,
+        meta_store,
+        secret_store,
+        query_options,
+    ));
+
+    start_server(builder, &auth, service, addr).await?;
+    tracing::info!("DataConnectorHub Flight service stopped");
     Ok(())
 }
