@@ -64,6 +64,7 @@ const (
 	nameDatabaseConfig = "dch-database-config"
 
 	kindDeployment = "Deployment"
+	kindConfigMap  = "ConfigMap"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 

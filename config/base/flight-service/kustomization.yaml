@@ -9,6 +9,3 @@ resources:
   - configmap.yaml
   - service_account.yaml
   - networkpolicy.yaml
-
-configurations:
-  - name-reference.yaml

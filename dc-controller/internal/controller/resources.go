@@ -284,7 +284,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 
 func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {
 	for _, obj := range resources {
-		if obj.GetKind() != "ConfigMap" {
+		if obj.GetKind() != kindConfigMap {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
