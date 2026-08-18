@@ -8,7 +8,7 @@ use commons::api::connections::DataFormat;
 use commons::api::storage::SecretStore;
 use std::sync::Arc;
 
-pub async fn validate_data_connection(
+pub async fn verify_data_connection(
     data_connection: &DataConnectionResource,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
@@ -25,7 +25,7 @@ pub async fn validate_data_connection(
 
     if let Some(Admin::SecretRef { secret_ref }) = &data_connection.resource.admin {
         let secret = secret_store
-            .get_secret(&tenant_id, &secret_ref)
+            .get_secret(&tenant_id, secret_ref)
             .await
             .map_err(|_| ValidationError::InvalidSecret)?;
 

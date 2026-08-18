@@ -128,7 +128,7 @@ impl TabularReader for SqliteReader {
 
         Ok(Box::pin(stream))
     }
-    
+
     async fn test_connection(&self) -> Result<(), ConnectorError> {
         Ok(())
     }

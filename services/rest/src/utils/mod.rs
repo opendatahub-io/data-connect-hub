@@ -1,9 +1,9 @@
+use commons::api::connection_types::Secret;
+use commons::api::connections::Admin;
+use commons::api::connections::DataConnection;
 use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
-use commons::api::connections::DataConnection;
-use commons::api::connection_types::Secret;
-use commons::api::connections::Admin;
 use std::collections::HashMap;
 use std::sync::Arc;
 

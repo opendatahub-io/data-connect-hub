@@ -164,7 +164,7 @@ impl TabularReader for S3Reader {
 
         Ok(Box::pin(stream))
     }
-    
+
     async fn test_connection(&self) -> Result<(), ConnectorError> {
         Ok(())
     }

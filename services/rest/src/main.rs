@@ -15,8 +15,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod rest;
+#[allow(unused)]
+mod state;
 mod utils;
-mod validations;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

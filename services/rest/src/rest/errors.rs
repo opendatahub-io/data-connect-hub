@@ -26,6 +26,7 @@ pub enum EndpointError {
     Unimplemented,
 }
 
+#[allow(unused)]
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Invalid tenant ID")]
