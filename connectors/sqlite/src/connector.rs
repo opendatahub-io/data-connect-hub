@@ -128,6 +128,10 @@ impl TabularReader for SqliteReader {
 
         Ok(Box::pin(stream))
     }
+    
+    async fn test_connection(&self) -> Result<(), ConnectorError> {
+        Ok(())
+    }
 }
 
 fn rows_to_batch(schema: &Arc<Schema>, rows: &[SqliteRow]) -> Result<RecordBatch, ConnectorError> {

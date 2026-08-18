@@ -16,6 +16,7 @@ use std::time::Duration;
 
 mod rest;
 mod utils;
+mod validations;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]

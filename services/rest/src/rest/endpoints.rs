@@ -1,7 +1,7 @@
 use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
-use crate::utils::validations::transform_data_connection;
+use crate::utils::transform_data_connection;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -9,10 +9,9 @@ use commons::api::connections::DataConnection;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
-
-use std::collections::HashMap;
 
 #[derive(Clone)]
 pub struct ApiContext {

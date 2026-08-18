@@ -138,6 +138,10 @@ impl TabularReader for PgReader {
 
         Ok(Box::pin(stream))
     }
+
+    async fn test_connection(&self) -> Result<(), ConnectorError> {
+        Ok(())
+    }
 }
 
 fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, ConnectorError> {
