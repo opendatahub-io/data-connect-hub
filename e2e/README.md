@@ -8,38 +8,38 @@ End-to-end tests for Data Connect Hub, driven by the Python SDK against a live d
 - `kubectl` configured and pointing at the target cluster
 - Python 3.11+
 
-## 2. Setup
+## 2. Setup & Run
 
 ```bash
 cd /path/to/data-connect-hub
-export DCH_NS=dch   # namespace where DCH services run
 
-# 1. Install test dependencies
-make e2e-install
-
-# 2. Start port-forwards
+# 1. Start port-forwards
+DCH_NS=dch   # namespace where DCH services run
 kubectl port-forward -n $DCH_NS svc/dch-flight-service 50051:50051 &
 kubectl port-forward -n $DCH_NS svc/dch-rest-service 18443:8443 &
+kubectl port-forward -n $DCH_NS svc/dch-flight-service 19090:9090 &  # metrics (optional)
 
-# 3. Prepare environment (once)
-DCH_SERVICE_NAMESPACE=$DCH_NS \
-DCH_REST_URL=https://127.0.0.1:18443 \
-DCH_FLIGHT_URL=grpc+tls://127.0.0.1:50051 \
-  bash e2e/setup.sh
+# 2. Copy the example config and fill in your values
+cp e2e/env.example e2e/env.local
+vi e2e/env.local
 
-# 4. Run tests (repeatable)
-make e2e-test
+# 3. Run (installs deps, prepares K8s resources, runs pytest)
+./e2e/run-e2e.sh e2e/env.local
 ```
 
-## 3. Environment Variables
+To pass extra pytest arguments:
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DCH_SERVICE_NAMESPACE` | Yes | | Namespace where DCH services run |
-| `DCH_REST_URL` | Yes | | REST service URL (e.g. `https://127.0.0.1:18443`) |
-| `DCH_FLIGHT_URL` | Yes | | Flight gRPC URL (e.g. `grpc+tls://127.0.0.1:50051`) |
-| `DCH_TENANT_ID` | No | `dch-e2e` | Tenant namespace name (created if missing) |
-| `DCH_FLIGHT_SA` | No | `dch-flight-service-sa` | Flight service ServiceAccount name |
-| `DCH_TOKEN_AUDIENCE` | No | `https://kubernetes.default.svc` | Audience for SA token |
-| `DCH_INSECURE` | No | `true` | Skip TLS verification (for self-signed certs) |
-| `DCH_AUTH_TOKEN` | No | *(generated)* | Skip SA/token creation if already set |
+```bash
+./e2e/run-e2e.sh e2e/env.local -k test_health
+./e2e/run-e2e.sh e2e/env.local --tb=short -x
+```
+
+## 3. Configuration
+
+See `env.example` for all available settings. Required fields:
+
+| Variable | Description |
+|----------|-------------|
+| `DCH_SERVICE_NAMESPACE` | Namespace where DCH services run |
+| `DCH_REST_URL` | REST service URL (e.g. `https://127.0.0.1:18443`) |
+| `DCH_FLIGHT_URL` | Flight gRPC URL (e.g. `grpc+tls://127.0.0.1:50051`) |

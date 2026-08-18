@@ -38,6 +38,7 @@ coverage.json
 
 # E2E test env (contains tokens) and build artifacts
 e2e/.env
+e2e/env.local
 e2e/.venv/
 e2e/*.egg-info/
 

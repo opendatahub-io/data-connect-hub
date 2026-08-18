@@ -9,7 +9,7 @@ by setup.sh into .env and loaded at the top of this file.
     DCH_AUTH_TOKEN         Bearer token
     DCH_INSECURE           Skip TLS verify          (default: false)
     DCH_CA_CERT            CA cert path              (optional)
-    DCH_E2E_PG_SECRET      K8s secret name for PG    (set by setup.sh, enables query tests)
+    DCH_PG_SECRET      K8s secret name for PG    (set by setup.sh, enables query tests)
 """
 
 from __future__ import annotations
@@ -54,6 +54,11 @@ def flight_url() -> str:
 
 
 @pytest.fixture(scope="session")
+def flight_metrics_url() -> str | None:
+    return os.environ.get("DCH_FLIGHT_METRICS_URL") or None
+
+
+@pytest.fixture(scope="session")
 def tenant_id() -> str:
     return os.environ.get("DCH_TENANT_ID", "e2e-test")
 
@@ -61,6 +66,16 @@ def tenant_id() -> str:
 @pytest.fixture(scope="session")
 def auth_token() -> str:
     return os.environ.get("DCH_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def denied_auth_token() -> str:
+    return os.environ.get("DCH_DENIED_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def no_access_namespace() -> str:
+    return os.environ.get("DCH_NO_ACCESS_NAMESPACE", "")
 
 
 @pytest.fixture(scope="session")
@@ -74,8 +89,28 @@ def insecure() -> bool:
 
 
 @pytest.fixture(scope="session")
-def e2e_pg_secret() -> str | None:
-    return os.environ.get("DCH_E2E_PG_SECRET") or None
+def pg_secret() -> str | None:
+    return os.environ.get("DCH_PG_SECRET") or None
+
+
+@pytest.fixture(scope="session")
+def s3_secret() -> str | None:
+    return os.environ.get("DCH_S3_SECRET") or None
+
+
+@pytest.fixture(scope="session")
+def s3_csv_query() -> str | None:
+    return os.environ.get("DCH_S3_CSV_QUERY") or None
+
+
+@pytest.fixture(scope="session")
+def s3_parquet_query() -> str | None:
+    return os.environ.get("DCH_S3_PARQUET_QUERY") or None
+
+
+@pytest.fixture(scope="session")
+def s3_jsonl_query() -> str | None:
+    return os.environ.get("DCH_S3_JSONL_QUERY") or None
 
 
 # ---------------------------------------------------------------------------
@@ -206,7 +241,7 @@ def create_connection(rest_client: DataConnectClient):
 
 @pytest.fixture(scope="module")
 def pg_flight_connection(
-    e2e_pg_secret: str | None,
+    pg_secret: str | None,
     rest_client: DataConnectClient,
 ) -> str:
     """Create connection type + connection for Flight SQL query tests.
@@ -214,8 +249,8 @@ def pg_flight_connection(
     The K8s secret and test data are prepared by setup.sh.
     Returns the connection ID. Cleans up REST resources after the module.
     """
-    if not e2e_pg_secret:
-        pytest.skip("DCH_E2E_PG_SECRET not set (run e2e/setup.sh first)")
+    if not pg_secret:
+        pytest.skip("DCH_PG_SECRET not set (run e2e/setup.sh first)")
 
     ct = rest_client.create_connection_type(
         name=_unique_name("e2e-pg-type"),
@@ -226,7 +261,41 @@ def pg_flight_connection(
         name=_unique_name("e2e-pg-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=e2e_pg_secret),
+        admin=AdminSecretRef(secret_ref=pg_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def s3_flight_connection(
+    s3_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight S3 query tests.
+
+    The K8s secret is prepared by run-e2e.sh. S3 data must already exist.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not s3_secret:
+        pytest.skip("DCH_S3_SECRET not set (set AWS credentials in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-s3-type"),
+        provider="s3",
+        description="e2e S3 test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-s3-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=s3_secret),
         properties={},
     )
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 
-class TestHealth:
+class TestRestHealth:
     def test_health_endpoint(self, http_client: httpx.Client) -> None:
         resp = http_client.get("/api/v1/data/health")
         assert resp.status_code == 200

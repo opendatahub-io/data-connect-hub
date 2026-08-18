@@ -98,7 +98,7 @@ class FlightSQLClient:
         }
         try:
             return flight_dbapi.connect(self._flight_url, db_kwargs=db_kwargs)
-        except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:
+        except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
 
     def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
@@ -143,11 +143,11 @@ class FlightSQLClient:
     def _do_server_info(self) -> dict[str, Any]:
         try:
             conn = flight_dbapi.connect(self._flight_url, db_kwargs=self._base_kwargs())
-        except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:
+        except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
         try:
             return {str(k): v for k, v in conn.adbc_get_info().items()}
-        except (flight_dbapi.InterfaceError, flight_dbapi.OperationalError) as exc:
+        except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
         finally:
             conn.close()
