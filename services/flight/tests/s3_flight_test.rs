@@ -4,11 +4,13 @@ use arrow::array::{Array, Float64Array, Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
-use commons::api::connections::{
-    Admin, DataConnection, DataConnectionType, DataConnectionTypeResource, MetaStore, Secret,
-};
+use commons::api::connection_types::DataConnectionType;
+use commons::api::connection_types::DataConnectionTypeResource;
+use commons::api::connection_types::Secret;
+use commons::api::connections::{Admin, DataConnection};
 use commons::api::connections::{DataConnectionResource, DataFormat};
 use commons::api::errors::MetaStoreError;
+use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::flight::service::TabularDataService;
@@ -107,6 +109,7 @@ impl MetaStore for S3TestMetaStore {
                 description: Some("S3-compatible object storage".to_string()),
                 credentials_fields: vec![],
             },
+            status: Default::default(),
         })
     }
 

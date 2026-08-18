@@ -1,11 +1,10 @@
 use chrono::Utc;
 use commons::api::ResourceMetadata;
+use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource};
 use commons::api::connections::Admin;
-use commons::api::connections::{
-    DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus, DataConnectionType,
-    DataConnectionTypeResource, MetaStore,
-};
+use commons::api::connections::{DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus};
 use commons::api::errors::MetaStoreError;
+use commons::api::storage::MetaStore;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
@@ -329,6 +328,7 @@ impl MetaStore for PgMetaStore {
                 updated_at: now,
             },
             resource: data_connection_type.clone(),
+            status: Default::default(),
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
@@ -377,6 +377,7 @@ impl MetaStore for PgMetaStore {
                 ..existing.metadata
             },
             resource: data_connection_type,
+            status: existing.status.clone(),
         };
 
         let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;

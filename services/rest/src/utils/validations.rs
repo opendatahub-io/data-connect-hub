@@ -1,8 +1,7 @@
 use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 
-use commons::api::connections::Secret;
-
+use commons::api::connection_types::Secret;
 use std::collections::HashMap;
 use std::sync::Arc;
 

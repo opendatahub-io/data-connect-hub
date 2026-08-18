@@ -1,5 +1,6 @@
-use commons::api::connections::{Secret, SecretStore};
+use commons::api::connection_types::Secret;
 use commons::api::errors::SecretStoreError;
+use commons::api::storage::SecretStore;
 use std::collections::HashMap;
 use std::sync::RwLock;
 

@@ -4,14 +4,14 @@ use super::errors::RestErrorResponse;
 use crate::utils::validations::transform_data_connection;
 use actix_web::web::Bytes;
 use actix_web::{HttpResponse, web};
+use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
-use commons::api::connections::MetaStore;
-use commons::api::connections::SecretStore;
+use commons::api::storage::MetaStore;
+use commons::api::storage::SecretStore;
 use serde::Serialize;
 use std::sync::Arc;
 use tracing::info;
 
-use commons::api::connections::DataConnectionType;
 use std::collections::HashMap;
 
 #[derive(Clone)]
@@ -195,8 +195,12 @@ pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
 mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
-    use commons::api::connections::{DataConnectionResource, DataConnectionTypeResource, Secret};
+    use commons::api::connection_types::DataConnectionTypeResource;
+    use commons::api::connection_types::Secret;
+    use commons::api::connections::DataConnectionResource;
     use commons::api::errors::SecretStoreError;
+    use commons::api::storage::MetaStore;
+    use commons::api::storage::SecretStore;
     use std::collections::HashMap;
 
     use super::*;
@@ -317,6 +321,7 @@ mod tests {
                         description: Some("PostgreSQL database connection".to_string()),
                         credentials_fields: vec![],
                     },
+                    status: Default::default(),
                 })
             } else {
                 Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
@@ -338,6 +343,7 @@ mod tests {
                     updated_at: "2026-01-01T00:00:00Z".to_string(),
                 },
                 resource: data_connection_type.clone(),
+                status: Default::default(),
             })
         }
 

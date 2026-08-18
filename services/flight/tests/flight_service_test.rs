@@ -4,18 +4,21 @@ use arrow::array::{Array, StringArray};
 use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::ResourceList;
 use commons::api::ResourceMetadata;
+use commons::api::connection_types::DataConnectionType;
+use commons::api::connection_types::DataConnectionTypeResource;
+use commons::api::connection_types::Field;
+use commons::api::connection_types::Secret;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::connections::{
-    Admin, DataConnection, DataConnectionType, DataConnectionTypeResource, MetaStore, Secret,
-};
+use commons::api::connections::{Admin, DataConnection};
 use commons::api::errors::MetaStoreError;
+use commons::api::storage::MetaStore;
+
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::flight::service::TabularDataService;
-
 mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
@@ -129,7 +132,7 @@ impl MetaStore for TestMetaStore {
                 name: "SQLite".to_string(),
                 provider: "sqlite".to_string(),
                 description: None,
-                credentials_fields: vec![commons::api::connections::Field {
+                credentials_fields: vec![Field {
                     name: "url".to_string(),
                     label: "Url".to_string(),
                     d_type: "string".to_string(),
@@ -139,6 +142,7 @@ impl MetaStore for TestMetaStore {
                     default_value: None,
                 }],
             },
+            status: Default::default(),
         })
     }
 }
@@ -250,18 +254,18 @@ async fn test_flight_sql_select_prompts() {
 
     let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(SqliteConnector::new()));
 
-    let secret_store = InMemorySecretStore::new(vec![Secret {
+    let secret_store = Arc::new(InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),
         namespace: "default".to_string(),
         properties: Arc::new(HashMap::from([("url".to_string(), sqlite_url)])),
         labels: Arc::new(HashMap::new()),
         annotations: Arc::new(HashMap::new()),
-    }]);
+    }]));
 
     let service = TabularDataService::new(
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
-        Arc::new(secret_store),
+        secret_store,
         Default::default(),
     );
 

@@ -1,5 +1,6 @@
-use commons::api::connections::{Secret, SecretStore};
+use commons::api::connection_types::Secret;
 use commons::api::errors::SecretStoreError;
+use commons::api::storage::SecretStore;
 use k8s_openapi::api::core::v1::Secret as K8sSecret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{DeleteParams, Patch, PatchParams, PostParams};

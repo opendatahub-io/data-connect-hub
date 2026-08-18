@@ -11,9 +11,10 @@ use arrow_flight::{
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
-use commons::api::connections::{Admin, DataConnectionResource, SecretStore};
+use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::storage::{MetaStore, SecretStore};
 use commons::api::tabular::QueryOptions;
-use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID, connections::MetaStore};
+use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
