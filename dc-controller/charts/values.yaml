@@ -12,7 +12,10 @@ controllerManager:
       cpu: 10m
       memory: 64Mi
 
-relatedImages: {}
+relatedImages:
+  restService: quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable
+  flightService: quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable
+  kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
 
 leaderElection: true
 
