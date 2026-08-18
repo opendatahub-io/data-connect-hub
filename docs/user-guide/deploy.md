@@ -264,11 +264,20 @@ watches this ConfigMap and reconciles on changes.
 
 ### 1. Delete the DataConnectService CR
 
-The CR carries a finalizer, so deleting it cleans up all managed
-resources (deployments, services, configmaps, networkpolicies, etc.):
+The CR carries a finalizer, so deleting it cleans up all namespace-scoped
+managed resources (deployments, services, configmaps, networkpolicies).
+Cluster-scoped resources (ClusterRoles, ClusterRoleBindings) are also
+cleaned up via owner references:
 
 ```console
 oc delete dchs default-dataconnectservice -n $NS
+```
+
+If cluster-scoped resources are not garbage-collected (e.g. after a
+forced deletion), clean them up manually:
+
+```console
+oc delete clusterrole,clusterrolebinding -l dataconnecthub.opendatahub.io/managed-by=dataconnectservice
 ```
 
 ### 2. Remove the operator
