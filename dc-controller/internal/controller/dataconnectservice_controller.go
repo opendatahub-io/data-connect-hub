@@ -396,7 +396,13 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 		Name:      gw.Name,
 		Namespace: gw.Namespace,
 	}
-	cr.Status.Hostname = r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
+	hostname := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
+	cr.Status.Addresses = []dchv1alpha1.Addresses{
+		{
+			Type:  "hostname",
+			Value: hostname,
+		},
+	}
 }
 
 func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
