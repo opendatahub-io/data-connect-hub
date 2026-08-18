@@ -24,7 +24,7 @@ class TestFlightS3:
         assert set(table.column_names) >= {"id", "category", "prompt"}
         rows = table.to_pydict()
         assert rows["id"] == [1, 2, 3]
-        assert rows["category"] == ["factuality", "reasoning", "safety"]
+        assert rows["category"] == ["factuality_csv", "reasoning_csv", "safety_csv"]
 
     def test_parquet_query(
         self, dch_client: DataConnectClient, s3_flight_connection: str, s3_parquet_query: str | None
@@ -39,8 +39,6 @@ class TestFlightS3:
         assert rows["id"] == [11, 12, 13]
         assert rows["category"] == ["factuality_parquet", "reasoning_parquet", "safety_parquet"]
 
-    # TODO: enable when JSONL support is implemented in the Flight service
-    @pytest.mark.skip(reason="JSONL support not yet implemented")
     def test_jsonl_query(
         self, dch_client: DataConnectClient, s3_flight_connection: str, s3_jsonl_query: str | None
     ) -> None:
