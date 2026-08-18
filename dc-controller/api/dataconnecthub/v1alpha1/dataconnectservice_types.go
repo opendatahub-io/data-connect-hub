@@ -110,6 +110,7 @@ type DataConnectServiceSpec struct {
 	Gateway *Gateway `json:"gateway,omitempty"`
 }
 
+// Addresses identifies an address where the service is reachable
 type Addresses struct {
 	// type can be "hostname"
 	// +optional
@@ -117,7 +118,7 @@ type Addresses struct {
 
 	// the value of the address
 	// +optional
-	Value string `json:"httpRoute,omitempty"`
+	Value string `json:"value,omitempty"`
 }
 
 // DataConnectServiceStatus defines the observed state of DataConnectService.
@@ -140,7 +141,7 @@ type DataConnectServiceStatus struct {
 
 	// addresses is the addresses where the service is reachable
 	// +optional
-	Adresses []Addresses `json:"addresses,omitempty"`
+	Addresses []Addresses `json:"addresses,omitempty"`
 
 	// httpRoute is the name of the HTTPRoute resource created for this service
 	// +optional
