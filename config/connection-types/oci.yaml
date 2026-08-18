@@ -9,7 +9,7 @@ credentials_fields:
     type: string
   - name: OCI_HOST
     label: Oci host name
-    description: OCI resgitry host name
+    description: OCI registry host name
     required: true
     type: string
 

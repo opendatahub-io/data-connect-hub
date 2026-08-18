@@ -15,4 +15,131 @@ spec:
       description: "Postgres connection URI"
       required: true
       type: string
+---
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: InitDataConnectionType
+metadata:
+  name: huggingface
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  name: HuggingFace
+  provider: huggingface
+  description: "Hugging Face model and dataset hub"
+  credentialsFields:
+    - name: HF_URI
+      label: URI
+      description: "HuggingFace URI"
+      required: true
+      type: string
+    - name: HF_TOKEN
+      label: Token
+      description: "HuggingFace token"
+      required: false
+      type: string
+---
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: InitDataConnectionType
+metadata:
+  name: milvus
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  name: Milvus
+  provider: milvus
+  description: "Milvus vector database"
+  credentialsFields:
+    - name: MILVUS_HOST
+      label: Host
+      description: "Milvus server hostname or IP address"
+      required: true
+      type: string
+    - name: MILVUS_PORT
+      label: Port
+      description: "Milvus server port"
+      required: false
+      type: string
+      defaultValue: "19530"
+    - name: MILVUS_TOKEN
+      label: Token
+      description: "Milvus authentication token"
+      required: false
+      type: string
+    - name: MILVUS_DATABASE
+      label: Database
+      description: "Milvus database name"
+      required: false
+      type: string
+      defaultValue: "default"
+---
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: InitDataConnectionType
+metadata:
+  name: elasticsearch
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  name: ElasticSearch
+  provider: elasticsearch
+  description: "Elasticsearch search and analytics engine"
+  credentialsFields:
+    - name: ES_HOST
+      label: Host
+      description: "Elasticsearch server URL"
+      required: true
+      type: string
+    - name: ES_USERNAME
+      label: Username
+      description: "Elasticsearch username"
+      required: false
+      type: string
+    - name: ES_PASSWORD
+      label: Password
+      description: "Elasticsearch password"
+      required: false
+      type: string
+    - name: ES_CA_CERT
+      label: CA Certificate
+      description: "CA certificate for TLS verification"
+      required: false
+      type: string
+    - name: ES_API_KEY
+      label: API Key
+      description: "Elasticsearch API key (alternative to username/password)"
+      required: false
+      type: string
+---
+apiVersion: dataconnecthub.opendatahub.io/v1alpha1
+kind: InitDataConnectionType
+metadata:
+  name: neo4j
+  labels:
+    {{- include "dc-controller.labels" . | nindent 4 }}
+spec:
+  name: Neo4j
+  provider: neo4j
+  description: "Neo4j graph database"
+  credentialsFields:
+    - name: NEO4J_URI
+      label: URI
+      description: "Neo4j connection URI (e.g. bolt://host:7687 or neo4j://host:7687)"
+      required: true
+      type: string
+    - name: NEO4J_USERNAME
+      label: Username
+      description: "Neo4j username"
+      required: false
+      type: string
+      defaultValue: "neo4j"
+    - name: NEO4J_PASSWORD
+      label: Password
+      description: "Neo4j password"
+      required: true
+      type: string
+    - name: NEO4J_DATABASE
+      label: Database
+      description: "Neo4j database name"
+      required: false
+      type: string
+      defaultValue: "neo4j"
 {{- end }}
