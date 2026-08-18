@@ -1,2 +1,2 @@
-pub mod data_conenction_status;
-pub use data_conenction_status::*;
+pub mod data_connection_status;
+pub use data_connection_status::*;
