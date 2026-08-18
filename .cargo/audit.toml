@@ -1,4 +1,9 @@
 [advisories]
-# Marvin Attack (timing sidechannel) in the `rsa` crate — transitive dep via sqlx,
-# no upstream fix available as of 2026-07.
-ignore = ["RUSTSEC-2023-0071"]
+ignore = [
+    # Marvin Attack (timing sidechannel) in the `rsa` crate — transitive dep via sqlx,
+    # no upstream fix available as of 2026-07.
+    "RUSTSEC-2023-0071",
+    # h2 unbounded empty DATA frames — transitive dep via actix-http,
+    # actix-http has not released a version using h2 0.4 yet.
+    "RUSTSEC-2026-0258",
+]
