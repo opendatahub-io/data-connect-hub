@@ -66,7 +66,7 @@ func TestCreateConnectionType(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL)
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.NoError(t, err)
 }
@@ -77,7 +77,7 @@ func TestCreateConnectionTypeConflict(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL)
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrConflict)
 }
@@ -88,13 +88,13 @@ func TestServiceUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewHTTPConnectionTypeClient(server.URL)
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
 
 func TestConnectionRefused(t *testing.T) {
-	client := NewHTTPConnectionTypeClient("http://localhost:1")
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return "http://localhost:1", nil })
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
@@ -117,7 +117,7 @@ func TestListConnectionTypes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewHTTPMigrationClient(server.URL)
+	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
 	types, err := c.ListConnectionTypes(context.Background(), "test-ns")
 	require.NoError(t, err)
 	assert.Len(t, types, 1)
@@ -131,7 +131,7 @@ func TestListConnectionTypesServiceUnavailable(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewHTTPMigrationClient(server.URL)
+	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
 	_, err := c.ListConnectionTypes(context.Background(), "test-ns")
 	assert.ErrorIs(t, err, ErrServiceUnavailable)
 }
@@ -152,7 +152,7 @@ func TestCreateConnection(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewHTTPMigrationClient(server.URL)
+	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
 	err := c.CreateConnection(context.Background(), "test-ns", Connection{
 		Name:                 "my-conn",
 		DataConnectionTypeID: "type-id",
@@ -169,7 +169,7 @@ func TestCreateConnectionConflict(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewHTTPMigrationClient(server.URL)
+	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
 	err := c.CreateConnection(context.Background(), "test-ns", Connection{
 		Name:       "my-conn",
 		Properties: map[string]string{},

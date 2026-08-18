@@ -34,20 +34,10 @@ spec:
           {{- end }}
           - --health-probe-bind-address=:8081
         env:
-        - name: APPLICATIONS_NAMESPACE
-          {{- if .Values.operandNamespace }}
-          value: {{ .Values.operandNamespace | quote }}
-          {{- else }}
-          valueFrom:
-            fieldRef:
-              fieldPath: metadata.namespace
-          {{- end }}
         - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
           value: {{ .Values.relatedImages.restService | quote }}
         - name: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           value: {{ .Values.relatedImages.flightService | quote }}
-        - name: REST_SERVICE_URL
-          value: {{ .Values.restServiceURL | default (printf "https://dch-rest-service.%s.svc.cluster.local:8443" (.Values.operandNamespace | default .Release.Namespace)) | quote }}
         - name: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
           value: {{ .Values.relatedImages.kubeRbacProxy | quote }}
         ports:

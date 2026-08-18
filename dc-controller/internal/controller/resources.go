@@ -282,21 +282,23 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 	}
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, configMapName, namespace string) {
+func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {
 	for _, obj := range resources {
-		if obj.GetKind() != "ConfigMap" || obj.GetName() != configMapName {
+		if obj.GetKind() != "ConfigMap" {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
 		if !found {
 			continue
 		}
-		if toml, ok := data["config.toml"]; ok {
-			data["config.toml"] = strings.ReplaceAll(toml,
-				`tenant-id = "opendatahub"`,
-				fmt.Sprintf(`tenant-id = "%s"`, namespace))
-			_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		toml, ok := data["config.toml"]
+		if !ok || !strings.Contains(toml, "tenant-id") {
+			continue
 		}
+		data["config.toml"] = strings.ReplaceAll(toml,
+			`tenant-id = "opendatahub"`,
+			fmt.Sprintf(`tenant-id = "%s"`, namespace))
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 	}
 }
 
@@ -344,6 +346,7 @@ func resourcePriority(kind string) int {
 func (r *DataConnectServiceReconciler) applyResources(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
+	namespace string,
 	resources []*unstructured.Unstructured,
 ) error {
 	log := logf.FromContext(ctx)
@@ -353,10 +356,10 @@ func (r *DataConnectServiceReconciler) applyResources(
 	})
 
 	for _, obj := range resources {
-		obj.SetNamespace(r.Namespace)
+		obj.SetNamespace(namespace)
 
 		if obj.GetKind() == "ClusterRoleBinding" {
-			r.patchClusterRoleBindingSubjects(obj)
+			patchClusterRoleBindingSubjects(obj, namespace)
 		}
 
 		labels := obj.GetLabels()
@@ -450,12 +453,12 @@ func specHash(obj *unstructured.Unstructured) string {
 
 // --- Database secret validation ---
 
-func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Context) error {
+func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Context, namespace string) error {
 	secret := &corev1.Secret{}
-	key := client.ObjectKey{Name: nameDatabaseConfig, Namespace: r.Namespace}
+	key := client.ObjectKey{Name: nameDatabaseConfig, Namespace: namespace}
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("secret %q not found in namespace %q — create it with keys DATABASE_URL and secret-config.toml", nameDatabaseConfig, r.Namespace)
+			return fmt.Errorf("secret %q not found in namespace %q — create it with keys DATABASE_URL and secret-config.toml", nameDatabaseConfig, namespace)
 		}
 		return fmt.Errorf("reading secret %s: %w", nameDatabaseConfig, err)
 	}
@@ -469,10 +472,7 @@ func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Contex
 	return nil
 }
 
-// patchClusterRoleBindingSubjects updates ServiceAccount subject namespaces
-// to match the operand namespace. The Kustomize manifests hardcode a default
-// namespace that may differ from the actual deployment.
-func (r *DataConnectServiceReconciler) patchClusterRoleBindingSubjects(obj *unstructured.Unstructured) {
+func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace string) {
 	subjects, found, _ := unstructured.NestedSlice(obj.Object, "subjects")
 	if !found {
 		return
@@ -483,7 +483,7 @@ func (r *DataConnectServiceReconciler) patchClusterRoleBindingSubjects(obj *unst
 			continue
 		}
 		if kind, _ := sub["kind"].(string); kind == "ServiceAccount" {
-			sub["namespace"] = r.Namespace
+			sub["namespace"] = namespace
 			subjects[i] = sub
 		}
 	}

@@ -5,9 +5,7 @@ metadata:
     app.kubernetes.io/name: dc-controller
     app.kubernetes.io/managed-by: kustomize
   name: default-dataconnectservice
+  namespace: opendatahub
 spec:
-  gateway:
-    name: odh-gateway
-    namespace: opendatahub
   restService: {}
   flightService: {}

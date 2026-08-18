@@ -19,7 +19,6 @@ package main
 import (
 	"crypto/tls"
 	"flag"
-	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -188,16 +187,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	namespace := os.Getenv("APPLICATIONS_NAMESPACE")
-	if namespace == "" {
-		namespace = "opendatahub"
-	}
-
 	if err := (&controller.DataConnectServiceReconciler{
 		Client:        mgr.GetClient(),
 		Scheme:        mgr.GetScheme(),
 		ManifestsPath: manifestsPath,
-		Namespace:     namespace,
 		RestImage: controller.EnvOrDefault(
 			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE",
 			"quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68", //nolint:lll
@@ -215,16 +208,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	restServiceURL := os.Getenv("REST_SERVICE_URL")
-	if restServiceURL == "" {
-		restServiceURL = fmt.Sprintf("https://dch-rest-service.%s.svc.cluster.local:8443", namespace)
-	}
-	setupLog.Info("REST service URL for InitDataConnectionType", "url", restServiceURL)
+	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)
@@ -240,7 +229,7 @@ func main() {
 	if err := (&controller.ConfigMapWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restServiceURL),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "configmapwatcher")
 		os.Exit(1)
@@ -249,7 +238,7 @@ func main() {
 	if err := (&controller.SecretWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPMigrationClient(restServiceURL),
+		RestClient: controller.NewHTTPMigrationClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)
