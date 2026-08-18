@@ -41,8 +41,8 @@ var _ = Describe("DataConnectService Controller", func() {
 	const (
 		resourceName    = "default-dataconnectservice"
 		targetNamespace = "default"
-		testRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68"
-		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856"
+		testRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable"
+		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
 
 		// Kustomize adds this prefix to all resource names.
 		np = "dch-"
@@ -61,7 +61,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			ManifestsPath:      manifestsPath,
 			RestImage:          testRestImage,
 			FlightImage:        testFlightImage,
-			KubeRbacProxyImage: "quay.io/opendatahub/odh-kube-rbac-proxy@sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3",
+			KubeRbacProxyImage: "quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable",
 		}
 	}
 

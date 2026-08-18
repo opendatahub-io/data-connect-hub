@@ -19,6 +19,7 @@ package main
 import (
 	"crypto/tls"
 	"flag"
+	"fmt"
 	"os"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
@@ -47,8 +48,14 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
-const DefaultKubeRbacProxyImage = "quay.io/opendatahub/odh-kube-rbac-proxy@" +
-	"sha256:db643f5de15c0aab3eac9c60dc4cb311007f6977f96a790031b108f5c44a17d3"
+func requiredEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		setupLog.Error(fmt.Errorf("required environment variable %s is not set", key), "")
+		os.Exit(1)
+	}
+	return v
+}
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -188,21 +195,12 @@ func main() {
 	}
 
 	if err := (&controller.DataConnectServiceReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		ManifestsPath: manifestsPath,
-		RestImage: controller.EnvOrDefault(
-			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE",
-			"quay.io/opendatahub/odh-data-connect-hub-rest@sha256:4deef1160009b43403d2c693510fd78bbbe9ff88c1ee67110cd3faf325d49c68", //nolint:lll
-		),
-		FlightImage: controller.EnvOrDefault(
-			"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE",
-			"quay.io/opendatahub/odh-data-connect-hub-flight@sha256:94009d5dcd1c44ddf30d45ff9a40644ee7a6ce4a997e68d38b17ee2c476cf856", //nolint:lll
-		),
-		KubeRbacProxyImage: controller.EnvOrDefault(
-			"RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE",
-			DefaultKubeRbacProxyImage,
-		),
+		Client:             mgr.GetClient(),
+		Scheme:             mgr.GetScheme(),
+		ManifestsPath:      manifestsPath,
+		RestImage:          requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"),
+		FlightImage:        requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"),
+		KubeRbacProxyImage: requiredEnv("RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)

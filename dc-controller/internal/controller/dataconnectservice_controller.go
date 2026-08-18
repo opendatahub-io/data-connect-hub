@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -83,9 +82,9 @@ type DataConnectServiceReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	ManifestsPath      string
-	RestImage          string // resolved from RELATED_IMAGE or default
-	FlightImage        string // resolved from RELATED_IMAGE or default
-	KubeRbacProxyImage string // resolved from RELATED_IMAGE or default
+	RestImage          string
+	FlightImage        string
+	KubeRbacProxyImage string
 }
 
 type platformConfig struct {
@@ -128,14 +127,6 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	}
 
 	return cfg
-}
-
-// EnvOrDefault returns the value of the named environment variable or the fallback.
-func EnvOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }
 
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
