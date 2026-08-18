@@ -6,6 +6,7 @@ members = [
     "connectors/postgres",
     "connectors/sqlite",
     "connectors/s3",
+    "connectors/milvus",
     "services/flight",
     "services/rest",
 ]
@@ -22,6 +23,8 @@ commons = { path = "libs/commons" }
 postgres-connector = { path = "connectors/postgres" }
 sqlite-connector = { path = "connectors/sqlite" }
 s3-connector = { path = "connectors/s3" }
+milvus-connector = { path = "connectors/milvus" }
+milvus-sdk-rust = "2.6"
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
 arrow = "59.1.0"
