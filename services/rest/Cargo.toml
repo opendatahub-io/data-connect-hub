@@ -19,6 +19,7 @@ pg-meta-store = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
+json-patch = { workspace = true }
 kube-utils = { workspace = true }
 
 

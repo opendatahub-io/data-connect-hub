@@ -1,4 +1,3 @@
-use super::JsonPatch;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use crate::utils::transform_data_connection;
@@ -120,12 +119,28 @@ pub async fn get_connection_type(
 }
 
 pub async fn patch_connection(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _id: web::Path<String>,
-    _body: web::Json<Vec<JsonPatch>>,
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+    body: web::Json<serde_json::Value>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("patch_connection: for tenant {:?}", ctx.tenant_id);
+    let id = id.into_inner();
+    let patch = body.into_inner();
+
+    let update_fn = Arc::new(move |conn: DataConnection| {
+        let mut value = serde_json::to_value(&conn)
+            .map_err(|e| commons::api::errors::MetaStoreError::Serialization(e.to_string()))?;
+        json_patch::merge(&mut value, &patch);
+        serde_json::from_value(value).map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))
+    });
+
+    let connection = service
+        .meta_store
+        .update_data_connection(ctx.tenant_id.as_str(), id.as_str(), update_fn)
+        .await?;
+
+    Ok(HttpResponse::Ok().json(connection))
 }
 
 pub async fn create_connection_type(
@@ -268,13 +283,36 @@ mod tests {
 
         async fn update_data_connection(
             &self,
-            _t: &str,
-            _u: &str,
-            _f: Arc<
+            tenant_id: &str,
+            uid: &str,
+            update_fn: Arc<
                 dyn Fn(DataConnection) -> Result<DataConnection, commons::api::errors::MetaStoreError> + Send + Sync,
             >,
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            if tenant_id == "test-tenant" && uid == "conn-1" {
+                let existing = DataConnection {
+                    name: "my-pg".to_string(),
+                    data_connection_type_id: "postgres".to_string(),
+                    format: commons::api::connections::DataFormat::Tabular,
+                    admin: None,
+                    properties: std::collections::HashMap::new(),
+                };
+                let updated = update_fn(existing)?;
+                Ok(DataConnectionResource {
+                    metadata: commons::api::ResourceMetadata {
+                        id: "conn-1".to_string(),
+                        tenant_id: Some("test-tenant".to_string()),
+                        created_at: "2026-01-01T00:00:00Z".to_string(),
+                        updated_at: "2026-01-02T00:00:00Z".to_string(),
+                    },
+                    resource: updated,
+                    status: Default::default(),
+                })
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection '{uid}' not found"
+                )))
+            }
         }
 
         async fn delete_data_connection(
@@ -520,7 +558,7 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_patch_connection_unimplemented() {
+    async fn test_patch_connection_replace_name() {
         let app = test::init_service(
             App::new()
                 .app_data(test_service())
@@ -531,14 +569,57 @@ mod tests {
         let req = test::TestRequest::patch()
             .uri("/api/v1/data/connections/conn-1")
             .insert_header(("x-tenant-id", "test-tenant"))
-            .insert_header(("content-type", "application/json"))
-            .set_payload("[]")
+            .set_json(serde_json::json!({"name": "renamed-pg"}))
             .to_request();
         let resp = test::call_service(&app, req).await;
 
-        assert_eq!(resp.status(), 501);
+        assert_eq!(resp.status(), 200);
         let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unimplemented");
+        assert_eq!(body["metadata"]["id"], "conn-1");
+        assert_eq!(body["resource"]["name"], "renamed-pg");
+        assert_eq!(body["resource"]["data_connection_type_id"], "postgres");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_add_property() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({"properties": {"host": "localhost"}}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["properties"]["host"], "localhost");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_not_found() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connections/nonexistent")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({"name": "x"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
     }
 
     #[actix_web::test]

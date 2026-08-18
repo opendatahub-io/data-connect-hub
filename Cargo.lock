@@ -3811,6 +3811,7 @@ dependencies = [
  "clap",
  "commons",
  "config",
+ "json-patch",
  "kube-utils",
  "pg-meta-store",
  "serde",
