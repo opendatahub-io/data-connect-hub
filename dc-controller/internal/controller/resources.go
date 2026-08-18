@@ -490,6 +490,98 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
 }
 
+func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) bool {
+	const key = "token_review_audiences"
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml, ok := data["config.toml"]
+		if !ok || !strings.Contains(toml, "[auth]") {
+			continue
+		}
+
+		quoted := make([]string, len(audiences))
+		for i, a := range audiences {
+			quoted[i] = fmt.Sprintf("%q", a)
+		}
+		audienceLine := fmt.Sprintf("    %s = [%s]", key, strings.Join(quoted, ", "))
+
+		replaced := false
+		var result []string
+		for line := range strings.SplitSeq(toml, "\n") {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, key) && (len(trimmed) == len(key) || trimmed[len(key)] == ' ' || trimmed[len(key)] == '=') {
+				result = append(result, audienceLine)
+				replaced = true
+			} else {
+				result = append(result, line)
+			}
+		}
+
+		if !replaced {
+			var inserted []string
+			inAuth := false
+			done := false
+			for _, line := range result {
+				trimmed := strings.TrimSpace(line)
+				if trimmed == "[auth]" {
+					inAuth = true
+				}
+				if inAuth && !done && trimmed != "[auth]" && (strings.HasPrefix(trimmed, "[") || trimmed == "") {
+					inserted = append(inserted, audienceLine)
+					done = true
+				}
+				inserted = append(inserted, line)
+			}
+			if inAuth && !done {
+				inserted = append(inserted, audienceLine)
+			}
+			result = inserted
+		}
+
+		data["config.toml"] = strings.Join(result, "\n")
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		return true
+	}
+	return false
+}
+
+func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {
+	arg := fmt.Sprintf("--auth-token-audiences=%s", strings.Join(audiences, ","))
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		for i, c := range containers {
+			container, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := container["name"].(string)
+			if name != "kube-rbac-proxy" {
+				continue
+			}
+			var args []any
+			if existing, ok := container["args"].([]any); ok {
+				args = existing
+			}
+			args = append(args, arg)
+			container["args"] = args
+			containers[i] = container
+		}
+		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+	}
+}
+
 func indent(s string, spaces int) string {
 	pad := strings.Repeat(" ", spaces)
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")

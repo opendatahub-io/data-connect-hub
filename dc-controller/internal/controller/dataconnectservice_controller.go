@@ -339,6 +339,13 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 
+	if len(cr.Spec.TokenReviewAudiences) > 0 {
+		if !setConfigMapAudiences(resources, cr.Spec.TokenReviewAudiences) {
+			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
+		}
+		setKubeRbacProxyAudiences(resources, cr.Spec.TokenReviewAudiences)
+	}
+
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
 

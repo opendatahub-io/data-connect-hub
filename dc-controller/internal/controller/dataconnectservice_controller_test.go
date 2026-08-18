@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"path/filepath"
+	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -395,6 +396,50 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("flight-pull-secret"))
 			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[1].Name).To(Equal("shared-secret"))
+		})
+	})
+
+	Context("When tokenReviewAudiences is specified", func() {
+		BeforeEach(func() {
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					TokenReviewAudiences: []string{
+						"https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id",
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should patch flight-service configmap with audiences", func() {
+			reconcileUntilReady()
+
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+			toml := cm.Data["config.toml"]
+			Expect(toml).To(ContainSubstring(`token_review_audiences = ["https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id"]`))
+		})
+
+		It("should add --auth-token-audiences to kube-rbac-proxy", func() {
+			reconcileUntilReady()
+
+			deploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
+			proxy := findContainer(deploy, "kube-rbac-proxy")
+			Expect(proxy).NotTo(BeNil())
+
+			Expect(slices.Contains(proxy.Args, "--auth-token-audiences=https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id")).
+				To(BeTrue(), "expected --auth-token-audiences arg on kube-rbac-proxy")
 		})
 	})
 
