@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -12,9 +13,10 @@ if TYPE_CHECKING:
 
 import adbc_driver_flightsql.dbapi as flight_dbapi
 import pyarrow as pa
+import pyarrow.flight as flight
 from adbc_driver_flightsql import DatabaseOptions
 
-from ._auth import ADBC_HEADER_PREFIX, TokenCache, build_flight_headers
+from ._auth import ADBC_HEADER_PREFIX, TokenCache, build_headers
 from .exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
 
 _GRPC_UNAUTHENTICATED = "unauthenticated"
@@ -23,6 +25,9 @@ _QUERY_TIMEOUT = DatabaseOptions.TIMEOUT_QUERY.value
 _FETCH_TIMEOUT = DatabaseOptions.TIMEOUT_FETCH.value
 _TLS_ROOT_CERTS = DatabaseOptions.TLS_ROOT_CERTS.value
 _TLS_SKIP_VERIFY = DatabaseOptions.TLS_SKIP_VERIFY.value
+
+_FLIGHT_DISABLE_SERVER_VERIFICATION = "disable_server_verification"
+_FLIGHT_TLS_ROOT_CERTS = "tls_root_certs"
 
 
 def _is_auth_error(exc: Exception) -> bool:
@@ -71,25 +76,46 @@ class FlightSQLClient:
         self._flight_url = flight_url
         self._tenant_id = tenant_id
         self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
-        self._static_kwargs: dict[str, str] = {}
+        self._insecure = insecure
+        self._tls_root_certs: str | None = None
+        self._adbc_opts: dict[str, str] = {}
         if timeout is not None:
-            self._static_kwargs[_QUERY_TIMEOUT] = str(timeout)
-            self._static_kwargs[_FETCH_TIMEOUT] = str(timeout)
+            self._adbc_opts[_QUERY_TIMEOUT] = str(timeout)
+            self._adbc_opts[_FETCH_TIMEOUT] = str(timeout)
         if insecure:
-            self._static_kwargs[_TLS_SKIP_VERIFY] = "true"
+            self._adbc_opts[_TLS_SKIP_VERIFY] = "true"
         elif ca_cert:
             cert_path = Path(ca_cert)
             if not cert_path.is_file():
                 raise DCHConfigError(f"CA certificate file not found: {ca_cert}")
-            self._static_kwargs[_TLS_ROOT_CERTS] = cert_path.read_text()
+            self._tls_root_certs = cert_path.read_text()
+            self._adbc_opts[_TLS_ROOT_CERTS] = self._tls_root_certs
+        self._static_headers: dict[str, str] = {}
         if not token_provider:
-            self._static_kwargs.update(build_flight_headers(token=token, tenant_id=tenant_id))
+            self._static_headers = build_headers(token=token, tenant_id=tenant_id)
+
+    def _headers(self) -> dict[str, str]:
+        if self._token_cache:
+            return build_headers(token=self._token_cache.get(), tenant_id=self._tenant_id)
+        return dict(self._static_headers)
 
     def _base_kwargs(self) -> dict[str, str]:
-        if self._token_cache:
-            headers = build_flight_headers(token=self._token_cache.get(), tenant_id=self._tenant_id)
-            return {**self._static_kwargs, **headers}
-        return dict(self._static_kwargs)
+        prefixed = {f"{ADBC_HEADER_PREFIX}{k.lower()}": v for k, v in self._headers().items()}
+        return {**self._adbc_opts, **prefixed}
+
+    def _call_options(self) -> flight.FlightCallOptions:
+        return flight.FlightCallOptions(headers=[(k.lower().encode(), v.encode()) for k, v in self._headers().items()])
+
+    def _flight_connect(self) -> flight.FlightClient:
+        kwargs: dict[str, Any] = {}
+        if self._insecure:
+            kwargs[_FLIGHT_DISABLE_SERVER_VERIFICATION] = True
+        if self._tls_root_certs:
+            kwargs[_FLIGHT_TLS_ROOT_CERTS] = self._tls_root_certs.encode()
+        try:
+            return flight.connect(self._flight_url, **kwargs)
+        except Exception as exc:
+            raise DCHConnectionError(str(exc)) from exc
 
     def _connect(self, connection_id: str) -> flight_dbapi.Connection:
         db_kwargs = {
@@ -146,11 +172,27 @@ class FlightSQLClient:
         except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
         try:
-            return {str(k): v for k, v in conn.adbc_get_info().items()}
+            info: dict[str, Any] = {str(k): v for k, v in conn.adbc_get_info().items()}
+            info["supported_connectors"] = self._do_supported_connectors()
+            return info
         except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
         finally:
             conn.close()
+
+    def _do_supported_connectors(self) -> list[str]:
+        client = self._flight_connect()
+        try:
+            action = flight.Action("GetSupportedConnectors", b"")
+            results = list(client.do_action(action, self._call_options()))
+            if not results:
+                return []
+            connectors: list[str] = json.loads(results[0].body.to_pybytes())
+            return connectors
+        except Exception as exc:
+            raise DCHConnectionError(str(exc)) from exc
+        finally:
+            client.close()
 
     def close(self) -> None:
         """No-op — connections are opened and closed per call."""
