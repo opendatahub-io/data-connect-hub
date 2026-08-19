@@ -27,7 +27,7 @@ replacements:
   targets:
   - select:
       kind: Deployment
-      name: controller-manager
+      name: manager
     fieldPaths:
     - spec.template.spec.containers.[name=manager].image
 - source:
@@ -37,7 +37,7 @@ replacements:
   targets:
   - select:
       kind: Deployment
-      name: controller-manager
+      name: manager
     fieldPaths:
     - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE].value
 - source:
@@ -47,7 +47,7 @@ replacements:
   targets:
   - select:
       kind: Deployment
-      name: controller-manager
+      name: manager
     fieldPaths:
     - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE].value
 - source:
@@ -57,7 +57,7 @@ replacements:
   targets:
   - select:
       kind: Deployment
-      name: controller-manager
+      name: manager
     fieldPaths:
     - spec.template.spec.containers.[name=manager].env.[name=RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE].value
 resources:
@@ -106,7 +106,7 @@ patches:
 # - source: # Uncomment the following block to enable certificates for metrics
 #     kind: Service
 #     version: v1
-#     name: controller-manager-metrics-service
+#     name: metrics-service
 #     fieldPath: metadata.name
 #   targets:
 #     - select:
@@ -125,7 +125,7 @@ patches:
 #         kind: ServiceMonitor
 #         group: monitoring.coreos.com
 #         version: v1
-#         name: controller-manager-metrics-monitor
+#         name: manager-metrics-monitor
 #       fieldPaths:
 #         - spec.endpoints.0.tlsConfig.serverName
 #       options:
@@ -136,7 +136,7 @@ patches:
 # - source:
 #     kind: Service
 #     version: v1
-#     name: controller-manager-metrics-service
+#     name: metrics-service
 #     fieldPath: metadata.namespace
 #   targets:
 #     - select:
@@ -155,7 +155,7 @@ patches:
 #         kind: ServiceMonitor
 #         group: monitoring.coreos.com
 #         version: v1
-#         name: controller-manager-metrics-monitor
+#         name: manager-metrics-monitor
 #       fieldPaths:
 #         - spec.endpoints.0.tlsConfig.serverName
 #       options:

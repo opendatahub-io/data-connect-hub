@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Namespace
 metadata:
   labels:
-    control-plane: controller-manager
+    control-plane: manager
     app.kubernetes.io/name: dc-controller
     app.kubernetes.io/managed-by: kustomize
   name: system
@@ -10,24 +10,23 @@ metadata:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: controller-manager
+  name: manager
   namespace: system
   labels:
-    control-plane: controller-manager
+    control-plane: manager
     app.kubernetes.io/name: dc-controller
     app.kubernetes.io/managed-by: kustomize
 spec:
   selector:
     matchLabels:
-      control-plane: controller-manager
-      app.kubernetes.io/name: dc-controller
+      control-plane: manager
   replicas: 1
   template:
     metadata:
       annotations:
         kubectl.kubernetes.io/default-container: manager
       labels:
-        control-plane: controller-manager
+        control-plane: manager
         app.kubernetes.io/name: dc-controller
     spec:
       # TODO(user): Uncomment the following code to configure the nodeAffinity expression
@@ -109,5 +108,5 @@ spec:
             memory: 64Mi
         volumeMounts: []
       volumes: []
-      serviceAccountName: controller-manager
+      serviceAccountName: manager
       terminationGracePeriodSeconds: 10
