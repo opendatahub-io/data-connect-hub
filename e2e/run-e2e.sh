@@ -59,6 +59,8 @@ E2E_DENIED_SA_NAME="e2e-denied-user"
 PG_SECRET="e2e-pg-creds"
 S3_SECRET="e2e-s3-creds"
 MILVUS_SECRET="e2e-milvus-creds"
+ES_SECRET="e2e-es-creds"
+ES_APIKEY_SECRET="e2e-es-apikey-creds"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 # -------------------------------------------------------------------
@@ -133,10 +135,77 @@ setup_milvus_secret() {
     fi
 }
 
+fetch_es_ca_cert() {
+    local es_namespace="${DCH_ES_NAMESPACE:-elasticsearch}"
+    kubectl get secret elasticsearch-master-certs -n "$es_namespace" \
+        -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d 2>/dev/null || true
+}
+
+setup_es_secret() {
+    E2E_ES_ENABLED="false"
+    if [[ -n "${DCH_ES_URI:-}" ]]; then
+        local -a args=(--from-literal="ES_HOST=${DCH_ES_URI}")
+        [[ -n "${DCH_ES_USERNAME:-}" ]] && args+=(--from-literal="ES_USERNAME=${DCH_ES_USERNAME}")
+        [[ -n "${DCH_ES_PASSWORD:-}" ]] && args+=(--from-literal="ES_PASSWORD=${DCH_ES_PASSWORD}")
+
+        local ca_cert="${DCH_ES_CA_CERT:-}"
+        if [[ -z "$ca_cert" ]]; then
+            ca_cert=$(fetch_es_ca_cert)
+        fi
+        [[ -n "$ca_cert" ]] && args+=(--from-literal="ES_CA_CERT=${ca_cert}")
+
+        kubectl create secret generic "$ES_SECRET" \
+            -n "$DCH_TENANT_ID" \
+            "${args[@]}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        E2E_ES_ENABLED="true"
+    fi
+}
+
+setup_es_apikey_secret() {
+    E2E_ES_APIKEY_ENABLED="false"
+    [[ "$E2E_ES_ENABLED" == "true" ]] || return 0
+    [[ -n "${DCH_ES_USERNAME:-}" && -n "${DCH_ES_PASSWORD:-}" ]] || return 0
+
+    local es_namespace="${DCH_ES_NAMESPACE:-elasticsearch}"
+    local es_pod
+    es_pod=$(kubectl get pods -n "$es_namespace" -l app=elasticsearch-master \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || return 0
+    [[ -n "$es_pod" ]] || return 0
+
+    local api_key_json
+    api_key_json=$(kubectl exec "$es_pod" -n "$es_namespace" -- \
+        curl -ksf -u "${DCH_ES_USERNAME}:${DCH_ES_PASSWORD}" \
+        -X POST "https://localhost:9200/_security/api_key" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"e2e-test-key"}' 2>/dev/null) || return 0
+
+    local encoded_api_key
+    encoded_api_key=$(echo "$api_key_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['encoded'])" 2>/dev/null) || return 0
+
+    local -a args=(
+        --from-literal="ES_HOST=${DCH_ES_URI}"
+        --from-literal="ES_API_KEY=${encoded_api_key}"
+    )
+    local ca_cert="${DCH_ES_CA_CERT:-}"
+    if [[ -z "$ca_cert" ]]; then
+        ca_cert=$(fetch_es_ca_cert)
+    fi
+    [[ -n "$ca_cert" ]] && args+=(--from-literal="ES_CA_CERT=${ca_cert}")
+
+    kubectl create secret generic "$ES_APIKEY_SECRET" \
+        -n "$DCH_TENANT_ID" \
+        "${args[@]}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    E2E_ES_APIKEY_ENABLED="true"
+}
+
 setup_flight_secret_rbac() {
     local -a secret_names=("--resource-name=$PG_SECRET")
     [[ "$E2E_S3_ENABLED" == "true" ]] && secret_names+=("--resource-name=$S3_SECRET")
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] && secret_names+=("--resource-name=$MILVUS_SECRET")
+    [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
+    [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
 
     kubectl create role e2e-flight-secret-read \
         -n "$DCH_TENANT_ID" \
@@ -164,6 +233,13 @@ seed_milvus_data() {
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] || return 0
     bash "$(dirname "$0")/scripts/seed-milvus-data.sh" \
         -e "$DCH_MILVUS_URI" -n "$DCH_SERVICE_NAMESPACE"
+}
+
+seed_es_data() {
+    [[ "$E2E_ES_ENABLED" == "true" ]] || return 0
+    local -a args=(-e "$DCH_ES_URI" -n "$DCH_SERVICE_NAMESPACE")
+    [[ -n "${DCH_ES_PASSWORD:-}" ]] && args+=(-p "$DCH_ES_PASSWORD")
+    bash "$(dirname "$0")/scripts/seed-elasticsearch-data.sh" "${args[@]}"
 }
 
 # -------------------------------------------------------------------
@@ -215,6 +291,18 @@ EOF
 DCH_MILVUS_SECRET=e2e-milvus-creds
 MILVUS_EOF
     fi
+
+    if [[ "$E2E_ES_ENABLED" == "true" ]]; then
+        cat >> "$ENV_FILE" <<'ES_EOF'
+DCH_ES_SECRET=e2e-es-creds
+ES_EOF
+    fi
+
+    if [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]]; then
+        cat >> "$ENV_FILE" <<'ES_APIKEY_EOF'
+DCH_ES_APIKEY_SECRET=e2e-es-apikey-creds
+ES_APIKEY_EOF
+    fi
 }
 
 # ===================================================================
@@ -226,13 +314,13 @@ echo "=== E2E Setup ==="
 # 1. Install dependencies
 VENV_DIR="$SCRIPT_DIR/.venv"
 if [[ ! -d "$VENV_DIR" ]]; then
-    echo "[1/9] Creating virtualenv ..."
+    echo "[1/10] Creating virtualenv ..."
     python3 -m venv "$VENV_DIR"
 fi
 VENV_PYTHON="$VENV_DIR/bin/python3"
 VENV_PYTEST="$VENV_DIR/bin/pytest"
 if [[ ! -x "$VENV_PYTEST" ]]; then
-    echo "[1/9] Installing dependencies ..."
+    echo "[1/10] Installing dependencies ..."
     "$VENV_PYTHON" -m pip install --quiet \
         -e "$REPO_ROOT/sdk/python[flight]" \
         -e "$SCRIPT_DIR"
@@ -251,43 +339,53 @@ kubectl get svc -n "$DCH_SERVICE_NAMESPACE" -l app.kubernetes.io/name=rest-servi
 
 # 3. K8s setup
 setup_namespaces
-echo "[2/9] Namespaces ready"
+echo "[2/10] Namespaces ready"
 
 setup_service_accounts
-echo "[3/9] Service accounts ready"
+echo "[3/10] Service accounts ready"
 
 setup_sa_rbac
-echo "[4/9] SA RBAC ready"
+echo "[4/10] SA RBAC ready"
 
 # 4. Credential secrets
 setup_pg_secret
 setup_s3_secret
 setup_milvus_secret
+setup_es_secret
+setup_es_apikey_secret
 setup_flight_secret_rbac
 
 SECRETS_MSG="PG"
 [[ "$E2E_S3_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG} + S3"
 [[ "$E2E_MILVUS_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG} + Milvus"
-echo "[5/9] ${SECRETS_MSG} secrets + Flight RBAC ready"
+[[ "$E2E_ES_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG} + Elasticsearch"
+echo "[5/10] ${SECRETS_MSG} secrets + Flight RBAC ready"
 
 # 5. Seed test data
 seed_pg_data
-echo "[6/9] PG test data seeded"
+echo "[6/10] PG test data seeded"
 
 seed_milvus_data
 if [[ "$E2E_MILVUS_ENABLED" == "true" ]]; then
-    echo "[7/9] Milvus test data seeded"
+    echo "[7/10] Milvus test data seeded"
 else
-    echo "[7/9] Milvus seed skipped (DCH_MILVUS_URI not set)"
+    echo "[7/10] Milvus seed skipped (DCH_MILVUS_URI not set)"
 fi
 
-# 6. Auth tokens
-generate_tokens
-echo "[8/9] Auth tokens ready"
+seed_es_data
+if [[ "$E2E_ES_ENABLED" == "true" ]]; then
+    echo "[8/10] Elasticsearch test data seeded"
+else
+    echo "[8/10] Elasticsearch seed skipped (DCH_ES_URI not set)"
+fi
 
-# 7. Write .env
+# 7. Auth tokens
+generate_tokens
+echo "[9/10] Auth tokens ready"
+
+# 8. Write .env
 write_env_file
-echo "[9/9] .env written"
+echo "[10/10] .env written"
 
 echo ""
 echo "=== E2E Setup Complete ==="

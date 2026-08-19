@@ -1392,6 +1392,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "elasticsearch-connector"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "commons",
+ "futures",
+ "moka",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1541,6 +1559,7 @@ dependencies = [
  "clap",
  "commons",
  "config",
+ "elasticsearch-connector",
  "futures",
  "http 1.5.0",
  "http-body",
