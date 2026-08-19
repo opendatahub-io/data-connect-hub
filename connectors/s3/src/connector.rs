@@ -119,7 +119,7 @@ impl S3Reader {
             .map_err(|e| ConnectorError::IOError(format!("Failed to read S3 object '{path}': {e}")))?
             .to_bytes();
         if data.is_empty() {
-            return Err(ConnectorError::NoDataError());
+            return Err(ConnectorError::NoDataError);
         }
         Ok(data)
     }

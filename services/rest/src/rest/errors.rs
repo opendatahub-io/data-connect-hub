@@ -59,7 +59,7 @@ impl From<ConnectorError> for RestErrorResponse {
     fn from(err: ConnectorError) -> Self {
         let (code, status) = match &err {
             ConnectorError::InvalidRequest(_) => ("invalid_request", 400),
-            ConnectorError::NoDataError() => ("no_data", 404),
+            ConnectorError::NoDataError => ("no_data", 404),
             ConnectorError::ConfigError(_) => ("config", 500),
             ConnectorError::ConnectionError(_) => ("connection", 503),
             ConnectorError::SQLError(_) => ("sql_error", 400),
