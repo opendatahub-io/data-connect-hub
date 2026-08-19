@@ -582,6 +582,54 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 	}
 }
 
+func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, deploymentContainer, configMapSuffix string) {
+	var configHash string
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !strings.HasSuffix(obj.GetName(), configMapSuffix) {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		b, _ := json.Marshal(data)
+		h := sha256.Sum256(b)
+		configHash = hex.EncodeToString(h[:])[:16]
+		break
+	}
+	if configHash == "" {
+		return
+	}
+
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		hasContainer := false
+		for _, c := range containers {
+			if container, ok := c.(map[string]any); ok {
+				if name, _ := container["name"].(string); name == deploymentContainer {
+					hasContainer = true
+					break
+				}
+			}
+		}
+		if !hasContainer {
+			continue
+		}
+		ann, _, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "annotations")
+		if ann == nil {
+			ann = map[string]string{}
+		}
+		ann["dataconnecthub/config-hash"] = configHash
+		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
+	}
+}
+
 func indent(s string, spaces int) string {
 	pad := strings.Repeat(" ", spaces)
 	lines := strings.Split(strings.TrimRight(s, "\n"), "\n")

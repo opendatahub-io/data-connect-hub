@@ -346,6 +346,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, cr.Spec.TokenReviewAudiences)
 	}
 
+	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
+
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
 
