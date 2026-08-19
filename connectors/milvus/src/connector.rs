@@ -152,12 +152,7 @@ impl TabularReader for MilvusReader {
 }
 
 impl MilvusReader {
-    fn read_query_paginated(
-        &self,
-        request: MilvusRequestInput,
-        schema: Arc<Schema>,
-        batch_size: usize,
-    ) -> QueryOutput {
+    fn read_query_paginated(&self, request: MilvusRequestInput, schema: Arc<Schema>, batch_size: usize) -> QueryOutput {
         let client = self.client.clone();
         let page_size = batch_size as i64;
 

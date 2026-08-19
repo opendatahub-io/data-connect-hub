@@ -7,6 +7,8 @@ use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use std::io::Cursor;
 use std::sync::Arc;
 
+pub type BatchIter = Box<dyn Iterator<Item = Result<RecordBatch, ConnectorError>> + Send>;
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FileFormat {
     Parquet,
@@ -46,19 +48,16 @@ pub fn read_parquet_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
     Ok(reader.schema().as_ref().clone())
 }
 
-pub fn read_parquet_batches(
-    data: Bytes,
-    batch_size: usize,
-) -> Result<Box<dyn Iterator<Item = Result<RecordBatch, ConnectorError>> + Send>, ConnectorError> {
+pub fn read_parquet_batches(data: Bytes, batch_size: usize) -> Result<BatchIter, ConnectorError> {
     let reader = ParquetRecordBatchReaderBuilder::try_new(data)
         .map_err(|e| ConnectorError::IOError(format!("Failed to open Parquet reader: {e}")))?
         .with_batch_size(batch_size)
         .build()
         .map_err(|e| ConnectorError::IOError(format!("Failed to build Parquet reader: {e}")))?;
 
-    Ok(Box::new(
-        reader.map(|batch| batch.map_err(|e| ConnectorError::IOError(format!("Parquet read error: {e}")))),
-    ))
+    Ok(Box::new(reader.map(|batch| {
+        batch.map_err(|e| ConnectorError::IOError(format!("Parquet read error: {e}")))
+    })))
 }
 
 pub fn read_csv_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
@@ -70,11 +69,7 @@ pub fn read_csv_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
     Ok(schema)
 }
 
-pub fn read_csv_batches(
-    data: Bytes,
-    schema: &Arc<Schema>,
-    batch_size: usize,
-) -> Result<Box<dyn Iterator<Item = Result<RecordBatch, ConnectorError>> + Send>, ConnectorError> {
+pub fn read_csv_batches(data: Bytes, schema: &Arc<Schema>, batch_size: usize) -> Result<BatchIter, ConnectorError> {
     let cursor = Cursor::new(data);
     let reader = CsvReaderBuilder::new(schema.clone())
         .with_header(true)
@@ -82,9 +77,9 @@ pub fn read_csv_batches(
         .build(cursor)
         .map_err(|e| ConnectorError::IOError(format!("Failed to build CSV reader: {e}")))?;
 
-    Ok(Box::new(
-        reader.map(|batch| batch.map_err(|e| ConnectorError::IOError(format!("CSV read error: {e}")))),
-    ))
+    Ok(Box::new(reader.map(|batch| {
+        batch.map_err(|e| ConnectorError::IOError(format!("CSV read error: {e}")))
+    })))
 }
 
 pub fn read_jsonl_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
@@ -94,20 +89,16 @@ pub fn read_jsonl_schema(data: &Bytes) -> Result<Schema, ConnectorError> {
     Ok(schema)
 }
 
-pub fn read_jsonl_batches(
-    data: Bytes,
-    schema: &Arc<Schema>,
-    batch_size: usize,
-) -> Result<Box<dyn Iterator<Item = Result<RecordBatch, ConnectorError>> + Send>, ConnectorError> {
+pub fn read_jsonl_batches(data: Bytes, schema: &Arc<Schema>, batch_size: usize) -> Result<BatchIter, ConnectorError> {
     let cursor = std::io::BufReader::new(Cursor::new(data));
     let reader = arrow_json::ReaderBuilder::new(schema.clone())
         .with_batch_size(batch_size)
         .build(cursor)
         .map_err(|e| ConnectorError::IOError(format!("Failed to build JSONL reader: {e}")))?;
 
-    Ok(Box::new(
-        reader.map(|batch| batch.map_err(|e| ConnectorError::IOError(format!("JSONL read error: {e}")))),
-    ))
+    Ok(Box::new(reader.map(|batch| {
+        batch.map_err(|e| ConnectorError::IOError(format!("JSONL read error: {e}")))
+    })))
 }
 
 #[cfg(test)]
@@ -207,7 +198,10 @@ mod tests {
         assert_eq!(read_schema.field(0).name(), "id");
         assert_eq!(read_schema.field(1).name(), "name");
 
-        let batches: Vec<_> = read_parquet_batches(data, 1024).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let batches: Vec<_> = read_parquet_batches(data, 1024)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 3);
     }
@@ -225,7 +219,10 @@ mod tests {
             Field::new("score", DataType::Float64, true),
         ]));
 
-        let batches: Vec<_> = read_csv_batches(csv_data, &schema, 1024).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let batches: Vec<_> = read_csv_batches(csv_data, &schema, 1024)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 3);
 
@@ -255,7 +252,10 @@ mod tests {
             Field::new("score", DataType::Float64, true),
         ]));
 
-        let batches: Vec<_> = read_jsonl_batches(jsonl_data, &schema, 1024).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let batches: Vec<_> = read_jsonl_batches(jsonl_data, &schema, 1024)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(batches.len(), 1);
         assert_eq!(batches[0].num_rows(), 3);
 
@@ -285,7 +285,10 @@ mod tests {
 
         let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int64, true)]));
 
-        let batches: Vec<_> = read_jsonl_batches(data, &schema, 30).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let batches: Vec<_> = read_jsonl_batches(data, &schema, 30)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total_rows, 100);
         assert!(batches.len() >= 3);
@@ -329,7 +332,10 @@ mod tests {
         }
         let data = Bytes::from(buf);
 
-        let batches: Vec<_> = read_parquet_batches(data, 30).unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let batches: Vec<_> = read_parquet_batches(data, 30)
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total_rows, 100);
         assert!(batches.len() >= 3);
