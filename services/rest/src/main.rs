@@ -7,7 +7,7 @@ use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
 use anyhow::Result;
-use commons::api::connections::MetaStore;
+use commons::api::storage::MetaStore;
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
@@ -15,6 +15,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 mod rest;
+#[allow(unused)]
+mod state;
 mod utils;
 
 #[derive(Parser, Debug)]

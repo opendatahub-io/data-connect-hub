@@ -1,5 +1,7 @@
+pub mod connection_types;
 pub mod connections;
 pub mod errors;
+pub mod storage;
 pub mod tabular;
 
 pub const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";

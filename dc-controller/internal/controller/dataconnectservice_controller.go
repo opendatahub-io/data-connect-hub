@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -42,6 +43,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	kustypes "sigs.k8s.io/kustomize/api/types"
+	"sigs.k8s.io/yaml"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -83,9 +85,9 @@ type DataConnectServiceReconciler struct {
 	client.Client
 	Scheme             *runtime.Scheme
 	ManifestsPath      string
-	RestImage          string // resolved from RELATED_IMAGE or default
-	FlightImage        string // resolved from RELATED_IMAGE or default
-	KubeRbacProxyImage string // resolved from RELATED_IMAGE or default
+	RestImage          string
+	FlightImage        string
+	KubeRbacProxyImage string
 }
 
 type platformConfig struct {
@@ -130,14 +132,6 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	return cfg
 }
 
-// EnvOrDefault returns the value of the named environment variable or the fallback.
-func EnvOrDefault(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
@@ -167,6 +161,8 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !cr.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&cr, finalizerName) {
 			log.Info("running finalizer for DataConnectService")
+			r.clearSyncedAnnotations(ctx, cr.Namespace)
+			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
 		}
@@ -211,7 +207,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// All manifests applied successfully
+	// Phase 3: Ensure InitDataConnectionType CRs exist in the DCS namespace
+	r.ensureInitDataConnectionTypes(ctx, &cr)
+
 	// Phase 4: Check all deployments are ready before declaring Ready
 	pendingDeployments, err := r.pendingDeployments(ctx, cr.Namespace, cr.UID)
 	if err != nil {
@@ -342,6 +340,161 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
+}
+
+// ensureInitDataConnectionTypes reads connection type definitions from the
+// manifests directory and creates corresponding IDCT CRs in the DCS CR
+// namespace so they register under the correct (global) tenant.
+func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
+	log := logf.FromContext(ctx)
+
+	typesDir := filepath.Join(r.ManifestsPath, "connection-types")
+	entries, err := os.ReadDir(typesDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return
+		}
+		log.Error(err, "failed to read connection-types directory")
+		return
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(typesDir, entry.Name()))
+		if err != nil {
+			log.Error(err, "failed to read connection type file", "file", entry.Name())
+			continue
+		}
+
+		var spec connectionTypeFile
+		if err := yaml.Unmarshal(data, &spec); err != nil {
+			log.Error(err, "failed to parse connection type file", "file", entry.Name())
+			continue
+		}
+
+		name := strings.TrimSuffix(entry.Name(), ".yaml")
+		existing := &dchv1alpha1.InitDataConnectionType{}
+		key := types.NamespacedName{Name: name, Namespace: cr.Namespace}
+		if err := r.Get(ctx, key, existing); err == nil {
+			continue
+		}
+
+		idct := &dchv1alpha1.InitDataConnectionType{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: cr.Namespace,
+			},
+			Spec: spec.toIDCTSpec(),
+		}
+		if err := r.Create(ctx, idct); err != nil {
+			if !apierrors.IsAlreadyExists(err) {
+				log.Error(err, "failed to create InitDataConnectionType", "name", name)
+			}
+		} else {
+			log.Info("created InitDataConnectionType", "name", name, "namespace", cr.Namespace)
+		}
+	}
+}
+
+type connectionTypeFile struct {
+	Name              string                   `json:"name"`
+	Provider          string                   `json:"provider"`
+	Description       string                   `json:"description"`
+	CredentialsFields []connectionTypeFieldDef `json:"credentials_fields"`
+}
+
+type connectionTypeFieldDef struct {
+	Name         string `json:"name"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	Required     bool   `json:"required"`
+	Type         string `json:"type"`
+	DefaultValue string `json:"default_value"`
+}
+
+func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec {
+	fields := make([]dchv1alpha1.CredentialsField, len(f.CredentialsFields))
+	for i, cf := range f.CredentialsFields {
+		fields[i] = dchv1alpha1.CredentialsField{
+			Name:     cf.Name,
+			Label:    cf.Label,
+			Required: cf.Required,
+			Type:     cf.Type,
+		}
+		if cf.Description != "" {
+			fields[i].Description = &cf.Description
+		}
+		if cf.DefaultValue != "" {
+			fields[i].DefaultValue = &cf.DefaultValue
+		}
+	}
+	spec := dchv1alpha1.InitDataConnectionTypeSpec{
+		Name:              f.Name,
+		Provider:          f.Provider,
+		CredentialsFields: fields,
+	}
+	if f.Description != "" {
+		spec.Description = &f.Description
+	}
+	return spec
+}
+
+// deleteInitDataConnectionTypes removes IDCT CRs from the DCS namespace so
+// they get re-created on a future install with a fresh database.
+func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context.Context, namespace string) {
+	log := logf.FromContext(ctx)
+	var list dchv1alpha1.InitDataConnectionTypeList
+	if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+		log.Error(err, "failed to list InitDataConnectionTypes for cleanup")
+		return
+	}
+	for i := range list.Items {
+		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
+			log.Error(err, "failed to delete InitDataConnectionType", "name", list.Items[i].Name)
+		}
+	}
+}
+
+// clearSyncedAnnotations removes the dataconnecthub synced annotation from
+// connection-type ConfigMaps and connection Secrets so they get re-promoted
+// on a future install.
+func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Context, namespace string) {
+	log := logf.FromContext(ctx)
+
+	var cmList corev1.ConfigMapList
+	if err := r.List(ctx, &cmList, client.InNamespace(namespace), client.HasLabels{labelODHConnectionType}); err != nil {
+		log.Error(err, "failed to list connection-type ConfigMaps for cleanup")
+	} else {
+		for i := range cmList.Items {
+			cm := &cmList.Items[i]
+			if cm.Annotations[annotationDCHSynced] == valueSyncedTrue {
+				patch := client.MergeFrom(cm.DeepCopy())
+				delete(cm.Annotations, annotationDCHSynced)
+				if err := r.Patch(ctx, cm, patch); err != nil {
+					log.Error(err, "failed to clear synced annotation", "configmap", cm.Name)
+				}
+			}
+		}
+	}
+
+	var secretList corev1.SecretList
+	if err := r.List(ctx, &secretList, client.InNamespace(namespace), client.HasLabels{labelODHDashboard}); err != nil {
+		log.Error(err, "failed to list connection Secrets for cleanup")
+	} else {
+		for i := range secretList.Items {
+			s := &secretList.Items[i]
+			if s.Annotations[annotationDCHSynced] == valueSyncedTrue {
+				patch := client.MergeFrom(s.DeepCopy())
+				delete(s.Annotations, annotationDCHSynced)
+				if err := r.Patch(ctx, s, patch); err != nil {
+					log.Error(err, "failed to clear synced annotation", "secret", s.Name)
+				}
+			}
+		}
+	}
 }
 
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.

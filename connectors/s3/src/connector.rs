@@ -85,6 +85,10 @@ impl FlightConnector for S3Connector {
         "s3".to_string()
     }
 
+    fn description(&self) -> String {
+        "Amazon compatible S3 connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -150,19 +154,23 @@ impl TabularReader for S3Reader {
         let schema = state.schema.clone();
         let batch_size = options.batch_size;
 
-        let batches = match format {
+        let iter = match format {
             FileFormat::Parquet => format::read_parquet_batches(data, batch_size)?,
             FileFormat::Csv => format::read_csv_batches(data, &schema, batch_size)?,
             FileFormat::JsonLines => format::read_jsonl_batches(data, &schema, batch_size)?,
         };
 
         let stream = async_stream::try_stream! {
-            for batch in batches {
-                yield batch;
+            for batch in iter {
+                yield batch?;
             }
         };
 
         Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), ConnectorError> {
+        Ok(())
     }
 }
 

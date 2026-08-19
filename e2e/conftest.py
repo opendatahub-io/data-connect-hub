@@ -113,6 +113,12 @@ def s3_jsonl_query() -> str | None:
     return os.environ.get("DCH_S3_JSONL_QUERY") or None
 
 
+@pytest.fixture(scope="session")
+def milvus_secret() -> str | None:
+    return os.environ.get("DCH_MILVUS_SECRET") or None
+
+
+
 # ---------------------------------------------------------------------------
 # Client fixtures
 # ---------------------------------------------------------------------------
@@ -296,6 +302,40 @@ def s3_flight_connection(
         connection_type_id=ct.id,
         data_format="tabular",
         admin=AdminSecretRef(secret_ref=s3_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def milvus_flight_connection(
+    milvus_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight Milvus query tests.
+
+    The K8s secret is prepared by run-e2e.sh. Milvus data must already exist.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not milvus_secret:
+        pytest.skip("DCH_MILVUS_SECRET not set (set DCH_MILVUS_URI in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-milvus-type"),
+        provider="milvus",
+        description="e2e Milvus test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-milvus-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=milvus_secret),
         properties={},
     )
 

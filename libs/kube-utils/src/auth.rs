@@ -21,6 +21,10 @@ pub enum AuthError {
     Unauthenticated(String),
     #[error("Forbidden: {0}")]
     Forbidden(String),
+    #[error("TokenReview API call failed: {0}")]
+    TokenReviewError(String),
+    #[error("SubjectAccessReview API call failed: {0}")]
+    AccessReviewError(String),
     #[error("Internal auth error: {0}")]
     Internal(String),
 }
@@ -77,7 +81,7 @@ impl KubeAuthClient {
                 let result = api
                     .create(&PostParams::default(), &review)
                     .await
-                    .map_err(|e| AuthError::Internal(format!("TokenReview API call failed: {e}")))?;
+                    .map_err(|e| AuthError::TokenReviewError(e.to_string()))?;
 
                 let status = result
                     .status
@@ -144,7 +148,7 @@ impl KubeAuthClient {
                 let result = api
                     .create(&PostParams::default(), &sar)
                     .await
-                    .map_err(|e| AuthError::Internal(format!("SubjectAccessReview API call failed: {e}")))?;
+                    .map_err(|e| AuthError::AccessReviewError(e.to_string()))?;
 
                 let status = result
                     .status

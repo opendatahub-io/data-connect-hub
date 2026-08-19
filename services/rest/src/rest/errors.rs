@@ -26,6 +26,19 @@ pub enum EndpointError {
     Unimplemented,
 }
 
+#[allow(unused)]
+#[derive(Error, Debug)]
+pub enum ValidationError {
+    #[error("Invalid tenant ID")]
+    InvalidTenantId,
+    #[error("Invalid data connection type")]
+    InvalidDataConnectionType,
+    #[error("Invalid secret")]
+    InvalidSecret,
+    #[error("Missing required key: {0}")]
+    MissingRequiredKey(String),
+}
+
 impl fmt::Display for RestErrorResponse {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.message)

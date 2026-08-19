@@ -493,6 +493,26 @@ components:
           items:
             $ref: "#/components/schemas/Field"
 
+    SupportedApi:
+      type: string
+      enum: [flight, rest, none]
+
+    IngestionStatus:
+      type: object
+      required: [supported_apis]
+      properties:
+        supported_apis:
+          type: array
+          items:
+            $ref: "#/components/schemas/SupportedApi"
+
+    DataConnectionTypeStatus:
+      type: object
+      required: [ingestion]
+      properties:
+        ingestion:
+          $ref: "#/components/schemas/IngestionStatus"
+
     DataConnectionTypeResource:
       type: object
       required: [metadata, resource]
@@ -501,6 +521,8 @@ components:
           $ref: "#/components/schemas/ResourceMetadata"
         resource:
           $ref: "#/components/schemas/DataConnectionType"
+        status:
+          $ref: "#/components/schemas/DataConnectionTypeStatus"
 
     DataConnectionTypeResourceList:
       type: object

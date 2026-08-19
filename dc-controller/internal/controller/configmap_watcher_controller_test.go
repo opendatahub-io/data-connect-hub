@@ -109,17 +109,21 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
 	})
 
-	It("should skip already-synced ConfigMap", func() {
+	It("should verify already-synced ConfigMap still exists in REST", func() {
 		cm := newConfigMap()
 		cm.Annotations[annotationDCHSynced] = valueSyncedTrue
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 
-		mock := &mockConnectionTypeClient{}
+		mock := &mockConnectionTypeClient{
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrConflict
+			},
+		}
 		r := reconciler(mock)
 
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: cmKey})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mock.createCalls).To(Equal(0))
+		Expect(mock.createCalls).To(Equal(1))
 	})
 
 	It("should mark synced on conflict (already exists)", func() {
@@ -185,7 +189,7 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(mock.createCalls).To(Equal(0))
 	})
 
-	It("should not re-create after successful sync", func() {
+	It("should re-create after database reset when synced annotation exists", func() {
 		cm := newConfigMap()
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 
@@ -196,9 +200,10 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mock.createCalls).To(Equal(1))
 
+		// Second reconcile still attempts create (verifies type exists)
 		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: cmKey})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mock.createCalls).To(Equal(1))
+		Expect(mock.createCalls).To(Equal(2))
 	})
 
 	It("should not set error on unexpected REST failure", func() {

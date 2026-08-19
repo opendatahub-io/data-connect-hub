@@ -3,7 +3,3 @@ resources:
 - platform-config.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-images:
-- name: controller
-  newName: quay.io/opendatahub/odh-data-connect-hub-controller
-  digest: sha256:f09d3d648a96853cab045730989b192d0acd7392d7c50a6a7fb5fb0a39ca6090

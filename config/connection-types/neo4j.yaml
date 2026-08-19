@@ -1,0 +1,26 @@
+name: Neo4j
+provider: neo4j
+description: Neo4j graph database
+credentials_fields:
+  - name: NEO4J_URI
+    label: URI
+    description: Neo4j connection URI (e.g. bolt://host:7687 or neo4j://host:7687)
+    required: true
+    type: string
+  - name: NEO4J_USERNAME
+    label: Username
+    description: Neo4j username
+    required: false
+    type: string
+    default_value: neo4j
+  - name: NEO4J_PASSWORD
+    label: Password
+    description: Neo4j password
+    required: true
+    type: string
+  - name: NEO4J_DATABASE
+    label: Database
+    description: Neo4j database name
+    required: false
+    type: string
+    default_value: neo4j

@@ -71,8 +71,10 @@ where
             let token = match extract_bearer_token(&req) {
                 Some(t) => t.to_string(),
                 None => {
-                    warn!("Missing or malformed Authorization header");
-                    return Ok(grpc_error_response(Status::unauthenticated("missing bearer token")));
+                    warn!("Invalid or missing Authorization header");
+                    return Ok(grpc_error_response(Status::unauthenticated(
+                        "invalid or missing bearer token",
+                    )));
                 },
             };
 
@@ -84,7 +86,9 @@ where
             {
                 Some(value) => value.to_string(),
                 None => {
-                    return Ok(grpc_error_response(Status::permission_denied("missing x-tenant-id")));
+                    return Ok(grpc_error_response(Status::permission_denied(
+                        "x-tenant-id header is required",
+                    )));
                 },
             };
 
@@ -128,9 +132,17 @@ fn auth_error_to_status(e: &AuthError) -> Status {
     match e {
         AuthError::Unauthenticated(msg) => Status::unauthenticated(msg),
         AuthError::Forbidden(msg) => Status::permission_denied(msg),
+        AuthError::TokenReviewError(_) => {
+            warn!("{e}");
+            Status::internal("token verification failed")
+        },
+        AuthError::AccessReviewError(_) => {
+            warn!("{e}");
+            Status::internal("authorization check failed")
+        },
         AuthError::Internal(msg) => {
-            warn!("Internal auth error: {msg}");
-            Status::internal("internal auth error")
+            warn!("{e}");
+            Status::internal(msg)
         },
     }
 }

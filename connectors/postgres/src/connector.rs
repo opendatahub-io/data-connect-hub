@@ -42,6 +42,10 @@ impl FlightConnector for PgConnector {
         "postgres".to_string()
     }
 
+    fn description(&self) -> String {
+        "PostgreSQL connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -137,6 +141,10 @@ impl TabularReader for PgReader {
         };
 
         Ok(Box::pin(stream))
+    }
+
+    async fn test_connection(&self) -> Result<(), ConnectorError> {
+        Ok(())
     }
 }
 

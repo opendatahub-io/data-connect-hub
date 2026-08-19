@@ -1,0 +1,26 @@
+name: Milvus
+provider: milvus
+description: Milvus vector database
+credentials_fields:
+  - name: MILVUS_HOST
+    label: Host
+    description: Milvus server hostname or IP address
+    required: true
+    type: string
+  - name: MILVUS_PORT
+    label: Port
+    description: Milvus server port
+    required: false
+    type: string
+    default_value: "19530"
+  - name: MILVUS_TOKEN
+    label: Token
+    description: Milvus authentication token
+    required: false
+    type: string
+  - name: MILVUS_DATABASE
+    label: Database
+    description: Milvus database name
+    required: false
+    type: string
+    default_value: default
