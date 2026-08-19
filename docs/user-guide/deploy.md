@@ -356,7 +356,7 @@ section below.
 ## Verify services
 
 ```console
-# REST health check
+# REST health check (direct, bypasses auth)
 oc exec deploy/dch-rest-service -c rest-service -n $NS -- \
   curl -s http://localhost:8080/api/v1/data/health
 ```
@@ -379,27 +379,57 @@ NAME                                  READY   STATUS    RESTARTS   AGE
 dch-flight-service-59d944f8f9-xxxxx   1/1     Running   0          6m
 ```
 
-Test the API via the kube-rbac-proxy (port 8443) using a token:
+### Test through the gateway
+
+Get the gateway's external route and test the API with a bearer token.
+All API calls (except `/health`) require the `X-Tenant-Id` header set
+to the target namespace:
 
 ```console
 TOKEN=$(oc whoami -t)
 
-# List connection types
-oc exec deploy/dch-rest-service -c rest-service -n $NS -- \
-  curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
-  "https://localhost:8443/api/v1/data/connection-types"
+# RHOAI
+GATEWAY_URL=$(oc get route -n openshift-ingress data-science-gateway -o jsonpath='{.spec.host}')
 
+# ODH
+# GATEWAY_URL=$(oc get route -n opendatahub odh-gateway -o jsonpath='{.spec.host}')
+
+echo "Gateway: https://$GATEWAY_URL"
+```
+
+```console
+# Health check through gateway
+curl -sk -H "Authorization: Bearer $TOKEN" \
+  "https://$GATEWAY_URL/api/v1/data/health"
+```
+
+Expected output:
+
+```
+{"service":"Data Connect Hub"}
+```
+
+```console
+# List connection types (global types visible to all tenants)
+curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
+  "https://$GATEWAY_URL/api/v1/data/connection-types"
+```
+
+Expected output (5 default types from IDCT + 3 from ConfigMap migration):
+
+```
+{"total_count":8,"items":[...]}
+```
+
+```console
 # List connections
-oc exec deploy/dch-rest-service -c rest-service -n $NS -- \
-  curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
-  "https://localhost:8443/api/v1/data/connections"
+curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
+  "https://$GATEWAY_URL/api/v1/data/connections"
 ```
 
-Expected output (connection types includes the default `Postgres` type
-registered by the `InitDataConnectionType` CR):
+Expected output:
 
 ```
-{"total_count":1,"items":[...]}
 {"total_count":0,"items":[]}
 ```
 
