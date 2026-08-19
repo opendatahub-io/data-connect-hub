@@ -99,7 +99,11 @@ impl TabularReader for MilvusReader {
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
-        let request = MilvusRequestInput::parse(query)?;
+        let mut request = MilvusRequestInput::parse(query)?;
+
+        if let MilvusOperation::Query = request.operation() {
+            request.limit = Some(1);
+        }
 
         let field_data = match request.operation() {
             MilvusOperation::Query => self.execute_query(&request).await?,
@@ -115,28 +119,31 @@ impl TabularReader for MilvusReader {
     async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
         let request = MilvusRequestInput::parse(&state.query)?;
         let batch_size = options.batch_size;
-
-        let field_data = match request.operation() {
-            MilvusOperation::Query => self.execute_query(&request).await?,
-            MilvusOperation::Search => self.execute_search(&request).await?,
-            MilvusOperation::Get => self.execute_get(&request).await?,
-        };
-
-        let field_data = reorder_fields(&state.schema, field_data);
         let schema = state.schema.clone();
-        let total_rows = field_data.first().map(field_data_len).unwrap_or(0);
 
-        let stream = async_stream::try_stream! {
-            let mut offset = 0;
-            while offset < total_rows {
-                let end = (offset + batch_size).min(total_rows);
-                let batch = fields_to_batch(&schema, &field_data, offset, end)?;
-                yield batch;
-                offset = end;
-            }
-        };
+        match request.operation() {
+            MilvusOperation::Query => self.read_query_paginated(request, schema, batch_size),
+            MilvusOperation::Search | MilvusOperation::Get => {
+                let field_data = match request.operation() {
+                    MilvusOperation::Search => self.execute_search(&request).await?,
+                    MilvusOperation::Get => self.execute_get(&request).await?,
+                    _ => unreachable!(),
+                };
+                let field_data = reorder_fields(&schema, field_data);
+                let total_rows = field_data.first().map(field_data_len).unwrap_or(0);
 
-        Ok(Box::pin(stream))
+                let stream = async_stream::try_stream! {
+                    let mut offset = 0;
+                    while offset < total_rows {
+                        let end = (offset + batch_size).min(total_rows);
+                        let batch = fields_to_batch(&schema, &field_data, offset, end)?;
+                        yield batch;
+                        offset = end;
+                    }
+                };
+                Ok(Box::pin(stream))
+            },
+        }
     }
 
     async fn test_connection(&self) -> Result<(), ConnectorError> {
@@ -145,6 +152,65 @@ impl TabularReader for MilvusReader {
 }
 
 impl MilvusReader {
+    fn read_query_paginated(
+        &self,
+        request: MilvusRequestInput,
+        schema: Arc<Schema>,
+        batch_size: usize,
+    ) -> QueryOutput {
+        let client = self.client.clone();
+        let page_size = batch_size as i64;
+
+        let stream = async_stream::try_stream! {
+            let client_offset = request.offset.unwrap_or(0);
+            let client_limit = request.limit;
+            let mut fetched: i64 = 0;
+
+            loop {
+                let remaining = client_limit.map(|l| l - fetched);
+                let this_page = match remaining {
+                    Some(r) if r <= 0 => break,
+                    Some(r) => r.min(page_size),
+                    None => page_size,
+                };
+
+                let mut builder = QueryRequest::builder()
+                    .collection_name(&request.collection_name)
+                    .filter(request.filter.as_deref().unwrap_or(""))
+                    .offset(client_offset + fetched)
+                    .limit(this_page);
+
+                if let Some(ref fields) = request.output_fields {
+                    builder = builder.output_fields(fields.iter().map(|s| s.as_str()));
+                }
+
+                let req = builder
+                    .build()
+                    .map_err(|e| ConnectorError::InvalidRequest(format!("Failed to build query request: {e}")))?;
+
+                let response: QueryResponse = client.query(req).await.map_err(map_milvus_error)?;
+                let field_data = response.results().get_output_fields().to_vec();
+                let field_data = reorder_fields(&schema, field_data);
+                let rows = field_data.first().map(field_data_len).unwrap_or(0);
+
+                if rows == 0 {
+                    break;
+                }
+
+                let batch = fields_to_batch(&schema, &field_data, 0, rows)?;
+                yield batch;
+
+                fetched += rows as i64;
+
+                if (rows as i64) < this_page {
+                    break;
+                }
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
     async fn execute_query(&self, request: &MilvusRequestInput) -> Result<Vec<FieldData>, ConnectorError> {
         let mut builder = QueryRequest::builder()
             .collection_name(&request.collection_name)
