@@ -44,9 +44,9 @@ const (
 
 // ConfigMapWatcherReconciler watches ODH connection-type ConfigMaps
 // (labelled opendatahub.io/connection-type: "true") and promotes them
-// to DCH connection types via the REST API. It is a one-shot per
-// ConfigMap: once synced, an annotation is set and the ConfigMap is
-// not processed again.
+// to DCH connection types via the REST API. On each reconcile it
+// attempts to create the connection type; if it already exists (409)
+// the ConfigMap is marked synced and skipped on future reconciles.
 type ConfigMapWatcherReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
@@ -66,9 +66,7 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, err
 	}
 
-	if cm.Annotations[annotationDCHSynced] == valueSyncedTrue {
-		return ctrl.Result{}, nil
-	}
+	alreadySynced := cm.Annotations[annotationDCHSynced] == valueSyncedTrue
 
 	fieldsJSON, ok := cm.Data["fields"]
 	if !ok {
@@ -82,12 +80,17 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	log.Info("promoting ODH connection type", "name", ct.Name, "provider", ct.Provider, "namespace", cm.Namespace)
+	if !alreadySynced {
+		log.Info("promoting ODH connection type", "name", ct.Name, "provider", ct.Provider, "namespace", cm.Namespace)
+	}
 
 	if err := r.RestClient.CreateConnectionType(ctx, cm.Namespace, ct); err != nil {
 		if errors.Is(err, ErrConflict) {
-			log.Info("connection type already exists, marking synced", "name", ct.Name)
-			return r.markSynced(ctx, &cm)
+			if !alreadySynced {
+				log.Info("connection type already exists, marking synced", "name", ct.Name)
+				return r.markSynced(ctx, &cm)
+			}
+			return ctrl.Result{}, nil
 		}
 		if errors.Is(err, ErrServiceUnavailable) {
 			log.Info("REST service unavailable, requeuing", "name", ct.Name)
@@ -97,7 +100,11 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	log.Info("connection type promoted", "name", ct.Name)
+	if alreadySynced {
+		log.Info("connection type re-created after database reset", "name", ct.Name)
+	} else {
+		log.Info("connection type promoted", "name", ct.Name)
+	}
 	return r.markSynced(ctx, &cm)
 }
 

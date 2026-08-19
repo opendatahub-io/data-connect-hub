@@ -18,6 +18,3 @@ relatedImages:
   kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
 
 leaderElection: true
-
-initDataConnectionTypes:
-  enabled: true
