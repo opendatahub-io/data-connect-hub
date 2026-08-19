@@ -400,19 +400,19 @@ func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context
 }
 
 type connectionTypeFile struct {
-	Name              string                   `yaml:"name"`
-	Provider          string                   `yaml:"provider"`
-	Description       string                   `yaml:"description"`
-	CredentialsFields []connectionTypeFieldDef `yaml:"credentials_fields"`
+	Name              string                   `json:"name"`
+	Provider          string                   `json:"provider"`
+	Description       string                   `json:"description"`
+	CredentialsFields []connectionTypeFieldDef `json:"credentials_fields"`
 }
 
 type connectionTypeFieldDef struct {
-	Name         string `yaml:"name"`
-	Label        string `yaml:"label"`
-	Description  string `yaml:"description"`
-	Required     bool   `yaml:"required"`
-	Type         string `yaml:"type"`
-	DefaultValue string `yaml:"default_value"`
+	Name         string `json:"name"`
+	Label        string `json:"label"`
+	Description  string `json:"description"`
+	Required     bool   `json:"required"`
+	Type         string `json:"type"`
+	DefaultValue string `json:"default_value"`
 }
 
 func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec {
