@@ -4619,6 +4619,9 @@ spec:
                   sidecar on the REST service. On ROSA clusters this must be set to
                   the cluster's OIDC provider URL. When empty, the Kubernetes API
                   server's default audience is used.
+                  This can also be set via the opendatahub-dataconnecthub-config
+                  ConfigMap key "auth.tokenReviewAudiences" (comma-separated).
+                  The CR value takes priority over the ConfigMap.
                 items:
                   type: string
                 type: array

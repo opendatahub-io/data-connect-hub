@@ -299,15 +299,9 @@ Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 
 On ROSA clusters (and other clusters with external OIDC providers), the
 default Kubernetes API audience does not match the cluster's OIDC
-provider URL. Set `spec.tokenReviewAudiences` so that both the flight
-service and the kube-rbac-proxy sidecar on the REST service use the
-correct audience for TokenReview:
-
-```yaml
-spec:
-  tokenReviewAudiences:
-    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
-```
+provider URL. The controller needs the correct audience so that both the
+flight service and the kube-rbac-proxy sidecar on the REST service can
+validate tokens via TokenReview.
 
 To find the correct audience on a ROSA cluster:
 
@@ -315,9 +309,42 @@ To find the correct audience on a ROSA cluster:
 oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}'
 ```
 
-When this field is empty (the default), the Kubernetes API server's own
-audience is used — this is correct for standard OCP / ODH / RHOAI
-clusters.
+When no audience is configured, the Kubernetes API server's own audience
+is used — this is correct for standard OCP / ODH / RHOAI clusters.
+
+**Option A: Platform ConfigMap (recommended for cluster-wide defaults)**
+
+Create the `opendatahub-dataconnecthub-config` ConfigMap in the operand
+namespace with `auth.tokenReviewAudiences` (comma-separated):
+
+```console
+oc apply -n $NS -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opendatahub-dataconnecthub-config
+data:
+  auth.tokenReviewAudiences: "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+EOF
+```
+
+All DataConnectService CRs in that namespace pick up the value
+automatically. The controller watches this ConfigMap and reconciles
+on changes.
+
+On ODH / RHOAI, the platform operator manages this ConfigMap — no
+manual creation needed.
+
+**Option B: CR spec override**
+
+Set `spec.tokenReviewAudiences` directly on the CR. This takes priority
+over the ConfigMap value:
+
+```yaml
+spec:
+  tokenReviewAudiences:
+    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+```
 
 Image resolution priority (highest wins):
 1. CR spec override (`spec.restService.image`)

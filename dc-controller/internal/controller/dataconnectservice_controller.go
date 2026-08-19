@@ -91,12 +91,17 @@ type DataConnectServiceReconciler struct {
 }
 
 type platformConfig struct {
-	Distribution     dchv1alpha1.DistributionStatus
-	PlatformVersion  string
-	GatewayName      string
-	GatewayNamespace string
+	Distribution         dchv1alpha1.DistributionStatus
+	PlatformVersion      string
+	GatewayName          string
+	GatewayNamespace     string
+	TokenReviewAudiences []string
 }
 
+// readPlatformConfig reads cluster-level defaults from the platform ConfigMap.
+// TODO(DSC): When DCH is onboarded to DSC, the platform operator will create
+// and manage this ConfigMap (including auth.tokenReviewAudiences) in the operand
+// namespace. Until then, standalone users create it manually or use CR overrides.
 func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, namespace string) platformConfig {
 	cfg := platformConfig{
 		Distribution: dchv1alpha1.DistributionStatus{
@@ -127,6 +132,15 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	}
 	if v := cm.Data["gateway.namespace"]; v != "" {
 		cfg.GatewayNamespace = v
+	}
+	if v := cm.Data["auth.tokenReviewAudiences"]; v != "" {
+		var audiences []string
+		for a := range strings.SplitSeq(v, ",") {
+			if trimmed := strings.TrimSpace(a); trimmed != "" {
+				audiences = append(audiences, trimmed)
+			}
+		}
+		cfg.TokenReviewAudiences = audiences
 	}
 
 	return cfg
@@ -339,11 +353,12 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 
-	if len(cr.Spec.TokenReviewAudiences) > 0 {
-		if !setConfigMapAudiences(resources, cr.Spec.TokenReviewAudiences) {
+	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
+	if len(audiences) > 0 {
+		if !setConfigMapAudiences(resources, audiences) {
 			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
 		}
-		setKubeRbacProxyAudiences(resources, cr.Spec.TokenReviewAudiences)
+		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
 	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
@@ -517,6 +532,13 @@ func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnec
 		gw.Namespace = cr.Spec.Gateway.Namespace
 	}
 	return gw
+}
+
+func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) []string {
+	if len(cr.Spec.TokenReviewAudiences) > 0 {
+		return cr.Spec.TokenReviewAudiences
+	}
+	return platCfg.TokenReviewAudiences
 }
 
 func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
