@@ -295,6 +295,30 @@ spec:
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
 
+### Token review audiences (ROSA / custom OIDC)
+
+On ROSA clusters (and other clusters with external OIDC providers), the
+default Kubernetes API audience does not match the cluster's OIDC
+provider URL. Set `spec.tokenReviewAudiences` so that both the flight
+service and the kube-rbac-proxy sidecar on the REST service use the
+correct audience for TokenReview:
+
+```yaml
+spec:
+  tokenReviewAudiences:
+    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+```
+
+To find the correct audience on a ROSA cluster:
+
+```console
+oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}'
+```
+
+When this field is empty (the default), the Kubernetes API server's own
+audience is used — this is correct for standard OCP / ODH / RHOAI
+clusters.
+
 Image resolution priority (highest wins):
 1. CR spec override (`spec.restService.image`)
 2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)

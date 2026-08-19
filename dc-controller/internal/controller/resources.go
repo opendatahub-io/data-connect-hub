@@ -509,7 +509,7 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 		for i, a := range audiences {
 			quoted[i] = fmt.Sprintf("%q", a)
 		}
-		audienceLine := fmt.Sprintf("    %s = [%s]", key, strings.Join(quoted, ", "))
+		audienceLine := fmt.Sprintf("%s = [%s]", key, strings.Join(quoted, ", "))
 
 		replaced := false
 		var result []string
