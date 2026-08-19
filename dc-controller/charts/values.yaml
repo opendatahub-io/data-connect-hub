@@ -2,7 +2,7 @@ controllerManager:
   image:
     repository: quay.io/opendatahub/odh-data-connect-hub-controller
     tag: odh-stable
-    pullPolicy: IfNotPresent
+    pullPolicy: Always
   replicas: 1
   resources:
     limits:
