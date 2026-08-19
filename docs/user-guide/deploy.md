@@ -311,7 +311,7 @@ oc get dchs default-dataconnectservice -n $NS
 Expected output (once ready):
 
 ```
-dc-controller-controller-manager-765b9b57d8-xxxxx  1/1     Running   0          2m
+dc-controller-manager-765b9b57d8-xxxxx  1/1     Running   0          2m
 
 dch-flight-service-59d944f8f9-xxxxx                1/1     Running   0          30s
 dch-rest-service-555bf7fc78-xxxxx                  2/2     Running   0          30s
