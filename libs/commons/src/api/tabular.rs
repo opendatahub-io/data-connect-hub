@@ -45,6 +45,8 @@ pub trait TabularReader: Send + Sync {
 #[async_trait::async_trait]
 pub trait FlightConnector: Send + Sync {
     fn provider(&self) -> String;
+    fn description(&self) -> String;
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,

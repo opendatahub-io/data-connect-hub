@@ -27,4 +27,8 @@ impl ConnectorsRegistry {
                 provider
             )))
     }
+
+    pub fn get_supported_connectors(&self) -> Vec<Arc<dyn FlightConnector>> {
+        self.connectors.values().cloned().collect()
+    }
 }

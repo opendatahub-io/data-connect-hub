@@ -2,7 +2,7 @@ use crate::flight::errors::{map_connector_error, map_meta_store_error, map_secre
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
 use arrow_flight::{
-    FlightDescriptor, FlightEndpoint, FlightInfo, Ticket,
+    Action, ActionType, FlightDescriptor, FlightEndpoint, FlightInfo, Ticket,
     encode::FlightDataEncoderBuilder,
     error::FlightError,
     flight_service_server::FlightService,
@@ -18,6 +18,7 @@ use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
@@ -28,6 +29,8 @@ const METHOD_DO_GET: &str = "arrow.flight.protocol.FlightService/DoGet";
 const OPERATION_SQL_INFO: &str = "sql_info";
 const OPERATION_STATEMENT: &str = "statement";
 const STATUS_OK: &str = "OK";
+
+const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 
 fn grpc_status_label(status: &Status) -> &'static str {
     match status.code() {
@@ -57,6 +60,12 @@ pub struct TabularDataService {
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ConnectorInfo {
+    name: String,
+    description: String,
 }
 
 impl TabularDataService {
@@ -289,6 +298,39 @@ impl FlightSqlService for TabularDataService {
     type FlightService = TabularDataService;
 
     async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {}
+
+    async fn list_custom_actions(&self) -> Option<Vec<Result<ActionType, Status>>> {
+        Some(vec![Ok(ActionType {
+            r#type: ACTION_GET_SUPPORTED_CONNECTORS.into(),
+            description: "Returns the list of supported data connectors".into(),
+        })])
+    }
+
+    async fn do_action_fallback(
+        &self,
+        request: Request<Action>,
+    ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
+        let action = request.get_ref();
+        match action.r#type.as_str() {
+            ACTION_GET_SUPPORTED_CONNECTORS => {
+                let providers = self
+                    .connectors_registry
+                    .get_supported_connectors()
+                    .iter()
+                    .map(|p| ConnectorInfo {
+                        name: p.provider(),
+                        description: p.description(),
+                    })
+                    .collect::<Vec<ConnectorInfo>>();
+                let body = serde_json::to_vec(&providers).map_err(|e| Status::internal(e.to_string()))?;
+                let result = arrow_flight::Result { body: body.into() };
+                Ok(Response::new(
+                    Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
+                ))
+            },
+            _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
+        }
+    }
 
     async fn get_flight_info_sql_info(
         &self,

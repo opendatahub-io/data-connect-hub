@@ -40,6 +40,10 @@ impl FlightConnector for SqliteConnector {
         "sqlite".to_string()
     }
 
+    fn description(&self) -> String {
+        "SQLite connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,

@@ -42,6 +42,10 @@ impl FlightConnector for PgConnector {
         "postgres".to_string()
     }
 
+    fn description(&self) -> String {
+        "PostgreSQL connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,

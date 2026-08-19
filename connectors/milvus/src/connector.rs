@@ -58,6 +58,10 @@ impl FlightConnector for MilvusConnector {
         "milvus".to_string()
     }
 
+    fn description(&self) -> String {
+        "Milvus vector database connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,

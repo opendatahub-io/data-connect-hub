@@ -85,6 +85,10 @@ impl FlightConnector for S3Connector {
         "s3".to_string()
     }
 
+    fn description(&self) -> String {
+        "Amazon compatible S3 connector".to_string()
+    }
+
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
