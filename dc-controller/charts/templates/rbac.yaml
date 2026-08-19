@@ -25,7 +25,7 @@ rules:
   verbs: [get, patch, update]
 - apiGroups: [dataconnecthub.opendatahub.io]
   resources: [initdataconnectiontypes]
-  verbs: [get, list, watch]
+  verbs: [create, delete, get, list, watch]
 - apiGroups: [dataconnecthub.opendatahub.io]
   resources: [initdataconnectiontypes/status]
   verbs: [get, patch, update]
