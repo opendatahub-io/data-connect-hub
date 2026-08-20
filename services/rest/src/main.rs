@@ -76,15 +76,47 @@ fn redact_db_url(url: &str) -> String {
     };
     let authority_start = scheme_end + 3;
     let rest = &url[authority_start..];
-    // Userinfo, if present, ends at the first '@' before any path/query.
-    let Some(at) = rest.find('@') else {
+    // The authority ends at the first '/', '?' or '#'; only it can hold userinfo.
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    // Userinfo, if present, ends at the '@' within the authority.
+    let Some(at) = authority.find('@') else {
         return url.to_string();
     };
-    let userinfo = &rest[..at];
+    let userinfo = &authority[..at];
     let Some(colon) = userinfo.find(':') else {
         return url.to_string();
     };
     format!("{}{}:***{}", &url[..authority_start], &userinfo[..colon], &rest[at..])
+}
+
+/// redact_sensitive_fields recursively replaces the values of any object keys
+/// whose name suggests a credential (password, secret, token, api key, private
+/// key) with `***`, so config parameters can be logged without leaking secrets.
+fn redact_sensitive_fields(value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(fields) => {
+            for (key, value) in fields {
+                let key = key.to_ascii_lowercase();
+                if key.contains("password")
+                    || key.contains("secret")
+                    || key.contains("token")
+                    || key.contains("api_key")
+                    || key.contains("private_key")
+                {
+                    *value = serde_json::Value::String("***".to_owned());
+                } else {
+                    redact_sensitive_fields(value);
+                }
+            }
+        },
+        serde_json::Value::Array(values) => {
+            for value in values {
+                redact_sensitive_fields(value);
+            }
+        },
+        _ => {},
+    }
 }
 
 /// log_config_source emits the parameters read from a single config file,
@@ -111,6 +143,7 @@ fn log_config_source(config_file: &str, source: &str, required: bool) {
             {
                 params["database"]["url"] = serde_json::Value::String(redact_db_url(url));
             }
+            redact_sensitive_fields(&mut params);
             tracing::info!(source, config_file, params = %params, "Loaded configuration parameters");
         },
         Err(e) => {
@@ -162,7 +195,25 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::redact_db_url;
+    use super::{redact_db_url, redact_sensitive_fields};
+
+    #[test]
+    fn test_redact_sensitive_fields_masks_nested_secrets() {
+        let mut value = serde_json::json!({
+            "server": { "port": 8080 },
+            "database": { "url": "postgresql://host/db", "password": "hunter2" },
+            "auth": { "api_key": "abc", "Token": "xyz" },
+            "connections": [ { "secret": "s3cr3t", "name": "keep" } ]
+        });
+        redact_sensitive_fields(&mut value);
+        assert_eq!(value["server"]["port"], 8080);
+        assert_eq!(value["database"]["url"], "postgresql://host/db");
+        assert_eq!(value["database"]["password"], "***");
+        assert_eq!(value["auth"]["api_key"], "***");
+        assert_eq!(value["auth"]["Token"], "***");
+        assert_eq!(value["connections"][0]["secret"], "***");
+        assert_eq!(value["connections"][0]["name"], "keep");
+    }
 
     #[test]
     fn test_redact_db_url_masks_password() {
@@ -185,6 +236,38 @@ mod tests {
         assert_eq!(
             redact_db_url("postgresql://localhost:5432/db"),
             "postgresql://localhost:5432/db"
+        );
+    }
+
+    #[test]
+    fn test_redact_db_url_at_in_query_is_not_userinfo() {
+        assert_eq!(
+            redact_db_url("postgresql://localhost:5432/db?x:y@z"),
+            "postgresql://localhost:5432/db?x:y@z"
+        );
+    }
+
+    #[test]
+    fn test_redact_db_url_at_in_path_is_not_userinfo() {
+        assert_eq!(
+            redact_db_url("postgresql://localhost:5432/d:b@x"),
+            "postgresql://localhost:5432/d:b@x"
+        );
+    }
+
+    #[test]
+    fn test_redact_db_url_at_in_fragment_is_not_userinfo() {
+        assert_eq!(
+            redact_db_url("postgresql://localhost:5432/db#a:b@c"),
+            "postgresql://localhost:5432/db#a:b@c"
+        );
+    }
+
+    #[test]
+    fn test_redact_db_url_masks_password_with_at_in_query() {
+        assert_eq!(
+            redact_db_url("postgresql://user:pass@host:5432/db?a:b@c"),
+            "postgresql://user:***@host:5432/db?a:b@c"
         );
     }
 }
