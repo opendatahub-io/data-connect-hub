@@ -5,7 +5,7 @@ NAMESPACE="${1:-openshift-ingress}"
 
 echo ""
 echo ""
-echo "================================== INSTALL GATEWAY ============================="
+echo "================================== Pre-req: Create GATEWAY for tenants ============================="
 echo "  Creating dch-gateway in namespace '$NAMESPACE'..."
 
 oc apply -f - <<EOF
@@ -64,8 +64,3 @@ spec:
         name: dch-gateway-tls
       mode: Terminate
 EOF
-
-echo ""
-echo "=== Done ==="
-echo "  Gateway: dch-gateway"
-echo "  Namespace: $NAMESPACE"

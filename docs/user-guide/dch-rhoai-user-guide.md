@@ -1,37 +1,41 @@
 # Data Connect Hub (DCH) - User Guide for RHOAI OpenShift
-The purpose of this document is to provide **end-users** steps to install, configure, use DCH in an **OpenShift** cluster, as such this document can be used by doc team to build official doc. This approach is similar to other services.
+The purpose of this document is to provide **end-users** steps to install, configure, use DCH in an **OpenShift** cluster with RHOAI, as such this document can be used by doc team to build official RedHat doc. This approach is similar to other services.
 
 ## Content
 - [x] Prerequisites
   - [x] CLI tools
-  - [ ] Namespaces
+  - [x] Namespaces
   - [x] Gateway 
   - [x] Postgres Db
 - [x] Install DCH Operator
-- [ ] Install `DataConnectService`
-- [x] Grant Flight Service Access to Tenant Secrets 
-- [x] Verify `DataConnectService`
+- [x] Install `DataConnectService`
 - [x] Prepare Test Users
   - [x] Create Test User
   - [x] Authorize Test User
   - [x] Get User Token
-- [ ] populate-db-temp.sh 
-- [ ] Create Connection Type
+- [x] Create Connection Type
 - [x] Get Connection Types
-- [ ] Create Connection
+- [x] Create DB Secret for Connection
+- [x] Grant DCH Services to read secrets in tenant namespace 
+- [x] Create Connection
 - [x] Get Connections
+- [x] Populate Test Data 
 - [x] Get Data
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
 - [ ] S3 Connection
-  - [ ] Flight Service jsonl files ingestion - S3
 - [ ] Python SDK
 - [ ] Trouble Shooting
+- [ ] TODOs
+  - [ ] Keep Postgres db in `dch-example`
+  - [ ] Delete `dch-infra-example` namespace 
+  - [ ] Use `dch-tenant1` `dch-infra-tenant1` 
 
 ## Prerequisites
 - You have an OpenShift cluster on version `4.20` or higher.
 - You have installed the OpenShift CLI (`oc`).
 - You have installed `helm` which will be used to install DCH operator.
 - You have installed `curl`, `grpcurl`. We will use these to test DCH REST and flight service. There are different versions of `grpcurl` and they work differently. `grpcurl` used in this document was installed with `go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest`.
+- You have installed `jq` which will be used to display json.
 - You have logged in as a user with cluster-admin privileges.
 - You have installed {productname-long} {vernum}.
 - A `DataScienceClusterInitialization` (DSCI) exists in your cluster. The `DataScienceClusterInitialization` gets created by the Red Hat OpenShift-AI operator out of the box. Verify DSCI as follows:
@@ -53,6 +57,7 @@ The purpose of this document is to provide **end-users** steps to install, confi
     $ oc new-project dch-example
     ```
 
+- **NB**: For the rest of the document, you need to be in the `scripts` folder in order to run the scripts in this folder.
 - A `Gateway` which will be referred to by `DataConnectService` CR. You can use an existing `Gateway`. For the purpose of this demo, we will create a `Gateway` called `dch-gateway` in `openshift-ingress` namespace by running the [scripts/create-gateway.sh](scripts/create-gateway.sh). You can check the gateway as follows:
   ```console
   oc get gateway -n openshift-ingress dch-gateway
@@ -61,7 +66,7 @@ The purpose of this document is to provide **end-users** steps to install, confi
   ```
    - Eventually, each tenant can have its own gateway.
 
-- A Postgres database to store data for this demo. DCH requires a Postgres database to store its meta data:
+- A Postgres database to store DCH meta data. For this demo, we also use this database to store data. You can prepare Postgres database as follows:
   - First, run the script [scripts/install-postgres-operator.sh](scripts/install-postgres-operator.sh) to install the Postgres operator. You can check the operator as follows:
     ```console
     $ oc get csv -n openshift-operators -l operators.coreos.com/cloudnative-pg.openshift-operators=
@@ -93,37 +98,10 @@ As a cluster admin, you can install DCH operator.
     dc-controller-controller-manager-849cc9b557-5zjdx   1/1     Running   0          100s
     ```
 - For Post Dev Preview, you can install the operator as follows: [TBD]
-### Grant Service Access to Tenant Secrets
-[TODO: THIS NEEDS TO BE REWORKED!]
-For **each** tenant, the admin must **explicitly** grant permission for DCH services in the tenant infra namespace to read **connection secrets** in the tenant namespace so that the services can access the connections. 
-
-In this demo, it's the `dch-database-config` above. You can run the commands in [scripts/grant-service-read-secret.sh](scripts/grant-service-read-secret.sh). The output should be as follows:
-```console
-role.rbac.authorization.k8s.io/dch-flight-secret-reader created
-rolebinding.rbac.authorization.k8s.io/dch-flight-secret-reader created
-```
 
 ### Install `DataConnectService`
-As a tenant admin, you can install `DataConnectService` into your tenant namespace - once the DCH operator is running and there's an available `Gateway`. This will create a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. 
-- For TP, you can create a `DataConnectService` in `dch-infra-example` namespace for this demo as follows:
-  ```bash
-  oc apply -f - <<'EOF'
-  apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-    kind: DataConnectService
-    metadata:
-      name: dch-example
-      namespace: dch-infra-example
-    spec:
-      description: "Data Connect Hub for the ML platform"
-      restApiReplicas: 2
-      flightApiReplicas: 3
-      gateway:
-        name: dch-gateway
-        namespace: openshift-ingress
-  EOF
-  ```
-- For post TP, you can create as follows: [TBD]
-### Verify `DataConnectService`
+Once the DCH operator is running and there's an available `Gateway`, as a tenant admin, you can install `DataConnectService` into your tenant namespace. This creates a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. Run the commands in [scripts/install-dch-services.sh](scripts/install-dch-services.sh) to create `DataConnectService` CR.
+
 You can verify the `DataConnectService` as follows:
 - Verify all pods are up and running:
   ```
@@ -132,12 +110,18 @@ You can verify the `DataConnectService` as follows:
   flight-service-7475479d7-6gq7w   1/1     Running   0          23h
   rest-service-5987596fcf-4r4b8    2/2     Running   0          27h
   ```
+- Verify HttpRoute has been created:
+  ```console
+  $ oc get HttpRoutes -n dch-infra-example
+  NAME                   HOSTNAMES   AGE
+  dch-data-connect-hub               120m
+  ```
 
 ### Prepare Test Users
-There are 2 cluster roles in DCH; namely, `dch-read` and `dch-read-write`. The `dch-read` role has read-only permissions. The `dch-read-write` role has all permissions. To only ingest data, users need to have `dch-read` role. To ingest data as well as to create connection types and connections, users need to have `dch-read-write` role.
+There are 2 cluster roles in DCH; namely, `dch-read` and `dch-read-write`. The `dch-read` role has read-only permissions. The `dch-read-write` role has all permissions. To only ingest data, users need to have `dch-read` role. To ingest data as well as to create connection types and connections, users need to have `dch-read-write` role. For clarity, We refer to a user with read/write access as `DCH admin user` and `DCH user` for any user with read access.
 
 #### Create Test Users
-A tenant admin can create users who consume DCH services.
+An admin can create users who consume DCH services.
 For the purpose of the demo, we create `serviceaccount` (SA) instead of users in `dch-example` namespace.
 You can run the commands in [scripts/create-test-user.sh](scripts/create-test-user.sh) to create `dch-test-user` SA in `dch-example` namespace:
 
@@ -149,8 +133,8 @@ dch-test-user      1         3m7s
 ```
 
 #### Authorize Test User
-A tenant admin can authorize users to consume DCH services.
-To allow `dch-test-user` to have `dch-read-write` role, you can run the commands in [scripts/auth-test-user.sh](scripts/auth-test-user.sh). You can verify as follows:
+A tenant admin can authorize users to consume the tenant's DCH services.
+To allow `dch-test-user` to have read/write access, you can run the commands in [scripts/auth-test-user.sh](scripts/auth-test-user.sh). You can verify as follows:
 ```console
 $  oc get rolebindings -n dch-example dch-test-user-dch-read-write
 NAME                           ROLE                         AGE
@@ -162,7 +146,7 @@ As a user who consumes DCH services,
 you will need to get your token in order to make calls to REST and flight services. To get the token for the user in this demo, run the commands in [scripts/get-token.sh](scripts/get-token.sh).
 
 ### Create Connection Type
-As a DCH user, you can run the script [scripts/create-connection-type.sh](scripts/create-connection-type.sh) to create a sample Postgres connection type. You should see the following:
+As a DCH admin user, you can run the script [scripts/create-connection-type.sh](scripts/create-connection-type.sh) to create a sample Postgres connection type. You should see the following:
 ```console
    Finding rest-service pod...
   Pod: dch-rest-service-798989c455-jl9g6
@@ -248,10 +232,25 @@ eyJhbGciOiJSUzI1NiIsImtpZCI6InA2NmxtWG5xbEtIaGMycW4xS2YteHlQY18zOG9CNUhPd1RyTjl3
   ```
 - To simplify, for the rest of the document, when possible, we will **directly** hit the REST/flight services instead of the gateway.
 
-### Create Connection
-As a DCH user, once there are connection types, you can create connections. For this demo, you can run the script [scripts/create-connection.sh](scripts/create-connection.sh) with the connection type id above. For example:
+### Create DB Secret for Connection
+A connection refers to a connection type and a database secret in the tenant namespace. So before creating a connection, we need to create a secret for the database in this example. As a tenant admin, run [scripts/create-db-secret.sh](scripts/create-db-secret.sh) to create a secret in `dch-example` namespace. You should see the following:
 ```console
-$ ./create-connection.sh dch-infra-example dch-example 6a12dc44-7901-4fd2-9d84-c52c12c748b3
+  Extracting database URI from secret 'dch-postgres-app' in namespace 'dch-infra-example'...
+  Creating secret 'dch-database-config' in namespace 'dch-example'...
+secret/dch-database-config created
+```
+
+### Grant DCH Services to read secrets in tenant namespace 
+With the database secrets created in tenant namespaces, we need to grant DCH services in tenant infra namespaces to read secrets from tenant namespaces. As a tenant amin, run [scripts/grant-service-read-secret.sh](scripts/grant-service-read-secret.sh) to grant services from `dch-infra-namespace` to access secrets in `dch-namespace`. You should see the following:
+```console
+role.rbac.authorization.k8s.io/dch-flight-secret-reader created
+rolebinding.rbac.authorization.k8s.io/dch-flight-secret-reader created
+```
+
+### Create Connection
+Once there are connection types, you can create connections refering to the connection types. As a DCH admin user, you can run the script [scripts/create-connection.sh](scripts/create-connection.sh) to create a connection with the connection type id above. For example:
+```console
+$ ./create-connection.sh 6a12dc44-7901-4fd2-9d84-c52c12c748b3
   Finding rest-service pod...
   Pod: dch-rest-service-d5d5768b-qh4vx
   Port-forwarding dch-rest-service-d5d5768b-qh4vx:8080 -> localhost:18080...
@@ -292,7 +291,7 @@ $ ./create-connection.sh dch-infra-example dch-example 6a12dc44-7901-4fd2-9d84-c
 ```
 
 ### Get Connections
-You can run the script [scripts/get-connections.sh](scripts/get-connections.sh) to get all connections. These connections reference the connection types above. The output should be similar to:
+As a DCH user, you can run the script [scripts/get-connections.sh](scripts/get-connections.sh) to get all connections. You will need the connection `id` to fetch data. The output should be similar to:
   ```console
      Finding rest-service pod...
   Pod: dch-rest-service-d5d5768b-qh4vx
@@ -326,25 +325,43 @@ You can run the script [scripts/get-connections.sh](scripts/get-connections.sh) 
       }
     }
   ```
+### Populate Test Data
+For the purpose of this demo,
+before fetching the data, run the script [scripts/populate-test-data.sh](scripts/populate-test-data.sh) to create table and insert data into table. You should see the following:
+```console
+================================== POPULATE DB =============================
+  Finding postgres pod in namespace 'dch-infra-example'...
+  Pod: dch-postgres-1
+  Populating database...
+Defaulted container "postgres" out of: postgres, bootstrap-controller (init)
+CREATE TABLE
+INSERT 0 3
+GRANT
+  Database populated successfully
+```
 
 ### Get Data
 As a DCH user, you can call DCH services to ingest data.
-You can run the script [scripts/get-data-from-connection-id.sh](scripts/get-data-from-connection-id.sh) to get data from a connection id. In addition to getting the data, this script also downloads `grpcurl`, downloads Flight proto file, uses Python `pyarrow` to decode the returned arrow data for display. The output should be similar to:
+You can run the script [scripts/get-data.sh](scripts/get-data.sh) to get data from a connection using the connection `id`. In addition to getting the data, this script also downloads `grpcurl`, downloads Flight proto file, uses Python `pyarrow` to decode the returned arrow data for display. The output should be similar to:
 ```console
-  Finding flight-service pod...
-  Pod: flight-service-74df6d8484-zf5qh
-  Port-forwarding flight-service-74df6d8484-zf5qh:50051 -> localhost:15051...
-  Port-forward ready (pid=590211)
+$ ./get-data.sh 34c998ff-7c28-4c03-a4a9-8a2616513feb
+   Finding rest-service pod...
+  Pod: dch-rest-service-656c8b84f8-9bqbz
+  Port-forwarding dch-rest-service-656c8b84f8-9bqbz:8080 -> localhost:18080...
+  Port-forward ready (pid=410279)
 
-  Using audience: https://rh-oidc.s3.us-east-1.amazonaws.com/27bd6cg0vs7nn08mue83fbof94dj4m9a
-  eyJhbGciOiJSU...kgBM
+  Finding flight-service pod...
+  Pod: dch-flight-service-765f8dff9d-87gcn
+  Port-forwarding dch-flight-service-765f8dff9d-87gcn:50051 -> localhost:15051...
+  Port-forward ready (pid=410306)
+
+Using audience (Service Account Issuer): https://rh-oidc.s3.us-east-1.amazonaws.com/27bd6cg0vs7nn08mue83fbof94dj4m9a
   Token obtained for dch-test-user
 
-  grpcurl ready
   Proto files ready
 
   SQL: SELECT * FROM test_prompts
-  CMD: grpcurl -plaintext -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' -H 'x-data-connection-id: 00000000-0000-0000-0000-000000000002' -d '{"type":"CMD","cmd":"<base64>"}' localhost:15051 arrow.flight.protocol.FlightService/GetFlightInfo
+  CMD: grpcurl -insecure -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' -H 'x-data-connection-id: abb27883-8a4d-4ca1-899f-87fd975f9c2c' -d '{"type":"CMD","cmd":"<base64>"}' localhost:15051 arrow.flight.protocol.FlightService/GetFlightInfo
   schema: [344 chars]
   endpoint: [
     {
@@ -354,11 +371,9 @@ You can run the script [scripts/get-data-from-connection-id.sh](scripts/get-data
     }
   totalRecords: -1
   totalBytes: -1
-  PASSED
-
 DoGet for SQL query (expect test_prompts data)
   SQL: SELECT * FROM test_prompts
-  CMD: grpcurl -plaintext -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' -H 'x-data-connection-id: 00000000-0000-0000-0000-000000000002' -d '{"ticket":"<ticket>"}' localhost:15051 arrow.flight.protocol.FlightService/DoGet
+  CMD: grpcurl -insecure -H 'Authorization: Bearer <token>' -H 'x-tenant-id: dch-example' -H 'x-data-connection-id: abb27883-8a4d-4ca1-899f-87fd975f9c2c' -d '{"ticket":"<ticket>"}' localhost:15051 arrow.flight.protocol.FlightService/DoGet
   Rows: 3
   id | category   | prompt
   ---+------------+-------------------------------

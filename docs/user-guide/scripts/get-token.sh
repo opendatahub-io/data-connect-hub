@@ -1,14 +1,14 @@
 #!/bin/bash
 set -euo pipefail
 
-TENANT_NAMESPACE="${1:-dch-example}"
+TENANT_NAMESPACE="dch-example"
 SA_NAME="${SA_NAME:-dch-test-user}"
 
 SA_ISSUER=$(oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}' 2>/dev/null) || true
 if [ -z "$SA_ISSUER" ]; then
   SA_ISSUER="https://kubernetes.default.svc"
 fi
-echo "  Using audience: $SA_ISSUER"
+echo "Using audience (Service Account Issuer): $SA_ISSUER"
 
 PROXY_PORT=18082
 lsof -ti :$PROXY_PORT 2>/dev/null | xargs kill 2>/dev/null || true
@@ -24,5 +24,5 @@ user_token=$(curl -s -X POST "http://127.0.0.1:${PROXY_PORT}/api/v1/namespaces/$
 kill $proxy_pid 2>/dev/null || true
 wait $proxy_pid 2>/dev/null || true
 proxy_pid=""
-echo user_token=$user_token
+#echo user_token=$user_token
 export user_token=$user_token

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 INFRA_NAMESPACE="${1:-dch-infra-example}"
-TENANT_NAMESPACE="${1:-dch-example}"
+TENANT_NAMESPACE="${1:-dch-infra-example}"
 
 GATEWAY_NS="${2:-${DCH_GATEWAY_NS:-openshift-ingress}}"
 
@@ -28,4 +28,4 @@ echo "  CMD: curl -sk -H 'Authorization: Bearer <token>' -H 'x-tenant-id: $TENAN
 
 oc exec "$POD_NAME" -n "$INFRA_NAMESPACE" -- curl -sk \
     -H "Authorization: Bearer $user_token" -H "x-tenant-id: $TENANT_NAMESPACE" \
-    "${BASE_URL}${API_PATH}"  | jq .
+    "${BASE_URL}${API_PATH}" | jq . 

@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-NAMESPACE="${1:-dch-example}"
+TENANT_NAMESPACE="${1:-dch-example}"
 SA_NAME="${2:-dch-test-user}"
 
 create_sa() {
@@ -21,4 +21,4 @@ type: kubernetes.io/service-account-token
 EOF
 }
 
-create_sa "$SA_NAME" "$NAMESPACE"
+create_sa "$SA_NAME" "$TENANT_NAMESPACE"
