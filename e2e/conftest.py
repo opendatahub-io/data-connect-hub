@@ -128,6 +128,11 @@ def es_apikey_secret() -> str | None:
     return os.environ.get("DCH_ES_APIKEY_SECRET") or None
 
 
+@pytest.fixture(scope="session")
+def neo4j_secret() -> str | None:
+    return os.environ.get("DCH_NEO4J_SECRET") or None
+
+
 # ---------------------------------------------------------------------------
 # Client fixtures
 # ---------------------------------------------------------------------------
@@ -412,6 +417,40 @@ def es_apikey_flight_connection(
         connection_type_id=ct.id,
         data_format="tabular",
         admin=AdminSecretRef(secret_ref=es_apikey_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def neo4j_flight_connection(
+    neo4j_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight Neo4j query tests.
+
+    The K8s secret is prepared by run-e2e.sh. Neo4j data must already exist.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not neo4j_secret:
+        pytest.skip("DCH_NEO4J_SECRET not set (set DCH_NEO4J_URI in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-neo4j-type"),
+        provider="neo4j",
+        description="e2e Neo4j test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-neo4j-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=neo4j_secret),
         properties={},
     )
 

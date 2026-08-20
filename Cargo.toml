@@ -8,6 +8,7 @@ members = [
     "connectors/s3",
     "connectors/milvus",
     "connectors/elasticsearch",
+    "connectors/neo4j",
     "services/flight",
     "services/rest",
 ]
@@ -26,7 +27,9 @@ sqlite-connector = { path = "connectors/sqlite" }
 s3-connector = { path = "connectors/s3" }
 milvus-connector = { path = "connectors/milvus" }
 elasticsearch-connector = { path = "connectors/elasticsearch" }
+neo4j-connector = { path = "connectors/neo4j" }
 milvus-sdk-rust = "2.6"
+neo4rs = "0.8"
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
 arrow = "59.1.0"
