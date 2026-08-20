@@ -108,11 +108,10 @@ impl MetaStore for PgMetaStore {
         let items: Vec<DataConnectionResource> = rows
             .iter()
             .map(|row| {
-                let json_value: serde_json::Value =
-                    row.try_get("data").map_err(|e| {
-                        error!("failed to read data connection column: {e}");
-                        MetaStoreError::Query("failed to read data connection".to_string())
-                    })?;
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read data connection column: {e}");
+                    MetaStoreError::Query("failed to read data connection".to_string())
+                })?;
                 serde_json::from_value(json_value).map_err(|e| {
                     error!("failed to deserialize data connection: {e}");
                     MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
@@ -233,11 +232,10 @@ impl MetaStore for PgMetaStore {
             error!("failed to read data connection column: {e}");
             MetaStoreError::Query("failed to read data connection".to_string())
         })?;
-        let existing: DataConnectionResource =
-            serde_json::from_value(json_value).map_err(|e| {
-                error!("failed to deserialize data connection: {e}");
-                MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
-            })?;
+        let existing: DataConnectionResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize data connection: {e}");
+            MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
+        })?;
 
         let data_connection = update_fn(existing.resource)?;
 
@@ -327,16 +325,14 @@ impl MetaStore for PgMetaStore {
         let items: Vec<DataConnectionTypeResource> = rows
             .iter()
             .map(|row| {
-                let json_value: serde_json::Value =
-                    row.try_get("data").map_err(|e| {
-                        error!("failed to read connection type column: {e}");
-                        MetaStoreError::Query("failed to read connection type".to_string())
-                    })?;
-                let mut dct: DataConnectionTypeResource =
-                    serde_json::from_value(json_value).map_err(|e| {
-                        error!("failed to deserialize connection type: {e}");
-                        MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
-                    })?;
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read connection type column: {e}");
+                    MetaStoreError::Query("failed to read connection type".to_string())
+                })?;
+                let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+                    error!("failed to deserialize connection type: {e}");
+                    MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+                })?;
                 if let Some(tenant) = dct.metadata.tenant_id.clone()
                     && tenant == self.global_tenant_id
                 {
@@ -443,11 +439,10 @@ impl MetaStore for PgMetaStore {
             error!("failed to read connection type column: {e}");
             MetaStoreError::Query("failed to read connection type".to_string())
         })?;
-        let existing: DataConnectionTypeResource =
-            serde_json::from_value(json_value).map_err(|e| {
-                error!("failed to deserialize connection type: {e}");
-                MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
-            })?;
+        let existing: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize connection type: {e}");
+            MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+        })?;
 
         let data_connection_type = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
