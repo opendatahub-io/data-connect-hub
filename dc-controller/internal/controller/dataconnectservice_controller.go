@@ -55,6 +55,9 @@ const (
 	conditionTypeReady                 = "Ready"
 	conditionTypeProvisioningSucceeded = "ProvisioningSucceeded"
 	conditionTypeDegraded              = "Degraded"
+	conditionTypeGRPCGatewaySupported  = "GRPCGatewaySupported"
+
+	http2EnableAnnotation = "ingress.operator.openshift.io/default-enable-http2"
 
 	requeueWaitingForReady = 10 * time.Second
 	requeueOnError         = 30 * time.Second
@@ -142,6 +145,8 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
@@ -524,6 +529,67 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 			Value: hostname,
 		},
 	}
+	r.checkGRPCGatewaySupport(ctx, cr)
+}
+
+// checkGRPCGatewaySupport sets an advisory condition when the cluster's ingress
+// appears to have HTTP/2 disabled. gRPC (flight-service) traffic routed through an
+// OpenShift Route in front of the gateway requires ALPN, which OpenShift's router
+// does not negotiate unless HTTP/2 is explicitly enabled. This never affects the
+// Ready phase -- flight-service may still be reachable without going through this
+// Route at all.
+func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
+	enabled, known := r.http2Enabled(ctx)
+	if !known {
+		meta.RemoveStatusCondition(&cr.Status.Conditions, conditionTypeGRPCGatewaySupported)
+		return
+	}
+	if enabled {
+		r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionTrue, "HTTP2Enabled",
+			"Cluster ingress has HTTP/2 enabled; gRPC (flight-service) traffic can negotiate ALPN through the gateway route")
+		return
+	}
+	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled",
+		"gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables "+
+			"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster "+
+			http2EnableAnnotation+"=true --overwrite. The Route also needs its own dedicated TLS certificate "+
+			"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md.")
+}
+
+// http2Enabled reports whether HTTP/2 appears enabled on the cluster's ingress,
+// checked cluster-wide (ingresses.config/cluster) and per-IngressController. known
+// is false when neither could be read (e.g. non-OpenShift cluster or missing RBAC),
+// in which case the caller should not draw a conclusion either way.
+func (r *DataConnectServiceReconciler) http2Enabled(ctx context.Context) (enabled, known bool) {
+	clusterIngress := &unstructured.Unstructured{}
+	clusterIngress.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "config.openshift.io",
+		Version: "v1",
+		Kind:    "Ingress",
+	})
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, clusterIngress); err == nil {
+		known = true
+		if clusterIngress.GetAnnotations()[http2EnableAnnotation] == "true" {
+			return true, true
+		}
+	}
+
+	controllers := &unstructured.UnstructuredList{}
+	controllers.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "operator.openshift.io",
+		Version: "v1",
+		Kind:    "IngressControllerList",
+	})
+	if err := r.List(ctx, controllers, client.InNamespace("openshift-ingress-operator")); err == nil {
+		known = true
+		for i := range controllers.Items {
+			if controllers.Items[i].GetAnnotations()[http2EnableAnnotation] == "true" {
+				return true, true
+			}
+		}
+	}
+
+	return false, known
 }
 
 func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {

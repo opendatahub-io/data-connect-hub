@@ -4616,6 +4616,20 @@ spec:
           status:
             description: status defines the observed state of DataConnectService
             properties:
+              addresses:
+                description: addresses is the addresses where the service is reachable
+                items:
+                  description: Addresses identifies an address where the service is
+                    reachable
+                  properties:
+                    type:
+                      description: type can be "hostname"
+                      type: string
+                    value:
+                      description: the value of the address
+                      type: string
+                  type: object
+                type: array
               conditions:
                 description: conditions represent the current state of the DataConnectService
                   resource.
@@ -4703,9 +4717,6 @@ spec:
                 - name
                 - namespace
                 type: object
-              hostname:
-                description: hostname is the hostname where the service is reachable
-                type: string
               httpRoute:
                 description: httpRoute is the name of the HTTPRoute resource created
                   for this service

@@ -53,6 +53,14 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - config.openshift.io
+  resources:
+  - ingresses
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
   - data-connection-types
@@ -135,6 +143,14 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - operator.openshift.io
+  resources:
+  - ingresscontrollers
+  verbs:
+  - get
+  - list
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
