@@ -233,6 +233,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "WaitingForDeployments", "No errors")
+			r.checkGRPCGatewaySupport(ctx, cr)
 		})
 	}
 
@@ -242,6 +243,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
+		r.checkGRPCGatewaySupport(ctx, cr)
 	})
 }
 
@@ -529,15 +531,14 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 			Value: hostname,
 		},
 	}
-	r.checkGRPCGatewaySupport(ctx, cr)
 }
 
-// checkGRPCGatewaySupport sets an advisory condition when the cluster's ingress
-// appears to have HTTP/2 disabled. gRPC (flight-service) traffic routed through an
-// OpenShift Route in front of the gateway requires ALPN, which OpenShift's router
-// does not negotiate unless HTTP/2 is explicitly enabled. This never affects the
-// Ready phase -- flight-service may still be reachable without going through this
-// Route at all.
+// checkGRPCGatewaySupport sets an advisory condition -- and escalates Degraded --
+// when the cluster's ingress appears to have HTTP/2 disabled. gRPC (flight-service)
+// traffic routed through an OpenShift Route in front of the gateway requires ALPN,
+// which OpenShift's router does not negotiate unless HTTP/2 is explicitly enabled.
+// This must run after the caller's own Degraded=False, since it overrides that
+// value when HTTP/2 is confirmed disabled.
 func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
 	enabled, known := r.http2Enabled(ctx)
 	if !known {
@@ -549,11 +550,12 @@ func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Conte
 			"Cluster ingress has HTTP/2 enabled; gRPC (flight-service) traffic can negotiate ALPN through the gateway route")
 		return
 	}
-	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled",
-		"gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables "+
-			"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster "+
-			http2EnableAnnotation+"=true --overwrite. The Route also needs its own dedicated TLS certificate "+
-			"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md.")
+	message := "gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables " +
+		"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster " +
+		http2EnableAnnotation + "=true --overwrite. The Route also needs its own dedicated TLS certificate " +
+		"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md."
+	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled", message)
+	r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", message)
 }
 
 // http2Enabled reports whether HTTP/2 appears enabled on the cluster's ingress,
