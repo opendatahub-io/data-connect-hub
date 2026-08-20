@@ -18,8 +18,11 @@ use moka::future::Cache;
 
 use crate::query::{MilvusOperation, MilvusRequestInput};
 
-const KEY_URI: &str = "uri";
-const KEY_TOKEN: &str = "token";
+const KEY_HOST: &str = "MILVUS_HOST";
+const KEY_PORT: &str = "MILVUS_PORT";
+const KEY_TOKEN: &str = "MILVUS_TOKEN";
+const KEY_DATABASE: &str = "MILVUS_DATABASE";
+const DEFAULT_PORT: &str = "19530";
 
 pub struct MilvusConnector {
     clients: Cache<String, ClientV2>,
@@ -68,12 +71,16 @@ impl FlightConnector for MilvusConnector {
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
 
-        let uri = credentials
-            .get(KEY_URI)
-            .ok_or_else(|| ConnectorError::ConnectionError("Milvus URI is required".to_string()))?
+        let host = credentials
+            .get(KEY_HOST)
+            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_HOST is required".to_string()))?
             .clone();
 
+        let port = credentials.get(KEY_PORT).map(|s| s.as_str()).unwrap_or(DEFAULT_PORT);
+
+        let uri = format!("http://{host}:{port}");
         let token = credentials.get(KEY_TOKEN).cloned();
+        let database = credentials.get(KEY_DATABASE).cloned();
 
         let cache_key = data_connection.metadata.id.clone();
         let client = self
@@ -82,6 +89,9 @@ impl FlightConnector for MilvusConnector {
                 let mut config = ConnectConfig::new().uri(&uri);
                 if let Some(ref token) = token {
                     config = config.token(token);
+                }
+                if let Some(ref db) = database {
+                    config = config.database(db);
                 }
                 ClientV2::new(&config).await.map_err(map_milvus_error)
             })
@@ -478,8 +488,10 @@ mod tests {
                 admin: Some(Admin::Secret {
                     name: "test-milvus".to_string(),
                     secret: Arc::new(HashMap::from([
-                        (KEY_URI.to_string(), "http://localhost:19530".to_string()),
+                        (KEY_HOST.to_string(), "localhost".to_string()),
+                        (KEY_PORT.to_string(), "19530".to_string()),
                         (KEY_TOKEN.to_string(), "root:milvus".to_string()),
+                        (KEY_DATABASE.to_string(), "default".to_string()),
                     ])),
                 }),
                 properties: HashMap::new(),
@@ -488,7 +500,7 @@ mod tests {
         };
         let result = extract_credentials(&conn);
         assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_URI).unwrap(), "http://localhost:19530");
+        assert_eq!(result.unwrap().get(KEY_HOST).unwrap(), "localhost");
     }
 
     #[test]

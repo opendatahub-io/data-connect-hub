@@ -124,9 +124,13 @@ setup_s3_secret() {
 
 setup_milvus_secret() {
     E2E_MILVUS_ENABLED="false"
-    if [[ -n "${DCH_MILVUS_URI:-}" ]]; then
-        local -a args=(--from-literal="uri=${DCH_MILVUS_URI}")
-        [[ -n "${DCH_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="token=${DCH_MILVUS_TOKEN}")
+    if [[ -n "${DCH_MILVUS_HOST:-}" ]]; then
+        local -a args=(
+            --from-literal="MILVUS_HOST=${DCH_MILVUS_HOST}"
+            --from-literal="MILVUS_PORT=${DCH_MILVUS_PORT:-19530}"
+        )
+        [[ -n "${DCH_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="MILVUS_TOKEN=${DCH_MILVUS_TOKEN}")
+        [[ -n "${DCH_MILVUS_DATABASE:-}" ]] && args+=(--from-literal="MILVUS_DATABASE=${DCH_MILVUS_DATABASE}")
         kubectl create secret generic "$MILVUS_SECRET" \
             -n "$DCH_TENANT_ID" \
             "${args[@]}" \
@@ -231,8 +235,9 @@ seed_pg_data() {
 
 seed_milvus_data() {
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] || return 0
+    local milvus_uri="http://${DCH_MILVUS_HOST}:${DCH_MILVUS_PORT:-19530}"
     bash "$(dirname "$0")/scripts/seed-milvus-data.sh" \
-        -e "$DCH_MILVUS_URI" -n "$DCH_SERVICE_NAMESPACE"
+        -e "$milvus_uri" -n "$DCH_SERVICE_NAMESPACE"
 }
 
 seed_es_data() {
@@ -369,7 +374,7 @@ seed_milvus_data
 if [[ "$E2E_MILVUS_ENABLED" == "true" ]]; then
     echo "[7/10] Milvus test data seeded"
 else
-    echo "[7/10] Milvus seed skipped (DCH_MILVUS_URI not set)"
+    echo "[7/10] Milvus seed skipped (DCH_MILVUS_HOST not set)"
 fi
 
 seed_es_data

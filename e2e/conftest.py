@@ -333,7 +333,7 @@ def milvus_flight_connection(
     Returns the connection ID. Cleans up REST resources after the module.
     """
     if not milvus_secret:
-        pytest.skip("DCH_MILVUS_SECRET not set (set DCH_MILVUS_URI in env file)")
+        pytest.skip("DCH_MILVUS_SECRET not set (set DCH_MILVUS_HOST in env file)")
 
     ct = rest_client.create_connection_type(
         name=_unique_name("e2e-milvus-type"),
