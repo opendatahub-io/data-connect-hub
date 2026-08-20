@@ -18,6 +18,17 @@ use moka::future::Cache;
 use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
+
+const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
+
+fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
+    if let sqlx::Error::Database(ref db_err) = e
+        && db_err.code().as_deref() == Some(PG_READ_ONLY_SQL_TRANSACTION)
+    {
+        return ConnectorError::InvalidRequest("data source is read-only".to_string());
+    }
+    ConnectorError::SQLError(e.to_string())
+}
 use std::time::Duration;
 
 pub struct PgConnector {
@@ -87,11 +98,7 @@ impl TabularReader for PgReader {
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
-        let statement = self
-            .pool
-            .prepare(query)
-            .await
-            .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+        let statement = self.pool.prepare(query).await.map_err(map_sqlx_error)?;
 
         let fields: Vec<Field> = statement
             .columns()
@@ -113,18 +120,18 @@ impl TabularReader for PgReader {
 
         let stream = async_stream::try_stream! {
             let mut conn = pool.acquire().await.map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
-            let mut tx = conn.begin().await.map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+            let mut tx = conn.begin().await.map_err(map_sqlx_error)?;
             sqlx::query("SET TRANSACTION READ ONLY")
                 .execute(&mut *tx)
                 .await
-                .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+                .map_err(map_sqlx_error)?;
 
             {
                 let mut rows = sqlx::query(query.as_str()).fetch(&mut *tx);
                 let mut chunk = Vec::with_capacity(batch_size);
 
                 while let Some(row) = rows.next().await {
-                    chunk.push(row.map_err(|e| ConnectorError::SQLError(e.to_string()))?);
+                    chunk.push(row.map_err(map_sqlx_error)?);
 
                     if chunk.len() >= batch_size {
                         yield rows_to_batch(&schema, &chunk)?;
@@ -137,7 +144,7 @@ impl TabularReader for PgReader {
                 }
             }
 
-            tx.commit().await.map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+            tx.commit().await.map_err(map_sqlx_error)?;
         };
 
         Ok(Box::pin(stream))
@@ -198,7 +205,7 @@ fn time_to_micros(t: chrono::NaiveTime) -> i64 {
 }
 
 fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> Result<ArrayRef, ConnectorError> {
-    let err = |e: sqlx::Error| ConnectorError::SQLError(e.to_string());
+    let err = map_sqlx_error;
     match pg_type {
         "BOOL" => {
             let vals: Vec<Option<bool>> = rows

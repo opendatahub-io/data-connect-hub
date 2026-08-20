@@ -19,6 +19,7 @@ postgres-connector = { workspace = true }
 sqlite-connector = { workspace = true }
 s3-connector = { workspace = true }
 milvus-connector = { workspace = true }
+elasticsearch-connector = { workspace = true }
 async-trait = { workspace = true }
 commons = { workspace = true }
 pg-meta-store = { workspace = true }

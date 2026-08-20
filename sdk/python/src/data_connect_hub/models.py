@@ -16,6 +16,15 @@ DataFormat = Literal["tabular", "binary"]
 DataConnectionState = Literal["ready", "not_ready"]
 
 
+class _MaskProperties:
+    def __repr_args__(self) -> Any:
+        for name, value in super().__repr_args__():  # type: ignore[misc]
+            if name == "properties" and value:
+                yield name, {k: "***" for k in value}
+            else:
+                yield name, value
+
+
 class AdminSecretRef(BaseModel):
     secret_ref: str
 
@@ -23,6 +32,10 @@ class AdminSecretRef(BaseModel):
 class AdminSecret(BaseModel):
     name: str
     secret: dict[str, str]
+
+    def __repr_args__(self) -> Any:
+        yield "name", self.name
+        yield "secret", {k: "***" for k in self.secret}
 
 
 Admin = AdminSecretRef | AdminSecret
@@ -34,7 +47,7 @@ class DataConnectionStatus(BaseModel):
     phases: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class DataConnection(BaseModel):
+class DataConnection(_MaskProperties, BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     id: str
@@ -59,7 +72,7 @@ class DataConnection(BaseModel):
         return data
 
 
-class CreateConnectionRequest(BaseModel):
+class CreateConnectionRequest(_MaskProperties, BaseModel):
     name: str
     data_connection_type_id: str
     format: DataFormat
@@ -67,7 +80,7 @@ class CreateConnectionRequest(BaseModel):
     properties: dict[str, str] = Field(default_factory=dict)
 
 
-class UpdateConnectionRequest(BaseModel):
+class UpdateConnectionRequest(_MaskProperties, BaseModel):
     name: str | None = None
     data_connection_type_id: str | None = None
     format: DataFormat | None = None
