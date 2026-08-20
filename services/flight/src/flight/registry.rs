@@ -20,12 +20,10 @@ impl ConnectorsRegistry {
     }
 
     pub fn get_connector(&self, provider: &str) -> Result<&Arc<dyn FlightConnector>, ConnectorError> {
-        self.connectors
-            .get(provider)
-            .ok_or(ConnectorError::InvalidRequest(format!(
-                "Connector not found: {}",
-                provider
-            )))
+        self.connectors.get(provider).ok_or(ConnectorError::ConfigError(format!(
+            "no connector registered for provider '{}'",
+            provider
+        )))
     }
 
     pub fn get_supported_connectors(&self) -> Vec<Arc<dyn FlightConnector>> {

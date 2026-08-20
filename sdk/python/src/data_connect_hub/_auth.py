@@ -29,12 +29,12 @@ def _normalize_token(token: str) -> str:
     return f"{_BEARER_PREFIX}{token}"
 
 
-def build_rest_headers(
+def build_headers(
     *,
     token: str,
     tenant_id: str,
 ) -> dict[str, str]:
-    """Build HTTP headers for REST API calls."""
+    """Build standard HTTP headers for authentication."""
     headers: dict[str, str] = {}
     if token:
         headers["Authorization"] = _normalize_token(token)
@@ -70,20 +70,3 @@ class TokenCache:
 
 
 ADBC_HEADER_PREFIX = "adbc.flight.sql.rpc.call_header."
-
-
-def build_flight_headers(
-    *,
-    token: str,
-    tenant_id: str,
-    connection_id: str | None = None,
-) -> dict[str, str]:
-    """Build ``db_kwargs`` header entries for ADBC Flight SQL connections."""
-    headers: dict[str, str] = {}
-    if token:
-        headers[f"{ADBC_HEADER_PREFIX}authorization"] = _normalize_token(token)
-    if tenant_id:
-        headers[f"{ADBC_HEADER_PREFIX}x-tenant-id"] = tenant_id
-    if connection_id:
-        headers[f"{ADBC_HEADER_PREFIX}x-data-connection-id"] = connection_id
-    return headers

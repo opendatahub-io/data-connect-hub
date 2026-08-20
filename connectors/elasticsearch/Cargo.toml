@@ -1,5 +1,5 @@
 [package]
-name = "s3-connector"
+name = "elasticsearch-connector"
 version = "0.1.0"
 edition = "2024"
 
@@ -14,12 +14,8 @@ tokio = { workspace = true }
 futures = { workspace = true }
 async-stream = { workspace = true }
 moka = { workspace = true, features = ["future"] }
-opendal = { workspace = true }
-parquet = { workspace = true }
-arrow-csv = { workspace = true }
-arrow-json = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 tracing = { workspace = true }
-bytes = { workspace = true }
-
-[dev-dependencies]
-opendal = { workspace = true, features = ["services-fs"] }
+chrono = { workspace = true }
+reqwest = { workspace = true }

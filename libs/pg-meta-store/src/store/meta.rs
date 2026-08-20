@@ -8,6 +8,7 @@ use commons::api::storage::MetaStore;
 use serde::Deserialize;
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
+use tracing::error;
 use uuid::Uuid;
 
 use commons::api::ResourceList;
@@ -26,16 +27,18 @@ fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
     if let sqlx::Error::Database(ref db_err) = e
         && db_err.code().as_deref() == Some("23505")
     {
-        return MetaStoreError::Conflict(db_err.message().to_string());
+        return MetaStoreError::Conflict("a resource with the same identity already exists".to_string());
     }
-    MetaStoreError::Query(e.to_string())
+    error!("database query failed: {e}");
+    MetaStoreError::Query("failed to execute database operation".to_string())
 }
 
 impl PgMetaStore {
     pub async fn new(config: DatabaseConfig, global_tenant_id: String) -> Result<Self, MetaStoreError> {
-        let pool = PgPool::connect(&config.url)
-            .await
-            .map_err(|e| MetaStoreError::Connection(e.to_string()))?;
+        let pool = PgPool::connect(&config.url).await.map_err(|e| {
+            error!("failed to connect to database: {e}");
+            MetaStoreError::Connection("failed to connect to the metadata database".to_string())
+        })?;
 
         Self::init_schema(&pool).await?;
 
@@ -46,7 +49,10 @@ impl PgMetaStore {
         sqlx::raw_sql(include_str!("../../schema/connections.sql"))
             .execute(pool)
             .await
-            .map_err(|e| MetaStoreError::Query(format!("schema initialization failed: {e}")))?;
+            .map_err(|e| {
+                error!("schema initialization failed: {e}");
+                MetaStoreError::Query("failed to initialize database schema".to_string())
+            })?;
         Ok(())
     }
 
@@ -66,7 +72,10 @@ impl PgMetaStore {
                 sqlx::Error::RowNotFound => {
                     MetaStoreError::ResourceNotFound(format!("connection type '{connection_type_id}' not found"))
                 }
-                e => MetaStoreError::Query(e.to_string()),
+                e => {
+                    error!("failed to validate connection type '{connection_type_id}': {e}");
+                    MetaStoreError::Query("failed to validate connection type".to_string())
+                }
             })?;
         Ok(())
     }
@@ -91,14 +100,22 @@ impl MetaStore for PgMetaStore {
             .bind(tenant_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(|e| {
+                error!("failed to list data connections: {e}");
+                MetaStoreError::Query("failed to list data connections".to_string())
+            })?;
 
         let items: Vec<DataConnectionResource> = rows
             .iter()
             .map(|row| {
-                let json_value: serde_json::Value =
-                    row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-                serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read data connection column: {e}");
+                    MetaStoreError::Query("failed to read data connection".to_string())
+                })?;
+                serde_json::from_value(json_value).map_err(|e| {
+                    error!("failed to deserialize data connection: {e}");
+                    MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -115,12 +132,21 @@ impl MetaStore for PgMetaStore {
             .fetch_one(&self.pool)
             .await
             .map_err(|e| match e {
-                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("Data connection '{uid}' not found for tenant '{tenant_id}'")),
-                e => MetaStoreError::Query(e.to_string()),
+                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("data connection '{uid}' not found")),
+                e => {
+                    error!("failed to get data connection '{uid}': {e}");
+                    MetaStoreError::Query("failed to retrieve data connection".to_string())
+                }
             })?;
 
-        let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read data connection column: {e}");
+            MetaStoreError::Query("failed to read data connection".to_string())
+        })?;
+        serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize data connection: {e}");
+            MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
+        })
     }
 
     async fn create_data_connection(
@@ -130,11 +156,10 @@ impl MetaStore for PgMetaStore {
     ) -> Result<DataConnectionResource, MetaStoreError> {
         Self::can_store(data_connection).await?;
 
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to create data connection".to_string())
+        })?;
 
         Self::validate_connection_type(
             &mut *tx,
@@ -160,7 +185,10 @@ impl MetaStore for PgMetaStore {
             },
         };
 
-        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize data connection: {e}");
+            MetaStoreError::Serialization("failed to serialize data connection".to_string())
+        })?;
 
         sqlx::query("INSERT INTO data_connections (data) VALUES ($1)")
             .bind(&json_value)
@@ -168,7 +196,10 @@ impl MetaStore for PgMetaStore {
             .await
             .map_err(map_sqlx_error)?;
 
-        tx.commit().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to create data connection".to_string())
+        })?;
 
         Ok(resource)
     }
@@ -179,11 +210,10 @@ impl MetaStore for PgMetaStore {
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to update data connection".to_string())
+        })?;
 
         let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
             .bind(uid)
@@ -191,13 +221,21 @@ impl MetaStore for PgMetaStore {
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| match e {
-                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("Data connection '{uid}' not found for tenant '{tenant_id}'")),
-                e => MetaStoreError::Query(e.to_string()),
+                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("data connection '{uid}' not found")),
+                e => {
+                    error!("failed to get data connection '{uid}' for update: {e}");
+                    MetaStoreError::Query("failed to update data connection".to_string())
+                }
             })?;
 
-        let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        let existing: DataConnectionResource =
-            serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read data connection column: {e}");
+            MetaStoreError::Query("failed to read data connection".to_string())
+        })?;
+        let existing: DataConnectionResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize data connection: {e}");
+            MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
+        })?;
 
         let data_connection = update_fn(existing.resource)?;
 
@@ -224,7 +262,10 @@ impl MetaStore for PgMetaStore {
             status: existing.status.clone(),
         };
 
-        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize data connection: {e}");
+            MetaStoreError::Serialization("failed to serialize data connection".to_string())
+        })?;
 
         sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
             .bind(&json_value)
@@ -232,9 +273,15 @@ impl MetaStore for PgMetaStore {
             .bind(tenant_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(|e| {
+                error!("failed to update data connection '{uid}': {e}");
+                MetaStoreError::Query("failed to update data connection".to_string())
+            })?;
 
-        tx.commit().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to update data connection".to_string())
+        })?;
 
         Ok(resource)
     }
@@ -247,11 +294,14 @@ impl MetaStore for PgMetaStore {
         .bind(tenant_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        .map_err(|e| {
+            error!("failed to delete data connection '{uid}': {e}");
+            MetaStoreError::Query("failed to delete data connection".to_string())
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(
-                "Data connection '{uid}' not found for tenant '{tenant_id}'"
+                "data connection '{uid}' not found"
             )));
         }
 
@@ -267,15 +317,22 @@ impl MetaStore for PgMetaStore {
             .bind(&self.global_tenant_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(|e| {
+                error!("failed to list connection types: {e}");
+                MetaStoreError::Query("failed to list connection types".to_string())
+            })?;
 
         let items: Vec<DataConnectionTypeResource> = rows
             .iter()
             .map(|row| {
-                let json_value: serde_json::Value =
-                    row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-                let mut dct: DataConnectionTypeResource =
-                    serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read connection type column: {e}");
+                    MetaStoreError::Query("failed to read connection type".to_string())
+                })?;
+                let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+                    error!("failed to deserialize connection type: {e}");
+                    MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+                })?;
                 if let Some(tenant) = dct.metadata.tenant_id.clone()
                     && tenant == self.global_tenant_id
                 {
@@ -307,11 +364,20 @@ impl MetaStore for PgMetaStore {
                 sqlx::Error::RowNotFound => {
                     MetaStoreError::ResourceNotFound(format!("connection type '{id}' not found"))
                 },
-                e => MetaStoreError::Query(e.to_string()),
+                e => {
+                    error!("failed to get connection type '{id}': {e}");
+                    MetaStoreError::Query("failed to retrieve connection type".to_string())
+                }
             })?;
 
-        let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read connection type column: {e}");
+            MetaStoreError::Query("failed to read connection type".to_string())
+        })?;
+        serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize connection type: {e}");
+            MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+        })
     }
 
     async fn create_data_connection_type(
@@ -331,7 +397,10 @@ impl MetaStore for PgMetaStore {
             status: Default::default(),
         };
 
-        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize connection type: {e}");
+            MetaStoreError::Serialization("failed to serialize connection type".to_string())
+        })?;
 
         sqlx::query("INSERT INTO data_connection_types (data) VALUES ($1)")
             .bind(&json_value)
@@ -348,11 +417,10 @@ impl MetaStore for PgMetaStore {
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        let mut tx = self
-            .pool
-            .begin()
-            .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to update connection type".to_string())
+        })?;
 
         let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
             .bind(uid)
@@ -360,13 +428,21 @@ impl MetaStore for PgMetaStore {
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| match e {
-                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("Connection type '{uid}' not found for tenant '{tenant_id}'")),
-                e => MetaStoreError::Query(e.to_string()),
+                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("connection type '{uid}' not found")),
+                e => {
+                    error!("failed to get connection type '{uid}' for update: {e}");
+                    MetaStoreError::Query("failed to update connection type".to_string())
+                }
             })?;
 
-        let json_value: serde_json::Value = row.try_get("data").map_err(|e| MetaStoreError::Query(e.to_string()))?;
-        let existing: DataConnectionTypeResource =
-            serde_json::from_value(json_value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read connection type column: {e}");
+            MetaStoreError::Query("failed to read connection type".to_string())
+        })?;
+        let existing: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize connection type: {e}");
+            MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+        })?;
 
         let data_connection_type = update_fn(existing.resource)?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
@@ -380,7 +456,10 @@ impl MetaStore for PgMetaStore {
             status: existing.status.clone(),
         };
 
-        let json_value = serde_json::to_value(&resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize connection type: {e}");
+            MetaStoreError::Serialization("failed to serialize connection type".to_string())
+        })?;
 
         sqlx::query("UPDATE data_connection_types SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
             .bind(&json_value)
@@ -388,9 +467,15 @@ impl MetaStore for PgMetaStore {
             .bind(tenant_id)
             .execute(&mut *tx)
             .await
-            .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+            .map_err(|e| {
+                error!("failed to update connection type '{uid}': {e}");
+                MetaStoreError::Query("failed to update connection type".to_string())
+            })?;
 
-        tx.commit().await.map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to update connection type".to_string())
+        })?;
 
         Ok(resource)
     }
@@ -403,11 +488,14 @@ impl MetaStore for PgMetaStore {
         .bind(tenant_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| MetaStoreError::Query(e.to_string()))?;
+        .map_err(|e| {
+            error!("failed to delete connection type '{uid}': {e}");
+            MetaStoreError::Query("failed to delete connection type".to_string())
+        })?;
 
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(
-                "Data connection type '{uid}' not found for tenant '{tenant_id}'"
+                "connection type '{uid}' not found"
             )));
         }
 

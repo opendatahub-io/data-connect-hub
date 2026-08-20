@@ -17,10 +17,10 @@ CREATE TABLE IF NOT EXISTS data_connections (
     data JSONB NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_data_connections_id ON data_connections ((data->'metadata'->>'id'));
 CREATE INDEX IF NOT EXISTS idx_data_connections_tenant ON data_connections ((data->'metadata'->>'tenant_id'));
 CREATE INDEX IF NOT EXISTS idx_data_connections_name ON data_connections ((data->'resource'->>'name'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connections_name_tenant ON data_connections ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connections_id ON data_connections ((data->'metadata'->>'id'));
 
 -- Stores DataConnectionTypeResource records as JSONB documents.
 -- Each type defines a provider (e.g. "postgres", "sqlite") and the
@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS data_connection_types (
     data JSONB NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_data_connection_types_id ON data_connection_types ((data->'metadata'->>'id'));
 CREATE INDEX IF NOT EXISTS idx_data_connection_types_name ON data_connection_types ((data->'resource'->>'name'));
 CREATE INDEX IF NOT EXISTS idx_data_connection_types_provider ON data_connection_types ((data->'resource'->>'provider'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connection_types_name_tenant ON data_connection_types ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connection_types_id ON data_connection_types ((data->'metadata'->>'id'));

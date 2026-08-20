@@ -2,14 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bytes::Bytes;
+use crate::format::{self, FileFormat};
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
 use moka::future::Cache;
-use opendal::{Operator, services::S3};
-
-use crate::format::{self, FileFormat};
+use opendal::{Operator, Reader, services::S3};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -111,21 +109,17 @@ pub struct S3Reader {
 }
 
 impl S3Reader {
-    async fn read_object(&self, path: &str) -> Result<Bytes, ConnectorError> {
-        let data = self
-            .operator
-            .read(path)
-            .await
-            .map_err(|e| ConnectorError::IOError(format!("Failed to read S3 object '{path}': {e}")))?
-            .to_bytes();
-        if data.is_empty() {
-            return Err(ConnectorError::NoDataError());
-        }
-        Ok(data)
-    }
-
     fn detect_format(&self, path: &str) -> Result<FileFormat, ConnectorError> {
         FileFormat::detect(path, self.format_hint.as_deref())
+    }
+
+    async fn make_reader(&self, path: &str) -> Result<Reader, ConnectorError> {
+        let reader = self
+            .operator
+            .reader(path)
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("Failed to create S3 reader for '{path}': {e}")))?;
+        Ok(reader)
     }
 }
 
@@ -137,12 +131,12 @@ impl TabularReader for S3Reader {
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
         let format = self.detect_format(query)?;
-        let data = self.read_object(query).await?;
+        let reader = self.make_reader(query).await?;
 
         let schema = match format {
-            FileFormat::Parquet => format::read_parquet_schema(&data)?,
-            FileFormat::Csv => format::read_csv_schema(&data)?,
-            FileFormat::JsonLines => format::read_jsonl_schema(&data)?,
+            FileFormat::Parquet => format::read_parquet_schema(reader).await?,
+            FileFormat::Csv => format::read_csv_schema(reader).await?,
+            FileFormat::JsonLines => format::read_jsonl_schema(reader).await?,
         };
 
         Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
@@ -150,23 +144,22 @@ impl TabularReader for S3Reader {
 
     async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
         let format = self.detect_format(&state.query)?;
-        let data = self.read_object(&state.query).await?;
-        let schema = state.schema.clone();
         let batch_size = options.batch_size;
 
-        let iter = match format {
-            FileFormat::Parquet => format::read_parquet_batches(data, batch_size)?,
-            FileFormat::Csv => format::read_csv_batches(data, &schema, batch_size)?,
-            FileFormat::JsonLines => format::read_jsonl_batches(data, &schema, batch_size)?,
-        };
-
-        let stream = async_stream::try_stream! {
-            for batch in iter {
-                yield batch?;
-            }
-        };
-
-        Ok(Box::pin(stream))
+        match format {
+            FileFormat::Parquet => {
+                let reader = self.make_reader(&state.query).await?;
+                format::read_parquet_batches(reader, batch_size).await
+            },
+            FileFormat::Csv => {
+                let reader = self.make_reader(&state.query).await?;
+                format::read_csv_batches(reader, &state.schema, batch_size).await
+            },
+            FileFormat::JsonLines => {
+                let reader = self.make_reader(&state.query).await?;
+                format::read_jsonl_batches(reader, &state.schema, batch_size).await
+            },
+        }
     }
 
     async fn test_connection(&self) -> Result<(), ConnectorError> {
