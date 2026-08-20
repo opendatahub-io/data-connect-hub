@@ -13,6 +13,7 @@ use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use std::sync::Arc;
 use std::time::Duration;
+use url::Url;
 
 mod rest;
 #[allow(unused)]
@@ -69,25 +70,19 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
 }
 
 /// redact_db_url masks the password in a database connection URL of the form
-/// `scheme://user:password@host/...` so it can be safely logged.
+/// `scheme://user:password@host/...` so it can be safely logged. The input is
+/// returned unchanged if it cannot be parsed or carries no password.
 fn redact_db_url(url: &str) -> String {
-    let Some(scheme_end) = url.find("://") else {
+    let Ok(mut parsed) = Url::parse(url) else {
         return url.to_string();
     };
-    let authority_start = scheme_end + 3;
-    let rest = &url[authority_start..];
-    // The authority ends at the first '/', '?' or '#'; only it can hold userinfo.
-    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
-    let authority = &rest[..authority_end];
-    // Userinfo, if present, ends at the '@' within the authority.
-    let Some(at) = authority.find('@') else {
+    if parsed.password().is_none() {
         return url.to_string();
-    };
-    let userinfo = &authority[..at];
-    let Some(colon) = userinfo.find(':') else {
+    }
+    if parsed.set_password(Some("***")).is_err() {
         return url.to_string();
-    };
-    format!("{}{}:***{}", &url[..authority_start], &userinfo[..colon], &rest[at..])
+    }
+    parsed.into()
 }
 
 /// redact_sensitive_fields recursively replaces the values of any object keys
