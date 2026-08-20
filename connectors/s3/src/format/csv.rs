@@ -5,7 +5,6 @@ use arrow::datatypes::Schema;
 use arrow_csv::ReaderBuilder as CsvReaderBuilder;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::QueryOutput;
-use futures::TryStreamExt;
 use opendal::Reader;
 
 pub async fn read_csv_schema(reader: Reader) -> Result<Schema, ConnectorError> {
@@ -19,50 +18,12 @@ pub async fn read_csv_schema(reader: Reader) -> Result<Schema, ConnectorError> {
 }
 
 pub async fn read_csv_batches(reader: Reader, schema: &Arc<Schema>, batch_size: usize) -> QueryOutput {
-    let mut decoder = CsvReaderBuilder::new(schema.clone())
+    let decoder = CsvReaderBuilder::new(schema.clone())
         .with_header(true)
         .with_batch_size(batch_size)
         .build_decoder();
 
-    let mut buf_stream = reader
-        .into_stream(..)
-        .await
-        .map_err(|e| ConnectorError::IOError(format!("Failed to open CSV stream: {e}")))?;
-
-    let stream = async_stream::try_stream! {
-        while let Some(buf) = buf_stream
-            .try_next()
-            .await
-            .map_err(|e| ConnectorError::IOError(format!("CSV stream read error: {e}")))?
-        {
-            let chunk = buf.to_bytes();
-            let mut offset = 0;
-            while offset < chunk.len() {
-                let consumed = decoder
-                    .decode(&chunk[offset..])
-                    .map_err(|e| ConnectorError::IOError(format!("CSV decode error: {e}")))?;
-                offset += consumed;
-
-                if consumed == 0 {
-                    break;
-                }
-
-                if let Some(batch) = decoder
-                    .flush()
-                    .map_err(|e| ConnectorError::IOError(format!("CSV flush error: {e}")))? {
-                    yield batch;
-                }
-            }
-        }
-
-        if let Some(batch) = decoder
-            .flush()
-            .map_err(|e| ConnectorError::IOError(format!("CSV flush error: {e}")))? {
-            yield batch;
-        }
-    };
-
-    Ok(Box::pin(stream))
+    super::decode_stream(reader, super::Decoder::Csv(Box::new(decoder)), "CSV").await
 }
 
 #[cfg(test)]

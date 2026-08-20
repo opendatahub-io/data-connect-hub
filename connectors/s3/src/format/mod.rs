@@ -3,6 +3,7 @@ mod jsonl;
 mod parquet;
 
 use commons::api::errors::ConnectorError;
+use commons::api::tabular::QueryOutput;
 use futures::TryStreamExt;
 use opendal::Reader;
 
@@ -11,6 +12,69 @@ pub use jsonl::{read_jsonl_batches, read_jsonl_schema};
 pub use parquet::{read_parquet_batches, read_parquet_schema};
 
 const MAX_SCHEMA_SAMPLE: usize = 1_048_576;
+
+enum Decoder {
+    Csv(Box<arrow_csv::reader::Decoder>),
+    Json(Box<arrow_json::reader::Decoder>),
+}
+
+impl Decoder {
+    fn decode(&mut self, buf: &[u8]) -> Result<usize, arrow::error::ArrowError> {
+        match self {
+            Decoder::Csv(d) => d.decode(buf),
+            Decoder::Json(d) => d.decode(buf),
+        }
+    }
+
+    fn flush(&mut self) -> Result<Option<arrow::record_batch::RecordBatch>, arrow::error::ArrowError> {
+        match self {
+            Decoder::Csv(d) => d.flush(),
+            Decoder::Json(d) => d.flush(),
+        }
+    }
+}
+
+async fn decode_stream(reader: Reader, mut decoder: Decoder, format: &str) -> QueryOutput {
+    let mut buf_stream = reader
+        .into_stream(..)
+        .await
+        .map_err(|e| ConnectorError::IOError(format!("Failed to open {format} stream: {e}")))?;
+
+    let format = format.to_owned();
+    let stream = async_stream::try_stream! {
+        while let Some(buf) = buf_stream
+            .try_next()
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("{format} stream read error: {e}")))?
+        {
+            let chunk = buf.to_bytes();
+            let mut offset = 0;
+            while offset < chunk.len() {
+                let consumed = decoder
+                    .decode(&chunk[offset..])
+                    .map_err(|e| ConnectorError::IOError(format!("{format} decode error: {e}")))?;
+
+                if consumed == 0 {
+                    if let Some(batch) = decoder
+                        .flush()
+                        .map_err(|e| ConnectorError::IOError(format!("{format} flush error: {e}")))? {
+                        yield batch;
+                    }
+                } else {
+                    offset += consumed;
+                }
+            }
+        }
+
+        if let Some(batch) = decoder
+            .flush()
+            .map_err(|e| ConnectorError::IOError(format!("{format} flush error: {e}")))? {
+            yield batch;
+        }
+    };
+
+    Ok(Box::pin(stream))
+}
 
 async fn read_sample(reader: Reader) -> Result<Vec<u8>, ConnectorError> {
     let mut buf_stream = reader

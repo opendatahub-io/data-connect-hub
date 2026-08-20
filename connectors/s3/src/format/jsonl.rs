@@ -4,7 +4,6 @@ use std::sync::Arc;
 use arrow::datatypes::Schema;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::QueryOutput;
-use futures::TryStreamExt;
 use opendal::Reader;
 
 pub async fn read_jsonl_schema(reader: Reader) -> Result<Schema, ConnectorError> {
@@ -16,50 +15,12 @@ pub async fn read_jsonl_schema(reader: Reader) -> Result<Schema, ConnectorError>
 }
 
 pub async fn read_jsonl_batches(reader: Reader, schema: &Arc<Schema>, batch_size: usize) -> QueryOutput {
-    let mut decoder = arrow_json::ReaderBuilder::new(schema.clone())
+    let decoder = arrow_json::ReaderBuilder::new(schema.clone())
         .with_batch_size(batch_size)
         .build_decoder()
         .map_err(|e| ConnectorError::IOError(format!("Failed to build JSONL decoder: {e}")))?;
 
-    let mut buf_stream = reader
-        .into_stream(..)
-        .await
-        .map_err(|e| ConnectorError::IOError(format!("Failed to open JSONL stream: {e}")))?;
-
-    let stream = async_stream::try_stream! {
-        while let Some(buf) = buf_stream
-            .try_next()
-            .await
-            .map_err(|e| ConnectorError::IOError(format!("JSONL stream read error: {e}")))?
-        {
-            let chunk = buf.to_bytes();
-            let mut offset = 0;
-            while offset < chunk.len() {
-                let consumed = decoder
-                    .decode(&chunk[offset..])
-                    .map_err(|e| ConnectorError::IOError(format!("JSONL decode error: {e}")))?;
-                offset += consumed;
-
-                if consumed == 0 {
-                    break;
-                }
-
-                if let Some(batch) = decoder
-                    .flush()
-                    .map_err(|e| ConnectorError::IOError(format!("JSONL flush error: {e}")))? {
-                    yield batch;
-                }
-            }
-        }
-
-        if let Some(batch) = decoder
-            .flush()
-            .map_err(|e| ConnectorError::IOError(format!("JSONL flush error: {e}")))? {
-            yield batch;
-        }
-    };
-
-    Ok(Box::pin(stream))
+    super::decode_stream(reader, super::Decoder::Json(Box::new(decoder)), "JSONL").await
 }
 
 #[cfg(test)]
