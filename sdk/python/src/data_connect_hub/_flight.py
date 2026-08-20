@@ -40,7 +40,7 @@ class FlightClient:
 
     Parameters
     ----------
-    flight_url : str
+    url : str
         gRPC endpoint, e.g. ``grpc://host:50051`` or ``grpc+tls://host:50051``.
     token : str
         Static Bearer token value.
@@ -60,7 +60,7 @@ class FlightClient:
 
     def __init__(
         self,
-        flight_url: str,
+        url: str,
         token: str = "",
         tenant_id: str = "",
         *,
@@ -74,7 +74,7 @@ class FlightClient:
                 "Cannot specify both 'token' and 'token_provider'."
                 " Please provide either a static token or a token_provider callable, not both."
             )
-        self._flight_url = flight_url
+        self._url = url
         self._tenant_id = tenant_id
         self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
         self._insecure = insecure
@@ -114,7 +114,7 @@ class FlightClient:
         if self._tls_root_certs:
             kwargs[_FLIGHT_TLS_ROOT_CERTS] = self._tls_root_certs.encode()
         try:
-            return flight.connect(self._flight_url, **kwargs)
+            return flight.connect(self._url, **kwargs)
         except Exception as exc:
             raise DCHConnectionError(str(exc)) from exc
 
@@ -124,7 +124,7 @@ class FlightClient:
             f"{ADBC_HEADER_PREFIX}x-data-connection-id": connection_id,
         }
         try:
-            return flight_dbapi.connect(self._flight_url, db_kwargs=db_kwargs)
+            return flight_dbapi.connect(self._url, db_kwargs=db_kwargs)
         except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
 
@@ -169,7 +169,7 @@ class FlightClient:
 
     def _do_server_info(self) -> dict[str, Any]:
         try:
-            conn = flight_dbapi.connect(self._flight_url, db_kwargs=self._base_kwargs())
+            conn = flight_dbapi.connect(self._url, db_kwargs=self._base_kwargs())
         except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
         try:

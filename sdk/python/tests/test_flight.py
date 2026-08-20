@@ -31,7 +31,7 @@ class _ProgrammingError(_Error):
 
 @pytest.fixture()
 def flight_client() -> FlightClient:
-    return FlightClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
+    return FlightClient(url="grpc://localhost:50051", token="tok", tenant_id="t1")
 
 
 def _mock_cursor(table: pa.Table) -> MagicMock:
@@ -235,7 +235,7 @@ class TestTokenProviderGuard:
     def test_token_and_provider_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="Cannot specify both"):
             FlightClient(
-                flight_url="grpc://localhost:50051",
+                url="grpc://localhost:50051",
                 token="tok",
                 token_provider=lambda: "fresh",
             )
@@ -253,7 +253,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -276,7 +276,7 @@ class TestTokenProvider:
     def test_provider_used_for_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
         )
@@ -294,7 +294,7 @@ class TestTokenProvider:
     def test_provider_with_timeout(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
             timeout=10.0,
@@ -322,7 +322,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -351,7 +351,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -370,7 +370,7 @@ class TestTokenProvider:
     def test_auth_error_after_refresh_raises(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "bad-token",
         )
@@ -390,7 +390,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -412,7 +412,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -437,7 +437,7 @@ class TestTimeouts:
     def test_timeouts_injected(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
             timeout=10.0,
@@ -458,7 +458,7 @@ class TestTimeouts:
     def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
             timeout=10.0,
@@ -494,7 +494,7 @@ class TestTLS:
     def test_insecure_sets_tls_skip_verify(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             insecure=True,
@@ -516,7 +516,7 @@ class TestTLS:
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             ca_cert=str(cert_file),
@@ -534,7 +534,7 @@ class TestTLS:
     def test_ca_cert_file_not_found_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="CA certificate file not found"):
             FlightClient(
-                flight_url="grpc+tls://localhost:50051",
+                url="grpc+tls://localhost:50051",
                 token="tok",
                 tenant_id="t1",
                 ca_cert="/nonexistent/ca.pem",
@@ -547,7 +547,7 @@ class TestTLS:
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             ca_cert=str(cert_file),

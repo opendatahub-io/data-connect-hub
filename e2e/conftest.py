@@ -3,8 +3,7 @@
 Configuration is read from environment variables, typically written
 by setup.sh into .env and loaded at the top of this file.
 
-    DCH_REST_URL           REST service URL
-    DCH_FLIGHT_URL         Flight gRPC URL
+    DCH_GATEWAY_URL        Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
     DCH_AUTH_TOKEN         Bearer token
     DCH_INSECURE           Skip TLS verify          (default: false)
@@ -23,6 +22,7 @@ import httpx
 import pytest
 
 from data_connect_hub import AdminSecretRef, DataConnectClient
+from data_connect_hub.client import _build_urls
 
 # ---------------------------------------------------------------------------
 # Load .env written by setup.sh (does not override existing env vars)
@@ -44,13 +44,19 @@ if _ENV_FILE.exists():
 
 
 @pytest.fixture(scope="session")
-def rest_url() -> str:
-    return os.environ.get("DCH_REST_URL", "http://localhost:8080")
+def gateway_url() -> str:
+    return os.environ.get("DCH_GATEWAY_URL", "https://localhost:8443")
 
 
 @pytest.fixture(scope="session")
-def flight_url() -> str:
-    return os.environ.get("DCH_FLIGHT_URL", "grpc://localhost:50051")
+def rest_url(gateway_url: str) -> str:
+    """REST base URL the SDK derives from *gateway_url*.
+
+    Only for the raw ``httpx`` fixture below, so it targets the exact URL the
+    SDK targets; SDK-based tests should take ``gateway_url`` directly.
+    """
+    rest, _ = _build_urls(gateway_url)
+    return rest
 
 
 @pytest.fixture(scope="session")
@@ -144,9 +150,15 @@ def uri_secret() -> str | None:
 
 
 @pytest.fixture(scope="session")
-def rest_client(rest_url: str, tenant_id: str, auth_token: str, ca_cert: str | None, insecure: bool) -> DataConnectClient:
+def dch_client(
+    gateway_url: str,
+    tenant_id: str,
+    auth_token: str,
+    ca_cert: str | None,
+    insecure: bool,
+) -> DataConnectClient:
     client = DataConnectClient(
-        rest_url=rest_url,
+        gateway_url,
         token=auth_token,
         tenant_id=tenant_id,
         ca_cert=ca_cert,
@@ -159,26 +171,9 @@ def rest_client(rest_url: str, tenant_id: str, auth_token: str, ca_cert: str | N
 
 
 @pytest.fixture(scope="session")
-def dch_client(
-    rest_url: str,
-    flight_url: str,
-    tenant_id: str,
-    auth_token: str,
-    ca_cert: str | None,
-    insecure: bool,
-) -> DataConnectClient:
-    client = DataConnectClient(
-        rest_url=rest_url,
-        flight_url=flight_url,
-        token=auth_token,
-        tenant_id=tenant_id,
-        ca_cert=ca_cert,
-        insecure=insecure,
-        max_retries=1,
-        rest_timeout=15.0,
-    )
-    yield client  # type: ignore[misc]
-    client.close()
+def rest_client(dch_client: DataConnectClient) -> DataConnectClient:
+    """Alias of ``dch_client``, kept for readability in REST-only tests."""
+    return dch_client
 
 
 @pytest.fixture(scope="session")

@@ -3,9 +3,9 @@
 Usage:
     python examples/flight_query.py
 
-Requires a running DCH flight-service (default: grpc+tls://localhost:50051).
+Requires a running DCH gateway (default: localhost:8443).
 Set environment variables to override defaults:
-    DCH_FLIGHT_URL, DCH_TOKEN, DCH_TENANT_ID, DCH_CONNECTION_ID
+    DCH_HOST, DCH_TOKEN, DCH_TENANT_ID, DCH_CONNECTION_ID
 """
 
 import os
@@ -13,7 +13,7 @@ import os
 from data_connect_hub import DataConnectClient
 
 client = DataConnectClient(
-    flight_url=os.getenv("DCH_FLIGHT_URL", "grpc+tls://localhost:50051"),
+    url=os.getenv("DCH_HOST", "localhost:8443"),
     token=os.getenv("DCH_TOKEN", ""),
     tenant_id=os.getenv("DCH_TENANT_ID", "opendatahub"),
     ca_cert=os.getenv("DCH_CA_CERT", None),

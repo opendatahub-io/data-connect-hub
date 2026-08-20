@@ -64,7 +64,7 @@ def _make_client(
 ) -> RestClient:
     http_client = httpx.Client(transport=transport, base_url="http://test")
     return RestClient(
-        base_url="http://test",
+        url="http://test",
         token="test-token",
         tenant_id="test-tenant",
         api_base=api_base,
@@ -509,7 +509,7 @@ class TestTokenProviderGuard:
 
         with pytest.raises(DCHConfigError, match="Cannot specify both"):
             RestClient(
-                base_url="http://test",
+                url="http://test",
                 token="tok",
                 tenant_id="t1",
                 token_provider=lambda: "fresh",
@@ -534,7 +534,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=provider,
@@ -568,7 +568,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=provider,
@@ -589,7 +589,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=lambda: "bad-token",

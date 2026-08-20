@@ -44,8 +44,7 @@ set +a
 # -------------------------------------------------------------------
 
 : "${DCH_SERVICE_NAMESPACE:?DCH_SERVICE_NAMESPACE is required (set it in $CONFIG_FILE)}"
-: "${DCH_REST_URL:?DCH_REST_URL is required (set it in $CONFIG_FILE)}"
-: "${DCH_FLIGHT_URL:?DCH_FLIGHT_URL is required (set it in $CONFIG_FILE)}"
+: "${DCH_GATEWAY_URL:?DCH_GATEWAY_URL is required (set it in $CONFIG_FILE)}"
 
 : "${DCH_TENANT_ID:?DCH_TENANT_ID is required (set it in $CONFIG_FILE)}"
 : "${DCH_NO_ACCESS_NAMESPACE:?DCH_NO_ACCESS_NAMESPACE is required (set it in $CONFIG_FILE)}"
@@ -345,8 +344,7 @@ generate_tokens() {
 
 write_env_file() {
     cat > "$ENV_FILE" <<EOF
-DCH_REST_URL=${DCH_REST_URL}
-DCH_FLIGHT_URL=${DCH_FLIGHT_URL}
+DCH_GATEWAY_URL=${DCH_GATEWAY_URL}
 DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}

@@ -3,10 +3,10 @@
 Usage:
     python examples/connections.py
 
-Requires a running DCH rest-service (default: https://localhost:8443)
+Requires a running DCH gateway (default: localhost:8443)
 and an existing connection type (DCH_CONNECTION_TYPE_ID).
 Set environment variables to override defaults:
-    DCH_REST_URL, DCH_TOKEN, DCH_TENANT_ID, DCH_CA_CERT, DCH_INSECURE,
+    DCH_HOST, DCH_TOKEN, DCH_TENANT_ID, DCH_CA_CERT, DCH_INSECURE,
     DCH_CONNECTION_TYPE_ID
 """
 
@@ -17,7 +17,7 @@ from data_connect_hub import AdminSecretRef, DataConnectClient
 from data_connect_hub.exceptions import DCHHTTPError
 
 client = DataConnectClient(
-    rest_url=os.getenv("DCH_REST_URL", "https://localhost:8443"),
+    url=os.getenv("DCH_HOST", "localhost:8443"),
     token=os.getenv("DCH_TOKEN", ""),
     tenant_id=os.getenv("DCH_TENANT_ID", "opendatahub"),
     ca_cert=os.getenv("DCH_CA_CERT") or None,
