@@ -47,6 +47,17 @@ def _set_mock_exceptions(mock_dbapi: MagicMock) -> None:
     mock_dbapi.ProgrammingError = _ProgrammingError
 
 
+def _set_mock_flight(mock_flight: MagicMock, connectors: list[str] | None = None) -> MagicMock:
+    import json
+
+    mock_client = MagicMock()
+    mock_flight.connect.return_value = mock_client
+    mock_result = MagicMock()
+    mock_result.body.to_pybytes.return_value = json.dumps(connectors or ["postgres"]).encode()
+    mock_client.do_action.return_value = [mock_result]
+    return mock_client
+
+
 class TestRead:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
@@ -124,16 +135,40 @@ class TestReadPandas:
 
 
 class TestServerInfo:
+    @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_dict(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_returns_dict_with_connectors(
+        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightSQLClient
+    ) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        info: dict[str, Any] = {"vendor": "DCH", "version": "1.0"}
+        mock_conn = MagicMock()
+        mock_conn.adbc_get_info.return_value = info
+        mock_dbapi.connect.return_value = mock_conn
+        _set_mock_flight(mock_flight, connectors=["postgres", "sqlite"])
+
+        result = flight_client.server_info()
+        assert result["vendor"] == "DCH"
+        assert result["version"] == "1.0"
+        assert result["supported_connectors"] == ["postgres", "sqlite"]
+        mock_conn.close.assert_called_once()
+
+    @patch("data_connect_hub.flight.flight")
+    @patch("data_connect_hub.flight.flight_dbapi")
+    def test_server_info_connectors_error_propagates(
+        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightSQLClient
+    ) -> None:
         _set_mock_exceptions(mock_dbapi)
         info: dict[str, Any] = {"vendor": "DCH", "version": "1.0"}
         mock_conn = MagicMock()
         mock_conn.adbc_get_info.return_value = info
         mock_dbapi.connect.return_value = mock_conn
 
-        result = flight_client.server_info()
-        assert result == info
+        mock_flight_client = _set_mock_flight(mock_flight)
+        mock_flight_client.do_action.side_effect = Exception("action failed")
+
+        with pytest.raises(DCHConnectionError, match="action failed"):
+            flight_client.server_info()
         mock_conn.close.assert_called_once()
 
 
@@ -231,8 +266,9 @@ class TestTokenProvider:
         assert kwargs2["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-1"
         assert call_count == 1
 
+    @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_provider_used_for_server_info(self, mock_dbapi: MagicMock) -> None:
+    def test_provider_used_for_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightSQLClient(
             flight_url="grpc://localhost:50051",
@@ -242,6 +278,7 @@ class TestTokenProvider:
         mock_conn = MagicMock()
         mock_conn.adbc_get_info.return_value = {"vendor": "DCH"}
         mock_dbapi.connect.return_value = mock_conn
+        _set_mock_flight(mock_flight)
 
         client.server_info()
 
@@ -358,8 +395,9 @@ class TestTokenProvider:
             client.read("SELECT 1", "conn-1")
         assert call_count == 1
 
+    @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_server_info_auth_error_triggers_refresh(self, mock_dbapi: MagicMock) -> None:
+    def test_server_info_auth_error_triggers_refresh(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
 
@@ -381,10 +419,12 @@ class TestTokenProvider:
             mock_conn_ok,
         ]
 
+        _set_mock_flight(mock_flight)
+
         result = client.server_info()
 
         assert call_count == 2
-        assert result == {"vendor": "DCH"}
+        assert result["vendor"] == "DCH"
 
 
 class TestTimeouts:
@@ -408,8 +448,9 @@ class TestTimeouts:
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
 
+    @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock) -> None:
+    def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightSQLClient(
             flight_url="grpc://localhost:50051",
@@ -420,6 +461,7 @@ class TestTimeouts:
         mock_conn = MagicMock()
         mock_conn.adbc_get_info.return_value = {"vendor": "DCH"}
         mock_dbapi.connect.return_value = mock_conn
+        _set_mock_flight(mock_flight)
 
         client.server_info()
 

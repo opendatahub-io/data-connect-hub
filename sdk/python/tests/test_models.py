@@ -103,6 +103,23 @@ class TestAdmin:
         assert restored.name == "my-secret"
         assert restored.secret == {"username": "admin", "password": "s3cret"}
 
+    def test_admin_secret_repr_masks_values(self) -> None:
+        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
+        text = repr(admin)
+        assert "s3cret" not in text
+        assert "root" not in text
+        assert "***" in text
+        assert "user" in text
+        assert "password" in text
+        assert "pg-creds" in text
+
+    def test_admin_secret_str_masks_values(self) -> None:
+        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
+        text = str(admin)
+        assert "s3cret" not in text
+        assert "root" not in text
+        assert "***" in text
+
     def test_secret_variant_in_connection(self) -> None:
         data = dict(SAMPLE_CONNECTION_JSON)
         data["admin"] = {"name": "pg-creds", "secret": {"user": "root", "pass": "pw"}}
@@ -110,6 +127,31 @@ class TestAdmin:
         assert isinstance(conn.admin, AdminSecret)
         assert conn.admin.name == "pg-creds"
         assert conn.admin.secret == {"user": "root", "pass": "pw"}
+
+
+class TestDataConnectionRepr:
+    def test_repr_masks_properties(self) -> None:
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
+        text = repr(conn)
+        assert "value" not in text
+        assert "***" in text
+        assert "key" in text
+
+    def test_repr_masks_admin_secret(self) -> None:
+        data = dict(SAMPLE_CONNECTION_JSON)
+        data["admin"] = {"name": "pg-creds", "secret": {"user": "root", "pass": "pw"}}
+        conn = DataConnection.model_validate(data)
+        text = repr(conn)
+        assert "pw" not in text
+        assert "root" not in text
+        assert "***" in text
+
+    def test_repr_empty_properties_not_masked(self) -> None:
+        data = dict(SAMPLE_CONNECTION_JSON)
+        data["properties"] = {}
+        conn = DataConnection.model_validate(data)
+        text = repr(conn)
+        assert "***" not in text
 
 
 class TestCreateConnectionRequest:
@@ -124,6 +166,18 @@ class TestCreateConnectionRequest:
         assert dumped["properties"] == {}
         assert "admin" not in dumped
 
+    def test_repr_masks_properties(self) -> None:
+        req = CreateConnectionRequest(
+            name="conn",
+            data_connection_type_id="postgres",
+            format="tabular",
+            properties={"host": "db.internal", "password": "secret123"},
+        )
+        text = repr(req)
+        assert "db.internal" not in text
+        assert "secret123" not in text
+        assert "***" in text
+
 
 class TestUpdateConnectionRequest:
     def test_partial_dump(self) -> None:
@@ -131,6 +185,12 @@ class TestUpdateConnectionRequest:
         dumped = req.model_dump(exclude_none=True)
         assert dumped == {"name": "new-name"}
         assert "data_connection_type_id" not in dumped
+
+    def test_repr_masks_properties(self) -> None:
+        req = UpdateConnectionRequest(properties={"host": "db.internal"})
+        text = repr(req)
+        assert "db.internal" not in text
+        assert "***" in text
 
 
 class TestConnectionType:

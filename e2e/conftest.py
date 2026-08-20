@@ -118,6 +118,15 @@ def milvus_secret() -> str | None:
     return os.environ.get("DCH_MILVUS_SECRET") or None
 
 
+@pytest.fixture(scope="session")
+def es_secret() -> str | None:
+    return os.environ.get("DCH_ES_SECRET") or None
+
+
+@pytest.fixture(scope="session")
+def es_apikey_secret() -> str | None:
+    return os.environ.get("DCH_ES_APIKEY_SECRET") or None
+
 
 # ---------------------------------------------------------------------------
 # Client fixtures
@@ -336,6 +345,73 @@ def milvus_flight_connection(
         connection_type_id=ct.id,
         data_format="tabular",
         admin=AdminSecretRef(secret_ref=milvus_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def es_flight_connection(
+    es_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight Elasticsearch query tests.
+
+    The K8s secret is prepared by run-e2e.sh. ES data must already exist.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not es_secret:
+        pytest.skip("DCH_ES_SECRET not set (set DCH_ES_URI in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-es-type"),
+        provider="elasticsearch",
+        description="e2e Elasticsearch test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-es-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=es_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def es_apikey_flight_connection(
+    es_apikey_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection for Flight Elasticsearch API key auth tests.
+
+    Uses an API key instead of basic auth. Skips if API key secret is not available.
+    """
+    if not es_apikey_secret:
+        pytest.skip("DCH_ES_APIKEY_SECRET not set (ES API key not created)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-es-apikey-type"),
+        provider="elasticsearch",
+        description="e2e Elasticsearch API key test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-es-apikey-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=es_apikey_secret),
         properties={},
     )
 

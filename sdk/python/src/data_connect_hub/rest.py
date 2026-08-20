@@ -11,7 +11,7 @@ from typing import Any
 
 import httpx
 
-from ._auth import TokenCache, build_rest_headers
+from ._auth import TokenCache, build_headers
 from .exceptions import DCHConfigError, DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
 from .models import (
     ConnectionType,
@@ -119,7 +119,7 @@ class RestClient:
 
     def _headers(self) -> dict[str, str]:
         token = self._token_cache.get() if self._token_cache else self._token
-        return build_rest_headers(
+        return build_headers(
             token=token,
             tenant_id=self._tenant_id,
         )

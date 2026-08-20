@@ -7,6 +7,7 @@ members = [
     "connectors/sqlite",
     "connectors/s3",
     "connectors/milvus",
+    "connectors/elasticsearch",
     "services/flight",
     "services/rest",
 ]
@@ -24,6 +25,7 @@ postgres-connector = { path = "connectors/postgres" }
 sqlite-connector = { path = "connectors/sqlite" }
 s3-connector = { path = "connectors/s3" }
 milvus-connector = { path = "connectors/milvus" }
+elasticsearch-connector = { path = "connectors/elasticsearch" }
 milvus-sdk-rust = "2.6"
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
@@ -65,3 +67,5 @@ opendal = { version = "0.58", features = ["services-s3"] }
 parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
 arrow-csv = "59.1"
 arrow-json = "59.1"
+base64 = "0.22"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
