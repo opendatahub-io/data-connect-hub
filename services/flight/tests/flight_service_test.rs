@@ -108,7 +108,13 @@ impl MetaStore for TestMetaStore {
     async fn update_data_connection_type_status(
         &self,
         _uid: &str,
-        _update_fn: Arc<dyn Fn(commons::api::connection_types::DataConnectionTypeStatus) -> Result<commons::api::connection_types::DataConnectionTypeStatus, MetaStoreError> + Send + Sync>,
+        _update_fn: Arc<
+            dyn Fn(
+                    commons::api::connection_types::DataConnectionTypeStatus,
+                ) -> Result<commons::api::connection_types::DataConnectionTypeStatus, MetaStoreError>
+                + Send
+                + Sync,
+        >,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         unimplemented!()
     }
@@ -124,9 +130,7 @@ impl MetaStore for TestMetaStore {
         unimplemented!()
     }
 
-    async fn get_all_data_connection_types(
-        &self,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+    async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         unimplemented!()
     }
 

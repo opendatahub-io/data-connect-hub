@@ -1,8 +1,8 @@
+use crate::utils::FlightService;
 use arrow::record_batch::RecordBatch;
 use arrow_flight::Action;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use tonic::transport::Channel;
-use crate::utils::FlightService;
 
 pub async fn get_supported_connectors(flight_service: &FlightService) -> Result<RecordBatch, tonic::Status> {
     let channel = Channel::from_shared(flight_service.endpoint())

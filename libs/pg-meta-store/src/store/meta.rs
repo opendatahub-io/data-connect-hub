@@ -308,9 +308,7 @@ impl MetaStore for PgMetaStore {
         Ok(())
     }
 
-    async fn get_all_data_connection_types(
-        &self,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+    async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         let rows = sqlx::query("SELECT data FROM data_connection_types")
             .fetch_all(&self.pool)
             .await
@@ -344,8 +342,6 @@ impl MetaStore for PgMetaStore {
             total_count: items.len(),
             items,
         })
-
-
     }
     async fn get_data_connection_types(
         &self,
@@ -522,7 +518,9 @@ impl MetaStore for PgMetaStore {
     async fn update_data_connection_type_status(
         &self,
         uid: &str,
-        update_fn: Arc<dyn Fn(DataConnectionTypeStatus) -> Result<DataConnectionTypeStatus, MetaStoreError> + Send + Sync>,
+        update_fn: Arc<
+            dyn Fn(DataConnectionTypeStatus) -> Result<DataConnectionTypeStatus, MetaStoreError> + Send + Sync,
+        >,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             error!("failed to begin transaction: {e}");
@@ -534,11 +532,13 @@ impl MetaStore for PgMetaStore {
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| match e {
-                sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("connection type '{uid}' not found")),
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("connection type '{uid}' not found"))
+                },
                 e => {
                     error!("failed to get connection type '{uid}' for status update: {e}");
                     MetaStoreError::Query("failed to update connection type status".to_string())
-                }
+                },
             })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| {

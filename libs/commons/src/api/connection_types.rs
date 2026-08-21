@@ -54,7 +54,6 @@ pub struct DataConnectionType {
     pub credentials_fields: Vec<Field>,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct Capabilities {
     pub flight: bool,

@@ -344,8 +344,8 @@ impl FlightSqlService for TabularDataService {
 
                 let mut buf = Vec::new();
                 {
-                    let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema())
-                        .map_err(|e| {
+                    let mut writer =
+                        arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema()).map_err(|e| {
                             tracing::error!(error = %e, "failed to create IPC writer");
                             Status::internal("failed to encode response")
                         })?;
