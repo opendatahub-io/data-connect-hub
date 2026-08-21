@@ -3,6 +3,13 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::api::ResourceMetadata;
+use crate::api::errors::MetaStoreError;
+
+const MAX_NAME_LENGTH: usize = 253;
+const MAX_LABEL_LENGTH: usize = 256;
+const MAX_DESCRIPTION_LENGTH: usize = 1024;
+const MAX_DEFAULT_VALUE_LENGTH: usize = 1024;
+const VALID_FIELD_TYPES: &[&str] = &["string", "enum"];
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnumValue {
@@ -23,6 +30,101 @@ pub struct Field {
     pub enum_values: Option<Vec<EnumValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
+}
+
+impl Field {
+    pub fn validate(&self) -> Result<(), MetaStoreError> {
+        if self.name.is_empty() {
+            return Err(MetaStoreError::Validation("field name must not be empty".to_string()));
+        }
+        if self.name.len() > MAX_NAME_LENGTH {
+            return Err(MetaStoreError::Validation(format!(
+                "field name '{}' exceeds maximum length of {MAX_NAME_LENGTH}",
+                self.name
+            )));
+        }
+        if self.label.is_empty() {
+            return Err(MetaStoreError::Validation(format!(
+                "field '{}': label must not be empty",
+                self.name
+            )));
+        }
+        if self.label.len() > MAX_LABEL_LENGTH {
+            return Err(MetaStoreError::Validation(format!(
+                "field '{}': label exceeds maximum length of {MAX_LABEL_LENGTH}",
+                self.name
+            )));
+        }
+        if let Some(desc) = &self.description
+            && desc.len() > MAX_DESCRIPTION_LENGTH
+        {
+            return Err(MetaStoreError::Validation(format!(
+                "field '{}': description exceeds maximum length of {MAX_DESCRIPTION_LENGTH}",
+                self.name
+            )));
+        }
+        if !VALID_FIELD_TYPES.contains(&self.d_type.as_str()) {
+            return Err(MetaStoreError::Validation(format!(
+                "field '{}': type '{}' is not valid; valid types are: {}",
+                self.name,
+                self.d_type,
+                VALID_FIELD_TYPES.join(", ")
+            )));
+        }
+        if self.d_type == "enum" {
+            match &self.enum_values {
+                None => {
+                    return Err(MetaStoreError::Validation(format!(
+                        "field '{}': enum_values must be provided when type is 'enum'",
+                        self.name
+                    )));
+                },
+                Some(values) if values.is_empty() => {
+                    return Err(MetaStoreError::Validation(format!(
+                        "field '{}': enum_values must not be empty when type is 'enum'",
+                        self.name
+                    )));
+                },
+                Some(values) => {
+                    for v in values {
+                        if v.value.is_empty() {
+                            return Err(MetaStoreError::Validation(format!(
+                                "field '{}': enum value must not be empty",
+                                self.name
+                            )));
+                        }
+                        if v.value.len() > MAX_LABEL_LENGTH {
+                            return Err(MetaStoreError::Validation(format!(
+                                "field '{}': enum value '{}' exceeds maximum length of {MAX_LABEL_LENGTH}",
+                                self.name, v.value
+                            )));
+                        }
+                        if v.label.is_empty() {
+                            return Err(MetaStoreError::Validation(format!(
+                                "field '{}': enum label must not be empty",
+                                self.name
+                            )));
+                        }
+                        if v.label.len() > MAX_LABEL_LENGTH {
+                            return Err(MetaStoreError::Validation(format!(
+                                "field '{}': enum label '{}' exceeds maximum length of {MAX_LABEL_LENGTH}",
+                                self.name, v.label
+                            )));
+                        }
+                    }
+                },
+            }
+        }
+        if let Some(default) = &self.default_value
+            && default.len() > MAX_DEFAULT_VALUE_LENGTH
+        {
+            return Err(MetaStoreError::Validation(format!(
+                "field '{}': default_value exceeds maximum length of {MAX_DEFAULT_VALUE_LENGTH}",
+                self.name
+            )));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -104,6 +206,38 @@ pub struct DataConnectionType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
+}
+
+impl DataConnectionType {
+    pub fn validate(&self) -> Result<(), MetaStoreError> {
+        if self.name.is_empty() {
+            return Err(MetaStoreError::Validation("name must not be empty".to_string()));
+        }
+        if self.name.len() > MAX_NAME_LENGTH {
+            return Err(MetaStoreError::Validation(format!(
+                "name '{}' exceeds maximum length of {MAX_NAME_LENGTH}",
+                self.name
+            )));
+        }
+        if Provider::from_id(&self.provider).is_none() {
+            let supported = Provider::ALL.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ");
+            return Err(MetaStoreError::UnsupportedProvider(format!(
+                "unsupported provider '{}'; supported providers are: {supported}",
+                self.provider
+            )));
+        }
+        if let Some(desc) = &self.description
+            && desc.len() > MAX_DESCRIPTION_LENGTH
+        {
+            return Err(MetaStoreError::Validation(format!(
+                "description exceeds maximum length of {MAX_DESCRIPTION_LENGTH}"
+            )));
+        }
+        for field in &self.credentials_fields {
+            field.validate()?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
@@ -268,5 +402,114 @@ mod tests {
         assert_eq!(enums.len(), 2);
         assert_eq!(enums[0].value, "us-east-1");
         assert_eq!(enums[1].label, "EU West");
+    }
+
+    fn valid_connection_type() -> DataConnectionType {
+        DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: Some("A connection".to_string()),
+            credentials_fields: vec![Field {
+                name: "url".to_string(),
+                label: "URL".to_string(),
+                description: None,
+                required: true,
+                d_type: "string".to_string(),
+                enum_values: None,
+                default_value: None,
+            }],
+        }
+    }
+
+    #[test]
+    fn test_validate_valid_connection_type() {
+        assert!(valid_connection_type().validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_empty_name() {
+        let mut ct = valid_connection_type();
+        ct.name = "".to_string();
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("name must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_name_too_long() {
+        let mut ct = valid_connection_type();
+        ct.name = "a".repeat(254);
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn test_validate_unsupported_provider() {
+        let mut ct = valid_connection_type();
+        ct.provider = "postgresql".to_string();
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("unsupported provider 'postgresql'"));
+        assert!(err.contains("postgres"));
+    }
+
+    #[test]
+    fn test_validate_description_too_long() {
+        let mut ct = valid_connection_type();
+        ct.description = Some("a".repeat(1025));
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("description exceeds maximum length"));
+    }
+
+    #[test]
+    fn test_validate_field_empty_name() {
+        let mut ct = valid_connection_type();
+        ct.credentials_fields[0].name = "".to_string();
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("field name must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_field_invalid_type() {
+        let mut ct = valid_connection_type();
+        ct.credentials_fields[0].d_type = "integer".to_string();
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("type 'integer' is not valid"));
+    }
+
+    #[test]
+    fn test_validate_enum_field_missing_values() {
+        let mut ct = valid_connection_type();
+        ct.credentials_fields[0].d_type = "enum".to_string();
+        ct.credentials_fields[0].enum_values = None;
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("enum_values must be provided"));
+    }
+
+    #[test]
+    fn test_validate_enum_field_empty_values() {
+        let mut ct = valid_connection_type();
+        ct.credentials_fields[0].d_type = "enum".to_string();
+        ct.credentials_fields[0].enum_values = Some(vec![]);
+        let err = ct.validate().unwrap_err().to_string();
+        assert!(err.contains("enum_values must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_enum_field_valid() {
+        let mut ct = valid_connection_type();
+        ct.credentials_fields[0].d_type = "enum".to_string();
+        ct.credentials_fields[0].enum_values = Some(vec![EnumValue {
+            value: "a".to_string(),
+            label: "A".to_string(),
+        }]);
+        assert!(ct.validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_all_providers() {
+        for p in Provider::ALL {
+            let mut ct = valid_connection_type();
+            ct.provider = p.as_str().to_string();
+            assert!(ct.validate().is_ok(), "provider '{}' should be valid", p.as_str());
+        }
     }
 }

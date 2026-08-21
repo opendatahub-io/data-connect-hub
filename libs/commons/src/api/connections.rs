@@ -1,7 +1,10 @@
 use crate::api::ResourceMetadata;
+use crate::api::errors::MetaStoreError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+const MAX_NAME_LENGTH: usize = 253;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
@@ -88,6 +91,26 @@ pub struct DataConnection {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub admin: Option<Admin>,
     pub properties: HashMap<String, String>,
+}
+
+impl DataConnection {
+    pub fn validate(&self) -> Result<(), MetaStoreError> {
+        if self.name.is_empty() {
+            return Err(MetaStoreError::Validation("name must not be empty".to_string()));
+        }
+        if self.name.len() > MAX_NAME_LENGTH {
+            return Err(MetaStoreError::Validation(format!(
+                "name '{}' exceeds maximum length of {MAX_NAME_LENGTH}",
+                self.name
+            )));
+        }
+        if self.data_connection_type_id.is_empty() {
+            return Err(MetaStoreError::Validation(
+                "data_connection_type_id must not be empty".to_string(),
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -316,5 +339,44 @@ mod tests {
         let res: DataConnectionResource = serde_json::from_value(json).unwrap();
         assert_eq!(res.status.state, DataConnectionState::NotReady);
         assert!(res.status.message.is_none());
+    }
+
+    fn valid_connection() -> DataConnection {
+        DataConnection {
+            name: "my-conn".to_string(),
+            data_connection_type_id: "ct-1".to_string(),
+            format: DataFormat::Tabular,
+            admin: None,
+            properties: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_validate_valid_connection() {
+        assert!(valid_connection().validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_connection_empty_name() {
+        let mut conn = valid_connection();
+        conn.name = "".to_string();
+        let err = conn.validate().unwrap_err().to_string();
+        assert!(err.contains("name must not be empty"));
+    }
+
+    #[test]
+    fn test_validate_connection_name_too_long() {
+        let mut conn = valid_connection();
+        conn.name = "a".repeat(254);
+        let err = conn.validate().unwrap_err().to_string();
+        assert!(err.contains("exceeds maximum length"));
+    }
+
+    #[test]
+    fn test_validate_connection_empty_type_id() {
+        let mut conn = valid_connection();
+        conn.data_connection_type_id = "".to_string();
+        let err = conn.validate().unwrap_err().to_string();
+        assert!(err.contains("data_connection_type_id must not be empty"));
     }
 }

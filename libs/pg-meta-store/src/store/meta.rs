@@ -154,6 +154,7 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         data_connection: &DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError> {
+        data_connection.validate()?;
         Self::can_store(data_connection).await?;
 
         let mut tx = self.pool.begin().await.map_err(|e| {
@@ -239,6 +240,7 @@ impl MetaStore for PgMetaStore {
 
         let data_connection = update_fn(existing.resource)?;
 
+        data_connection.validate()?;
         Self::can_store(&data_connection).await?;
 
         Self::validate_connection_type(
@@ -426,6 +428,7 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         data_connection_type: &DataConnectionType,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        data_connection_type.validate()?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         let resource = DataConnectionTypeResource {
             metadata: ResourceMetadata {
@@ -494,6 +497,7 @@ impl MetaStore for PgMetaStore {
         })?;
 
         let data_connection_type = update_fn(existing.resource)?;
+        data_connection_type.validate()?;
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
 
         let resource = DataConnectionTypeResource {
