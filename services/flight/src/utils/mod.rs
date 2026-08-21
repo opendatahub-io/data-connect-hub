@@ -48,7 +48,7 @@ fn default_cache_ttl_secs() -> u64 {
 }
 
 fn default_token_review_audiences() -> Vec<String> {
-    vec!["https://kubernetes.default.svc".to_string()]
+    vec![]
 }
 
 impl Default for AuthConfig {
@@ -56,7 +56,7 @@ impl Default for AuthConfig {
         Self {
             enabled: false,
             cache_ttl_secs: default_cache_ttl_secs(),
-            token_review_audiences: default_token_review_audiences(),
+            token_review_audiences: vec![],
         }
     }
 }

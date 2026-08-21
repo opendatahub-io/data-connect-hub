@@ -42,7 +42,6 @@ class TestRestConnectionType:
         with pytest.raises(DCHNotFoundError):
             rest_client.delete_connection_type(fake_id)
 
-    @pytest.mark.skip(reason="PATCH /connection-types/{id} not implemented (server returns 501)")
     def test_update(self, rest_client: DataConnectClient, create_connection_type) -> None:
         ct = create_connection_type(provider="postgres")
         updated = rest_client.update_connection_type(ct.id, description="updated description")

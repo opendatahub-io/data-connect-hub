@@ -4612,10 +4612,37 @@ spec:
                       type: object
                     type: array
                 type: object
+              tokenReviewAudiences:
+                description: |-
+                  tokenReviewAudiences sets the audiences for Kubernetes TokenReview
+                  authentication on both the flight service and the kube-rbac-proxy
+                  sidecar on the REST service. On ROSA clusters this must be set to
+                  the cluster's OIDC provider URL. When empty, the Kubernetes API
+                  server's default audience is used.
+                  This can also be set via the opendatahub-dataconnecthub-config
+                  ConfigMap key "auth.tokenReviewAudiences" (comma-separated).
+                  The CR value takes priority over the ConfigMap.
+                items:
+                  type: string
+                type: array
             type: object
           status:
             description: status defines the observed state of DataConnectService
             properties:
+              addresses:
+                description: addresses is the addresses where the service is reachable
+                items:
+                  description: Addresses identifies an address where the service is
+                    reachable
+                  properties:
+                    type:
+                      description: type can be "hostname"
+                      type: string
+                    value:
+                      description: the value of the address
+                      type: string
+                  type: object
+                type: array
               conditions:
                 description: conditions represent the current state of the DataConnectService
                   resource.
@@ -4703,9 +4730,6 @@ spec:
                 - name
                 - namespace
                 type: object
-              hostname:
-                description: hostname is the hostname where the service is reachable
-                type: string
               httpRoute:
                 description: httpRoute is the name of the HTTPRoute resource created
                   for this service

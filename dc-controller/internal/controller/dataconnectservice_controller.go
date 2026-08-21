@@ -55,6 +55,9 @@ const (
 	conditionTypeReady                 = "Ready"
 	conditionTypeProvisioningSucceeded = "ProvisioningSucceeded"
 	conditionTypeDegraded              = "Degraded"
+	conditionTypeGRPCGatewaySupported  = "GRPCGatewaySupported"
+
+	http2EnableAnnotation = "ingress.operator.openshift.io/default-enable-http2"
 
 	requeueWaitingForReady = 10 * time.Second
 	requeueOnError         = 30 * time.Second
@@ -91,12 +94,17 @@ type DataConnectServiceReconciler struct {
 }
 
 type platformConfig struct {
-	Distribution     dchv1alpha1.DistributionStatus
-	PlatformVersion  string
-	GatewayName      string
-	GatewayNamespace string
+	Distribution         dchv1alpha1.DistributionStatus
+	PlatformVersion      string
+	GatewayName          string
+	GatewayNamespace     string
+	TokenReviewAudiences []string
 }
 
+// readPlatformConfig reads cluster-level defaults from the platform ConfigMap.
+// TODO(DSC): When DCH is onboarded to DSC, the platform operator will create
+// and manage this ConfigMap (including auth.tokenReviewAudiences) in the operand
+// namespace. Until then, standalone users create it manually or use CR overrides.
 func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, namespace string) platformConfig {
 	cfg := platformConfig{
 		Distribution: dchv1alpha1.DistributionStatus{
@@ -128,6 +136,15 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	if v := cm.Data["gateway.namespace"]; v != "" {
 		cfg.GatewayNamespace = v
 	}
+	if v := cm.Data["auth.tokenReviewAudiences"]; v != "" {
+		var audiences []string
+		for a := range strings.SplitSeq(v, ",") {
+			if trimmed := strings.TrimSpace(a); trimmed != "" {
+				audiences = append(audiences, trimmed)
+			}
+		}
+		cfg.TokenReviewAudiences = audiences
+	}
 
 	return cfg
 }
@@ -142,6 +159,8 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
+// +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
@@ -228,6 +247,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "WaitingForDeployments", "No errors")
+			r.checkGRPCGatewaySupport(ctx, cr)
 		})
 	}
 
@@ -237,6 +257,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
+		r.checkGRPCGatewaySupport(ctx, cr)
 	})
 }
 
@@ -338,6 +359,16 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameFlightService, flightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
+
+	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
+	if len(audiences) > 0 {
+		if !setConfigMapAudiences(resources, audiences) {
+			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
+		}
+		setKubeRbacProxyAudiences(resources, audiences)
+	}
+
+	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
@@ -510,6 +541,13 @@ func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnec
 	return gw
 }
 
+func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) []string {
+	if len(cr.Spec.TokenReviewAudiences) > 0 {
+		return cr.Spec.TokenReviewAudiences
+	}
+	return platCfg.TokenReviewAudiences
+}
+
 func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
 	gw := r.resolveGateway(cr, platCfg)
 	cr.Status.HttpRoute = nameDataConnectHub
@@ -524,6 +562,74 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 			Value: hostname,
 		},
 	}
+}
+
+// checkGRPCGatewaySupport sets an advisory condition -- and escalates Degraded --
+// when the cluster's ingress appears to have HTTP/2 disabled. gRPC (flight-service)
+// traffic routed through an OpenShift Route in front of the gateway requires ALPN,
+// which OpenShift's router does not negotiate unless HTTP/2 is explicitly enabled.
+// Per the ODH PlatformObject contract (Ready must be a true aggregate -- see
+// https://github.com/opendatahub-io/odh-platform-utilities/blob/main/docs/platform-object-contract.md),
+// this overrides the caller's Ready=True/Phase=Ready when HTTP/2 is confirmed
+// disabled, so Ready and Phase never contradict Degraded. It must therefore run
+// after the caller's own Ready/Degraded/Phase are set.
+func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
+	enabled, known := r.http2Enabled(ctx)
+	if !known {
+		meta.RemoveStatusCondition(&cr.Status.Conditions, conditionTypeGRPCGatewaySupported)
+		return
+	}
+	if enabled {
+		r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionTrue, "HTTP2Enabled",
+			"Cluster ingress has HTTP/2 enabled; gRPC (flight-service) traffic can negotiate ALPN through the gateway route")
+		return
+	}
+	message := "gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables " +
+		"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster " +
+		http2EnableAnnotation + "=true --overwrite. The Route also needs its own dedicated TLS certificate " +
+		"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md."
+	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled", message)
+	r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", message)
+	r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "GatewayHTTP2Disabled", message)
+	if cr.Status.Phase == conditionTypeReady {
+		cr.Status.Phase = "Not Ready"
+	}
+}
+
+// http2Enabled reports whether HTTP/2 appears enabled on the cluster's ingress,
+// checked cluster-wide (ingresses.config/cluster) and per-IngressController. known
+// is false when neither could be read (e.g. non-OpenShift cluster or missing RBAC),
+// in which case the caller should not draw a conclusion either way.
+func (r *DataConnectServiceReconciler) http2Enabled(ctx context.Context) (enabled, known bool) {
+	clusterIngress := &unstructured.Unstructured{}
+	clusterIngress.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "config.openshift.io",
+		Version: "v1",
+		Kind:    "Ingress",
+	})
+	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, clusterIngress); err == nil {
+		known = true
+		if clusterIngress.GetAnnotations()[http2EnableAnnotation] == "true" {
+			return true, true
+		}
+	}
+
+	controllers := &unstructured.UnstructuredList{}
+	controllers.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "operator.openshift.io",
+		Version: "v1",
+		Kind:    "IngressControllerList",
+	})
+	if err := r.List(ctx, controllers, client.InNamespace("openshift-ingress-operator")); err == nil {
+		known = true
+		for i := range controllers.Items {
+			if controllers.Items[i].GetAnnotations()[http2EnableAnnotation] == "true" {
+				return true, true
+			}
+		}
+	}
+
+	return false, known
 }
 
 func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {

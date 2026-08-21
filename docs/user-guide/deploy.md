@@ -15,6 +15,14 @@ Data Connect Hub is deployed in two steps:
 - OpenShift 4.20+ (Kubernetes 1.33+) -- required for the native `grpc:`
   readiness/liveness probe type used by `flight-service`.
 - Logged in to the target cluster (`oc login` / `oc whoami` should work).
+- HTTP/2 enabled on the cluster's ingress if you plan to reach
+  `flight-service` (gRPC) through the gateway's Route rather than
+  in-cluster -- OpenShift disables HTTP/2 by default, which breaks ALPN
+  negotiation for gRPC. See
+  [Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error)
+  if you hit this. The `DataConnectService` status surfaces this as the
+  `GRPCGatewaySupported` condition and reports `Degraded=True`,
+  `Ready=False`, and `.status.phase: Not Ready`.
 
 ### Image pulls
 
@@ -295,6 +303,57 @@ spec:
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
 
+### Token review audiences (ROSA / custom OIDC)
+
+On ROSA clusters (and other clusters with external OIDC providers), the
+default Kubernetes API audience does not match the cluster's OIDC
+provider URL. The controller needs the correct audience so that both the
+flight service and the kube-rbac-proxy sidecar on the REST service can
+validate tokens via TokenReview.
+
+To find the correct audience on a ROSA cluster:
+
+```console
+oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}'
+```
+
+When no audience is configured, the Kubernetes API server's own audience
+is used — this is correct for standard OCP / ODH / RHOAI clusters.
+
+**Option A: Platform ConfigMap (recommended for cluster-wide defaults)**
+
+Create the `opendatahub-dataconnecthub-config` ConfigMap in the operand
+namespace with `auth.tokenReviewAudiences` (comma-separated):
+
+```console
+oc apply -n $NS -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opendatahub-dataconnecthub-config
+data:
+  auth.tokenReviewAudiences: "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+EOF
+```
+
+All DataConnectService CRs in that namespace pick up the value
+automatically. The controller watches this ConfigMap and reconciles
+on changes.
+
+On ODH / RHOAI, the platform operator manages this ConfigMap — no
+manual creation needed.
+
+**Option B: CR spec override**
+
+Set `spec.tokenReviewAudiences` directly on the CR. This takes priority
+over the ConfigMap value:
+
+```yaml
+spec:
+  tokenReviewAudiences:
+    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+```
+
 Image resolution priority (highest wins):
 1. CR spec override (`spec.restService.image`)
 2. Controller env var (`RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE`)
@@ -439,7 +498,11 @@ Expected output:
 oc get dchs default-dataconnectservice -n $NS -o yaml
 ```
 
-Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`.
+Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`,
+`GRPCGatewaySupported`. `GRPCGatewaySupported=False` also sets
+`Degraded=True` and `Ready=False` (both reason `GatewayHTTP2Disabled`), and
+`.status.phase` becomes `Not Ready` -- see
+[Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error).
 
 ## What gets created
 
@@ -568,6 +631,96 @@ oc patch gateway data-science-gateway -n openshift-ingress --type=json \
 Re-check the HTTPRoute status — `Accepted` should now be `True`. Remove
 the `opendatahub.io/managed` annotation when you no longer need the
 override.
+
+### Flight (gRPC) calls fail with an ALPN handshake error
+
+If a client (e.g. the Python SDK) fails to reach `flight-service` through
+the gateway with an error like:
+
+```
+transport: authentication handshake failed: credentials: cannot check peer:
+missing selected ALPN property. If you upgraded from a grpc-go version
+earlier than 1.67, your TLS connections may have stopped working due to
+ALPN enforcement.
+```
+
+Check the `DataConnectService` status — the controller reports this
+automatically as the `GRPCGatewaySupported` condition, `Degraded=True`,
+`Ready=False` (all reason `GatewayHTTP2Disabled`), and
+`.status.phase: Not Ready`:
+
+```console
+oc get dchs default-dataconnectservice -n $NS \
+  -o jsonpath='{.status.conditions[?(@.type=="GRPCGatewaySupported")]}'
+```
+
+**Root cause:** gRPC requires HTTP/2 negotiated via ALPN. OpenShift's
+router has HTTP/2 disabled by default, so a `reencrypt`-terminated Route in
+front of the gateway (the default for `data-science-gateway`/`odh-gateway`)
+silently drops ALPN — REST/JSON traffic tolerates the HTTP/1.1 fallback,
+but gRPC cannot. This is a cluster ingress configuration gap, not a bug in
+`flight-service`'s own TLS setup.
+
+**Fix** (requires cluster-admin access; does not require setting
+`opendatahub.io/managed=false` on anything, since none of the Gateway/Route
+resources need to be touched):
+
+1. Enable HTTP/2 on the ingress. On most clusters:
+
+   ```console
+   oc annotate ingresses.config/cluster \
+     ingress.operator.openshift.io/default-enable-http2=true --overwrite
+   ```
+
+   On managed OpenShift (e.g. ROSA), this cluster-scoped object is
+   protected by an admission webhook (`Only privileged service accounts
+   may access`). Use the per-IngressController annotation instead:
+
+   ```console
+   oc annotate ingresscontroller default -n openshift-ingress-operator \
+     ingress.operator.openshift.io/default-enable-http2=true --overwrite
+   ```
+
+2. Give the gateway's Route its own dedicated TLS certificate instead of
+   the shared default one. HAProxy refuses to negotiate ALPN on routes
+   using the cluster's shared default certificate (to avoid connection
+   coalescing across unrelated hostnames), so a Route relying on the
+   default cert will still fail step 1 alone. Reuse the cluster's existing
+   trusted wildcard cert so client trust is unaffected:
+
+   ```console
+   oc get secret <default-ingress-cert-secret> -n openshift-ingress \
+     -o jsonpath='{.data.tls\.crt}' | base64 -d > /tmp/route.crt
+   oc get secret <default-ingress-cert-secret> -n openshift-ingress \
+     -o jsonpath='{.data.tls\.key}' | base64 -d > /tmp/route.key
+   oc patch route data-science-gateway -n openshift-ingress --type=merge -p "$(python3 -c "
+   import json
+   print(json.dumps({'spec': {'tls': {'certificate': open('/tmp/route.crt').read(), 'key': open('/tmp/route.key').read()}}}))
+   ")"
+   ```
+
+   (Find `<default-ingress-cert-secret>` via
+   `oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}'`.)
+
+3. flight-service's own TLS listener requires a matching backend TLS
+   policy for its port. If the gateway is Istio-backed and traffic still
+   fails after steps 1–2 with `UNAVAILABLE: upstream connect error`, the
+   gateway's `DestinationRule` needs a `portLevelSettings` entry for
+   flight-service's port (`50051`), matching the existing entries for the
+   REST service:
+
+   ```yaml
+   - port:
+       number: 50051
+     tls:
+       mode: SIMPLE
+       insecureSkipVerify: true
+   ```
+
+Both the Route and `DestinationRule` in a RHOAI/ODH deployment are owned
+and reconciled by the platform's `GatewayConfig` controller — file a
+platform issue to have this fixed at the source rather than carrying a
+permanent manual override.
 
 ### API calls return 400 Bad Request
 

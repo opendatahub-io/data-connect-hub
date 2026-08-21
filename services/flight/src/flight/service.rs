@@ -12,6 +12,7 @@ use arrow_flight::{
     },
 };
 use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::errors::ConnectorError;
 use commons::api::storage::{MetaStore, SecretStore};
 use commons::api::tabular::QueryOptions;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
@@ -105,10 +106,9 @@ impl TabularDataService {
     }
 
     async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnectionResource, Status> {
-        tracing::info!(
+        debug!(
             "get_connection: tenant_id: {}, connection_id: {}",
-            tenant_id,
-            connection_id
+            tenant_id, connection_id
         );
         let mut r = self
             .meta_store
@@ -116,7 +116,7 @@ impl TabularDataService {
             .await
             .map_err(map_meta_store_error)?;
 
-        tracing::info!("Resolving credentials");
+        debug!("Resolving credentials");
         if let Some(Admin::SecretRef { secret_ref: s }) = &r.resource.admin {
             let secret = self
                 .secret_store
@@ -146,7 +146,10 @@ impl TabularDataService {
 
         let flight_info = FlightInfo::new()
             .try_with_schema(self.sql_info.schema().as_ref())
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to encode sql_info schema");
+                Status::internal("failed to encode sql_info schema")
+            })?
             .with_descriptor(flight_descriptor)
             .with_endpoint(endpoint);
 
@@ -160,16 +163,19 @@ impl TabularDataService {
         let requested: Vec<String> = Self::query_to_string(&query);
         info!("do_get_sql_info: {:?}", requested);
 
-        let batch = query
-            .into_builder(&self.sql_info)
-            .build()
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let batch = query.into_builder(&self.sql_info).build().map_err(|e| {
+            tracing::error!(error = %e, "failed to build sql_info response");
+            Status::internal("failed to build response")
+        })?;
 
         let stream = futures::stream::once(async { Ok(batch) });
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(self.sql_info.schema())
             .build(stream)
-            .map_err(|e| Status::internal(e.to_string()));
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to encode flight data");
+                Status::internal("failed to encode sql_info response")
+            });
 
         Ok(Response::new(
             Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
@@ -190,13 +196,13 @@ impl TabularDataService {
                 "{X_DATA_CONNECTION_ID} header is required"
             )))?
             .to_str()
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
             .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
             .to_str()
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
 
         let connection = self.get_connection(tenant_id, connection_id).await?;
 
@@ -226,7 +232,10 @@ impl TabularDataService {
 
         let flight_info = FlightInfo::new()
             .try_with_schema(&schema)
-            .map_err(|e| Status::internal(e.to_string()))?
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to encode statement schema");
+                Status::internal("failed to encode statement schema")
+            })?
             .with_endpoint(endpoint)
             .with_total_records(-1)
             .with_total_bytes(-1);
@@ -250,13 +259,13 @@ impl TabularDataService {
                 "{X_DATA_CONNECTION_ID} header is required"
             )))?
             .to_str()
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
 
         let tenant_id = metadata
             .get(X_TENANT_ID)
             .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
             .to_str()
-            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
 
         let connection = self.get_connection(tenant_id, connection_id).await?;
 
@@ -285,7 +294,19 @@ impl TabularDataService {
         let flight_stream = FlightDataEncoderBuilder::new()
             .with_schema(schema)
             .build(stream.map_err(|e| FlightError::ExternalError(Box::new(e))))
-            .map_err(|e| Status::internal(e.to_string()));
+            .map_err(|e| match e {
+                FlightError::ExternalError(inner) => match inner.downcast::<ConnectorError>() {
+                    Ok(ce) => map_connector_error(*ce),
+                    Err(other) => {
+                        tracing::error!(error = %other, "unexpected error during streaming");
+                        Status::internal("data source read failed")
+                    },
+                },
+                other => {
+                    tracing::error!(error = %other, "failed to encode flight data");
+                    Status::internal("failed to encode statement response")
+                },
+            });
 
         Ok(Response::new(
             Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
@@ -322,7 +343,10 @@ impl FlightSqlService for TabularDataService {
                         description: p.description(),
                     })
                     .collect::<Vec<ConnectorInfo>>();
-                let body = serde_json::to_vec(&providers).map_err(|e| Status::internal(e.to_string()))?;
+                let body = serde_json::to_vec(&providers).map_err(|e| {
+                    tracing::error!(error = %e, "failed to serialize connector info");
+                    Status::internal("failed to serialize response")
+                })?;
                 let result = arrow_flight::Result { body: body.into() };
                 Ok(Response::new(
                     Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream

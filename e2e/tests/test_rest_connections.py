@@ -62,7 +62,6 @@ class TestRestConnection:
         with pytest.raises(DCHNotFoundError):
             rest_client.delete_connection(fake_id)
 
-    @pytest.mark.skip(reason="PATCH /connections/{id} not implemented (server returns 501)")
     def test_update(
         self,
         rest_client: DataConnectClient,

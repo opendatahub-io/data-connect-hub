@@ -7,7 +7,7 @@ pub enum ConnectorError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
     #[error("No data returned")]
-    NoDataError(),
+    NoDataError,
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
     #[error("Config error: {0}")]

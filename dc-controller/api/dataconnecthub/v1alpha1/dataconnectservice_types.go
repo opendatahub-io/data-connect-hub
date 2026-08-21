@@ -104,6 +104,17 @@ type DataConnectServiceSpec struct {
 	// +optional
 	FlightService *ServiceOverrides `json:"flightService,omitempty"`
 
+	// tokenReviewAudiences sets the audiences for Kubernetes TokenReview
+	// authentication on both the flight service and the kube-rbac-proxy
+	// sidecar on the REST service. On ROSA clusters this must be set to
+	// the cluster's OIDC provider URL. When empty, the Kubernetes API
+	// server's default audience is used.
+	// This can also be set via the opendatahub-dataconnecthub-config
+	// ConfigMap key "auth.tokenReviewAudiences" (comma-separated).
+	// The CR value takes priority over the ConfigMap.
+	// +optional
+	TokenReviewAudiences []string `json:"tokenReviewAudiences,omitempty"`
+
 	// gateway is a reference to a Kubernetes Gateway for external traffic.
 	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).
 	// +optional

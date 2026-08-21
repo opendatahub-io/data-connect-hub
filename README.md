@@ -29,7 +29,7 @@ data-connect-hub/
 ## Prerequisites
 
 - Rust 1.96+
-- PostgreSQL (for integration testing, for `make container-run-flight`). The default URL in `services/flight/samples/config.toml` is `"postgresql://dch_user:dch_password@localhost:5432/dch_db"`, so you need to create a user `dch_user`, with `dch_password` as password, and `dch_db` database.
+- PostgreSQL (for metadata storage and integration testing)
 - Podman or Docker (for container builds)
 
 ## Getting Started
@@ -62,18 +62,124 @@ The configured hooks run Rust formatting checks (`cargo fmt --check`), workspace
 
 ### Running the Services
 
-```sh
-# REST service (default: 127.0.0.1:8080)
-cargo run -p rest-service -- --config {your local path}/config.toml
+Both services need a PostgreSQL database for metadata storage and a TOML
+config file.  Keep your local configs in the gitignored `.local/` directory.
 
-# Flight service (default: 127.0.0.1:50051)
-cargo run -p flight-service -- --config {your local path}/config.toml
+#### 1. Set up PostgreSQL
+
+You can use a local installation or run PostgreSQL in a container.
+
+**Option A — Local PostgreSQL**
+
+```sh
+createuser -s dch_user
+createdb -O dch_user dch_db
+psql -d dch_db -c "ALTER USER dch_user WITH PASSWORD 'dch_password';"
+```
+
+**Option B — Podman / Docker**
+
+```sh
+podman run -d --name dch-postgres \
+  -e POSTGRES_USER=dch_user \
+  -e POSTGRES_PASSWORD=dch_password \
+  -e POSTGRES_DB=dch_db \
+  -p 5432:5432 \
+  postgres:17
+```
+
+The services create the required tables automatically on startup — no manual
+schema step is needed.
+
+#### 2. Create local config files
+
+Create a `.local/` directory at the repository root (already gitignored).
+
+**`.local/rest-config.toml`**
+
+```toml
+[database]
+url = "postgresql://dch_user:dch_password@localhost:5432/dch_db"
+
+[server]
+address = "127.0.0.1"
+port = 8080
+
+[global-connection-types]
+tenant-id = "default"
+```
+
+**`.local/flight-config.toml`**
+
+```toml
+[database]
+url = "postgresql://dch_user:dch_password@localhost:5432/dch_db"
+
+[server]
+address = "127.0.0.1"
+port = 50051
+
+[ingestion_cache_pools]
+max_capacity = 50
+ttl_secs = 30
+idle_secs = 30
+
+[query]
+batch_size = 512
+max_rows = 1000000
+
+[global-connection-types]
+tenant-id = "default"
+
+[tls]
+# cert_file = "/etc/tls/private/tls.crt"
+# key_file = "/etc/tls/private/tls.key"
+
+[auth]
+enabled = false
+
+[metrics]
+enabled = false
+```
+
+#### 3. Start a service
+
+```sh
+# REST service (HTTP :8080)
+cargo run -p rest-service -- --config .local/rest-config.toml
+
+# Flight service (gRPC :50051)
+cargo run -p flight-service -- --config .local/flight-config.toml
+```
+
+#### 4. Verify it works
+
+```sh
+# REST service
+curl http://localhost:8080/api/v1/data/health
+# {"service":"rest-service"}
+
+curl http://localhost:8080/api/v1/data/connections
+# []
+```
+
+For the Flight service, use any gRPC client (e.g.
+[grpcurl](https://github.com/fullstorydev/grpcurl),
+[Postman](https://www.postman.com/),
+[Evans](https://github.com/ktr0731/evans)) to call the
+health check:
+
+```sh
+# Example with grpcurl
+grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
+# {"status":"SERVING"}
 ```
 
 ## REST API
 
 | Method | Path                                | Description                  |
 | ------ | ----------------------------------- | ---------------------------- |
+| GET    | `/api/v1/data/health`               | Health check                 |
 | GET    | `/api/v1/data/connections`          | List all connections         |
 | POST   | `/api/v1/data/connections`          | Create a connection          |
 | GET    | `/api/v1/data/connections/{id}`     | Get a connection             |

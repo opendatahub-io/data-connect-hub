@@ -20,3 +20,6 @@ arrow-csv = { workspace = true }
 arrow-json = { workspace = true }
 tracing = { workspace = true }
 bytes = { workspace = true }
+
+[dev-dependencies]
+opendal = { workspace = true, features = ["services-fs"] }

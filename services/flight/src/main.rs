@@ -4,6 +4,7 @@ use anyhow::Result;
 use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use config::{Config, File};
+use elasticsearch_connector::ElasticsearchConnector;
 use flight_service::flight::TabularDataService;
 use flight_service::flight::auth::AuthLayer;
 use flight_service::flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
@@ -11,6 +12,7 @@ use flight_service::flight::registry::ConnectorsRegistry;
 use kube_utils::KubeAuthClient;
 use kube_utils::secrets::KubeSecretStore;
 use milvus_connector::MilvusConnector;
+use neo4j_connector::Neo4jConnector;
 use pg_meta_store::store::PgMetaStore;
 use postgres_connector::PgConnector;
 use s3_connector::S3Connector;
@@ -84,6 +86,16 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
             config.ingestion_cache_pools.max_capacity,
         )))
         .with_connector(Arc::new(MilvusConnector::new(
+            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
+            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
+            config.ingestion_cache_pools.max_capacity,
+        )))
+        .with_connector(Arc::new(ElasticsearchConnector::new(
+            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
+            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
+            config.ingestion_cache_pools.max_capacity,
+        )))
+        .with_connector(Arc::new(Neo4jConnector::new(
             Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
             Duration::from_secs(config.ingestion_cache_pools.idle_secs),
             config.ingestion_cache_pools.max_capacity,
