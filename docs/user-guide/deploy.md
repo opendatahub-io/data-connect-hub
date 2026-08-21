@@ -21,7 +21,8 @@ Data Connect Hub is deployed in two steps:
   negotiation for gRPC. See
   [Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error)
   if you hit this. The `DataConnectService` status surfaces this as the
-  `GRPCGatewaySupported` condition and escalates `Degraded=True`.
+  `GRPCGatewaySupported` condition and reports `Degraded=True`,
+  `Ready=False`, and `.status.phase: Not Ready`.
 
 ### Image pulls
 
@@ -448,8 +449,8 @@ oc get dchs default-dataconnectservice -n $NS -o yaml
 
 Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`,
 `GRPCGatewaySupported`. `GRPCGatewaySupported=False` also sets
-`Degraded=True` with reason `GatewayHTTP2Disabled` -- `Ready` is
-unaffected, since dc-controller's own resources are still healthy; see
+`Degraded=True` and `Ready=False` (both reason `GatewayHTTP2Disabled`), and
+`.status.phase` becomes `Not Ready` -- see
 [Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error).
 
 ## What gets created
@@ -593,8 +594,9 @@ ALPN enforcement.
 ```
 
 Check the `DataConnectService` status — the controller reports this
-automatically as both the `GRPCGatewaySupported` condition and a
-`Degraded=True` (reason `GatewayHTTP2Disabled`):
+automatically as the `GRPCGatewaySupported` condition, `Degraded=True`,
+`Ready=False` (all reason `GatewayHTTP2Disabled`), and
+`.status.phase: Not Ready`:
 
 ```console
 oc get dchs default-dataconnectservice -n $NS \

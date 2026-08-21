@@ -537,8 +537,11 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 // when the cluster's ingress appears to have HTTP/2 disabled. gRPC (flight-service)
 // traffic routed through an OpenShift Route in front of the gateway requires ALPN,
 // which OpenShift's router does not negotiate unless HTTP/2 is explicitly enabled.
-// This must run after the caller's own Degraded=False, since it overrides that
-// value when HTTP/2 is confirmed disabled.
+// Per the ODH PlatformObject contract (Ready must be a true aggregate -- see
+// https://github.com/opendatahub-io/odh-platform-utilities/blob/main/docs/platform-object-contract.md),
+// this overrides the caller's Ready=True/Phase=Ready when HTTP/2 is confirmed
+// disabled, so Ready and Phase never contradict Degraded. It must therefore run
+// after the caller's own Ready/Degraded/Phase are set.
 func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
 	enabled, known := r.http2Enabled(ctx)
 	if !known {
@@ -556,6 +559,10 @@ func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Conte
 		"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md."
 	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled", message)
 	r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", message)
+	r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "GatewayHTTP2Disabled", message)
+	if cr.Status.Phase == conditionTypeReady {
+		cr.Status.Phase = "Not Ready"
+	}
 }
 
 // http2Enabled reports whether HTTP/2 appears enabled on the cluster's ingress,
