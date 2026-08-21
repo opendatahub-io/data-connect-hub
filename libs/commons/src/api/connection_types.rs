@@ -85,16 +85,15 @@ pub enum SupportedApi {
     #[serde(rename = "none")]
     #[default]
     None,
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+pub struct Capabilities {
+    pub flight: bool,
+    pub rest: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
-pub struct IngestionStatus {
-    pub supported_apis: Vec<SupportedApi>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct DataConnectionTypeStatus {
-    pub ingestion: IngestionStatus,
+    pub capabilities: Capabilities,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -131,11 +130,7 @@ mod tests {
                     default_value: None,
                 }],
             },
-            status: DataConnectionTypeStatus {
-                ingestion: IngestionStatus {
-                    supported_apis: vec![SupportedApi::Flight],
-                },
-            },
+            status: DataConnectionTypeStatus::default(),
         }
     }
 

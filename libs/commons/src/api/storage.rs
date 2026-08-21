@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::api::ResourceList;
-use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResource, Secret};
+use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Secret};
 use crate::api::connections::{DataConnection, DataConnectionResource};
 use crate::api::errors::{MetaStoreError, SecretStoreError};
 
@@ -42,6 +42,9 @@ pub trait MetaStore {
         tenant_id: &str,
     ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
 
+    /// Retrieves all data connection types. Used internally to audit data connection types.
+    async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
+
     /// Retrieves a data connection type by tenant and unique identifier.
     async fn get_data_connection_type(
         &self,
@@ -62,6 +65,15 @@ pub trait MetaStore {
         tenant_id: &str,
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
+
+    /// Updates the status of the data connection type identified by `uid`.
+    async fn update_data_connection_type_status(
+        &self,
+        uid: &str,
+        update_fn: Arc<
+            dyn Fn(DataConnectionTypeStatus) -> Result<DataConnectionTypeStatus, MetaStoreError> + Send + Sync,
+        >,
     ) -> Result<DataConnectionTypeResource, MetaStoreError>;
 
     /// Deletes the data connection type identified by `uid`.

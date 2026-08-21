@@ -1,6 +1,6 @@
 use chrono::Utc;
 use commons::api::ResourceMetadata;
-use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource};
+use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus};
 use commons::api::connections::Admin;
 use commons::api::connections::{DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus};
 use commons::api::errors::MetaStoreError;
@@ -13,7 +13,7 @@ use uuid::Uuid;
 
 use commons::api::ResourceList;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
     pub url: String,
 }
@@ -308,6 +308,41 @@ impl MetaStore for PgMetaStore {
         Ok(())
     }
 
+    async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+        let rows = sqlx::query("SELECT data FROM data_connection_types")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("failed to list connection types: {e}");
+                MetaStoreError::Query("failed to list connection types".to_string())
+            })?;
+
+        let items: Vec<DataConnectionTypeResource> = rows
+            .iter()
+            .map(|row| {
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read connection type column: {e}");
+                    MetaStoreError::Query("failed to read connection type".to_string())
+                })?;
+                let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+                    error!("failed to deserialize connection type: {e}");
+                    MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+                })?;
+                if let Some(tenant) = dct.metadata.tenant_id.clone()
+                    && tenant == self.global_tenant_id
+                {
+                    // Discard the tenant field for global connection types
+                    dct.metadata.tenant_id = None;
+                }
+                Ok(dct)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ResourceList {
+            total_count: items.len(),
+            items,
+        })
+    }
     async fn get_data_connection_types(
         &self,
         tenant_id: &str,
@@ -475,6 +510,75 @@ impl MetaStore for PgMetaStore {
         tx.commit().await.map_err(|e| {
             error!("failed to commit transaction: {e}");
             MetaStoreError::Query("failed to update connection type".to_string())
+        })?;
+
+        Ok(resource)
+    }
+
+    async fn update_data_connection_type_status(
+        &self,
+        uid: &str,
+        update_fn: Arc<
+            dyn Fn(DataConnectionTypeStatus) -> Result<DataConnectionTypeStatus, MetaStoreError> + Send + Sync,
+        >,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to update connection type status".to_string())
+        })?;
+
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 FOR UPDATE")
+            .bind(uid)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("connection type '{uid}' not found"))
+                },
+                e => {
+                    error!("failed to get connection type '{uid}' for status update: {e}");
+                    MetaStoreError::Query("failed to update connection type status".to_string())
+                },
+            })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read connection type column: {e}");
+            MetaStoreError::Query("failed to read connection type".to_string())
+        })?;
+        let existing: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize connection type: {e}");
+            MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+        })?;
+
+        let status = update_fn(existing.status)?;
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                updated_at: now,
+                ..existing.metadata
+            },
+            resource: existing.resource,
+            status,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize connection type: {e}");
+            MetaStoreError::Serialization("failed to serialize connection type".to_string())
+        })?;
+
+        sqlx::query("UPDATE data_connection_types SET data = $1 WHERE data->'metadata'->>'id' = $2")
+            .bind(&json_value)
+            .bind(uid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                error!("failed to update connection type status '{uid}': {e}");
+                MetaStoreError::Query("failed to update connection type status".to_string())
+            })?;
+
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to update connection type status".to_string())
         })?;
 
         Ok(resource)

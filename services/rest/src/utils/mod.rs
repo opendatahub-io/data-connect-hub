@@ -7,18 +7,32 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct Server {
     pub address: String,
     pub port: u16,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
+pub struct FlightService {
+    pub address: String,
+    pub port: u16,
+}
+
+impl FlightService {
+    pub fn endpoint(&self) -> String {
+        format!("http://{}:{}", self.address, self.port)
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
     #[serde(rename = "global-connection-types")]
     pub global_connection_types: GlobalConnectionTypes,
+    #[serde(rename = "flight-service")]
+    pub flight_service: FlightService,
 }
 
 pub async fn transform_data_connection(
@@ -65,6 +79,10 @@ mod tests {
 
             [global-connection-types]
             tenant-id = "opendatahub"
+
+            [flight-service]
+            address = "127.0.0.1"
+            port = 50051
         "#;
 
         let config = Config::builder()
@@ -75,6 +93,8 @@ mod tests {
         let server_config: ServerConfig = config.try_deserialize().unwrap();
         assert_eq!(server_config.server.address, "127.0.0.1");
         assert_eq!(server_config.server.port, 8080);
+        assert_eq!(server_config.flight_service.address, "127.0.0.1");
+        assert_eq!(server_config.flight_service.port, 50051);
     }
 
     #[test]
