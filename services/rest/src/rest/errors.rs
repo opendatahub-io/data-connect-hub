@@ -143,20 +143,6 @@ pub fn path_config() -> PathConfig {
     PathConfig::default().error_handler(|err, _req| extraction_error("invalid_path", err.into()))
 }
 
-impl From<ValidationError> for RestErrorResponse {
-    fn from(err: ValidationError) -> Self {
-        let code = match &err {
-            ValidationError::UnsupportedProvider(_) => "unsupported_provider",
-            _ => "validation",
-        };
-        RestErrorResponse {
-            code: code.to_string(),
-            message: err.to_string(),
-            status: 400,
-        }
-    }
-}
-
 impl From<EndpointError> for RestErrorResponse {
     fn from(err: EndpointError) -> Self {
         match err {
@@ -211,6 +197,11 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "flight_service_error".to_string(),
                 message: error,
                 status: 500,
+            },
+            ValidationError::UnsupportedProvider(message) => RestErrorResponse {
+                code: "unsupported_provider".to_string(),
+                message,
+                status: 400,
             },
         }
     }

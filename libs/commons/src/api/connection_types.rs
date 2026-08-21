@@ -85,6 +85,8 @@ pub enum SupportedApi {
     #[serde(rename = "none")]
     #[default]
     None,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
 pub struct Capabilities {
     pub flight: bool,
