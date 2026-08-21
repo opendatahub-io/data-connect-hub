@@ -326,7 +326,7 @@ impl MetaStore for PgMetaStore {
                 })?;
                 let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
                     error!("failed to deserialize connection type: {e}");
-                    MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+                    MetaStoreError::Deserialization(format!("failed to deserialize connection type: {e}"))
                 })?;
                 if let Some(tenant) = dct.metadata.tenant_id.clone()
                     && tenant == self.global_tenant_id
@@ -366,7 +366,7 @@ impl MetaStore for PgMetaStore {
                 })?;
                 let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
                     error!("failed to deserialize connection type: {e}");
-                    MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+                    MetaStoreError::Deserialization(format!("failed to deserialize connection type: {e}"))
                 })?;
                 if let Some(tenant) = dct.metadata.tenant_id.clone()
                     && tenant == self.global_tenant_id
@@ -411,7 +411,7 @@ impl MetaStore for PgMetaStore {
         })?;
         serde_json::from_value(json_value).map_err(|e| {
             error!("failed to deserialize connection type: {e}");
-            MetaStoreError::Deserialization("failed to deserialize connection type".to_string())
+            MetaStoreError::Deserialization(format!("failed to deserialize connection type: {e}"))
         })
     }
 
