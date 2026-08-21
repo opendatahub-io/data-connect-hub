@@ -457,6 +457,38 @@ The following steps show how to configure and test an S3 connection:
 Python SDK installation and examples can be found [Python SDK](https://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python).
 
 ## Trouble Shooting
+### Message: Connection Refused
+- An example of error message:
+  ```console
+  Failed to connect to dch-gateway-data-science-gateway-class.openshift-ingress.svc port 443: Connection refused
+  ```
+- Check if gateway pod is running, for example:
+  ```console
+  $ oc get po -n openshift-ingress | fgrep dch-gateway
+  ```
+### Message: No healthy upstream
+- An example of error message:
+  ```console
+  no healthy upstream
+  ```
+- Check if the HttpRoute exists. There must be an HttpRoute connecting to the gateway in the tenant infra namespace. Although, this Httproute is automatically recreated by the DCH operator:
+  ```console
+  $ oc get httproute -n dch-infra-example
+  No resources found in dch-infra-example namespace.
+  ```
+
+### Message: [invalid bearer token, token audiences ["..."] is invalid for the target audiences ["..."]]
+This happens when the service account issuer used in getting token doesn't match with the service account issuer in `dch-flight-service-config` configmap. Here are the steps:
+- Get the service account issuer. If it's empty, then it's assumed to be "https://kubernetes.default.svc":
+  ```console
+  $ oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}
+  ```
+- Compare to the entry in `dch-flight-service-config` configmap. If there's no entry, then it's assumed to be "https://kubernetes.default.svc":
+  ```console
+  $ oc get cm dch-flight-service-config -n dch-infra-example -o yaml | fgrep review
+    token_review_audiences = ["https://rh-oidc.s3.us-east-1.amazonaws.com/27bd6cg0vs7nn08mue83fbof94dj4m9a"]
+  ```
+
 ### Get Gateway Log
 Here's an example of getting gateway log:
 ```console
