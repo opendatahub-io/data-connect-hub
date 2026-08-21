@@ -543,7 +543,7 @@ func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnec
 }
 
 func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) []string {
-	if len(cr.Spec.TokenReviewAudiences) > 0 {
+	if cr.Spec.TokenReviewAudiences != nil {
 		return cr.Spec.TokenReviewAudiences
 	}
 	return platCfg.TokenReviewAudiences
