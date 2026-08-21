@@ -5,9 +5,8 @@ use commons::api::connections::Admin;
 use commons::api::connections::DataConnectionResource;
 use commons::api::storage::MetaStore;
 
-use crate::clients::flight::get_supported_connectors;
+use crate::clients::flight::FlightClient;
 use crate::rest::errors::ValidationError;
-use crate::utils::FlightService;
 use commons::api::connections::DataFormat;
 use commons::api::storage::SecretStore;
 use std::sync::Arc;
@@ -59,9 +58,9 @@ pub async fn verify_data_connection(
 
 pub async fn audit_data_connection_types(
     meta_store: Arc<dyn MetaStore + Send + Sync>,
-    flight_service: &FlightService,
+    flight_client: &FlightClient,
 ) -> Result<(), ValidationError> {
-    let supported = get_supported_connectors(flight_service).await.map_err(|e| {
+    let supported = flight_client.get_supported_connectors().await.map_err(|e| {
         tracing::error!(error = %e, "failed to get supported connectors from flight service");
         ValidationError::FlightServiceError(e.to_string())
     })?;

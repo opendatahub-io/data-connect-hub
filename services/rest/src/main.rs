@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
+use crate::clients::flight::FlightClient;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
@@ -170,8 +171,9 @@ async fn main() -> Result<()> {
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
+    let flight_client = FlightClient::new(config.flight_service.endpoint());
 
-    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), config.clone()));
+    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), flight_client));
 
     HttpServer::new(move || {
         let service = service.clone();

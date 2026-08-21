@@ -1,7 +1,7 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_data_connection_types;
-use crate::utils::ServerConfig;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -26,19 +26,19 @@ struct HealthResponse {
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
-    config: Arc<ServerConfig>,
+    flight_client: FlightClient,
 }
 
 impl ApiService {
     pub fn new(
         meta_store: Arc<dyn MetaStore + Send + Sync>,
         secret_store: Arc<dyn SecretStore + Send + Sync>,
-        config: Arc<ServerConfig>,
+        flight_client: FlightClient,
     ) -> Self {
         Self {
             meta_store,
             secret_store,
-            config,
+            flight_client,
         }
     }
 }
@@ -226,7 +226,7 @@ pub async fn get_ingestion_data(
 
 pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
     info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), &service.config.flight_service).await?;
+    audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
     Ok(HttpResponse::Accepted().finish())
 }
 
@@ -236,8 +236,6 @@ pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::FlightService;
-    use crate::utils::Server;
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
@@ -246,8 +244,6 @@ mod tests {
     use commons::api::errors::SecretStoreError;
     use commons::api::storage::MetaStore;
     use commons::api::storage::SecretStore;
-    use commons::utils::config::GlobalConnectionTypes;
-    use pg_meta_store::store::DatabaseConfig;
     use std::collections::HashMap;
 
     use super::*;
@@ -517,22 +513,7 @@ mod tests {
         web::Data::new(ApiService::new(
             Arc::new(StubMetaStore),
             Arc::new(StubSecretStore),
-            Arc::new(ServerConfig {
-                server: Server {
-                    address: "127.0.0.1".to_string(),
-                    port: 8080,
-                },
-                database: DatabaseConfig {
-                    url: "postgresql://user-a@localhost:5432/db-a".to_string(),
-                },
-                global_connection_types: GlobalConnectionTypes {
-                    tenant_id: "opendatahub".to_string(),
-                },
-                flight_service: FlightService {
-                    address: "127.0.0.1".to_string(),
-                    port: 50051,
-                },
-            }),
+            FlightClient::new("http://localhost:50051".to_string()),
         ))
     }
 

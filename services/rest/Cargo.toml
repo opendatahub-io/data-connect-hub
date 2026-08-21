@@ -24,10 +24,10 @@ anyhow = { workspace = true }
 serde = { workspace = true }
 json-patch = { workspace = true }
 kube-utils = { workspace = true }
+tokio = { workspace = true }
 url = { workspace = true }
 
 
 [dev-dependencies]
 actix-rt = "2"
-tokio = { workspace = true }
 async-trait = { workspace = true }
