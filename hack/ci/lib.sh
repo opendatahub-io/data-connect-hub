@@ -63,6 +63,7 @@ MINIO_BUCKET="${MINIO_BUCKET:-e2e-test}"
 
 # CI workflow controls
 E2E_CONNECTORS="${E2E_CONNECTORS:-postgres sqlite s3 elasticsearch neo4j milvus uri}"
+E2E_SSL_ENABLED="${E2E_SSL_ENABLED:-false}"
 
 # has_connector <name> — true if <name> is in E2E_CONNECTORS.
 has_connector() { [[ " $E2E_CONNECTORS " == *" $1 "* ]]; }
