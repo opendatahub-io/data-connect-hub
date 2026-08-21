@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::format::{self, FileFormat};
+use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
@@ -80,7 +81,7 @@ fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, Con
 #[async_trait::async_trait]
 impl FlightConnector for S3Connector {
     fn provider(&self) -> String {
-        "s3".to_string()
+        Provider::S3.as_str().to_string()
     }
 
     fn description(&self) -> String {
@@ -126,7 +127,7 @@ impl S3Reader {
 #[async_trait::async_trait]
 impl TabularReader for S3Reader {
     fn provider(&self) -> String {
-        "s3".to_string()
+        Provider::S3.as_str().to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

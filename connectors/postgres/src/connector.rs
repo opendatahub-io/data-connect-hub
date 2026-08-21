@@ -6,6 +6,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
@@ -50,7 +51,7 @@ impl PgConnector {
 #[async_trait::async_trait]
 impl FlightConnector for PgConnector {
     fn provider(&self) -> String {
-        "postgres".to_string()
+        Provider::Postgres.as_str().to_string()
     }
 
     fn description(&self) -> String {
@@ -94,7 +95,7 @@ impl PgReader {}
 #[async_trait::async_trait]
 impl TabularReader for PgReader {
     fn provider(&self) -> String {
-        "postgres".to_string()
+        Provider::Postgres.as_str().to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

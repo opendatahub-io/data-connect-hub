@@ -45,11 +45,57 @@ impl std::fmt::Debug for Secret {
     }
 }
 
-/// SUPPORTED_PROVIDERS lists the connector providers recognized by Data Connect
-/// Hub. It is the single source of truth for validating a
-/// [`DataConnectionType::provider`] and mirrors the connector crates under
-/// `connectors/`.
-pub const SUPPORTED_PROVIDERS: &[&str] = &["postgres", "sqlite", "neo4j", "s3", "milvus", "elasticsearch"];
+/// Provider is the single source of truth for the data connector providers
+/// recognized by Data Connect Hub. Both the connector crates (via their
+/// `provider()` methods) and the services (for validation) reference this enum,
+/// so the set of known providers cannot drift between them. Adding a connector
+/// means adding a variant here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Postgres,
+    Sqlite,
+    S3,
+    Milvus,
+    Elasticsearch,
+    Neo4j,
+}
+
+impl Provider {
+    /// ALL lists every known provider, in declaration order.
+    pub const ALL: &'static [Provider] = &[
+        Provider::Postgres,
+        Provider::Sqlite,
+        Provider::S3,
+        Provider::Milvus,
+        Provider::Elasticsearch,
+        Provider::Neo4j,
+    ];
+
+    /// as_str returns the canonical wire identifier for the provider.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Provider::Postgres => "postgres",
+            Provider::Sqlite => "sqlite",
+            Provider::S3 => "s3",
+            Provider::Milvus => "milvus",
+            Provider::Elasticsearch => "elasticsearch",
+            Provider::Neo4j => "neo4j",
+        }
+    }
+
+    /// from_id parses a provider identifier, returning `None` when it does not
+    /// match a known provider.
+    pub fn from_id(id: &str) -> Option<Provider> {
+        Provider::ALL.iter().copied().find(|p| p.as_str() == id)
+    }
+}
+
+impl std::fmt::Display for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConnectionType {
@@ -58,33 +104,6 @@ pub struct DataConnectionType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
-}
-
-impl DataConnectionType {
-    /// validate_provider returns a descriptive error message when `provider` is
-    /// not one of [`SUPPORTED_PROVIDERS`].
-    pub fn validate_provider(&self) -> Result<(), String> {
-        if SUPPORTED_PROVIDERS.contains(&self.provider.as_str()) {
-            Ok(())
-        } else {
-            Err(format!(
-                "unsupported provider '{}'; supported providers are: {}",
-                self.provider,
-                SUPPORTED_PROVIDERS.join(", ")
-            ))
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
-pub enum SupportedApi {
-    #[serde(rename = "flight")]
-    Flight,
-    #[serde(rename = "rest")]
-    Rest,
-    #[serde(rename = "none")]
-    #[default]
-    None,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
@@ -137,18 +156,21 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_provider() {
-        let mut ct = sample_data_connection_type_resource().resource;
-        assert!(ct.validate_provider().is_ok());
-
-        for provider in SUPPORTED_PROVIDERS {
-            ct.provider = provider.to_string();
-            assert!(ct.validate_provider().is_ok(), "expected {provider} to be supported");
+    fn test_provider_from_id_roundtrip() {
+        for provider in Provider::ALL {
+            assert_eq!(Provider::from_id(provider.as_str()), Some(*provider));
         }
+        assert_eq!(Provider::from_id("mysql"), None);
+        assert_eq!(Provider::from_id(""), None);
+    }
 
-        ct.provider = "mysql".to_string();
-        let err = ct.validate_provider().unwrap_err();
-        assert!(err.contains("unsupported provider 'mysql'"));
+    #[test]
+    fn test_provider_serde_lowercase() {
+        assert_eq!(serde_json::to_value(Provider::Postgres).unwrap(), "postgres");
+        assert_eq!(
+            serde_json::from_value::<Provider>(serde_json::json!("elasticsearch")).unwrap(),
+            Provider::Elasticsearch
+        );
     }
 
     #[test]
