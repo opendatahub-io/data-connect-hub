@@ -3,12 +3,14 @@ members = [
     "libs/commons",
     "libs/kube-utils",
     "libs/pg-meta-store",
+    "libs/format-reader",
     "connectors/postgres",
     "connectors/sqlite",
     "connectors/s3",
     "connectors/milvus",
     "connectors/elasticsearch",
     "connectors/neo4j",
+    "connectors/oci",
     "services/flight",
     "services/rest",
 ]
@@ -28,10 +30,12 @@ s3-connector = { path = "connectors/s3" }
 milvus-connector = { path = "connectors/milvus" }
 elasticsearch-connector = { path = "connectors/elasticsearch" }
 neo4j-connector = { path = "connectors/neo4j" }
+oci-connector = { path = "connectors/oci" }
 milvus-sdk-rust = "2.6"
 neo4rs = "0.8"
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
+format-reader = { path = "libs/format-reader" }
 arrow = "59.1.0"
 arrow-flight = { version = "59.1.0", features = ["flight-sql"] }
 tonic = "0.14"

@@ -1,5 +1,5 @@
 [package]
-name = "s3-connector"
+name = "oci-connector"
 version = "0.1.0"
 edition = "2024"
 
@@ -10,17 +10,12 @@ workspace = true
 async-trait = { workspace = true }
 commons = { workspace = true }
 arrow = { workspace = true }
-tokio = { workspace = true }
 futures = { workspace = true }
-async-stream = { workspace = true }
 moka = { workspace = true, features = ["future"] }
-opendal = { workspace = true }
-parquet = { workspace = true }
-arrow-csv = { workspace = true }
-arrow-json = { workspace = true }
-format-reader = { workspace = true }
-tracing = { workspace = true }
+oci-client = "0.17"
 bytes = { workspace = true }
-
-[dev-dependencies]
-opendal = { workspace = true, features = ["services-fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+base64 = { workspace = true }
+parquet = { workspace = true }
+format-reader = { workspace = true }

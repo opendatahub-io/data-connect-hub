@@ -1,0 +1,20 @@
+[package]
+name = "format-reader"
+version = "0.1.0"
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+commons = { workspace = true }
+arrow = { workspace = true }
+arrow-csv = { workspace = true }
+arrow-json = { workspace = true }
+parquet = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+async-stream = { workspace = true }
+tokio = { workspace = true, features = ["io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+async-compression = { version = "0.4", features = ["tokio", "gzip", "zstd"] }

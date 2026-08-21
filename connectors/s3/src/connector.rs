@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::format::{self, FileFormat};
+use crate::format;
 use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use format::FileFormat;
 use moka::future::Cache;
 use opendal::{Operator, Reader, services::S3};
 
@@ -111,7 +112,12 @@ pub struct S3Reader {
 
 impl S3Reader {
     fn detect_format(&self, path: &str) -> Result<FileFormat, ConnectorError> {
-        FileFormat::detect(path, self.format_hint.as_deref())
+        match FileFormat::detect(path, self.format_hint.as_deref(), None) {
+            FileFormat::Binary => Err(ConnectorError::InvalidRequest(format!(
+                "Cannot detect format for path: {path}. Set 'format' in connection properties."
+            ))),
+            fmt => Ok(fmt),
+        }
     }
 
     async fn make_reader(&self, path: &str) -> Result<Reader, ConnectorError> {
@@ -135,9 +141,18 @@ impl TabularReader for S3Reader {
         let reader = self.make_reader(query).await?;
 
         let schema = match format {
-            FileFormat::Parquet => format::read_parquet_schema(reader).await?,
-            FileFormat::Csv => format::read_csv_schema(reader).await?,
-            FileFormat::JsonLines => format::read_jsonl_schema(reader).await?,
+            FileFormat::Parquet => {
+                format_reader::read_parquet_schema(format::parquet::OpendalAsyncReader::new(reader)).await?
+            },
+            FileFormat::Csv => {
+                let stream = format::opendal_to_byte_stream(reader).await?;
+                format_reader::read_csv_schema(stream).await?
+            },
+            FileFormat::JsonLines => {
+                let stream = format::opendal_to_byte_stream(reader).await?;
+                format_reader::read_jsonl_schema(stream).await?
+            },
+            FileFormat::Binary => unreachable!(),
         };
 
         Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
@@ -150,16 +165,19 @@ impl TabularReader for S3Reader {
         match format {
             FileFormat::Parquet => {
                 let reader = self.make_reader(&state.query).await?;
-                format::read_parquet_batches(reader, batch_size).await
+                format_reader::read_parquet_batches(format::parquet::OpendalAsyncReader::new(reader), batch_size).await
             },
             FileFormat::Csv => {
                 let reader = self.make_reader(&state.query).await?;
-                format::read_csv_batches(reader, &state.schema, batch_size).await
+                let stream = format::opendal_to_byte_stream(reader).await?;
+                format_reader::read_csv_batches(stream, &state.schema, batch_size).await
             },
             FileFormat::JsonLines => {
                 let reader = self.make_reader(&state.query).await?;
-                format::read_jsonl_batches(reader, &state.schema, batch_size).await
+                let stream = format::opendal_to_byte_stream(reader).await?;
+                format_reader::read_jsonl_batches(stream, &state.schema, batch_size).await
             },
+            FileFormat::Binary => unreachable!(),
         }
     }
 

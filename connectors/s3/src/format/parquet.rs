@@ -1,22 +1,19 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use arrow::datatypes::Schema;
 use bytes::Bytes;
-use commons::api::errors::ConnectorError;
-use commons::api::tabular::QueryOutput;
+use futures::FutureExt;
 use futures::future::BoxFuture;
-use futures::{FutureExt, StreamExt};
 use opendal::{BytesRange, Reader};
-use parquet::arrow::async_reader::{AsyncFileReader, MetadataSuffixFetch, ParquetRecordBatchStreamBuilder};
+use parquet::arrow::async_reader::{AsyncFileReader, MetadataSuffixFetch};
 use parquet::file::metadata::ParquetMetaData;
 
-struct OpendalAsyncReader {
+pub struct OpendalAsyncReader {
     reader: Reader,
 }
 
 impl OpendalAsyncReader {
-    fn new(reader: Reader) -> Self {
+    pub fn new(reader: Reader) -> Self {
         Self { reader }
     }
 }
@@ -74,34 +71,13 @@ impl MetadataSuffixFetch for &mut OpendalAsyncReader {
     }
 }
 
-pub async fn read_parquet_schema(reader: Reader) -> Result<Schema, ConnectorError> {
-    let async_reader = OpendalAsyncReader::new(reader);
-    let builder = ParquetRecordBatchStreamBuilder::new(async_reader)
-        .await
-        .map_err(|e| ConnectorError::IOError(format!("Failed to read Parquet metadata: {e}")))?;
-    Ok(builder.schema().as_ref().clone())
-}
-
-pub async fn read_parquet_batches(reader: Reader, batch_size: usize) -> QueryOutput {
-    let async_reader = OpendalAsyncReader::new(reader);
-    let stream = ParquetRecordBatchStreamBuilder::new(async_reader)
-        .await
-        .map_err(|e| ConnectorError::IOError(format!("Failed to open Parquet reader: {e}")))?
-        .with_batch_size(batch_size)
-        .build()
-        .map_err(|e| ConnectorError::IOError(format!("Failed to build Parquet reader: {e}")))?;
-
-    Ok(Box::pin(stream.map(|batch| {
-        batch.map_err(|e| ConnectorError::IOError(format!("Parquet read error: {e}")))
-    })))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use arrow::array::{Int32Array, StringArray};
-    use arrow::datatypes::{DataType, Field};
+    use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
+    use format_reader::{read_parquet_batches, read_parquet_schema};
     use futures::TryStreamExt;
     use opendal::{Operator, services::Fs, services::Memory};
     use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
@@ -136,7 +112,7 @@ mod tests {
         }
 
         let reader = memory_reader(&buf).await;
-        let read_schema = read_parquet_schema(reader).await.unwrap();
+        let read_schema = read_parquet_schema(OpendalAsyncReader::new(reader)).await.unwrap();
         assert_eq!(read_schema.fields().len(), 2);
         assert_eq!(read_schema.field(0).name(), "id");
         assert_eq!(read_schema.field(1).name(), "name");
@@ -187,7 +163,7 @@ mod tests {
     #[tokio::test]
     async fn test_parquet_schema_from_file() {
         let reader = testdata_reader("sample.parquet");
-        let schema = read_parquet_schema(reader).await.unwrap();
+        let schema = read_parquet_schema(OpendalAsyncReader::new(reader)).await.unwrap();
         assert_eq!(schema.fields().len(), 4);
         assert_eq!(schema.field(0).name(), "id");
         assert_eq!(schema.field(1).name(), "name");
@@ -198,7 +174,7 @@ mod tests {
     #[tokio::test]
     async fn test_parquet_batches_from_file() {
         let reader = testdata_reader("sample.parquet");
-        let batches: Vec<_> = read_parquet_batches(reader, 1024)
+        let batches: Vec<_> = read_parquet_batches(OpendalAsyncReader::new(reader), 1024)
             .await
             .unwrap()
             .try_collect()

@@ -66,6 +66,10 @@ DCH_TENANT_NEO4J_URI="${DCH_TENANT_NEO4J_URI:-}"
 DCH_TENANT_NEO4J_ADMIN_PASSWORD="${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}"
 DCH_TENANT_NEO4J_USERNAME="${DCH_TENANT_NEO4J_USERNAME:-dch_reader}"
 DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
+DCH_OCI_HOST="${DCH_OCI_HOST:-}"
+DCH_OCI_USERNAME="${DCH_OCI_USERNAME:-}"
+DCH_OCI_PASSWORD="${DCH_OCI_PASSWORD:-}"
+DCH_OCI_CA_CERT_FILE="${DCH_OCI_CA_CERT_FILE:-}"
 
 E2E_SA_NAME="e2e-user"
 E2E_DENIED_SA_NAME="e2e-denied-user"
@@ -75,6 +79,7 @@ MILVUS_SECRET="e2e-milvus-creds"
 ES_SECRET="e2e-es-creds"
 ES_APIKEY_SECRET="e2e-es-apikey-creds"
 NEO4J_SECRET="e2e-neo4j-creds"
+OCI_SECRET="e2e-oci-creds"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 # -------------------------------------------------------------------
@@ -233,6 +238,30 @@ setup_neo4j_secret() {
     fi
 }
 
+setup_oci_secret() {
+    E2E_OCI_ENABLED="false"
+    if [[ -n "$DCH_OCI_HOST" ]]; then
+        local -a args=(
+            --from-literal="OCI_HOST=${DCH_OCI_HOST}"
+        )
+        if [[ -n "$DCH_OCI_CA_CERT_FILE" && -f "$DCH_OCI_CA_CERT_FILE" ]]; then
+            args+=(--from-file="OCI_CA_CERT=${DCH_OCI_CA_CERT_FILE}")
+        fi
+        if [[ -n "$DCH_OCI_USERNAME" && -n "$DCH_OCI_PASSWORD" ]]; then
+            local auth_b64
+            auth_b64=$(printf '%s:%s' "$DCH_OCI_USERNAME" "$DCH_OCI_PASSWORD" | base64)
+            local docker_config
+            docker_config=$(printf '{"auths":{"%s":{"auth":"%s"}}}' "$DCH_OCI_HOST" "$auth_b64")
+            args+=(--from-literal=".dockerconfigjson=${docker_config}")
+        fi
+        kubectl create secret generic "$OCI_SECRET" \
+            -n "$DCH_TENANT_ID" \
+            "${args[@]}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        E2E_OCI_ENABLED="true"
+    fi
+}
+
 setup_flight_secret_rbac() {
     local -a secret_names=()
     [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
@@ -241,6 +270,7 @@ setup_flight_secret_rbac() {
     [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
     [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
     [[ "$E2E_NEO4J_ENABLED" == "true" ]] && secret_names+=("--resource-name=$NEO4J_SECRET")
+    [[ "$E2E_OCI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$OCI_SECRET")
 
     if [[ ${#secret_names[@]} -eq 0 ]]; then
         return 0
@@ -290,6 +320,13 @@ seed_neo4j_data() {
     [[ -n "$DCH_TENANT_NEO4J_USERNAME" ]] && args+=(--user "$DCH_TENANT_NEO4J_USERNAME")
     [[ -n "$DCH_TENANT_NEO4J_PASSWORD" ]] && args+=(--pass "$DCH_TENANT_NEO4J_PASSWORD")
     bash "$(dirname "$0")/scripts/seed-neo4j-data.sh" "${args[@]}"
+}
+
+seed_oci_data() {
+    [[ "$E2E_OCI_ENABLED" == "true" ]] || return 0
+    [[ "${DCH_OCI_SEED_DATASET:-true}" == "true" ]] || return 0
+    bash "$(dirname "$0")/scripts/seed-oci-data.sh" \
+        -r "$DCH_OCI_HOST" -n "$DCH_TENANT_ID"
 }
 
 seed_es_data() {
@@ -369,6 +406,16 @@ ES_APIKEY_EOF
 DCH_NEO4J_SECRET=e2e-neo4j-creds
 NEO4J_EOF
     fi
+
+    if [[ "$E2E_OCI_ENABLED" == "true" ]]; then
+        cat >> "$ENV_FILE" <<EOF
+DCH_OCI_SECRET=${OCI_SECRET}
+DCH_OCI_CSV_QUERY=dch-test/prompts-csv:v1
+DCH_OCI_PARQUET_QUERY=dch-test/prompts-parquet:v1
+DCH_OCI_JSONL_QUERY=dch-test/prompts-jsonl:v1
+DCH_OCI_BINARY_QUERY=dch-test/prompts-binary:v1
+EOF
+    fi
 }
 
 # ===================================================================
@@ -419,6 +466,7 @@ setup_milvus_secret
 setup_es_secret
 setup_es_apikey_secret
 setup_neo4j_secret
+setup_oci_secret
 setup_flight_secret_rbac
 
 SECRETS_MSG=""
@@ -427,6 +475,7 @@ SECRETS_MSG=""
 [[ "$E2E_MILVUS_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Milvus"
 [[ "$E2E_ES_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
 [[ "$E2E_NEO4J_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Neo4j"
+[[ "$E2E_OCI_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }OCI"
 echo "[5/11] ${SECRETS_MSG:-none} secrets + Flight RBAC ready"
 
 # 5. Seed test data
@@ -460,14 +509,21 @@ fi
 
 seed_neo4j_data
 if [[ "$E2E_NEO4J_ENABLED" == "true" ]]; then
-    echo "[10/11] Neo4j test data seeded"
+    echo "[10/12] Neo4j test data seeded"
 else
-    echo "[10/11] Neo4j seed skipped (DCH_TENANT_NEO4J_URI not set)"
+    echo "[10/12] Neo4j seed skipped (DCH_TENANT_NEO4J_URI not set)"
+fi
+
+seed_oci_data
+if [[ "$E2E_OCI_ENABLED" == "true" && "${DCH_OCI_SEED_DATASET:-true}" == "true" ]]; then
+    echo "[11/12] OCI test data seeded"
+else
+    echo "[11/12] OCI seed skipped (DCH_OCI_HOST not set)"
 fi
 
 # 6. Auth tokens
 generate_tokens
-echo "[11/11] Auth tokens + .env ready"
+echo "[12/12] Auth tokens + .env ready"
 
 # 7. Write .env
 write_env_file

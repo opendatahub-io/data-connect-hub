@@ -116,8 +116,13 @@ impl TabularReader for MilvusReader {
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
         let mut request = MilvusRequestInput::parse(query)?;
 
-        if let MilvusOperation::Query = request.operation() {
-            request.limit = Some(1);
+        match request.operation() {
+            MilvusOperation::Query | MilvusOperation::Search => {
+                request.limit = Some(1);
+            },
+            MilvusOperation::Get => {
+                request.id = request.id.map(trim_id_to_first);
+            },
         }
 
         let field_data = match request.operation() {
@@ -345,6 +350,15 @@ fn parse_ids(value: &serde_json::Value) -> Result<Ids, ConnectorError> {
             }
         },
         _ => Err(ConnectorError::InvalidRequest("Invalid ID format".to_string())),
+    }
+}
+
+fn trim_id_to_first(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Array(arr) if !arr.is_empty() => {
+            serde_json::Value::Array(vec![arr.into_iter().next().unwrap()])
+        },
+        other => other,
     }
 }
 

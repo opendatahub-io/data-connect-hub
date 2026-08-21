@@ -133,6 +133,31 @@ def neo4j_secret() -> str | None:
     return os.environ.get("DCH_NEO4J_SECRET") or None
 
 
+@pytest.fixture(scope="session")
+def oci_secret() -> str | None:
+    return os.environ.get("DCH_OCI_SECRET") or None
+
+
+@pytest.fixture(scope="session")
+def oci_csv_query() -> str | None:
+    return os.environ.get("DCH_OCI_CSV_QUERY") or None
+
+
+@pytest.fixture(scope="session")
+def oci_parquet_query() -> str | None:
+    return os.environ.get("DCH_OCI_PARQUET_QUERY") or None
+
+
+@pytest.fixture(scope="session")
+def oci_jsonl_query() -> str | None:
+    return os.environ.get("DCH_OCI_JSONL_QUERY") or None
+
+
+@pytest.fixture(scope="session")
+def oci_binary_query() -> str | None:
+    return os.environ.get("DCH_OCI_BINARY_QUERY") or None
+
+
 # ---------------------------------------------------------------------------
 # Client fixtures
 # ---------------------------------------------------------------------------
@@ -451,6 +476,40 @@ def neo4j_flight_connection(
         connection_type_id=ct.id,
         data_format="tabular",
         admin=AdminSecretRef(secret_ref=neo4j_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def oci_flight_connection(
+    oci_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight OCI query tests.
+
+    The K8s secret is prepared by run-e2e.sh. OCI data must already exist.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not oci_secret:
+        pytest.skip("DCH_OCI_SECRET not set (set OCI registry credentials in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-oci-type"),
+        provider="oci",
+        description="e2e OCI test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-oci-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=oci_secret),
         properties={},
     )
 

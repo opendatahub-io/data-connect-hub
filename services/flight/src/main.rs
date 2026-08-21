@@ -13,6 +13,7 @@ use kube_utils::KubeAuthClient;
 use kube_utils::secrets::KubeSecretStore;
 use milvus_connector::MilvusConnector;
 use neo4j_connector::Neo4jConnector;
+use oci_connector::OciConnector;
 use pg_meta_store::store::PgMetaStore;
 use postgres_connector::PgConnector;
 use s3_connector::S3Connector;
@@ -96,6 +97,11 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
             config.ingestion_cache_pools.max_capacity,
         )))
         .with_connector(Arc::new(Neo4jConnector::new(
+            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
+            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
+            config.ingestion_cache_pools.max_capacity,
+        )))
+        .with_connector(Arc::new(OciConnector::new(
             Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
             Duration::from_secs(config.ingestion_cache_pools.idle_secs),
             config.ingestion_cache_pools.max_capacity,
