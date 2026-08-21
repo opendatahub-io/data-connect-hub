@@ -66,12 +66,12 @@ container-all: container-flight container-rest
 
 container-run-flight: | require-container-engine
 	"$(CONTAINER_ENGINE)" run --rm --network=host \
-		-v "$(CURDIR)/services/flight/samples/config.toml:/config/config.toml:ro" \
+		-v "$(CURDIR)/.local/flight-config.toml:/config/config.toml:ro" \
 		"$(IMAGE)-flight:$(VERSION)" 2>&1
 
 container-run-rest: | require-container-engine
 	"$(CONTAINER_ENGINE)" run --rm --network=host \
-		-v "$(CURDIR)/services/rest/samples/config.toml:/config/config.toml:ro" \
+		-v "$(CURDIR)/.local/rest-config.toml:/config/config.toml:ro" \
 		"$(IMAGE)-rest:$(VERSION)" 2>&1
 
 # -------------------------------------------------------------------
