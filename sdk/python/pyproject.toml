@@ -29,6 +29,7 @@ flight = [
     "adbc-driver-flightsql>=1.0.0",
     "pyarrow>=14.0",
     "pandas>=2.0",
+    "protobuf>=6.33.5",
 ]
 dev = [
     "pytest>=8.0",

@@ -250,6 +250,18 @@ class DataConnectClient:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
         return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
 
+    def get_tables(
+        self,
+        connection_id: str,
+        *,
+        table_name_filter: str | None = None,
+        include_schema: bool = False,
+    ) -> pa.Table:
+        """Retrieve table metadata via Flight SQL ``CommandGetTables``."""
+        return self._require_flight().get_tables(
+            connection_id, table_name_filter=table_name_filter, include_schema=include_schema
+        )
+
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""
         return self._require_flight().server_info()

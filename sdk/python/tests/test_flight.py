@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
-from data_connect_hub.flight import FlightSQLClient
+from data_connect_hub.flight import FlightSQLClient, _encode_varint
 
 
 class _Error(Exception):
@@ -620,3 +620,99 @@ class TestParameters:
 
         assert isinstance(result, pd.DataFrame)
         cursor.execute.assert_called_once_with("SELECT $1", [42])
+
+
+def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """Read a protobuf varint from *data* at *offset*, return (value, new_offset)."""
+    result = 0
+    shift = 0
+    while True:
+        b = data[offset]
+        offset += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return result, offset
+
+
+def _decode_proto_fields(data: bytes) -> dict[int, bytes | int]:
+    """Minimal protobuf wire-format decoder returning {field_number: value}."""
+    fields: dict[int, bytes | int] = {}
+    i = 0
+    while i < len(data):
+        tag, i = _read_varint(data, i)
+        field_number = tag >> 3
+        wire_type = tag & 0x7
+        if wire_type == 0:
+            value, i = _read_varint(data, i)
+            fields[field_number] = value
+        elif wire_type == 2:
+            length, i = _read_varint(data, i)
+            fields[field_number] = data[i : i + length]
+            i += length
+    return fields
+
+
+class TestEncodeVarint:
+    def test_single_byte(self) -> None:
+        assert _encode_varint(0) == b"\x00"
+        assert _encode_varint(1) == b"\x01"
+        assert _encode_varint(127) == b"\x7f"
+
+    def test_multi_byte(self) -> None:
+        assert _encode_varint(128) == b"\x80\x01"
+        assert _encode_varint(300) == b"\xac\x02"
+
+
+class TestBuildCommandGetTables:
+    protobuf = pytest.importorskip("google.protobuf")
+
+    def _parse(self, raw: bytes) -> tuple[str, dict[int, bytes | int]]:
+        """Decode Any wrapper, return (type_url, inner_fields)."""
+        outer = _decode_proto_fields(raw)
+        type_url = outer[1]
+        assert isinstance(type_url, bytes)
+        inner_bytes = outer.get(2, b"")
+        assert isinstance(inner_bytes, bytes)
+        inner = _decode_proto_fields(inner_bytes) if inner_bytes else {}
+        return type_url.decode(), inner
+
+    def test_no_args(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables()
+        type_url, fields = self._parse(raw)
+        assert type_url == "type.googleapis.com/arrow.flight.protocol.sql.CommandGetTables"
+        assert fields == {}
+
+    def test_table_name_filter(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="cities")
+        _, fields = self._parse(raw)
+        assert fields[3] == b"cities"
+        assert 5 not in fields
+
+    def test_include_schema(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(include_schema=True)
+        _, fields = self._parse(raw)
+        assert 3 not in fields
+        assert fields[5] == 1
+
+    def test_both_args(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="test%", include_schema=True)
+        _, fields = self._parse(raw)
+        assert fields[3] == b"test%"
+        assert fields[5] == 1
+
+    def test_unicode_filter(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="tést")
+        _, fields = self._parse(raw)
+        assert fields[3] == "tést".encode()

@@ -10,7 +10,7 @@ use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
-use commons::api::tabular::{QueryOutput, TabularReader};
+use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
@@ -153,6 +153,67 @@ impl TabularReader for PgReader {
 
     async fn test_connection(&self) -> Result<(), ConnectorError> {
         Ok(())
+    }
+
+    async fn list_tables(
+        &self,
+        table_name_filter: Option<&str>,
+        include_schema: bool,
+    ) -> Result<Vec<TableInfo>, ConnectorError> {
+        let rows: Vec<(String, String, String, String)> = match table_name_filter {
+            Some(pattern) => sqlx::query_as(
+                "SELECT table_catalog, table_schema, table_name, table_type \
+                     FROM information_schema.tables \
+                     WHERE table_schema NOT IN ('information_schema', 'pg_catalog') \
+                     AND table_name LIKE $1 \
+                     ORDER BY table_schema, table_name",
+            )
+            .bind(pattern)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+            None => sqlx::query_as(
+                "SELECT table_catalog, table_schema, table_name, table_type \
+                     FROM information_schema.tables \
+                     WHERE table_schema NOT IN ('information_schema', 'pg_catalog') \
+                     ORDER BY table_schema, table_name",
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(map_sqlx_error)?,
+        };
+
+        let mut tables = Vec::with_capacity(rows.len());
+        for (catalog, schema_name, table_name, table_type) in rows {
+            let table_schema = if include_schema {
+                let qualified = format!(
+                    "\"{}\".\"{}\"",
+                    schema_name.replace('"', "\"\""),
+                    table_name.replace('"', "\"\"")
+                );
+                let query = format!("SELECT * FROM {} LIMIT 0", qualified);
+                let statement = self.pool.prepare(&query).await.map_err(map_sqlx_error)?;
+
+                let fields: Vec<Field> = statement
+                    .columns()
+                    .iter()
+                    .map(|col| Field::new(col.name(), pg_type_to_arrow(col.type_info().name()), true))
+                    .collect();
+                Schema::new(fields)
+            } else {
+                Schema::empty()
+            };
+
+            tables.push(TableInfo {
+                catalog,
+                schema_name,
+                table_name,
+                table_type,
+                table_schema,
+            });
+        }
+
+        Ok(tables)
     }
 }
 
