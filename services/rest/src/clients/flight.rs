@@ -26,6 +26,10 @@ pub async fn get_supported_connectors(flight_service: &FlightService) -> Result<
     let batches: Result<Vec<_>, _> = reader.collect();
     let batches = batches.map_err(|e| tonic::Status::internal(format!("failed to read IPC batches: {e}")))?;
 
+    if batches.is_empty() {
+        return Err(tonic::Status::internal("no batches returned from GetSupportedConnectors"));
+    }
+
     arrow::compute::concat_batches(&batches[0].schema(), &batches)
         .map_err(|e| tonic::Status::internal(format!("failed to concat batches: {e}")))
 }
