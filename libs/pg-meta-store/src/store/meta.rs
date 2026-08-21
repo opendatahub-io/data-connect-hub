@@ -441,7 +441,13 @@ impl MetaStore for PgMetaStore {
             .bind(&json_value)
             .execute(&self.pool)
             .await
-            .map_err(map_sqlx_error)?;
+            .map_err(|e| match map_sqlx_error(e) {
+                MetaStoreError::Conflict(_) => MetaStoreError::Conflict(format!(
+                    "a connection type named '{}' already exists for this tenant",
+                    data_connection_type.name
+                )),
+                other => other,
+            })?;
 
         Ok(resource)
     }
