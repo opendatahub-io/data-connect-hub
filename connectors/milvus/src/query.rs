@@ -1,67 +1,60 @@
 use commons::api::errors::ConnectorError;
-use serde::Deserialize;
 
-// Milvus REST request json format: https://github.com/milvus-io/web-content/tree/master/API_Reference/milvus-restful
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct MilvusRequestInput {
-    pub collection_name: String,
-    #[serde(default)]
-    pub db_name: Option<String>,
-    #[serde(default)]
-    pub filter: Option<String>,
-    #[serde(default)]
-    pub output_fields: Option<Vec<String>>,
-    #[serde(default)]
-    pub partition_names: Option<Vec<String>>,
-    #[serde(default)]
-    pub limit: Option<i64>,
-    #[serde(default)]
-    pub offset: Option<i64>,
-    #[serde(default)]
-    pub data: Option<Vec<Vec<f32>>>,
-    #[serde(default)]
-    pub anns_field: Option<String>,
-    #[serde(default)]
-    pub search_params: Option<SearchParams>,
-    #[serde(default)]
-    pub grouping_field: Option<String>,
-    #[serde(default)]
-    pub consistency_level: Option<String>,
-    #[serde(default)]
-    pub id: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub struct SearchParams {
-    pub metric_type: Option<String>,
-    pub params: Option<serde_json::Value>,
-}
-
+#[derive(Debug)]
 pub enum MilvusOperation {
     Query,
     Search,
     Get,
 }
 
+pub struct MilvusRequestInput {
+    pub collection_name: String,
+    pub operation: MilvusOperation,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub body: serde_json::Value,
+}
+
 impl MilvusRequestInput {
     pub fn parse(query: &str) -> Result<Self, ConnectorError> {
-        serde_json::from_str(query)
-            .map_err(|e| ConnectorError::InvalidRequest(format!("Invalid Milvus JSON query: {e}")))
-    }
+        let value: serde_json::Value = serde_json::from_str(query)
+            .map_err(|e| ConnectorError::InvalidRequest(format!("Invalid Milvus JSON query: {e}")))?;
 
-    pub fn operation(&self) -> MilvusOperation {
-        if self.data.is_some() {
+        let obj = value
+            .as_object()
+            .ok_or_else(|| ConnectorError::InvalidRequest("Query must be a JSON object".to_string()))?;
+
+        let collection_name = obj
+            .get("collectionName")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ConnectorError::InvalidRequest("'collectionName' is required".to_string()))?
+            .to_string();
+
+        let operation = if obj.contains_key("data") {
             MilvusOperation::Search
-        } else if self.id.is_some() {
+        } else if obj.contains_key("id") {
             MilvusOperation::Get
         } else {
             MilvusOperation::Query
-        }
+        };
+
+        let limit = obj.get("limit").and_then(|v| v.as_i64());
+        let offset = obj.get("offset").and_then(|v| v.as_i64());
+
+        Ok(Self {
+            collection_name,
+            operation,
+            limit,
+            offset,
+            body: value,
+        })
+    }
+
+    pub fn output_fields(&self) -> Option<Vec<String>> {
+        self.body
+            .get("outputFields")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
     }
 }
 
@@ -74,10 +67,9 @@ mod tests {
         let json = r#"{"collectionName":"products","filter":"price > 50","outputFields":["id","name"],"limit":100}"#;
         let req = MilvusRequestInput::parse(json).unwrap();
         assert_eq!(req.collection_name, "products");
-        assert_eq!(req.filter.as_deref(), Some("price > 50"));
-        assert_eq!(req.output_fields.as_ref().unwrap(), &["id", "name"]);
         assert_eq!(req.limit, Some(100));
-        assert!(matches!(req.operation(), MilvusOperation::Query));
+        assert!(matches!(req.operation, MilvusOperation::Query));
+        assert_eq!(req.output_fields().unwrap(), vec!["id", "name"]);
     }
 
     #[test]
@@ -85,9 +77,8 @@ mod tests {
         let json = r#"{"collectionName":"products","data":[[0.1,0.2,0.3]],"annsField":"embedding","limit":10}"#;
         let req = MilvusRequestInput::parse(json).unwrap();
         assert_eq!(req.collection_name, "products");
-        assert!(req.data.is_some());
-        assert_eq!(req.anns_field.as_deref(), Some("embedding"));
-        assert!(matches!(req.operation(), MilvusOperation::Search));
+        assert!(matches!(req.operation, MilvusOperation::Search));
+        assert_eq!(req.limit, Some(10));
     }
 
     #[test]
@@ -95,27 +86,44 @@ mod tests {
         let json = r#"{"collectionName":"products","id":[1,2,3],"outputFields":["id","name"]}"#;
         let req = MilvusRequestInput::parse(json).unwrap();
         assert_eq!(req.collection_name, "products");
-        assert!(req.id.is_some());
-        assert!(matches!(req.operation(), MilvusOperation::Get));
+        assert!(matches!(req.operation, MilvusOperation::Get));
     }
 
     #[test]
-    fn test_parse_search_with_params() {
-        let json = r#"{"collectionName":"col","data":[[0.1]],"annsField":"vec","searchParams":{"metricType":"L2"}}"#;
+    fn test_parse_with_offset() {
+        let json = r#"{"collectionName":"products","limit":50,"offset":100}"#;
         let req = MilvusRequestInput::parse(json).unwrap();
-        let params = req.search_params.unwrap();
-        assert_eq!(params.metric_type.as_deref(), Some("L2"));
+        assert_eq!(req.limit, Some(50));
+        assert_eq!(req.offset, Some(100));
     }
 
     #[test]
     fn test_parse_invalid_json() {
-        let result = MilvusRequestInput::parse("not json");
-        assert!(result.is_err());
+        assert!(MilvusRequestInput::parse("not json").is_err());
     }
 
     #[test]
     fn test_parse_missing_collection() {
-        let result = MilvusRequestInput::parse(r#"{"filter":"id > 1"}"#);
-        assert!(result.is_err());
+        assert!(MilvusRequestInput::parse(r#"{"filter":"id > 1"}"#).is_err());
+    }
+
+    #[test]
+    fn test_parse_not_object() {
+        assert!(MilvusRequestInput::parse(r#"[1,2,3]"#).is_err());
+    }
+
+    #[test]
+    fn test_output_fields_none() {
+        let json = r#"{"collectionName":"products"}"#;
+        let req = MilvusRequestInput::parse(json).unwrap();
+        assert!(req.output_fields().is_none());
+    }
+
+    #[test]
+    fn test_body_preserved() {
+        let json = r#"{"collectionName":"products","filter":"price > 50","customParam":"value"}"#;
+        let req = MilvusRequestInput::parse(json).unwrap();
+        assert_eq!(req.body["customParam"], "value");
+        assert_eq!(req.body["filter"], "price > 50");
     }
 }
