@@ -45,6 +45,12 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// SUPPORTED_PROVIDERS lists the connector providers recognized by Data Connect
+/// Hub. It is the single source of truth for validating a
+/// [`DataConnectionType::provider`] and mirrors the connector crates under
+/// `connectors/`.
+pub const SUPPORTED_PROVIDERS: &[&str] = &["postgres", "sqlite", "neo4j", "s3", "milvus", "elasticsearch"];
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConnectionType {
     pub name: String,
@@ -52,6 +58,22 @@ pub struct DataConnectionType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
+}
+
+impl DataConnectionType {
+    /// validate_provider returns a descriptive error message when `provider` is
+    /// not one of [`SUPPORTED_PROVIDERS`].
+    pub fn validate_provider(&self) -> Result<(), String> {
+        if SUPPORTED_PROVIDERS.contains(&self.provider.as_str()) {
+            Ok(())
+        } else {
+            Err(format!(
+                "unsupported provider '{}'; supported providers are: {}",
+                self.provider,
+                SUPPORTED_PROVIDERS.join(", ")
+            ))
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -115,6 +137,21 @@ mod tests {
                 },
             },
         }
+    }
+
+    #[test]
+    fn test_validate_provider() {
+        let mut ct = sample_data_connection_type_resource().resource;
+        assert!(ct.validate_provider().is_ok());
+
+        for provider in SUPPORTED_PROVIDERS {
+            ct.provider = provider.to_string();
+            assert!(ct.validate_provider().is_ok(), "expected {provider} to be supported");
+        }
+
+        ct.provider = "mysql".to_string();
+        let err = ct.validate_provider().unwrap_err();
+        assert!(err.contains("unsupported provider 'mysql'"));
     }
 
     #[test]

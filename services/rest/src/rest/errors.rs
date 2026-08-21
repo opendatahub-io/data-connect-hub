@@ -37,6 +37,8 @@ pub enum ValidationError {
     InvalidSecret,
     #[error("Missing required key: {0}")]
     MissingRequiredKey(String),
+    #[error("{0}")]
+    UnsupportedProvider(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -137,6 +139,20 @@ pub fn query_config() -> QueryConfig {
 
 pub fn path_config() -> PathConfig {
     PathConfig::default().error_handler(|err, _req| extraction_error("invalid_path", err.into()))
+}
+
+impl From<ValidationError> for RestErrorResponse {
+    fn from(err: ValidationError) -> Self {
+        let code = match &err {
+            ValidationError::UnsupportedProvider(_) => "unsupported_provider",
+            _ => "validation",
+        };
+        RestErrorResponse {
+            code: code.to_string(),
+            message: err.to_string(),
+            status: 400,
+        }
+    }
 }
 
 impl From<EndpointError> for RestErrorResponse {
