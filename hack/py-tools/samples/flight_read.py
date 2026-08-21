@@ -1,6 +1,6 @@
 import adbc_driver_flightsql.dbapi as dbapi
+import pyarrow
 import pyarrow.flight as flight
-import json
 
 uri = "grpc://127.0.0.1:50051"
 headers = {
@@ -19,8 +19,9 @@ for action in actions:
 print()
 
 results = list(client.do_action(flight.Action("GetSupportedConnectors", b""), options))
-connectors = json.loads(results[0].body.to_pybytes())
-print(f"Supported connectors: {connectors}")
+reader = pyarrow.ipc.open_stream(results[0].body.to_pybytes())
+connectors = reader.read_all()
+print(f"Supported connectors:\n{connectors.to_pandas()}")
 print()
 
 conn = dbapi.connect(
