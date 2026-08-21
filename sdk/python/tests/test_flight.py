@@ -48,12 +48,17 @@ def _set_mock_exceptions(mock_dbapi: MagicMock) -> None:
 
 
 def _set_mock_flight(mock_flight: MagicMock, connectors: list[str] | None = None) -> MagicMock:
-    import json
+    names = connectors or ["postgres"]
+    table = pa.table({"name": names, "description": [""] * len(names)})
+    sink = pa.BufferOutputStream()
+    writer = pa.ipc.new_stream(sink, table.schema)
+    writer.write_table(table)
+    writer.close()
 
     mock_client = MagicMock()
     mock_flight.connect.return_value = mock_client
     mock_result = MagicMock()
-    mock_result.body.to_pybytes.return_value = json.dumps(connectors or ["postgres"]).encode()
+    mock_result.body.to_pybytes.return_value = sink.getvalue().to_pybytes()
     mock_client.do_action.return_value = [mock_result]
     return mock_client
 

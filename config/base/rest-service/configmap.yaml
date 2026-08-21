@@ -13,3 +13,7 @@ data:
 
     [global-connection-types]
     tenant-id = "opendatahub"
+
+    [flight-service]
+    address = "flight-service"
+    port = 50051
