@@ -96,6 +96,7 @@ impl From<MetaStoreError> for RestErrorResponse {
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
             MetaStoreError::Validation(_) => ("validation", 400),
+            MetaStoreError::UnsupportedProvider(_) => ("unsupported_provider", 400),
         };
         RestErrorResponse {
             code: code.to_string(),

@@ -6,6 +6,7 @@ pub(crate) fn map_meta_store_error(e: MetaStoreError) -> Status {
         MetaStoreError::ResourceNotFound(msg) => Status::not_found(msg),
         MetaStoreError::InvalidRequest(msg) => Status::invalid_argument(msg),
         MetaStoreError::Validation(msg) => Status::invalid_argument(msg),
+        MetaStoreError::UnsupportedProvider(msg) => Status::invalid_argument(msg),
         e @ MetaStoreError::Connection(_) => {
             tracing::error!(error = %e, "metadata store connection failed");
             Status::unavailable("metadata service unavailable")

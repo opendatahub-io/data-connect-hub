@@ -36,6 +36,8 @@ pub enum MetaStoreError {
     Deserialization(String),
     #[error("Validation error: {0}")]
     Validation(String),
+    #[error("{0}")]
+    UnsupportedProvider(String),
 }
 
 #[derive(Error, Debug, Clone)]

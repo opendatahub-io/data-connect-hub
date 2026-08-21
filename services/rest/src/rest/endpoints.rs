@@ -188,7 +188,7 @@ pub async fn patch_connection_type(
             .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
         updated
             .validate_provider()
-            .map_err(commons::api::errors::MetaStoreError::Validation)?;
+            .map_err(commons::api::errors::MetaStoreError::UnsupportedProvider)?;
         Ok(updated)
     });
 
@@ -872,7 +872,7 @@ mod tests {
 
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "validation");
+        assert_eq!(body["code"], "unsupported_provider");
     }
 
     #[actix_web::test]
