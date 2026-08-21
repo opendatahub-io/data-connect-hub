@@ -1,5 +1,7 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use crate::state::audit::audit_data_connection_types;
+use crate::utils::ServerConfig;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -24,13 +26,19 @@ struct HealthResponse {
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
+    config: Arc<ServerConfig>,
 }
 
 impl ApiService {
-    pub fn new(meta_store: Arc<dyn MetaStore + Send + Sync>, secret_store: Arc<dyn SecretStore + Send + Sync>) -> Self {
+    pub fn new(
+        meta_store: Arc<dyn MetaStore + Send + Sync>,
+        secret_store: Arc<dyn SecretStore + Send + Sync>,
+        config: Arc<ServerConfig>,
+    ) -> Self {
         Self {
             meta_store,
             secret_store,
+            config,
         }
     }
 }
@@ -216,12 +224,20 @@ pub async fn get_ingestion_data(
     Err(EndpointError::Unimplemented.into())
 }
 
+pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
+    info!("audit_connection_types");
+    audit_data_connection_types(service.meta_store.clone(), &service.config.flight_service).await?;
+    Ok(HttpResponse::Accepted().finish())
+}
+
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::FlightService;
+    use crate::utils::Server;
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
@@ -230,6 +246,8 @@ mod tests {
     use commons::api::errors::SecretStoreError;
     use commons::api::storage::MetaStore;
     use commons::api::storage::SecretStore;
+    use commons::utils::config::GlobalConnectionTypes;
+    use pg_meta_store::store::DatabaseConfig;
     use std::collections::HashMap;
 
     use super::*;
@@ -354,6 +372,12 @@ mod tests {
             })
         }
 
+        async fn get_all_data_connection_types(
+            &self,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
+            unimplemented!()
+        }
+
         async fn get_data_connection_type(
             &self,
             tenant_id: &str,
@@ -434,6 +458,23 @@ mod tests {
             }
         }
 
+        async fn update_data_connection_type_status(
+            &self,
+            _uid: &str,
+            _update_fn: Arc<
+                dyn Fn(
+                        commons::api::connection_types::DataConnectionTypeStatus,
+                    ) -> Result<
+                        commons::api::connection_types::DataConnectionTypeStatus,
+                        commons::api::errors::MetaStoreError,
+                    > + Send
+                    + Sync,
+            >,
+        ) -> Result<commons::api::connection_types::DataConnectionTypeResource, commons::api::errors::MetaStoreError>
+        {
+            unimplemented!()
+        }
+
         async fn delete_data_connection_type(
             &self,
             tenant_id: &str,
@@ -473,7 +514,26 @@ mod tests {
     }
 
     fn test_service() -> web::Data<ApiService> {
-        web::Data::new(ApiService::new(Arc::new(StubMetaStore), Arc::new(StubSecretStore)))
+        web::Data::new(ApiService::new(
+            Arc::new(StubMetaStore),
+            Arc::new(StubSecretStore),
+            Arc::new(ServerConfig {
+                server: Server {
+                    address: "127.0.0.1".to_string(),
+                    port: 8080,
+                },
+                database: DatabaseConfig {
+                    url: "postgresql://user-a@localhost:5432/db-a".to_string(),
+                },
+                global_connection_types: GlobalConnectionTypes {
+                    tenant_id: "opendatahub".to_string(),
+                },
+                flight_service: FlightService {
+                    address: "127.0.0.1".to_string(),
+                    port: 50051,
+                },
+            }),
+        ))
     }
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
