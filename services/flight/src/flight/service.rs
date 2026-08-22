@@ -178,7 +178,7 @@ impl TabularDataService {
         &self,
         query_context: &QueryContext,
     ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
-        let connection = self.get_connection(&query_context).await?;
+        let connection = self.get_connection(query_context).await?;
 
         let data_connection_type = self
             .meta_store
