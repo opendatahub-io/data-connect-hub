@@ -44,7 +44,7 @@ impl TabularDataService {
         let metadata = request.metadata();
         let query_context = QueryContext::from_request(metadata)?;
 
-        let (connection, connector) = self.get_connector_by_connection_id(&query_context).await?;
+        let (connection, connector) = self.get_connector(&query_context).await?;
 
         let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 

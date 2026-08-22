@@ -97,14 +97,14 @@ impl TabularDataService {
             .collect()
     }
 
-    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnectionResource, Status> {
+    async fn get_connection(&self, query_context: &QueryContext) -> Result<DataConnectionResource, Status> {
         debug!(
             "get_connection: tenant_id: {}, connection_id: {}",
-            tenant_id, connection_id
+            query_context.tenant_id, query_context.connection_id
         );
         let mut r = self
             .meta_store
-            .get_data_connection(tenant_id, connection_id)
+            .get_data_connection(query_context.tenant_id.as_str(), query_context.connection_id.as_str())
             .await
             .map_err(map_meta_store_error)?;
 
@@ -112,7 +112,7 @@ impl TabularDataService {
         if let Some(Admin::SecretRef { secret_ref: s }) = &r.resource.admin {
             let secret = self
                 .secret_store
-                .get_secret(tenant_id, s)
+                .get_secret(&query_context.tenant_id, s)
                 .await
                 .map_err(map_secret_store_error)?;
             r.resource.admin = Some(Admin::Secret {
@@ -174,13 +174,11 @@ impl TabularDataService {
         ))
     }
 
-    pub(crate) async fn get_connector_by_connection_id(
+    pub(crate) async fn get_connector(
         &self,
         query_context: &QueryContext,
     ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
-        let connection = self
-            .get_connection(&query_context.tenant_id, &query_context.connection_id)
-            .await?;
+        let connection = self.get_connection(&query_context).await?;
 
         let data_connection_type = self
             .meta_store
@@ -208,7 +206,7 @@ impl TabularDataService {
 
         let metadata = request.metadata();
         let query_context = QueryContext::from_request(metadata)?;
-        let (connection, connector) = self.get_connector_by_connection_id(&query_context).await?;
+        let (connection, connector) = self.get_connector(&query_context).await?;
 
         let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
@@ -249,7 +247,7 @@ impl TabularDataService {
 
         let query_context = QueryContext::from_request(metadata)?;
 
-        let (connection, connector) = self.get_connector_by_connection_id(&query_context).await?;
+        let (connection, connector) = self.get_connector(&query_context).await?;
 
         let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
