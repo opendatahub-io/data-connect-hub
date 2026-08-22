@@ -42,6 +42,18 @@ command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; 
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
+# Detect OpenShift (has SecurityContextConstraints API) vs vanilla Kubernetes
+SECURITY_OPTS=""
+if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
+    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
+    SECURITY_OPTS="\
+        --set securityContext.runAsUser=null \
+        --set securityContext.runAsGroup=null \
+        --set securityContext.fsGroup=null \
+        --set containerSecurityContext.runAsUser=null \
+        --set containerSecurityContext.runAsGroup=null"
+fi
+
 helm repo add neo4j https://helm.neo4j.com/neo4j >/dev/null 2>&1 || true
 helm repo update neo4j >/dev/null 2>&1
 
@@ -57,6 +69,7 @@ else
         --set volumes.data.mode=defaultStorageClass \
         --set neo4j.resources.requests.memory=2Gi \
         --set neo4j.resources.requests.cpu=500m \
+        $SECURITY_OPTS \
         --wait --timeout="$TIMEOUT" || {
         echo "error: failed to install Neo4j in namespace '${NAMESPACE}'" >&2
         exit 1

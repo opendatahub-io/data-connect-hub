@@ -39,6 +39,19 @@ command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; 
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
+# Detect OpenShift vs vanilla Kubernetes
+SECURITY_OPTS=""
+if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
+    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
+    SECURITY_OPTS="\
+        --set etcd.containerSecurityContext.runAsUser=null \
+        --set etcd.containerSecurityContext.runAsNonRoot=true \
+        --set etcd.podSecurityContext.fsGroup=null \
+        --set minio.podSecurityContext.fsGroup=null \
+        --set minio.containerSecurityContext.runAsUser=null \
+        --set minio.containerSecurityContext.runAsNonRoot=true"
+fi
+
 helm repo add milvus https://zilliztech.github.io/milvus-helm/ >/dev/null 2>&1 || true
 helm repo update milvus >/dev/null 2>&1
 
@@ -55,6 +68,7 @@ else
         --set minio.mode=standalone \
         --set standalone.resources.requests.memory=512Mi \
         --set standalone.resources.requests.cpu=200m \
+        $SECURITY_OPTS \
         --wait --timeout="$TIMEOUT" || {
         echo "error: failed to install Milvus in namespace '${NAMESPACE}'" >&2
         exit 1

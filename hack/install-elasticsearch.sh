@@ -42,6 +42,18 @@ command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; 
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
+# Detect OpenShift vs vanilla Kubernetes
+SECURITY_OPTS=""
+if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
+    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
+    SECURITY_OPTS="\
+        --set sysctlInitContainer.enabled=false \
+        --set podSecurityContext.fsGroup=null \
+        --set podSecurityContext.runAsUser=null \
+        --set securityContext.runAsUser=null \
+        --set securityContext.runAsNonRoot=true"
+fi
+
 helm repo add elastic https://helm.elastic.co >/dev/null 2>&1 || true
 helm repo update elastic >/dev/null 2>&1
 
@@ -57,6 +69,7 @@ else
         --set resources.requests.memory=1Gi \
         --set resources.requests.cpu=500m \
         --set persistence.enabled=true \
+        $SECURITY_OPTS \
         --wait --timeout="$TIMEOUT" || {
         echo "error: failed to install Elasticsearch in namespace '${NAMESPACE}'" >&2
         exit 1
