@@ -12,6 +12,7 @@ use commons::api::X_TENANT_ID;
 use tonic::Status;
 use tonic::metadata::MetadataMap;
 
+#[derive(Debug, Clone)]
 pub(crate) struct QueryContext {
     pub tenant_id: String,
     pub connection_id: String,
