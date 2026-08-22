@@ -192,7 +192,7 @@ impl TabularReader for Neo4jReader {
             >)
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
         let mut result = self
             .graph
             .execute(neo4rs::query("RETURN 1"))
@@ -213,7 +213,7 @@ fn map_neo4j_error(e: neo4rs::Error) -> ConnectorError {
     {
         return ConnectorError::InvalidRequest("Data source is read-only".to_string());
     }
-    ConnectorError::ConnectionError(format!("Neo4j error: {e}"))
+    ConnectorError::ConnectionError("Neo4j connection error".to_string())
 }
 
 fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[neo4rs::Row]) -> Result<RecordBatch, ConnectorError> {

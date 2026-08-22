@@ -160,7 +160,19 @@ impl TabularReader for MilvusReader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        use milvus::v2::request::utility::CheckHealthRequest;
+        let req = CheckHealthRequest::builder()
+            .build()
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build health check request: {e}")))?;
+        let resp = self
+            .client
+            .check_health(req)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Milvus health check failed: {e}")))?;
+        if !resp.is_healthy() {
+            return Err(ConnectorError::ConnectionError("Milvus reported unhealthy".to_string()));
+        }
         Ok(())
     }
 }

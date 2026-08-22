@@ -16,6 +16,7 @@ use arrow_flight::{
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::storage::{MetaStore, SecretStore};
+use commons::api::tabular::FlightConnector;
 use commons::api::tabular::QueryOptions;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use futures::TryStreamExt;
@@ -33,6 +34,7 @@ const OPERATION_STATEMENT: &str = "statement";
 const STATUS_OK: &str = "OK";
 
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
+const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
 
 fn grpc_status_label(status: &Status) -> &'static str {
     match status.code() {
@@ -177,6 +179,27 @@ impl TabularDataService {
         ))
     }
 
+    async fn get_connector_by_connection_id(
+        &self,
+        tenant_id: &str,
+        connection_id: &str,
+    ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
+        let connection = self.get_connection(tenant_id, connection_id).await?;
+
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
+            .await
+            .map_err(map_meta_store_error)?;
+
+        Ok((
+            connection,
+            self.connectors_registry
+                .get_connector(data_connection_type.resource.provider.as_str())
+                .map_err(map_connector_error)?,
+        ))
+    }
+
     async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,
@@ -199,18 +222,7 @@ impl TabularDataService {
             .to_str()
             .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
 
-        let connection = self.get_connection(tenant_id, connection_id).await?;
-
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-
-        let connector = self
-            .connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
@@ -238,6 +250,75 @@ impl TabularDataService {
         Ok(Response::new(flight_info))
     }
 
+    async fn action_check_connection(
+        &self,
+        request: &Request<Action>,
+    ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
+        let metadata = request.metadata();
+        let connection_id = metadata
+            .get(X_DATA_CONNECTION_ID)
+            .ok_or_else(|| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header is required")))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
+
+        let tenant_id = metadata
+            .get(X_TENANT_ID)
+            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
+
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
+
+        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+
+        reader.check_connection().await.map_err(map_connector_error)?;
+
+        let result = arrow_flight::Result {
+            body: Vec::new().into(),
+        };
+        Ok(Response::new(
+            Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
+        ))
+    }
+
+    async fn action_get_supported_connectors(
+        &self,
+    ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
+        let connectors = self.connectors_registry.get_supported_connectors();
+        let names: Vec<String> = connectors.iter().map(|c| c.provider()).collect();
+        let descriptions: Vec<String> = connectors.iter().map(|c| c.description()).collect();
+
+        let batch = RecordBatch::try_from_iter(vec![
+            ("name", Arc::new(StringArray::from(names)) as _),
+            ("description", Arc::new(StringArray::from(descriptions)) as _),
+        ])
+        .map_err(|e| {
+            tracing::error!(error = %e, "failed to build connector record batch");
+            Status::internal("failed to build response")
+        })?;
+
+        let mut buf = Vec::new();
+        {
+            let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema()).map_err(|e| {
+                tracing::error!(error = %e, "failed to create IPC writer");
+                Status::internal("failed to encode response")
+            })?;
+            writer.write(&batch).map_err(|e| {
+                tracing::error!(error = %e, "failed to write IPC batch");
+                Status::internal("failed to encode response")
+            })?;
+            writer.finish().map_err(|e| {
+                tracing::error!(error = %e, "failed to finish IPC stream");
+                Status::internal("failed to encode response")
+            })?;
+        }
+
+        let result = arrow_flight::Result { body: buf.into() };
+        Ok(Response::new(
+            Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
+        ))
+    }
+
     async fn handle_do_get_statement(
         &self,
         ticket: TicketStatementQuery,
@@ -262,18 +343,7 @@ impl TabularDataService {
             .to_str()
             .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
 
-        let connection = self.get_connection(tenant_id, connection_id).await?;
-
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-
-        let connector = self
-            .connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
 
@@ -316,10 +386,16 @@ impl FlightSqlService for TabularDataService {
     async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {}
 
     async fn list_custom_actions(&self) -> Option<Vec<Result<ActionType, Status>>> {
-        Some(vec![Ok(ActionType {
-            r#type: ACTION_GET_SUPPORTED_CONNECTORS.into(),
-            description: "Returns the list of supported data connectors".into(),
-        })])
+        Some(vec![
+            Ok(ActionType {
+                r#type: ACTION_GET_SUPPORTED_CONNECTORS.into(),
+                description: "Returns the list of supported data connectors".into(),
+            }),
+            Ok(ActionType {
+                r#type: ACTION_CHECK_CONNECTION.into(),
+                description: "Checks the connection to the data source".into(),
+            }),
+        ])
     }
 
     async fn do_action_fallback(
@@ -328,42 +404,8 @@ impl FlightSqlService for TabularDataService {
     ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
         let action = request.get_ref();
         match action.r#type.as_str() {
-            ACTION_GET_SUPPORTED_CONNECTORS => {
-                let connectors = self.connectors_registry.get_supported_connectors();
-                let names: Vec<String> = connectors.iter().map(|c| c.provider()).collect();
-                let descriptions: Vec<String> = connectors.iter().map(|c| c.description()).collect();
-
-                let batch = RecordBatch::try_from_iter(vec![
-                    ("name", Arc::new(StringArray::from(names)) as _),
-                    ("description", Arc::new(StringArray::from(descriptions)) as _),
-                ])
-                .map_err(|e| {
-                    tracing::error!(error = %e, "failed to build connector record batch");
-                    Status::internal("failed to build response")
-                })?;
-
-                let mut buf = Vec::new();
-                {
-                    let mut writer =
-                        arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema()).map_err(|e| {
-                            tracing::error!(error = %e, "failed to create IPC writer");
-                            Status::internal("failed to encode response")
-                        })?;
-                    writer.write(&batch).map_err(|e| {
-                        tracing::error!(error = %e, "failed to write IPC batch");
-                        Status::internal("failed to encode response")
-                    })?;
-                    writer.finish().map_err(|e| {
-                        tracing::error!(error = %e, "failed to finish IPC stream");
-                        Status::internal("failed to encode response")
-                    })?;
-                }
-
-                let result = arrow_flight::Result { body: buf.into() };
-                Ok(Response::new(
-                    Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
-                ))
-            },
+            ACTION_CHECK_CONNECTION => self.action_check_connection(&request).await,
+            ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
             _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
         }
     }

@@ -150,7 +150,11 @@ impl TabularReader for PgReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("PostgreSQL connection check failed".to_string()))?;
         Ok(())
     }
 }

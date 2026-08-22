@@ -162,8 +162,11 @@ impl TabularReader for S3Reader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
-        Ok(())
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        self.operator
+            .check()
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("Failed to check S3 connection".to_string()))
     }
 }
 

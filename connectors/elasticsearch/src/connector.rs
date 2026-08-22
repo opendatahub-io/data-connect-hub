@@ -289,7 +289,7 @@ impl TabularReader for ElasticsearchReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
         let response = self
             .client
             .get("/")
