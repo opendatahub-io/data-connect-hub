@@ -197,6 +197,23 @@ impl TabularDataService {
         ))
     }
 
+    pub(crate) async fn get_connector_by_type_id(
+        &self,
+        tenant_id: &str,
+        data_connection_type_id: &str,
+    ) -> Result<&Arc<dyn FlightConnector>, Status> {
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(&tenant_id, data_connection_type_id)
+            .await
+            .map_err(map_meta_store_error)?;
+
+        Ok(self
+            .connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?)
+    }
+
     async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,

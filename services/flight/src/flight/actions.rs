@@ -1,13 +1,20 @@
 use crate::flight::errors::map_connector_error;
 use crate::flight::service::TabularDataService;
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
+use commons::api::connections::Admin;
+use std::collections::HashMap;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::flight::QueryContext;
+use commons::api::ResourceMetadata;
+use commons::api::connections::DataConnection;
+use commons::api::connections::DataConnectionResource;
+use commons::api::connections::DataConnectionStatus;
+use commons::api::connections::DataFormat;
 use tonic::{Request, Response, Status};
-
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
 
@@ -44,9 +51,48 @@ impl TabularDataService {
         let metadata = request.metadata();
         let query_context = QueryContext::from_request(metadata)?;
 
-        let (connection, connector) = self.get_connector(&query_context).await?;
+        let reader = if let Some(mut keys) = parse_credentials_body(&request.get_ref().body)? {
+            let dct_id = keys
+                .remove("data_connection_type_id")
+                .ok_or(Status::invalid_argument("data_connection_type_id is required"))?;
 
-        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+            let credentials: HashMap<String, String> = keys
+                .into_iter()
+                .filter(|(k, _)| k.starts_with("secret."))
+                .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
+                .collect();
+
+            let admin = Admin::Secret {
+                name: String::new(),
+                secret: Arc::new(credentials),
+            };
+
+            let connector = self.get_connector_by_type_id(&query_context.tenant_id, &dct_id).await?;
+
+            // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.
+            connector
+                .get_reader(&DataConnectionResource {
+                    metadata: ResourceMetadata {
+                        id: Uuid::new_v4().to_string(),
+                        tenant_id: Some(query_context.tenant_id.clone()),
+                        created_at: "2021-01-01".to_string(),
+                        updated_at: "2021-01-01".to_string(),
+                    },
+                    resource: DataConnection {
+                        name: "test".to_string(),
+                        data_connection_type_id: dct_id.clone(),
+                        format: DataFormat::Tabular,
+                        admin: Some(admin),
+                        properties: HashMap::new(),
+                    },
+                    status: DataConnectionStatus::default(),
+                })
+                .await
+                .map_err(map_connector_error)?
+        } else {
+            let (connection, connector) = self.get_connector(&query_context).await?;
+            connector.get_reader(&connection).await.map_err(map_connector_error)?
+        };
 
         reader.check_connection().await.map_err(map_connector_error)?;
 
@@ -95,4 +141,35 @@ impl TabularDataService {
             Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
         ))
     }
+}
+
+fn parse_credentials_body(body: &[u8]) -> Result<Option<HashMap<String, String>>, Status> {
+    if body.is_empty() {
+        return Ok(None);
+    }
+
+    let reader = arrow::ipc::reader::StreamReader::try_new(std::io::Cursor::new(body), None)
+        .map_err(|e| Status::invalid_argument(format!("invalid credentials payload: {e}")))?;
+
+    let batch: RecordBatch = reader
+        .into_iter()
+        .next()
+        .ok_or_else(|| Status::invalid_argument("credentials payload is empty"))?
+        .map_err(|e| Status::invalid_argument(format!("failed to read credentials: {e}")))?;
+
+    let keys = batch
+        .column_by_name("key")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(|| Status::invalid_argument("credentials payload missing 'key' column"))?;
+
+    let values = batch
+        .column_by_name("value")
+        .and_then(|c| c.as_any().downcast_ref::<StringArray>())
+        .ok_or_else(|| Status::invalid_argument("credentials payload missing 'value' column"))?;
+
+    let map: HashMap<String, String> = (0..keys.len())
+        .map(|i| (keys.value(i).to_string(), values.value(i).to_string()))
+        .collect();
+
+    Ok(Some(map))
 }
