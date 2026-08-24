@@ -5,8 +5,9 @@ use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
+use chrono::Utc;
 use commons::api::connection_types::DataConnectionType;
-use commons::api::connections::DataConnection;
+use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus};
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
@@ -64,7 +65,7 @@ pub async fn get_connection(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("get_connection: for tenant {:?}", ctx.tenant_id);
+    info!("get_connection");
     let connection = service
         .meta_store
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
@@ -238,12 +239,49 @@ pub async fn check_existent_connection(
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("check_existent_connection: for tenant {:?}", ctx.tenant_id);
 
-    service
-        .flight_client
-        .check_connection(&ctx.tenant_id, &id)
-        .await
-        .map_err(|_| ValidationError::ConnectionCheckFailed(id.into_inner()))?;
+    let connection_id = id.into_inner();
 
+    let result = service
+        .flight_client
+        .check_connection(&ctx.tenant_id, &connection_id)
+        .await;
+
+    match result {
+        Ok(_) => {
+            let update_fn = Arc::new(|_: DataConnectionStatus| {
+                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                Ok(DataConnectionStatus {
+                    state: DataConnectionState::Ready,
+                    message: Some("Connection check successful".to_string()),
+                    updated_at: Some(now),
+                    phases: vec![],
+                })
+            });
+            service
+                .meta_store
+                .update_data_connection_status(&connection_id, update_fn)
+                .await?;
+        },
+        Err(_) => {
+            let update_fn = Arc::new(|_: DataConnectionStatus| {
+                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                Ok(DataConnectionStatus {
+                    state: DataConnectionState::NotReady,
+                    message: Some("Connection check failed".to_string()),
+                    updated_at: Some(now),
+                    phases: vec![],
+                })
+            });
+            service
+                .meta_store
+                .update_data_connection_status(&connection_id, update_fn)
+                .await?;
+
+            return Err(ValidationError::ConnectionCheckFailed(connection_id).into());
+        },
+    };
+
+    info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -373,6 +411,18 @@ mod tests {
                     "Data connection '{uid}' not found"
                 )))
             }
+        }
+
+        async fn update_data_connection_status(
+            &self,
+            _uid: &str,
+            _update_fn: Arc<
+                dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, commons::api::errors::MetaStoreError>
+                    + Send
+                    + Sync,
+            >,
+        ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
+            unimplemented!()
         }
 
         async fn get_data_connection_types(

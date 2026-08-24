@@ -65,7 +65,10 @@ pub struct PhaseCondition {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct DataConnectionStatus {
     pub state: DataConnectionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
     #[serde(default)]
     pub phases: Vec<PhaseCondition>,
 }
@@ -75,6 +78,7 @@ impl Default for DataConnectionStatus {
         Self {
             state: DataConnectionState::NotReady,
             message: None,
+            updated_at: None,
             phases: vec![],
         }
     }
@@ -134,6 +138,7 @@ mod tests {
             status: DataConnectionStatus {
                 state: DataConnectionState::NotReady,
                 message: None,
+                updated_at: None,
                 phases: vec![],
             },
         }
@@ -172,7 +177,6 @@ mod tests {
             },
             "status": {
                 "state": "not_ready",
-                "message": null,
                 "phases": []
             }
         });
@@ -214,6 +218,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: None,
+            updated_at: None,
             phases: vec![],
         };
         let json = serde_json::to_value(&status).unwrap();
@@ -226,6 +231,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("All checks passed".to_string()),
+            updated_at: None,
             phases: vec![],
         };
         let json = serde_json::to_value(&status).unwrap();
@@ -238,6 +244,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: Some("ready".to_string()),
+            updated_at: None,
             phases: vec![],
         };
         let json = serde_json::to_string(&status).unwrap();
@@ -272,16 +279,19 @@ mod tests {
         let a = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
+            updated_at: None,
             phases: vec![],
         };
         let b = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
+            updated_at: None,
             phases: vec![],
         };
         let c = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: Some("ok".to_string()),
+            updated_at: None,
             phases: vec![],
         };
         assert_eq!(a, b);

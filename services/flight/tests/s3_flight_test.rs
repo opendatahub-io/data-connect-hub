@@ -8,7 +8,7 @@ use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connection_types::Secret;
 use commons::api::connections::{Admin, DataConnection};
-use commons::api::connections::{DataConnectionResource, DataFormat};
+use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
@@ -76,6 +76,14 @@ impl MetaStore for S3TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }

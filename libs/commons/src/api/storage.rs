@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::api::ResourceList;
 use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Secret};
+use crate::api::connections::DataConnectionStatus;
 use crate::api::connections::{DataConnection, DataConnectionResource};
 use crate::api::errors::{MetaStoreError, SecretStoreError};
 
@@ -31,6 +32,13 @@ pub trait MetaStore {
         tenant_id: &str,
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError>;
+
+    /// Updates the status of the data connection identified by `uid`.
+    async fn update_data_connection_status(
+        &self,
+        uid: &str,
+        update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError>;
 
     /// Deletes the data connection identified by `uid`.
