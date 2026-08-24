@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 
+from ._rest import RestClient
 from .exceptions import DCHConfigError
 from .models import (
     Admin,
@@ -17,13 +18,12 @@ from .models import (
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
-from .rest import RestClient
 
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from .flight import FlightClient
+    from ._flight import FlightClient
 
 
 class DataConnectClient:
@@ -105,7 +105,7 @@ class DataConnectClient:
             )
 
         if flight_url:
-            from .flight import FlightClient as _FlightClient
+            from ._flight import FlightClient as _FlightClient
 
             self._flight = _FlightClient(
                 flight_url=flight_url,

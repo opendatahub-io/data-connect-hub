@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
+from data_connect_hub._rest import RestClient
 from data_connect_hub.exceptions import (
     DCHAuthenticationError,
     DCHConnectionError,
@@ -23,7 +24,6 @@ from data_connect_hub.models import (
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
-from data_connect_hub.rest import RestClient
 
 from .conftest import (
     SAMPLE_CONNECTION_JSON,
