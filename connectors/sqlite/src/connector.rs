@@ -13,25 +13,22 @@ use futures::StreamExt;
 
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::tabular::FlightConnector;
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Executor, Row, SqlitePool, Statement, TypeInfo};
 
 pub struct SqliteConnector {
     pools: Cache<String, SqlitePool>,
-}
-
-impl Default for SqliteConnector {
-    fn default() -> Self {
-        Self {
-            pools: Cache::builder().max_capacity(2).build(),
-        }
-    }
+    config: ConnectorConfig,
 }
 
 impl SqliteConnector {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(config: ConnectorConfig) -> Self {
+        Self {
+            pools: Cache::builder().max_capacity(2).build(),
+            config,
+        }
     }
 }
 
@@ -58,10 +55,13 @@ impl FlightConnector for SqliteConnector {
         let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+        let connection_timeout = self.config.connection_timeout();
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
-                SqlitePool::connect(url.as_str())
+                sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
             })
@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_sqlite_connector_new() {
-        let connector = SqliteConnector::new();
+        let connector = SqliteConnector::new(ConnectorConfig::default());
         assert_eq!(connector.provider(), "sqlite");
     }
 }

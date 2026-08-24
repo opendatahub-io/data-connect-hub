@@ -211,7 +211,12 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 10);
+    let connector = S3Connector::new(
+        Duration::from_secs(300),
+        Duration::from_secs(60),
+        10,
+        Default::default(),
+    );
     connector.insert_operator("s3-conn-1", operator).await;
 
     let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(connector));

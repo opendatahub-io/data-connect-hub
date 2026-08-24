@@ -1,4 +1,4 @@
-use commons::utils::config::GlobalConnectionTypes;
+use commons::utils::config::{ConnectorConfig, ConnectorConfigOverride, GlobalConnectionTypes};
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 
@@ -115,11 +115,52 @@ impl TlsConfig {
     }
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct ConnectorsConfig {
+    #[serde(default)]
+    pub default: ConnectorConfig,
+    #[serde(default)]
+    postgres: ConnectorConfigOverride,
+    #[serde(default)]
+    sqlite: ConnectorConfigOverride,
+    #[serde(default)]
+    elasticsearch: ConnectorConfigOverride,
+    #[serde(default)]
+    neo4j: ConnectorConfigOverride,
+    #[serde(default)]
+    milvus: ConnectorConfigOverride,
+    #[serde(default)]
+    s3: ConnectorConfigOverride,
+}
+
+impl ConnectorsConfig {
+    pub fn postgres(&self) -> ConnectorConfig {
+        self.default.merge(self.postgres)
+    }
+    pub fn sqlite(&self) -> ConnectorConfig {
+        self.default.merge(self.sqlite)
+    }
+    pub fn elasticsearch(&self) -> ConnectorConfig {
+        self.default.merge(self.elasticsearch)
+    }
+    pub fn neo4j(&self) -> ConnectorConfig {
+        self.default.merge(self.neo4j)
+    }
+    pub fn milvus(&self) -> ConnectorConfig {
+        self.default.merge(self.milvus)
+    }
+    pub fn s3(&self) -> ConnectorConfig {
+        self.default.merge(self.s3)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
     pub ingestion_cache_pools: IngestionCachePools,
+    #[serde(default)]
+    pub connectors: ConnectorsConfig,
     #[serde(default)]
     pub query: QueryConfig,
     #[serde(default)]

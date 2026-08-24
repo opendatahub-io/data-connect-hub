@@ -15,10 +15,12 @@ use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 use futures::StreamExt;
 
 use commons::api::tabular::FlightConnector;
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
+use std::time::Duration;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
@@ -30,20 +32,21 @@ fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     }
     ConnectorError::SQLError(e.to_string())
 }
-use std::time::Duration;
 
 pub struct PgConnector {
     pools: Cache<String, PgPool>,
+    config: ConnectorConfig,
 }
 
 impl PgConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             pools: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
@@ -72,10 +75,13 @@ impl FlightConnector for PgConnector {
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
 
+        let connection_timeout = self.config.connection_timeout();
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
-                PgPool::connect(url.as_str())
+                sqlx::pool::PoolOptions::<sqlx::Postgres>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))
             })
@@ -486,7 +492,12 @@ mod tests {
 
     #[test]
     fn test_pg_connector_new() {
-        let connector = PgConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = PgConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "postgres");
     }
 

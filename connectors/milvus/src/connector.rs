@@ -11,6 +11,7 @@ use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use milvus::v2::prelude::{
     ClientV2, ConnectConfig, FieldData, GetRequest, Ids, QueryRequest, QueryResponse, SearchRequest, SearchResponse,
     SearchVectors,
@@ -27,16 +28,18 @@ const DEFAULT_PORT: &str = "19530";
 
 pub struct MilvusConnector {
     clients: Cache<String, ClientV2>,
+    config: ConnectorConfig,
 }
 
 impl MilvusConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             clients: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
@@ -84,10 +87,11 @@ impl FlightConnector for MilvusConnector {
         let database = credentials.get(KEY_DATABASE).cloned();
 
         let cache_key = data_connection.metadata.id.clone();
+        let connection_timeout = self.config.connection_timeout();
         let client = self
             .clients
             .try_get_with(cache_key, async {
-                let mut config = ConnectConfig::new().uri(&uri);
+                let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
                 if let Some(ref token) = token {
                     config = config.token(token);
                 }
@@ -469,7 +473,12 @@ mod tests {
 
     #[test]
     fn test_milvus_connector_provider() {
-        let connector = MilvusConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = MilvusConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "milvus");
     }
 

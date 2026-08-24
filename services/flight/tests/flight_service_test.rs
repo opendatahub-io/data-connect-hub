@@ -270,7 +270,8 @@ async fn test_flight_sql_select_prompts() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(SqliteConnector::new()));
+    let connectors_registry =
+        ConnectorsRegistry::new().with_connector(Arc::new(SqliteConnector::new(Default::default())));
 
     let secret_store = Arc::new(InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),

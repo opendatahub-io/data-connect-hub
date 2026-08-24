@@ -73,33 +73,47 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
 }
 
 fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
-    ConnectorsRegistry::new()
-        .with_connector(Arc::new(PgConnector::new(
-            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
-            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
-            config.ingestion_cache_pools.max_capacity,
-        )))
-        .with_connector(Arc::new(SqliteConnector::new()))
-        .with_connector(Arc::new(S3Connector::new(
-            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
-            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
-            config.ingestion_cache_pools.max_capacity,
-        )))
-        .with_connector(Arc::new(MilvusConnector::new(
-            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
-            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
-            config.ingestion_cache_pools.max_capacity,
-        )))
-        .with_connector(Arc::new(ElasticsearchConnector::new(
-            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
-            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
-            config.ingestion_cache_pools.max_capacity,
-        )))
-        .with_connector(Arc::new(Neo4jConnector::new(
-            Duration::from_secs(config.ingestion_cache_pools.ttl_secs),
-            Duration::from_secs(config.ingestion_cache_pools.idle_secs),
-            config.ingestion_cache_pools.max_capacity,
-        )))
+    let cache = &config.ingestion_cache_pools;
+    let connectors = &config.connectors;
+    let cache_ttl = Duration::from_secs(cache.ttl_secs);
+    let cache_idle = Duration::from_secs(cache.idle_secs);
+    let cache_cap = cache.max_capacity;
+
+    let mut registry = ConnectorsRegistry::new();
+
+    let pg = connectors.postgres();
+    if pg.enabled {
+        registry = registry.with_connector(Arc::new(PgConnector::new(cache_ttl, cache_idle, cache_cap, pg)));
+    }
+
+    let sqlite = connectors.sqlite();
+    if sqlite.enabled {
+        registry = registry.with_connector(Arc::new(SqliteConnector::new(sqlite)));
+    }
+
+    let s3 = connectors.s3();
+    if s3.enabled {
+        registry = registry.with_connector(Arc::new(S3Connector::new(cache_ttl, cache_idle, cache_cap, s3)));
+    }
+
+    let milvus = connectors.milvus();
+    if milvus.enabled {
+        registry = registry.with_connector(Arc::new(MilvusConnector::new(cache_ttl, cache_idle, cache_cap, milvus)));
+    }
+
+    let es = connectors.elasticsearch();
+    if es.enabled {
+        registry = registry.with_connector(Arc::new(ElasticsearchConnector::new(
+            cache_ttl, cache_idle, cache_cap, es,
+        )));
+    }
+
+    let neo4j = connectors.neo4j();
+    if neo4j.enabled {
+        registry = registry.with_connector(Arc::new(Neo4jConnector::new(cache_ttl, cache_idle, cache_cap, neo4j)));
+    }
+
+    registry
 }
 
 async fn configure_tls(
@@ -200,7 +214,7 @@ async fn main() -> Result<()> {
         batch_size: config.query.batch_size,
     };
 
-    let tenant_id = config.global_connection_types.tenant_id.clone();
+    let tenant_id = config.global_connection_types.tenant_id;
     let auth = config.auth;
     let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
 

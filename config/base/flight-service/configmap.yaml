@@ -29,5 +29,27 @@ data:
     address = "0.0.0.0"
     port = 9090
 
+    [connectors.default]
+    connection_timeout_secs = 10
+
+    # Per-connector overrides (optional, inherits from [connectors.default]):
+    # [connectors.postgres]
+    # connection_timeout_secs = 30
+    #
+    # [connectors.sqlite]
+    # connection_timeout_secs = 10
+    #
+    # [connectors.elasticsearch]
+    # connection_timeout_secs = 10
+    #
+    # [connectors.neo4j]
+    # connection_timeout_secs = 10
+    #
+    # [connectors.milvus]
+    # connection_timeout_secs = 10
+    #
+    # [connectors.s3]
+    # connection_timeout_secs = 10
+
     [global-connection-types]
     tenant-id = "opendatahub"

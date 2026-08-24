@@ -8,6 +8,7 @@ use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use opendal::{EntryMode, Operator, Reader, services::S3};
 
@@ -19,16 +20,19 @@ const KEY_ENDPOINT: &str = "AWS_S3_ENDPOINT";
 
 pub struct S3Connector {
     operators: Cache<String, Operator>,
+    #[allow(dead_code)]
+    config: ConnectorConfig,
 }
 
 impl S3Connector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             operators: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 
@@ -292,7 +296,12 @@ mod tests {
 
     #[test]
     fn test_s3_connector_provider() {
-        let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = S3Connector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "s3");
     }
 
