@@ -2,6 +2,7 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
+use crate::clients::flight::FlightClient;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
 
+mod clients;
 mod rest;
 #[allow(unused)]
 mod state;
@@ -39,22 +41,24 @@ struct CommandLineArgs {
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/api/v1/data/health", web::get().to(health))
+        .route(
+            "/api-internal/v1/audit/data-connection-types",
+            web::post().to(audit_connection_types),
+        )
         .service(
-            web::scope("/api/v1/data").service(
-                web::scope("")
-                    .wrap(middleware::from_fn(validate_headers))
-                    .route("/connection-types", web::get().to(list_connection_types))
-                    .route("/connection-types", web::post().to(create_connection_type))
-                    .route("/connection-types/{id}", web::get().to(get_connection_type))
-                    .route("/connection-types/{id}", web::patch().to(patch_connection_type))
-                    .route("/connection-types/{id}", web::delete().to(delete_connection_type))
-                    .route("/connections", web::get().to(list_connections))
-                    .route("/connections", web::post().to(create_connection))
-                    .route("/connections/{id}", web::get().to(get_connection))
-                    .route("/connections/{id}", web::patch().to(patch_connection))
-                    .route("/connections/{id}", web::delete().to(delete_connection))
-                    .route("/ingestion/{id}", web::get().to(get_ingestion_data)),
-            ),
+            web::scope("/api/v1/data")
+                .wrap(middleware::from_fn(validate_headers))
+                .route("/connection-types", web::get().to(list_connection_types))
+                .route("/connection-types", web::post().to(create_connection_type))
+                .route("/connection-types/{id}", web::get().to(get_connection_type))
+                .route("/connection-types/{id}", web::patch().to(patch_connection_type))
+                .route("/connection-types/{id}", web::delete().to(delete_connection_type))
+                .route("/connections", web::get().to(list_connections))
+                .route("/connections", web::post().to(create_connection))
+                .route("/connections/{id}", web::get().to(get_connection))
+                .route("/connections/{id}", web::patch().to(patch_connection))
+                .route("/connections/{id}", web::delete().to(delete_connection))
+                .route("/ingestion/{id}", web::get().to(get_ingestion_data)),
         )
         .default_service(web::route().to(not_found));
 }
@@ -150,20 +154,26 @@ fn log_config_source(config_file: &str, source: &str, required: bool) {
 #[actix_web::main]
 async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
-    let config = load_config(args.config.clone(), args.secret_config.clone())?;
+    let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
 
     commons::utils::init_tracing(args.json_logs);
     tracing::info!("Starting DataConnectorHub API service");
     log_config_source(&args.config, "--config", true);
     log_config_source(&args.secret_config, "--secret-config", false);
 
-    let pg_meta_store =
-        Arc::new(PgMetaStore::new(config.database, config.global_connection_types.tenant_id.clone()).await?);
+    let pg_meta_store = Arc::new(
+        PgMetaStore::new(
+            config.database.clone(),
+            config.global_connection_types.tenant_id.clone(),
+        )
+        .await?,
+    );
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
+    let flight_client = FlightClient::new(config.flight_service.endpoint());
 
-    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store)));
+    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), flight_client));
 
     HttpServer::new(move || {
         let service = service.clone();
@@ -181,7 +191,7 @@ async fn main() -> Result<()> {
             .app_data(path_config())
             .configure(move |cfg| api_routes(cfg, service))
     })
-    .bind((config.server.address, config.server.port))?
+    .bind((config.server.address.clone(), config.server.port))?
     .run()
     .await?;
 

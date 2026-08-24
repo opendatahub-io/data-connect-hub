@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -187,7 +186,10 @@ class FlightSQLClient:
             results = list(client.do_action(action, self._call_options()))
             if not results:
                 return []
-            connectors: list[str] = json.loads(results[0].body.to_pybytes())
+            body = results[0].body.to_pybytes()
+            reader = pa.ipc.open_stream(body)
+            table = reader.read_all()
+            connectors: list[str] = table.column("name").to_pylist()
             return connectors
         except Exception as exc:
             raise DCHConnectionError(str(exc)) from exc

@@ -8,6 +8,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
@@ -129,7 +130,7 @@ fn build_client(credentials: &HashMap<String, String>) -> Result<EsClient, Conne
 #[async_trait::async_trait]
 impl FlightConnector for ElasticsearchConnector {
     fn provider(&self) -> String {
-        "elasticsearch".to_string()
+        Provider::Elasticsearch.as_str().to_string()
     }
 
     fn description(&self) -> String {
@@ -162,7 +163,7 @@ pub struct ElasticsearchReader {
 #[async_trait::async_trait]
 impl TabularReader for ElasticsearchReader {
     fn provider(&self) -> String {
-        "elasticsearch".to_string()
+        Provider::Elasticsearch.as_str().to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

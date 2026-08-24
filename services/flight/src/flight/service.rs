@@ -1,6 +1,8 @@
 use crate::flight::errors::{map_connector_error, map_meta_store_error, map_secret_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
+use arrow::array::StringArray;
+use arrow::record_batch::RecordBatch;
 use arrow_flight::{
     Action, ActionType, FlightDescriptor, FlightEndpoint, FlightInfo, Ticket,
     encode::FlightDataEncoderBuilder,
@@ -19,7 +21,6 @@ use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
-use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
@@ -61,12 +62,6 @@ pub struct TabularDataService {
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct ConnectorInfo {
-    name: String,
-    description: String,
 }
 
 impl TabularDataService {
@@ -334,20 +329,37 @@ impl FlightSqlService for TabularDataService {
         let action = request.get_ref();
         match action.r#type.as_str() {
             ACTION_GET_SUPPORTED_CONNECTORS => {
-                let providers = self
-                    .connectors_registry
-                    .get_supported_connectors()
-                    .iter()
-                    .map(|p| ConnectorInfo {
-                        name: p.provider(),
-                        description: p.description(),
-                    })
-                    .collect::<Vec<ConnectorInfo>>();
-                let body = serde_json::to_vec(&providers).map_err(|e| {
-                    tracing::error!(error = %e, "failed to serialize connector info");
-                    Status::internal("failed to serialize response")
+                let connectors = self.connectors_registry.get_supported_connectors();
+                let names: Vec<String> = connectors.iter().map(|c| c.provider()).collect();
+                let descriptions: Vec<String> = connectors.iter().map(|c| c.description()).collect();
+
+                let batch = RecordBatch::try_from_iter(vec![
+                    ("name", Arc::new(StringArray::from(names)) as _),
+                    ("description", Arc::new(StringArray::from(descriptions)) as _),
+                ])
+                .map_err(|e| {
+                    tracing::error!(error = %e, "failed to build connector record batch");
+                    Status::internal("failed to build response")
                 })?;
-                let result = arrow_flight::Result { body: body.into() };
+
+                let mut buf = Vec::new();
+                {
+                    let mut writer =
+                        arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema()).map_err(|e| {
+                            tracing::error!(error = %e, "failed to create IPC writer");
+                            Status::internal("failed to encode response")
+                        })?;
+                    writer.write(&batch).map_err(|e| {
+                        tracing::error!(error = %e, "failed to write IPC batch");
+                        Status::internal("failed to encode response")
+                    })?;
+                    writer.finish().map_err(|e| {
+                        tracing::error!(error = %e, "failed to finish IPC stream");
+                        Status::internal("failed to encode response")
+                    })?;
+                }
+
+                let result = arrow_flight::Result { body: buf.into() };
                 Ok(Response::new(
                     Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
                 ))

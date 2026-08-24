@@ -706,15 +706,28 @@ resources need to be touched):
    policy for its port. If the gateway is Istio-backed and traffic still
    fails after steps 1–2 with `UNAVAILABLE: upstream connect error`, the
    gateway's `DestinationRule` needs a `portLevelSettings` entry for
-   flight-service's port (`50051`), matching the existing entries for the
-   REST service:
+   flight-service's port (`50051`). Avoid `insecureSkipVerify: true` (the
+   existing entries for the REST service use it, but that's a pre-existing
+   gap in the platform-owned `DestinationRule`, not something to carry
+   forward) — flight-service's certificate is issued by the cluster's
+   internal service-ca, so verify against that instead:
+
+   ```console
+   oc get configmap openshift-service-ca.crt -n openshift-ingress \
+     -o jsonpath='{.data.service-ca\.crt}' > /tmp/service-ca.crt
+   oc create secret generic flight-service-ca-bundle -n openshift-ingress \
+     --from-file=ca.crt=/tmp/service-ca.crt
+   ```
 
    ```yaml
    - port:
        number: 50051
      tls:
        mode: SIMPLE
-       insecureSkipVerify: true
+       credentialName: flight-service-ca-bundle
+       sni: dch-flight-service.$NS.svc
+       subjectAltNames:
+         - dch-flight-service.$NS.svc
    ```
 
 Both the Route and `DestinationRule` in a RHOAI/ODH deployment are owned

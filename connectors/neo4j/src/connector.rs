@@ -8,6 +8,7 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
+use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
@@ -81,7 +82,7 @@ async fn build_graph(credentials: &HashMap<String, String>) -> Result<Graph, Con
 #[async_trait::async_trait]
 impl FlightConnector for Neo4jConnector {
     fn provider(&self) -> String {
-        "neo4j".to_string()
+        Provider::Neo4j.as_str().to_string()
     }
 
     fn description(&self) -> String {
@@ -111,7 +112,7 @@ pub struct Neo4jReader {
 #[async_trait::async_trait]
 impl TabularReader for Neo4jReader {
     fn provider(&self) -> String {
-        "neo4j".to_string()
+        Provider::Neo4j.as_str().to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

@@ -36,6 +36,8 @@ pub enum MetaStoreError {
     Deserialization(String),
     #[error("Validation error: {0}")]
     Validation(String),
+    #[error("Unprocessable entity: {0}")]
+    UnprocessableEntity(String),
 }
 
 #[derive(Error, Debug, Clone)]

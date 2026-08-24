@@ -4,6 +4,7 @@ use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
+use commons::api::connection_types::Provider;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
 use commons::api::tabular::{QueryOutput, TabularReader};
@@ -37,7 +38,7 @@ impl SqliteConnector {
 #[async_trait::async_trait]
 impl FlightConnector for SqliteConnector {
     fn provider(&self) -> String {
-        "sqlite".to_string()
+        Provider::Sqlite.as_str().to_string()
     }
 
     fn description(&self) -> String {
@@ -78,7 +79,7 @@ pub struct SqliteReader {
 #[async_trait::async_trait]
 impl TabularReader for SqliteReader {
     fn provider(&self) -> String {
-        "sqlite".to_string()
+        Provider::Sqlite.as_str().to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

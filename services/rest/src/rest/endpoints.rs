@@ -1,8 +1,12 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use super::errors::ValidationError;
+use crate::clients::flight::FlightClient;
+use crate::state::audit::audit_data_connection_types;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
+use commons::api::connection_types::Provider;
 use commons::api::connections::DataConnection;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
@@ -24,13 +28,19 @@ struct HealthResponse {
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
+    flight_client: FlightClient,
 }
 
 impl ApiService {
-    pub fn new(meta_store: Arc<dyn MetaStore + Send + Sync>, secret_store: Arc<dyn SecretStore + Send + Sync>) -> Self {
+    pub fn new(
+        meta_store: Arc<dyn MetaStore + Send + Sync>,
+        secret_store: Arc<dyn SecretStore + Send + Sync>,
+        flight_client: FlightClient,
+    ) -> Self {
         Self {
             meta_store,
             secret_store,
+            flight_client,
         }
     }
 }
@@ -142,12 +152,27 @@ pub async fn patch_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
+/// validate_provider rejects a provider identifier that is not one of the
+/// [`Provider`] variants known to Data Connect Hub.
+fn validate_provider(provider: &str) -> Result<(), ValidationError> {
+    if Provider::from_id(provider).is_some() {
+        Ok(())
+    } else {
+        let supported = Provider::ALL.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ");
+        Err(ValidationError::UnsupportedProvider(format!(
+            "unsupported provider '{provider}'; supported providers are: {supported}"
+        )))
+    }
+}
+
 pub async fn create_connection_type(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
     connection_type: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("create_connection_type: for tenant {:?}", ctx.tenant_id);
+
+    validate_provider(&connection_type.provider)?;
 
     let connection_type = service
         .meta_store
@@ -166,6 +191,10 @@ pub async fn patch_connection_type(
     info!("patch_connection_type: for tenant {:?}", ctx.tenant_id);
     let id = id.into_inner();
     let patch = body.into_inner();
+
+    if let Some(provider) = patch.get("provider").and_then(|v| v.as_str()) {
+        validate_provider(provider)?;
+    }
 
     let update_fn = Arc::new(move |ct: DataConnectionType| {
         let mut value = serde_json::to_value(&ct)
@@ -214,6 +243,12 @@ pub async fn get_ingestion_data(
     _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
+}
+
+pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
+    info!("audit_connection_types");
+    audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
+    Ok(HttpResponse::Accepted().finish())
 }
 
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
@@ -265,7 +300,7 @@ mod tests {
                     },
                     resource: DataConnection {
                         name: "my-pg".to_string(),
-                        data_connection_type_id: "postgres".to_string(),
+                        data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
                         admin: None,
                         properties: std::collections::HashMap::new(),
@@ -284,6 +319,12 @@ mod tests {
             tenant_id: &str,
             data_connection: &DataConnection,
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
+            if data_connection.data_connection_type_id != "ct-1" {
+                return Err(commons::api::errors::MetaStoreError::UnprocessableEntity(format!(
+                    "connection type '{}' not found",
+                    data_connection.data_connection_type_id
+                )));
+            }
             Ok(DataConnectionResource {
                 metadata: commons::api::ResourceMetadata {
                     id: "new-conn".to_string(),
@@ -307,12 +348,18 @@ mod tests {
             if tenant_id == "test-tenant" && uid == "conn-1" {
                 let existing = DataConnection {
                     name: "my-pg".to_string(),
-                    data_connection_type_id: "postgres".to_string(),
+                    data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
                     admin: None,
                     properties: std::collections::HashMap::new(),
                 };
                 let updated = update_fn(existing)?;
+                if updated.data_connection_type_id != "ct-1" {
+                    return Err(commons::api::errors::MetaStoreError::UnprocessableEntity(format!(
+                        "connection type '{}' not found",
+                        updated.data_connection_type_id
+                    )));
+                }
                 Ok(DataConnectionResource {
                     metadata: commons::api::ResourceMetadata {
                         id: "conn-1".to_string(),
@@ -352,6 +399,12 @@ mod tests {
                 total_count: 0,
                 items: vec![],
             })
+        }
+
+        async fn get_all_data_connection_types(
+            &self,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
+            unimplemented!()
         }
 
         async fn get_data_connection_type(
@@ -434,6 +487,23 @@ mod tests {
             }
         }
 
+        async fn update_data_connection_type_status(
+            &self,
+            _uid: &str,
+            _update_fn: Arc<
+                dyn Fn(
+                        commons::api::connection_types::DataConnectionTypeStatus,
+                    ) -> Result<
+                        commons::api::connection_types::DataConnectionTypeStatus,
+                        commons::api::errors::MetaStoreError,
+                    > + Send
+                    + Sync,
+            >,
+        ) -> Result<commons::api::connection_types::DataConnectionTypeResource, commons::api::errors::MetaStoreError>
+        {
+            unimplemented!()
+        }
+
         async fn delete_data_connection_type(
             &self,
             tenant_id: &str,
@@ -473,7 +543,11 @@ mod tests {
     }
 
     fn test_service() -> web::Data<ApiService> {
-        web::Data::new(ApiService::new(Arc::new(StubMetaStore), Arc::new(StubSecretStore)))
+        web::Data::new(ApiService::new(
+            Arc::new(StubMetaStore),
+            Arc::new(StubSecretStore),
+            FlightClient::new("http://localhost:50051".to_string()),
+        ))
     }
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
@@ -580,7 +654,7 @@ mod tests {
             .insert_header(("content-type", "application/json"))
             .set_json(serde_json::json!({
                 "name": "my-pg",
-                "data_connection_type_id": "postgres",
+                "data_connection_type_id": "ct-1",
                 "format": "tabular",
                 "properties": {}
             }))
@@ -592,6 +666,33 @@ mod tests {
         assert_eq!(body["metadata"]["id"], "new-conn");
         assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
         assert_eq!(body["resource"]["name"], "my-pg");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_nonexistent_type() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/api/v1/data/connections")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "my-pg",
+                "data_connection_type_id": "nonexistent-type-id",
+                "format": "tabular",
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 422);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unprocessable_entity");
     }
 
     #[actix_web::test]
@@ -614,7 +715,7 @@ mod tests {
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["metadata"]["id"], "conn-1");
         assert_eq!(body["resource"]["name"], "renamed-pg");
-        assert_eq!(body["resource"]["data_connection_type_id"], "postgres");
+        assert_eq!(body["resource"]["data_connection_type_id"], "ct-1");
     }
 
     #[actix_web::test]
@@ -657,6 +758,27 @@ mod tests {
         assert_eq!(resp.status(), 404);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "not_found");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_nonexistent_type() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connections/conn-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({"data_connection_type_id": "nonexistent-type-id"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 422);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unprocessable_entity");
     }
 
     #[actix_web::test]
@@ -775,6 +897,53 @@ mod tests {
         assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
         assert_eq!(body["resource"]["name"], "PostgreSQL");
         assert_eq!(body["resource"]["provider"], "postgres");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_type_unsupported_provider() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri("/api/v1/data/connection-types")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "Bogus",
+                "provider": "bogus",
+                "credentials_fields": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unsupported_provider");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_type_unsupported_provider() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri("/api/v1/data/connection-types/ct-1")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({"provider": "bogus"}))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unsupported_provider");
     }
 
     #[actix_web::test]

@@ -91,6 +91,10 @@ impl MetaStore for S3TestMetaStore {
         unimplemented!()
     }
 
+    async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+        unimplemented!()
+    }
+
     async fn get_data_connection_type(
         &self,
         _tenant_id: &str,
@@ -126,6 +130,20 @@ impl MetaStore for S3TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_type_status(
+        &self,
+        _uid: &str,
+        _update_fn: Arc<
+            dyn Fn(
+                    commons::api::connection_types::DataConnectionTypeStatus,
+                ) -> Result<commons::api::connection_types::DataConnectionTypeStatus, MetaStoreError>
+                + Send
+                + Sync,
+        >,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
         unimplemented!()
     }

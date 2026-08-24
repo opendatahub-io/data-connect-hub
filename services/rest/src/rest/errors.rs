@@ -37,6 +37,10 @@ pub enum ValidationError {
     InvalidSecret,
     #[error("Missing required key: {0}")]
     MissingRequiredKey(String),
+    #[error("{0}")]
+    UnsupportedProvider(String),
+    #[error("Flight service error: {0}")]
+    FlightServiceError(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -92,6 +96,7 @@ impl From<MetaStoreError> for RestErrorResponse {
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
             MetaStoreError::Validation(_) => ("validation", 400),
+            MetaStoreError::UnprocessableEntity(_) => ("unprocessable_entity", 422),
         };
         RestErrorResponse {
             code: code.to_string(),
@@ -161,6 +166,43 @@ impl From<EndpointError> for RestErrorResponse {
                 code: "unimplemented".to_string(),
                 message: "Unimplemented".to_string(),
                 status: 501,
+            },
+        }
+    }
+}
+
+impl From<ValidationError> for RestErrorResponse {
+    fn from(err: ValidationError) -> Self {
+        match err {
+            ValidationError::InvalidTenantId => RestErrorResponse {
+                code: "invalid_tenant_id".to_string(),
+                message: "Invalid tenant ID".to_string(),
+                status: 400,
+            },
+            ValidationError::InvalidDataConnectionType => RestErrorResponse {
+                code: "invalid_data_connection_type".to_string(),
+                message: "Invalid data connection type".to_string(),
+                status: 400,
+            },
+            ValidationError::InvalidSecret => RestErrorResponse {
+                code: "invalid_secret".to_string(),
+                message: "Invalid secret".to_string(),
+                status: 400,
+            },
+            ValidationError::MissingRequiredKey(key) => RestErrorResponse {
+                code: "missing_required_key".to_string(),
+                message: format!("Missing required key: {}", key),
+                status: 400,
+            },
+            ValidationError::FlightServiceError(error) => RestErrorResponse {
+                code: "flight_service_error".to_string(),
+                message: error,
+                status: 500,
+            },
+            ValidationError::UnsupportedProvider(message) => RestErrorResponse {
+                code: "unsupported_provider".to_string(),
+                message,
+                status: 400,
             },
         }
     }

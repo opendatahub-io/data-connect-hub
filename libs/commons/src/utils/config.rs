@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 pub struct GlobalConnectionTypes {
     #[serde(rename = "tenant-id")]
     pub tenant_id: String,
