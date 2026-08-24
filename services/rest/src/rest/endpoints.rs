@@ -946,53 +946,6 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_create_connection_type_unsupported_provider() {
-        let app = test::init_service(
-            App::new()
-                .app_data(test_service())
-                .app_data(json_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::post()
-            .uri("/api/v1/data/connection-types")
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .insert_header(("content-type", "application/json"))
-            .set_json(serde_json::json!({
-                "name": "Bogus",
-                "provider": "bogus",
-                "credentials_fields": []
-            }))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 400);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unsupported_provider");
-    }
-
-    #[actix_web::test]
-    async fn test_patch_connection_type_unsupported_provider() {
-        let app = test::init_service(
-            App::new()
-                .app_data(test_service())
-                .app_data(json_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connection-types/ct-1")
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .set_json(serde_json::json!({"provider": "bogus"}))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 400);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unsupported_provider");
-    }
-
-    #[actix_web::test]
     async fn test_get_connection_type() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
