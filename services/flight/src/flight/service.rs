@@ -219,8 +219,8 @@ impl TabularDataService {
         debug!("Received SQL Query: '{}'", query.query);
 
         let metadata = request.metadata();
-        let tenant_id = QueryContext::tenant_id(&metadata)?;
-        let connection_id = QueryContext::connection_id(&metadata)?;
+        let tenant_id = QueryContext::tenant_id(metadata)?;
+        let connection_id = QueryContext::connection_id(metadata)?;
         let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
 
         let reader = connector
@@ -263,8 +263,8 @@ impl TabularDataService {
 
         let metadata = request.metadata();
 
-        let tenant_id = QueryContext::tenant_id(&metadata)?;
-        let connection_id = QueryContext::connection_id(&metadata)?;
+        let tenant_id = QueryContext::tenant_id(metadata)?;
+        let connection_id = QueryContext::connection_id(metadata)?;
         let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
 
         let reader = connector

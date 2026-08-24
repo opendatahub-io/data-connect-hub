@@ -39,6 +39,8 @@ pub enum ValidationError {
     MissingRequiredKey(String),
     #[error("Flight service error: {0}")]
     FlightServiceError(String),
+    #[error("Connection check failed: {0}")]
+    ConnectionCheckFailed(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -195,6 +197,11 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "flight_service_error".to_string(),
                 message: error,
                 status: 500,
+            },
+            ValidationError::ConnectionCheckFailed(error) => RestErrorResponse {
+                code: "connection_check_failed".to_string(),
+                message: error,
+                status: 502,
             },
         }
     }

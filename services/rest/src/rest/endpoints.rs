@@ -1,5 +1,6 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
+use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::transform_data_connection;
@@ -228,6 +229,22 @@ pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<Ht
     info!("audit_connection_types");
     audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
     Ok(HttpResponse::Accepted().finish())
+}
+
+pub async fn check_existent_connection(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("check_existent_connection: for tenant {:?}", ctx.tenant_id);
+
+    service
+        .flight_client
+        .check_connection(&ctx.tenant_id, &id)
+        .await
+        .map_err(|_| ValidationError::ConnectionCheckFailed(id.into_inner()))?;
+
+    Ok(HttpResponse::NoContent().finish())
 }
 
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {

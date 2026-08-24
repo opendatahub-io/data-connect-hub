@@ -1,7 +1,9 @@
 use arrow::record_batch::RecordBatch;
 use arrow_flight::Action;
 use arrow_flight::flight_service_client::FlightServiceClient;
+use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use tokio::sync::OnceCell;
+use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
 pub struct FlightClient {
@@ -55,5 +57,24 @@ impl FlightClient {
 
         arrow::compute::concat_batches(&batches[0].schema(), &batches)
             .map_err(|e| tonic::Status::internal(format!("failed to concat batches: {e}")))
+    }
+
+    pub async fn check_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
+        let mut client = self.client().await?;
+        let mut request = tonic::Request::new(Action::new("CheckConnection", ""));
+        let metadata = request.metadata_mut();
+        metadata.insert(
+            X_TENANT_ID,
+            MetadataValue::try_from(tenant_id).map_err(|_| tonic::Status::invalid_argument("invalid tenant_id"))?,
+        );
+        metadata.insert(
+            X_DATA_CONNECTION_ID,
+            MetadataValue::try_from(connection_id)
+                .map_err(|_| tonic::Status::invalid_argument("invalid connection_id"))?,
+        );
+
+        let mut stream = client.do_action(request).await?.into_inner();
+        stream.message().await?;
+        Ok(())
     }
 }

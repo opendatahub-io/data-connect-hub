@@ -50,7 +50,7 @@ impl TabularDataService {
     ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
         let metadata = request.metadata();
 
-        let tenant_id = QueryContext::tenant_id(&metadata)?;
+        let tenant_id = QueryContext::tenant_id(metadata)?;
 
         let reader = if let Some(mut keys) = parse_credentials_body(&request.get_ref().body)? {
             let dct_id = keys
@@ -94,7 +94,7 @@ impl TabularDataService {
                 .await
                 .map_err(map_connector_error)?
         } else {
-            let connection_id = QueryContext::connection_id(&metadata)?;
+            let connection_id = QueryContext::connection_id(metadata)?;
             let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
             connector
                 .get_reader(true, &connection)
