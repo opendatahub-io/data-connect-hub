@@ -37,6 +37,8 @@ pub enum ValidationError {
     InvalidSecret,
     #[error("Missing required key: {0}")]
     MissingRequiredKey(String),
+    #[error("{0}")]
+    UnsupportedProvider(String),
     #[error("Flight service error: {0}")]
     FlightServiceError(String),
     #[error("Connection check failed: {0}")]
@@ -96,6 +98,7 @@ impl From<MetaStoreError> for RestErrorResponse {
             MetaStoreError::Serialization(_) => ("serialization", 400),
             MetaStoreError::Deserialization(_) => ("deserialization", 400),
             MetaStoreError::Validation(_) => ("validation", 400),
+            MetaStoreError::UnprocessableEntity(_) => ("unprocessable_entity", 422),
         };
         RestErrorResponse {
             code: code.to_string(),
@@ -202,6 +205,10 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "connection_check_failed".to_string(),
                 message: error,
                 status: 502,
+            ValidationError::UnsupportedProvider(message) => RestErrorResponse {
+                code: "unsupported_provider".to_string(),
+                message,
+                status: 400,
             },
         }
     }

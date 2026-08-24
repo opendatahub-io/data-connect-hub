@@ -101,6 +101,14 @@ spec:
         app.kubernetes.io/name: postgresql
         app.kubernetes.io/instance: ${RELEASE}
     spec:
+      initContainers:
+        - name: init-pgdata
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "mkdir -p /var/lib/postgresql/data/pgdata && chmod 700 /var/lib/postgresql/data/pgdata"]
+          volumeMounts:
+            - name: pgdata
+              mountPath: /var/lib/postgresql/data
       containers:
         - name: postgresql
           image: ${IMAGE}
@@ -108,6 +116,9 @@ spec:
           ports:
             - containerPort: 5432
               name: postgres
+          env:
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
                 name: ${RELEASE}-auth

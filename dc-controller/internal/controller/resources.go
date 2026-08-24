@@ -282,6 +282,36 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 	}
 }
 
+func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured) {
+	var flightSvcName string
+	for _, obj := range resources {
+		if obj.GetKind() == "Service" && strings.HasSuffix(obj.GetName(), nameFlightService) {
+			flightSvcName = obj.GetName()
+			break
+		}
+	}
+	if flightSvcName == "" {
+		return
+	}
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml, ok := data["config.toml"]
+		if !ok || !strings.Contains(toml, "[flight-service]") {
+			continue
+		}
+		data["config.toml"] = strings.ReplaceAll(toml,
+			`address = "flight-service"`,
+			fmt.Sprintf(`address = "%s"`, flightSvcName))
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+	}
+}
+
 func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {

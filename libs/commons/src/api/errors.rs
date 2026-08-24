@@ -38,6 +38,8 @@ pub enum MetaStoreError {
     Deserialization(String),
     #[error("Validation error: {0}")]
     Validation(String),
+    #[error("Unprocessable entity: {0}")]
+    UnprocessableEntity(String),
 }
 
 /// Only secret store implementations should emit this error.

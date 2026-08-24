@@ -45,6 +45,58 @@ impl std::fmt::Debug for Secret {
     }
 }
 
+/// Provider is the single source of truth for the data connector providers
+/// recognized by Data Connect Hub. Both the connector crates (via their
+/// `provider()` methods) and the services (for validation) reference this enum,
+/// so the set of known providers cannot drift between them. Adding a connector
+/// means adding a variant here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Provider {
+    Postgres,
+    Sqlite,
+    S3,
+    Milvus,
+    Elasticsearch,
+    Neo4j,
+}
+
+impl Provider {
+    /// ALL lists every known provider, in declaration order.
+    pub const ALL: &'static [Provider] = &[
+        Provider::Postgres,
+        Provider::Sqlite,
+        Provider::S3,
+        Provider::Milvus,
+        Provider::Elasticsearch,
+        Provider::Neo4j,
+    ];
+
+    /// as_str returns the canonical wire identifier for the provider.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Provider::Postgres => "postgres",
+            Provider::Sqlite => "sqlite",
+            Provider::S3 => "s3",
+            Provider::Milvus => "milvus",
+            Provider::Elasticsearch => "elasticsearch",
+            Provider::Neo4j => "neo4j",
+        }
+    }
+
+    /// from_id parses a provider identifier, returning `None` when it does not
+    /// match a known provider.
+    pub fn from_id(id: &str) -> Option<Provider> {
+        Provider::ALL.iter().copied().find(|p| p.as_str() == id)
+    }
+}
+
+impl std::fmt::Display for Provider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConnectionType {
     pub name: String,
@@ -101,6 +153,24 @@ mod tests {
             },
             status: DataConnectionTypeStatus::default(),
         }
+    }
+
+    #[test]
+    fn test_provider_from_id_roundtrip() {
+        for provider in Provider::ALL {
+            assert_eq!(Provider::from_id(provider.as_str()), Some(*provider));
+        }
+        assert_eq!(Provider::from_id("mysql"), None);
+        assert_eq!(Provider::from_id(""), None);
+    }
+
+    #[test]
+    fn test_provider_serde_lowercase() {
+        assert_eq!(serde_json::to_value(Provider::Postgres).unwrap(), "postgres");
+        assert_eq!(
+            serde_json::from_value::<Provider>(serde_json::json!("elasticsearch")).unwrap(),
+            Provider::Elasticsearch
+        );
     }
 
     #[test]
