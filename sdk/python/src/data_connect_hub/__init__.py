@@ -1,5 +1,6 @@
 """Data Connect Hub Python SDK."""
 
+from ._flight import RecordBatchStream
 from ._version import __version__
 from .client import DataConnectClient
 from .exceptions import (
@@ -59,6 +60,7 @@ __all__ = [
     "DataConnectionStatus",
     "DataFormat",
     "EnumValue",
+    "RecordBatchStream",
     "UpdateConnectionRequest",
     "UpdateConnectionTypeRequest",
     "__version__",

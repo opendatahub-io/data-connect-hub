@@ -82,11 +82,28 @@ client.delete_connection_type(type_id) -> None
 ### Tabular Data Queries (Flight SQL)
 
 ```python
-client.read(sql, connection_id) -> pyarrow.Table       # full result as Arrow Table
-client.read_pandas(sql, connection_id) -> pd.DataFrame # full result as pandas DataFrame
-client.get_tables(connection_id) -> pyarrow.Table      # table metadata
-client.server_info() -> dict                           # server metadata
+client.read(sql, connection_id) -> pyarrow.Table          # full result as Arrow Table
+client.read_pandas(sql, connection_id) -> pd.DataFrame    # full result as pandas DataFrame
+client.read_batches(sql, connection_id) -> RecordBatchStream  # stream of Arrow RecordBatches
+client.get_tables(connection_id) -> pyarrow.Table         # table metadata
+client.server_info() -> dict                              # server metadata
 ```
+
+`read_batches` streams results instead of buffering the full result set in
+memory.  The caller owns the returned stream and must close it — either by
+using it as a context manager or by calling `close()` explicitly:
+
+```python
+with client.read_batches("SELECT * FROM prompts", "conn-uuid") as stream:
+    print(stream.schema)
+    for batch in stream:
+        process(batch)
+```
+
+A server-side failure surfaced mid-stream closes the stream and raises
+`DCHQueryError`.  Automatic token refresh applies when the stream is opened;
+an authentication failure that occurs after the stream is open is not
+retried.
 
 These require the `flight` extra. On a REST-only install the client still
 imports and all REST calls work; the first Flight call raises `DCHConfigError`

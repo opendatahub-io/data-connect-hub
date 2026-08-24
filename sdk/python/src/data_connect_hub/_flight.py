@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -33,6 +33,81 @@ _FLIGHT_TLS_ROOT_CERTS = "tls_root_certs"
 
 def _is_auth_error(exc: Exception) -> bool:
     return _GRPC_UNAUTHENTICATED in str(exc).lower()
+
+
+class RecordBatchStream:
+    """Streaming iterator over Arrow RecordBatches with resource management.
+
+    Use as a context manager to ensure the underlying Flight SQL connection
+    and cursor are closed promptly::
+
+        with client.read_batches("SELECT ...", "conn-1") as stream:
+            for batch in stream:
+                process(batch)
+
+    The stream also closes resources automatically when fully exhausted or
+    when :meth:`close` is called.  A server-side failure surfaced while
+    reading closes the stream and raises :class:`DCHQueryError`.
+    """
+
+    def __init__(
+        self,
+        reader: pa.RecordBatchReader,
+        cursor: Any,
+        connection: flight_dbapi.Connection,
+    ) -> None:
+        self._reader = reader
+        self._cursor = cursor
+        self._connection = connection
+        self._closed = False
+
+    @property
+    def schema(self) -> pa.Schema:
+        """Arrow schema of the result set."""
+        return self._reader.schema
+
+    def __enter__(self) -> RecordBatchStream:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+    def __iter__(self) -> Iterator[pa.RecordBatch]:
+        return self
+
+    def __next__(self) -> pa.RecordBatch:
+        if self._closed:
+            raise StopIteration
+        try:
+            batch = self._reader.read_next_batch()
+        except Exception as exc:
+            self.close()
+            if isinstance(exc, flight_dbapi.Error):
+                raise DCHQueryError(str(exc)) from exc
+            raise
+        return batch
+
+    def __del__(self) -> None:
+        with contextlib.suppress(Exception):
+            self.close()
+
+    def read_all(self) -> pa.Table:
+        """Read remaining batches and return them as a single Table."""
+        try:
+            return self._reader.read_all()
+        except flight_dbapi.Error as exc:
+            raise DCHQueryError(str(exc)) from exc
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        """Release the cursor and connection."""
+        if self._closed:
+            return
+        self._closed = True
+        with contextlib.suppress(Exception):
+            self._cursor.close()
+        self._connection.close()
 
 
 class FlightClient:
@@ -152,6 +227,46 @@ class FlightClient:
                     cursor.close()
         finally:
             conn.close()
+
+    def read_batches(
+        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
+    ) -> RecordBatchStream:
+        """Execute *sql* and return a streaming iterator of RecordBatches.
+
+        Returns a :class:`RecordBatchStream` that yields one
+        :class:`pyarrow.RecordBatch` per iteration.  Use as a context manager
+        to ensure resources are released::
+
+            with client.read_batches("SELECT ...", "conn-1") as stream:
+                for batch in stream:
+                    process(batch)
+        """
+        try:
+            return self._do_read_batches(sql, connection_id, parameters=parameters)
+        except DCHConnectionError as exc:
+            if self._token_cache is not None and _is_auth_error(exc):
+                self._token_cache.refresh()
+                return self._do_read_batches(sql, connection_id, parameters=parameters)
+            raise
+
+    def _do_read_batches(
+        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
+    ) -> RecordBatchStream:
+        conn = self._connect(connection_id)
+        cursor = None
+        try:
+            cursor = conn.cursor()
+            cursor.execute(sql, parameters)
+            reader = cursor.fetch_record_batch()
+            return RecordBatchStream(reader, cursor, conn)
+        except Exception as exc:
+            if cursor is not None:
+                with contextlib.suppress(Exception):
+                    cursor.close()
+            conn.close()
+            if isinstance(exc, flight_dbapi.Error):
+                raise DCHQueryError(str(exc)) from exc
+            raise
 
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* and return the result as a pandas DataFrame."""

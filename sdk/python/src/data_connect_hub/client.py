@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from ._flight import FlightClient
+    from ._flight import FlightClient, RecordBatchStream
 
 
 def _build_urls(endpoint: str) -> tuple[str, str]:
@@ -288,6 +288,22 @@ class DataConnectClient:
     def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
         return self._require_flight().read(sql, connection_id, parameters=parameters)
+
+    def read_batches(
+        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
+    ) -> RecordBatchStream:
+        """Execute *sql* via Flight SQL and return a streaming iterator of RecordBatches.
+
+        Returns a :class:`RecordBatchStream` that yields one
+        :class:`pyarrow.RecordBatch` per iteration.  The caller owns the
+        returned stream and must close it — either by using it as a context
+        manager or by calling :meth:`~RecordBatchStream.close` explicitly::
+
+            with client.read_batches("SELECT ...", "conn-1") as stream:
+                for batch in stream:
+                    process(batch)
+        """
+        return self._require_flight().read_batches(sql, connection_id, parameters=parameters)
 
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""

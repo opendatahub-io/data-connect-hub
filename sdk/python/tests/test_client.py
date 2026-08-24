@@ -109,6 +109,23 @@ class TestFlightDelegation:
         client.read("SELECT $1", "conn-1", parameters=[42])
         client._flight.read.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
 
+    def test_read_batches(self) -> None:
+        stream = MagicMock()
+        client = DataConnectClient("localhost")
+        client._flight = MagicMock()
+        client._flight.read_batches.return_value = stream
+
+        result = client.read_batches("SELECT 1", "conn-1")
+        assert result is stream
+        client._flight.read_batches.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
+
+    def test_read_batches_with_parameters(self) -> None:
+        client = DataConnectClient("localhost")
+        client._flight = MagicMock()
+
+        client.read_batches("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read_batches.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+
     def test_read_pandas(self) -> None:
         import pandas as pd
 
