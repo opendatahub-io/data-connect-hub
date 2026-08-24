@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -188,9 +189,12 @@ class FlightClient:
             if not results:
                 return []
             body = results[0].body.to_pybytes()
-            reader = pa.ipc.open_stream(body)
-            table = reader.read_all()
-            connectors: list[str] = table.column("name").to_pylist()
+            try:
+                reader = pa.ipc.open_stream(body)
+                table = reader.read_all()
+                connectors: list[str] = table.column("name").to_pylist()
+            except pa.ArrowInvalid:
+                connectors = [str(entry["name"]) for entry in json.loads(body)]
             return connectors
         except Exception as exc:
             raise DCHConnectionError(str(exc)) from exc
