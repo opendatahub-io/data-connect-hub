@@ -54,6 +54,36 @@ spec:
               flightService:
                 description: flightService configures the Flight gRPC API deployment
                 properties:
+                  connectors:
+                    description: |-
+                      connectors configures individual data connectors.
+                      When omitted, all connectors are enabled with their default settings.
+                    items:
+                      description: ConnectorConfig configures an individual data connector.
+                      properties:
+                        connectionTimeout:
+                          description: |-
+                            connectionTimeout is the maximum duration to wait when establishing
+                            a connection to the data source (e.g. "5s", "30s", "1m").
+                            Defaults to the connector's built-in default when not set.
+                          type: string
+                        enabled:
+                          default: true
+                          description: |-
+                            enabled controls whether this connector is available for use.
+                            Defaults to true when the connector appears in the list.
+                          type: boolean
+                        name:
+                          description: name is the connector provider name (e.g. "postgres",
+                            "sqlite", "s3", "elasticsearch", "neo4j", "milvus")
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   env:
                     description: env is a list of additional environment variables
                       to set on the container
@@ -2342,6 +2372,36 @@ spec:
               restService:
                 description: restService configures the REST API deployment
                 properties:
+                  connectors:
+                    description: |-
+                      connectors configures individual data connectors.
+                      When omitted, all connectors are enabled with their default settings.
+                    items:
+                      description: ConnectorConfig configures an individual data connector.
+                      properties:
+                        connectionTimeout:
+                          description: |-
+                            connectionTimeout is the maximum duration to wait when establishing
+                            a connection to the data source (e.g. "5s", "30s", "1m").
+                            Defaults to the connector's built-in default when not set.
+                          type: string
+                        enabled:
+                          default: true
+                          description: |-
+                            enabled controls whether this connector is available for use.
+                            Defaults to true when the connector appears in the list.
+                          type: boolean
+                        name:
+                          description: name is the connector provider name (e.g. "postgres",
+                            "sqlite", "s3", "elasticsearch", "neo4j", "milvus")
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
                   env:
                     description: env is a list of additional environment variables
                       to set on the container
