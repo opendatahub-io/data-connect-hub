@@ -12,10 +12,14 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-  # Allow-all for now: we don't yet have a defined gateway/client topology to
-  # scope this down to. This exists so the policy can be tightened later
-  # without having to introduce the resource from scratch.
+  # Ingress is otherwise allow-all for now: we don't yet have a defined
+  # gateway/client topology to scope sources down to. The port restriction
+  # below is not optional though — it ensures all traffic passes through the
+  # kube-rbac-proxy sidecar on 8443; the unauthenticated app port 8080 must
+  # never be reachable from another pod.
   ingress:
-    - {}
+    - ports:
+        - protocol: TCP
+          port: 8443
   egress:
     - {}

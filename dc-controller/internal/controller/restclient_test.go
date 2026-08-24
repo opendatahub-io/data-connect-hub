@@ -163,6 +163,43 @@ func TestCreateConnection(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestAuditDataConnectionTypes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPost, r.Method)
+		assert.Equal(t, "/api-internal/v1/audit/data-connection-types", r.URL.Path)
+		assert.Empty(t, r.Header.Get("x-tenant-id"))
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer server.Close()
+
+	client := NewHTTPAuditClient(func() (string, error) { return server.URL, nil })
+	err := client.AuditDataConnectionTypes(context.Background())
+	assert.NoError(t, err)
+}
+
+func TestAuditDataConnectionTypesServiceUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewHTTPAuditClient(func() (string, error) { return server.URL, nil })
+	err := client.AuditDataConnectionTypes(context.Background())
+	assert.ErrorIs(t, err, ErrServiceUnavailable)
+}
+
+func TestAuditDataConnectionTypesForbidden(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+
+	client := NewHTTPAuditClient(func() (string, error) { return server.URL, nil })
+	err := client.AuditDataConnectionTypes(context.Background())
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrServiceUnavailable)
+}
+
 func TestCreateConnectionConflict(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusConflict)

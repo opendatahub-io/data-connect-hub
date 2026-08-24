@@ -56,6 +56,12 @@ type ConnectionMigrationClient interface {
 	CreateConnection(ctx context.Context, tenantID string, conn Connection) error
 }
 
+// AuditClient abstracts the internal audit call that resyncs DCT
+// flight-capability flags against what flight-service currently supports.
+type AuditClient interface {
+	AuditDataConnectionTypes(ctx context.Context) error
+}
+
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
 type ConnectionType struct {
 	Name              string  `json:"name"`
@@ -153,6 +159,12 @@ func NewHTTPConnectionTypeClient(resolver URLResolver) ConnectionTypeClient {
 // NewHTTPMigrationClient creates a ConnectionMigrationClient for the
 // Secret watcher to list connection types and create connections.
 func NewHTTPMigrationClient(resolver URLResolver) ConnectionMigrationClient {
+	return newHTTPClient(resolver)
+}
+
+// NewHTTPAuditClient creates an AuditClient that calls the rest-service's
+// internal audit endpoint through kube-rbac-proxy.
+func NewHTTPAuditClient(resolver URLResolver) AuditClient {
 	return newHTTPClient(resolver)
 }
 
@@ -259,6 +271,40 @@ func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantI
 	}
 	if resp.StatusCode == http.StatusConflict {
 		return ErrConflict
+	}
+	if resp.StatusCode >= 500 {
+		return ErrServiceUnavailable
+	}
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+// AuditDataConnectionTypes calls the internal audit endpoint, which resyncs
+// every DCT's flight-capability flag against flight-service's currently
+// supported connectors. It is cluster-scoped, so no tenant header is set.
+func (c *httpConnectionTypeClient) AuditDataConnectionTypes(ctx context.Context) error {
+	url, err := c.baseURL()
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api-internal/v1/audit/data-connection-types", nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	if token, err := c.readToken(); err == nil && token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusAccepted {
+		return nil
 	}
 	if resp.StatusCode >= 500 {
 		return ErrServiceUnavailable

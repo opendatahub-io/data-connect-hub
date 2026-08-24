@@ -7,5 +7,6 @@ resources:
   - configmap.yaml
   - kube-rbac-proxy-configmap.yaml
   - kube-rbac-proxy-auth-review-rbac.yaml
+  - audit-invoker-rbac.yaml
   - service_account.yaml
   - networkpolicy.yaml

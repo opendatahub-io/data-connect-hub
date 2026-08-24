@@ -47,6 +47,10 @@ type InitDataConnectionTypeReconciler struct {
 	client.Client
 	Scheme     *runtime.Scheme
 	RestClient ConnectionTypeClient
+	// AuditClient, if set, is called after a DCT is registered (or found to
+	// already exist) so its flight-capability flag is populated immediately
+	// instead of waiting for the next periodic audit.
+	AuditClient AuditClient
 }
 
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=get;list;watch
@@ -76,12 +80,14 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	if err == nil {
 		log.Info("connection type registered", "name", cr.Spec.Name)
 		r.setStatus(ctx, &cr, "Completed", metav1.ConditionTrue, "Created", "Connection type registered in the REST service")
+		r.triggerAudit(ctx)
 		return ctrl.Result{}, nil
 	}
 
 	if errors.Is(err, ErrConflict) {
 		log.Info("connection type already exists", "name", cr.Spec.Name)
 		r.setStatus(ctx, &cr, "AlreadyExists", metav1.ConditionTrue, "AlreadyExists", "Connection type already exists in the REST service")
+		r.triggerAudit(ctx)
 		return ctrl.Result{}, nil
 	}
 
@@ -94,6 +100,17 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 	log.Error(err, "failed to register connection type", "name", cr.Spec.Name)
 	r.setStatus(ctx, &cr, "Error", metav1.ConditionFalse, "SyncFailed", err.Error())
 	return ctrl.Result{}, nil
+}
+
+// triggerAudit is best-effort: a failed audit here is not fatal, since the
+// periodic AuditRunner (see audit_runner.go) will retry independently.
+func (r *InitDataConnectionTypeReconciler) triggerAudit(ctx context.Context) {
+	if r.AuditClient == nil {
+		return
+	}
+	if err := r.AuditClient.AuditDataConnectionTypes(ctx); err != nil {
+		logf.FromContext(ctx).Error(err, "failed to audit data connection types")
+	}
 }
 
 func (r *InitDataConnectionTypeReconciler) setStatus(ctx context.Context, cr *dchv1alpha1.InitDataConnectionType, phase string, status metav1.ConditionStatus, reason, message string) {

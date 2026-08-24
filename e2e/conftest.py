@@ -74,6 +74,11 @@ def denied_auth_token() -> str:
 
 
 @pytest.fixture(scope="session")
+def audit_invoker_token() -> str:
+    return os.environ.get("DCH_AUDIT_INVOKER_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
 def no_access_namespace() -> str:
     return os.environ.get("DCH_NO_ACCESS_NAMESPACE", "")
 

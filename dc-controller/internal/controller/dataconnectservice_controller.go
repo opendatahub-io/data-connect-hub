@@ -91,6 +91,10 @@ type DataConnectServiceReconciler struct {
 	RestImage          string
 	FlightImage        string
 	KubeRbacProxyImage string
+	// AuditClient, if set, is called once all managed deployments are ready,
+	// resyncing DCT flight-capability flags right after a flight-service
+	// rollout completes rather than waiting for the next periodic audit.
+	AuditClient AuditClient
 }
 
 type platformConfig struct {
@@ -251,7 +255,14 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	// All ready
+	// All ready. Best-effort: a failed audit here is not fatal, since the
+	// periodic AuditRunner (see audit_runner.go) will retry independently.
+	if r.AuditClient != nil {
+		if err := r.AuditClient.AuditDataConnectionTypes(ctx); err != nil {
+			log.Error(err, "failed to audit data connection types")
+		}
+	}
+
 	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")

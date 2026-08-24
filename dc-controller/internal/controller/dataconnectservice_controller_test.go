@@ -269,6 +269,29 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
 		})
 
+		It("should trigger an audit once all deployments become ready, and not before", func() {
+			r := reconciler()
+			auditMock := &mockAuditClient{}
+			r.AuditClient = auditMock
+			req := reconcile.Request{NamespacedName: crKey}
+
+			_, err := r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(auditMock.calls.Load()).To(Equal(int32(0)), "audit must not fire before deployments are ready")
+
+			for _, name := range []string{np + nameRestService, np + nameFlightService} {
+				simulateDeploymentReady(name)
+			}
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(auditMock.calls.Load()).To(Equal(int32(1)))
+
+			// Re-reconciling while still Ready (e.g. the periodic 5m requeue) audits again.
+			_, err = r.Reconcile(ctx, req)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(auditMock.calls.Load()).To(Equal(int32(2)))
+		})
+
 		It("should add managed-by label to created resources", func() {
 			reconcileUntilReady()
 

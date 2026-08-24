@@ -57,3 +57,16 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
                     verb: "{{.FromMethod}}"
+        # Internal endpoint invoked only by dc-controller to refresh DCT
+        # capability flags. Cluster-scoped (no tenant namespace) so access is
+        # gated purely by the caller's ServiceAccount identity, via the
+        # data-connection-types-audit-invoker ClusterRole/ClusterRoleBinding.
+        - path: /api-internal/v1/audit/data-connection-types
+          mappings:
+            - methods: [post]
+              resources:
+                - resourceAttributes:
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    subresource: audit
+                    verb: create

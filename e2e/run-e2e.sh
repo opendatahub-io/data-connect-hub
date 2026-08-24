@@ -69,6 +69,7 @@ DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
 
 E2E_SA_NAME="e2e-user"
 E2E_DENIED_SA_NAME="e2e-denied-user"
+E2E_AUDIT_INVOKER_SA_NAME="e2e-audit-invoker"
 PG_SECRET="e2e-pg-creds"
 S3_SECRET="e2e-s3-creds"
 MILVUS_SECRET="e2e-milvus-creds"
@@ -91,6 +92,12 @@ setup_service_accounts() {
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
         kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
+    if [[ -z "${DCH_AUDIT_INVOKER_TOKEN:-}" ]]; then
+        # Stands in for dc-controller's own ServiceAccount, to prove only a
+        # SA bound to dch-data-connection-types-audit-invoker can call the
+        # audit endpoint.
+        kubectl create sa "$E2E_AUDIT_INVOKER_SA_NAME" -n "$DCH_SERVICE_NAMESPACE" 2>/dev/null || true
+    fi
 }
 
 setup_sa_rbac() {
@@ -100,6 +107,12 @@ setup_sa_rbac() {
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read-write \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+    fi
+    if [[ -z "${DCH_AUDIT_INVOKER_TOKEN:-}" ]]; then
+        kubectl delete clusterrolebinding e2e-audit-invoker --ignore-not-found >/dev/null
+        kubectl create clusterrolebinding e2e-audit-invoker \
+            --clusterrole=dch-data-connection-types-audit-invoker \
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${E2E_AUDIT_INVOKER_SA_NAME}" >/dev/null
     fi
 }
 
@@ -313,6 +326,9 @@ generate_tokens() {
     if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         DCH_DENIED_AUTH_TOKEN=$(kubectl create token "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
+    if [[ -z "${DCH_AUDIT_INVOKER_TOKEN:-}" ]]; then
+        DCH_AUDIT_INVOKER_TOKEN=$(kubectl create token "$E2E_AUDIT_INVOKER_SA_NAME" -n "$DCH_SERVICE_NAMESPACE" "${token_args[@]}")
+    fi
 }
 
 # -------------------------------------------------------------------
@@ -327,6 +343,7 @@ DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
 DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
+DCH_AUDIT_INVOKER_TOKEN=${DCH_AUDIT_INVOKER_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 EOF
 

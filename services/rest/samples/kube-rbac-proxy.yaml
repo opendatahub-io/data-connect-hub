@@ -50,3 +50,13 @@ authorization:
                 apiGroup: dataconnecthub.opendatahub.io
                 resource: data-connection-types
                 verb: "{{.FromMethod}}"
+
+    - path: /api-internal/v1/audit/data-connection-types
+      mappings:
+        - methods: [post]
+          resources:
+            - resourceAttributes:
+                apiGroup: dataconnecthub.opendatahub.io
+                resource: data-connection-types
+                subresource: audit
+                verb: create

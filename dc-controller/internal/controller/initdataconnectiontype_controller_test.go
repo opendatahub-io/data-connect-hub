@@ -207,6 +207,79 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(cr.Status.Phase).To(Equal("Error"))
 	})
 
+	It("should trigger an audit after a new connection type is registered", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		restMock := &mockConnectionTypeClient{}
+		auditMock := &mockAuditClient{}
+		r := &InitDataConnectionTypeReconciler{
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			RestClient:  restMock,
+			AuditClient: auditMock,
+		}
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(auditMock.calls.Load()).To(Equal(int32(1)))
+	})
+
+	It("should trigger an audit when the connection type already exists", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		restMock := &mockConnectionTypeClient{
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrConflict
+			},
+		}
+		auditMock := &mockAuditClient{}
+		r := &InitDataConnectionTypeReconciler{
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			RestClient:  restMock,
+			AuditClient: auditMock,
+		}
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(auditMock.calls.Load()).To(Equal(int32(1)))
+	})
+
+	It("should not trigger an audit when registration fails", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		restMock := &mockConnectionTypeClient{
+			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
+				return ErrServiceUnavailable
+			},
+		}
+		auditMock := &mockAuditClient{}
+		r := &InitDataConnectionTypeReconciler{
+			Client:      k8sClient,
+			Scheme:      k8sClient.Scheme(),
+			RestClient:  restMock,
+			AuditClient: auditMock,
+		}
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(auditMock.calls.Load()).To(Equal(int32(0)))
+	})
+
+	It("should not panic when AuditClient is nil", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		mock := &mockConnectionTypeClient{}
+		r := reconciler(mock)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+	})
+
 	It("should do nothing on CR deletion (no finalizer)", func() {
 		cr := newCR()
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
