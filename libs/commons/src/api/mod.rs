@@ -21,7 +21,15 @@ pub struct ResourceMetadata {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ResourceError {
+    pub id: String,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ResourceList<T> {
     pub total_count: usize,
     pub items: Vec<T>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<ResourceError>,
 }

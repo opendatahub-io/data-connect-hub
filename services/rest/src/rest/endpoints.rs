@@ -282,6 +282,7 @@ mod tests {
             Ok(ResourceList {
                 total_count: 0,
                 items: vec![],
+                errors: vec![],
             })
         }
 
@@ -398,6 +399,7 @@ mod tests {
             Ok(ResourceList {
                 total_count: 0,
                 items: vec![],
+                errors: vec![],
             })
         }
 

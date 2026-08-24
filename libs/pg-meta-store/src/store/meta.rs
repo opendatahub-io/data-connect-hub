@@ -11,7 +11,7 @@ use std::sync::Arc;
 use tracing::error;
 use uuid::Uuid;
 
-use commons::api::ResourceList;
+use commons::api::{ResourceError, ResourceList};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseConfig {
@@ -90,6 +90,45 @@ impl PgMetaStore {
     }
 }
 
+// partition_connection_types deserializes each stored connection type JSON blob
+// independently, returning the successfully parsed resources alongside a per-item
+// error for every blob that fails to deserialize. A single malformed row therefore
+// no longer aborts the whole listing.
+fn partition_connection_types(
+    values: Vec<serde_json::Value>,
+    global_tenant_id: &str,
+) -> (Vec<DataConnectionTypeResource>, Vec<ResourceError>) {
+    let mut items = Vec::new();
+    let mut errors = Vec::new();
+    for value in values {
+        match serde_json::from_value::<DataConnectionTypeResource>(value.clone()) {
+            Ok(mut dct) => {
+                if let Some(tenant) = dct.metadata.tenant_id.clone()
+                    && tenant == global_tenant_id
+                {
+                    // Discard the tenant field for global connection types
+                    dct.metadata.tenant_id = None;
+                }
+                items.push(dct);
+            },
+            Err(e) => {
+                let id = value
+                    .get("metadata")
+                    .and_then(|m| m.get("id"))
+                    .and_then(|id| id.as_str())
+                    .unwrap_or("unknown")
+                    .to_string();
+                error!("failed to deserialize connection type {id}: {e}");
+                errors.push(ResourceError {
+                    id,
+                    message: format!("failed to deserialize connection type: {e}"),
+                });
+            },
+        }
+    }
+    (items, errors)
+}
+
 #[async_trait::async_trait]
 impl MetaStore for PgMetaStore {
     async fn get_data_connections(
@@ -122,6 +161,7 @@ impl MetaStore for PgMetaStore {
         Ok(ResourceList {
             total_count: items.len(),
             items,
+            errors: Vec::new(),
         })
     }
 
@@ -343,6 +383,7 @@ impl MetaStore for PgMetaStore {
         Ok(ResourceList {
             total_count: items.len(),
             items,
+            errors: Vec::new(),
         })
     }
     async fn get_data_connection_types(
@@ -359,32 +400,22 @@ impl MetaStore for PgMetaStore {
                 MetaStoreError::Query("failed to list connection types".to_string())
             })?;
 
-        let items: Vec<DataConnectionTypeResource> = rows
+        let values: Vec<serde_json::Value> = rows
             .iter()
             .map(|row| {
-                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                row.try_get("data").map_err(|e| {
                     error!("failed to read connection type column: {e}");
                     MetaStoreError::Query("failed to read connection type".to_string())
-                })?;
-                let mut dct: DataConnectionTypeResource = serde_json::from_value(json_value).map_err(|e| {
-                    error!("failed to deserialize connection type: {e}");
-                    MetaStoreError::Deserialization(
-                        "failed to deserialize connection type; see service logs for details".to_string(),
-                    )
-                })?;
-                if let Some(tenant) = dct.metadata.tenant_id.clone()
-                    && tenant == self.global_tenant_id
-                {
-                    // Discard the tenant field for global connection types
-                    dct.metadata.tenant_id = None;
-                }
-                Ok(dct)
+                })
             })
             .collect::<Result<Vec<_>, _>>()?;
+
+        let (items, errors) = partition_connection_types(values, &self.global_tenant_id);
 
         Ok(ResourceList {
             total_count: items.len(),
             items,
+            errors,
         })
     }
 
@@ -651,5 +682,80 @@ mod tests {
         let debug = format!("{:?}", config);
         assert!(debug.contains("DatabaseConfig"));
         assert!(debug.contains("postgresql://localhost/db"));
+    }
+
+    fn valid_connection_type_json(id: &str, tenant_id: Option<&str>) -> serde_json::Value {
+        let mut metadata = serde_json::json!({
+            "id": id,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        });
+        if let Some(tenant) = tenant_id {
+            metadata["tenant_id"] = serde_json::json!(tenant);
+        }
+        serde_json::json!({
+            "metadata": metadata,
+            "resource": {
+                "name": "pg",
+                "provider": "postgres",
+                "credentials_fields": [],
+            },
+        })
+    }
+
+    #[test]
+    fn test_partition_connection_types_all_valid() {
+        let values = vec![
+            valid_connection_type_json("a", None),
+            valid_connection_type_json("b", None),
+        ];
+        let (items, errors) = partition_connection_types(values, "global");
+        assert_eq!(items.len(), 2);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn test_partition_connection_types_mixed_returns_valid_and_error() {
+        // Second blob is missing the required `resource.name` field.
+        let invalid = serde_json::json!({
+            "metadata": {
+                "id": "bad-1",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+            },
+            "resource": {
+                "provider": "postgres",
+                "credentials_fields": [],
+            },
+        });
+        let values = vec![valid_connection_type_json("good-1", None), invalid];
+        let (items, errors) = partition_connection_types(values, "global");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].metadata.id, "good-1");
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].id, "bad-1");
+        assert!(errors[0].message.contains("failed to deserialize connection type"));
+    }
+
+    #[test]
+    fn test_partition_connection_types_error_id_falls_back_to_unknown() {
+        let invalid = serde_json::json!({ "resource": {} });
+        let (items, errors) = partition_connection_types(vec![invalid], "global");
+        assert!(items.is_empty());
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].id, "unknown");
+    }
+
+    #[test]
+    fn test_partition_connection_types_scrubs_global_tenant() {
+        let values = vec![
+            valid_connection_type_json("g", Some("global")),
+            valid_connection_type_json("t", Some("tenant-a")),
+        ];
+        let (items, errors) = partition_connection_types(values, "global");
+        assert!(errors.is_empty());
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].metadata.tenant_id, None);
+        assert_eq!(items[1].metadata.tenant_id, Some("tenant-a".to_string()));
     }
 }
