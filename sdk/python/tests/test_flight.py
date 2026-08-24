@@ -1,4 +1,4 @@
-"""Tests for the FlightSQLClient wrapper."""
+"""Tests for the FlightClient wrapper."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import pyarrow as pa
 import pytest
 
 from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
-from data_connect_hub.flight import FlightSQLClient
+from data_connect_hub.flight import FlightClient, _encode_varint
 
 
 class _Error(Exception):
@@ -30,8 +30,8 @@ class _ProgrammingError(_Error):
 
 
 @pytest.fixture()
-def flight_client() -> FlightSQLClient:
-    return FlightSQLClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
+def flight_client() -> FlightClient:
+    return FlightClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
 
 
 def _mock_cursor(table: pa.Table) -> MagicMock:
@@ -65,7 +65,7 @@ def _set_mock_flight(mock_flight: MagicMock, connectors: list[str] | None = None
 
 class TestRead:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
@@ -77,7 +77,7 @@ class TestRead:
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_empty_result_returns_empty_table(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_empty_result_returns_empty_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
         mock_conn = MagicMock()
@@ -88,7 +88,7 @@ class TestRead:
         assert result.num_rows == 0
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         cursor = MagicMock()
@@ -100,7 +100,7 @@ class TestRead:
             flight_client.read("BAD SQL", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         cursor = MagicMock()
@@ -114,7 +114,7 @@ class TestRead:
 
 class TestReadPandas:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_returns_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_returns_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
@@ -127,7 +127,7 @@ class TestReadPandas:
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_empty_result_returns_empty_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_empty_result_returns_empty_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
         mock_conn = MagicMock()
@@ -143,7 +143,7 @@ class TestServerInfo:
     @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_returns_dict_with_connectors(
-        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightSQLClient
+        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightClient
     ) -> None:
         _set_mock_exceptions(mock_dbapi)
         info: dict[str, Any] = {"vendor": "DCH", "version": "1.0"}
@@ -161,7 +161,7 @@ class TestServerInfo:
     @patch("data_connect_hub.flight.flight")
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_server_info_connectors_error_propagates(
-        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightSQLClient
+        self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightClient
     ) -> None:
         _set_mock_exceptions(mock_dbapi)
         info: dict[str, Any] = {"vendor": "DCH", "version": "1.0"}
@@ -179,7 +179,7 @@ class TestServerInfo:
 
 class TestConnectionError:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_interface_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_interface_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
 
@@ -187,7 +187,7 @@ class TestConnectionError:
             flight_client.read("SELECT 1", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_operational_error_on_connect_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_operational_error_on_connect_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _OperationalError("connection refused")
 
@@ -195,7 +195,7 @@ class TestConnectionError:
             flight_client.read("SELECT 1", "conn-1")
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_server_info_connect_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_server_info_connect_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
 
@@ -203,7 +203,7 @@ class TestConnectionError:
             flight_client.server_info()
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_server_info_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_server_info_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
         mock_conn.adbc_get_info.side_effect = _OperationalError("connection refused")
@@ -215,7 +215,7 @@ class TestConnectionError:
 
 class TestHeaders:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_connection_id_injected(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_connection_id_injected(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         mock_conn = MagicMock()
@@ -234,7 +234,7 @@ class TestHeaders:
 class TestTokenProviderGuard:
     def test_token_and_provider_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="Cannot specify both"):
-            FlightSQLClient(
+            FlightClient(
                 flight_url="grpc://localhost:50051",
                 token="tok",
                 token_provider=lambda: "fresh",
@@ -252,7 +252,7 @@ class TestTokenProvider:
             call_count += 1
             return f"token-{call_count}"
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
@@ -275,7 +275,7 @@ class TestTokenProvider:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_provider_used_for_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
@@ -293,7 +293,7 @@ class TestTokenProvider:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_provider_with_timeout(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
@@ -321,7 +321,7 @@ class TestTokenProvider:
             call_count += 1
             return f"token-{call_count}"
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
@@ -350,7 +350,7 @@ class TestTokenProvider:
             call_count += 1
             return f"token-{call_count}"
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
@@ -369,7 +369,7 @@ class TestTokenProvider:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_auth_error_after_refresh_raises(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "bad-token",
@@ -389,7 +389,7 @@ class TestTokenProvider:
             call_count += 1
             return f"token-{call_count}"
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
@@ -411,7 +411,7 @@ class TestTokenProvider:
             call_count += 1
             return f"token-{call_count}"
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
@@ -436,7 +436,7 @@ class TestTimeouts:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_timeouts_injected(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
@@ -457,7 +457,7 @@ class TestTimeouts:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
@@ -475,7 +475,7 @@ class TestTimeouts:
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_no_timeouts_by_default(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_no_timeouts_by_default(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         mock_conn = MagicMock()
@@ -493,7 +493,7 @@ class TestTLS:
     @patch("data_connect_hub.flight.flight_dbapi")
     def test_insecure_sets_tls_skip_verify(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
@@ -515,7 +515,7 @@ class TestTLS:
         cert_file = tmp_path / "ca.pem"
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
@@ -533,7 +533,7 @@ class TestTLS:
 
     def test_ca_cert_file_not_found_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="CA certificate file not found"):
-            FlightSQLClient(
+            FlightClient(
                 flight_url="grpc+tls://localhost:50051",
                 token="tok",
                 tenant_id="t1",
@@ -546,7 +546,7 @@ class TestTLS:
         cert_file = tmp_path / "ca.pem"
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
-        client = FlightSQLClient(
+        client = FlightClient(
             flight_url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
@@ -565,7 +565,7 @@ class TestTLS:
         assert "adbc.flight.sql.client_option.tls_root_certs" not in db_kwargs
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_no_tls_options_by_default(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_no_tls_options_by_default(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         mock_conn = MagicMock()
@@ -581,7 +581,7 @@ class TestTLS:
 
 class TestParameters:
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         cursor = _mock_cursor(table)
@@ -595,7 +595,7 @@ class TestParameters:
         cursor.execute.assert_called_once_with("SELECT $1", [42])
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_none_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_none_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         cursor = _mock_cursor(table)
@@ -608,7 +608,7 @@ class TestParameters:
         cursor.execute.assert_called_once_with("SELECT 1", None)
 
     @patch("data_connect_hub.flight.flight_dbapi")
-    def test_read_pandas_forwards_parameters(self, mock_dbapi: MagicMock, flight_client: FlightSQLClient) -> None:
+    def test_read_pandas_forwards_parameters(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         cursor = _mock_cursor(table)
@@ -620,3 +620,99 @@ class TestParameters:
 
         assert isinstance(result, pd.DataFrame)
         cursor.execute.assert_called_once_with("SELECT $1", [42])
+
+
+def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """Read a protobuf varint from *data* at *offset*, return (value, new_offset)."""
+    result = 0
+    shift = 0
+    while True:
+        b = data[offset]
+        offset += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return result, offset
+
+
+def _decode_proto_fields(data: bytes) -> dict[int, bytes | int]:
+    """Minimal protobuf wire-format decoder returning {field_number: value}."""
+    fields: dict[int, bytes | int] = {}
+    i = 0
+    while i < len(data):
+        tag, i = _read_varint(data, i)
+        field_number = tag >> 3
+        wire_type = tag & 0x7
+        if wire_type == 0:
+            value, i = _read_varint(data, i)
+            fields[field_number] = value
+        elif wire_type == 2:
+            length, i = _read_varint(data, i)
+            fields[field_number] = data[i : i + length]
+            i += length
+    return fields
+
+
+class TestEncodeVarint:
+    def test_single_byte(self) -> None:
+        assert _encode_varint(0) == b"\x00"
+        assert _encode_varint(1) == b"\x01"
+        assert _encode_varint(127) == b"\x7f"
+
+    def test_multi_byte(self) -> None:
+        assert _encode_varint(128) == b"\x80\x01"
+        assert _encode_varint(300) == b"\xac\x02"
+
+
+class TestBuildCommandGetTables:
+    protobuf = pytest.importorskip("google.protobuf")
+
+    def _parse(self, raw: bytes) -> tuple[str, dict[int, bytes | int]]:
+        """Decode Any wrapper, return (type_url, inner_fields)."""
+        outer = _decode_proto_fields(raw)
+        type_url = outer[1]
+        assert isinstance(type_url, bytes)
+        inner_bytes = outer.get(2, b"")
+        assert isinstance(inner_bytes, bytes)
+        inner = _decode_proto_fields(inner_bytes) if inner_bytes else {}
+        return type_url.decode(), inner
+
+    def test_no_args(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables()
+        type_url, fields = self._parse(raw)
+        assert type_url == "type.googleapis.com/arrow.flight.protocol.sql.CommandGetTables"
+        assert fields == {}
+
+    def test_table_name_filter(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="cities")
+        _, fields = self._parse(raw)
+        assert fields[3] == b"cities"
+        assert 5 not in fields
+
+    def test_include_schema(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(include_schema=True)
+        _, fields = self._parse(raw)
+        assert 3 not in fields
+        assert fields[5] == 1
+
+    def test_both_args(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="test%", include_schema=True)
+        _, fields = self._parse(raw)
+        assert fields[3] == b"test%"
+        assert fields[5] == 1
+
+    def test_unicode_filter(self) -> None:
+        from data_connect_hub.flight import _build_command_get_tables
+
+        raw = _build_command_get_tables(table_name_filter_pattern="tést")
+        _, fields = self._parse(raw)
+        assert fields[3] == "tést".encode()

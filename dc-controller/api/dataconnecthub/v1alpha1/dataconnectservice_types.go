@@ -66,6 +66,13 @@ type ServiceOverrides struct {
 	// imagePullSecrets is a list of references to secrets for pulling the container image
 	// +optional
 	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
+
+	// connectors configures individual data connectors.
+	// When omitted, all connectors are enabled with their default settings.
+	// +listType=map
+	// +listMapKey=name
+	// +optional
+	Connectors []ConnectorConfig `json:"connectors,omitempty"`
 }
 
 // DistributionStatus identifies the platform distribution context.
@@ -92,6 +99,25 @@ type ReleaseStatus struct {
 	// version is the version of the component
 	// +optional
 	Version string `json:"version,omitempty"`
+}
+
+// ConnectorConfig configures an individual data connector.
+type ConnectorConfig struct {
+	// name is the connector provider name (e.g. "postgres", "sqlite", "s3", "elasticsearch", "neo4j", "milvus")
+	// +required
+	Name string `json:"name"`
+
+	// enabled controls whether this connector is available for use.
+	// Defaults to true when the connector appears in the list.
+	// +kubebuilder:default=true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// connectionTimeout is the maximum duration to wait when establishing
+	// a connection to the data source (e.g. "5s", "30s", "1m").
+	// Defaults to the connector's built-in default when not set.
+	// +optional
+	ConnectionTimeout *metav1.Duration `json:"connectionTimeout,omitempty"`
 }
 
 // DataConnectServiceSpec defines the desired state of DataConnectService

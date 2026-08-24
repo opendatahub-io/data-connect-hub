@@ -20,6 +20,14 @@ impl TabularState {
     }
 }
 
+pub struct TableInfo {
+    pub catalog: String,
+    pub schema_name: String,
+    pub table_name: String,
+    pub table_type: String,
+    pub table_schema: Schema,
+}
+
 #[derive(Debug, Clone)]
 pub struct QueryOptions {
     pub batch_size: usize,
@@ -40,6 +48,14 @@ pub trait TabularReader: Send + Sync {
     async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput;
 
     async fn test_connection(&self) -> Result<(), ConnectorError>;
+
+    async fn list_tables(
+        &self,
+        _table_name_filter: Option<&str>,
+        _include_schema: bool,
+    ) -> Result<Vec<TableInfo>, ConnectorError> {
+        Ok(vec![])
+    }
 }
 
 #[async_trait::async_trait]
@@ -58,6 +74,28 @@ mod tests {
     use arrow::datatypes::{DataType, Field};
 
     use super::*;
+
+    #[test]
+    fn test_table_info() {
+        let schema = Schema::new(vec![
+            Field::new("id", DataType::Int64, false),
+            Field::new("name", DataType::Utf8, true),
+        ]);
+        let info = TableInfo {
+            catalog: "mydb".to_string(),
+            schema_name: "public".to_string(),
+            table_name: "users".to_string(),
+            table_type: "TABLE".to_string(),
+            table_schema: schema,
+        };
+        assert_eq!(info.catalog, "mydb");
+        assert_eq!(info.schema_name, "public");
+        assert_eq!(info.table_name, "users");
+        assert_eq!(info.table_type, "TABLE");
+        assert_eq!(info.table_schema.fields().len(), 2);
+        assert_eq!(info.table_schema.field(0).name(), "id");
+        assert_eq!(info.table_schema.field(1).name(), "name");
+    }
 
     #[test]
     fn test_tabular_state_new() {

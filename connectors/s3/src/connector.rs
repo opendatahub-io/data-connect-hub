@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::format::{self, FileFormat};
+use arrow::datatypes::Schema;
 use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
 use moka::future::Cache;
-use opendal::{Operator, Reader, services::S3};
+use opendal::{EntryMode, Operator, Reader, services::S3};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -166,6 +167,87 @@ impl TabularReader for S3Reader {
     async fn test_connection(&self) -> Result<(), ConnectorError> {
         Ok(())
     }
+
+    async fn list_tables(
+        &self,
+        table_name_filter: Option<&str>,
+        include_schema: bool,
+    ) -> Result<Vec<TableInfo>, ConnectorError> {
+        let entries = self
+            .operator
+            .list_with("")
+            .recursive(true)
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("Failed to list S3 objects: {e}")))?;
+
+        let paths: Vec<String> = entries
+            .into_iter()
+            .filter(|e| e.metadata().mode() == EntryMode::FILE)
+            .map(|e| e.path().to_string())
+            .filter(|p| FileFormat::detect(p, self.format_hint.as_deref()).is_ok())
+            .collect();
+
+        let mut tables = Vec::new();
+        for path in &paths {
+            if let Some(pattern) = table_name_filter
+                && !sql_like_match(path, pattern)
+            {
+                continue;
+            }
+
+            let table_schema = if include_schema {
+                match self.schema(path).await {
+                    Ok(state) => state.schema.as_ref().clone(),
+                    Err(e) => {
+                        tracing::warn!(path, error = %e, "failed to read schema");
+                        Schema::empty()
+                    },
+                }
+            } else {
+                Schema::empty()
+            };
+
+            tables.push(TableInfo {
+                catalog: String::new(),
+                schema_name: String::new(),
+                table_name: path.clone(),
+                table_type: "TABLE".to_string(),
+                table_schema,
+            });
+        }
+
+        Ok(tables)
+    }
+}
+
+fn sql_like_match(value: &str, pattern: &str) -> bool {
+    let v: Vec<char> = value.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+
+    let (mut vi, mut pi) = (0usize, 0usize);
+    let (mut star_pi, mut star_vi): (Option<usize>, usize) = (None, 0);
+
+    while vi < v.len() {
+        if pi < p.len() && (p[pi] == '_' || p[pi] == v[vi]) {
+            vi += 1;
+            pi += 1;
+        } else if pi < p.len() && p[pi] == '%' {
+            star_pi = Some(pi);
+            pi += 1;
+            star_vi = vi;
+        } else if let Some(sp) = star_pi {
+            pi = sp + 1;
+            star_vi += 1;
+            vi = star_vi;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < p.len() && p[pi] == '%' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 #[cfg(test)]
@@ -306,5 +388,31 @@ mod tests {
             reader.detect_format("data/no-extension").unwrap(),
             FileFormat::JsonLines
         );
+    }
+
+    #[test]
+    fn test_sql_like_exact() {
+        assert!(sql_like_match("cities.parquet", "cities.parquet"));
+        assert!(!sql_like_match("cities.parquet", "cities.csv"));
+    }
+
+    #[test]
+    fn test_sql_like_percent() {
+        assert!(sql_like_match("data/cities.parquet", "%cities%"));
+        assert!(sql_like_match("cities.parquet", "%"));
+        assert!(sql_like_match("data/cities.parquet", "data/%"));
+        assert!(!sql_like_match("data/cities.parquet", "other/%"));
+    }
+
+    #[test]
+    fn test_sql_like_underscore() {
+        assert!(sql_like_match("a.csv", "_.csv"));
+        assert!(!sql_like_match("ab.csv", "_.csv"));
+    }
+
+    #[test]
+    fn test_sql_like_combined() {
+        assert!(!sql_like_match("data/cities.parquet", "%/_.parquet"));
+        assert!(sql_like_match("data/x.parquet", "%/_.parquet"));
     }
 }

@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from .flight import FlightSQLClient
+    from .flight import FlightClient
 
 
 class DataConnectClient:
@@ -87,7 +87,7 @@ class DataConnectClient:
             )
 
         self._rest: RestClient | None = None
-        self._flight: FlightSQLClient | None = None
+        self._flight: FlightClient | None = None
 
         if rest_url:
             self._rest = RestClient(
@@ -105,9 +105,9 @@ class DataConnectClient:
             )
 
         if flight_url:
-            from .flight import FlightSQLClient as _FlightSQLClient
+            from .flight import FlightClient as _FlightClient
 
-            self._flight = _FlightSQLClient(
+            self._flight = _FlightClient(
                 flight_url=flight_url,
                 token=token,
                 tenant_id=tenant_id,
@@ -139,7 +139,7 @@ class DataConnectClient:
             raise DCHConfigError("rest_url is required for this operation")
         return self._rest
 
-    def _require_flight(self) -> FlightSQLClient:
+    def _require_flight(self) -> FlightClient:
         if self._flight is None:
             raise DCHConfigError("flight_url is required for this operation")
         return self._flight
@@ -249,6 +249,18 @@ class DataConnectClient:
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
         return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
+
+    def get_tables(
+        self,
+        connection_id: str,
+        *,
+        table_name_filter: str | None = None,
+        include_schema: bool = False,
+    ) -> pa.Table:
+        """Retrieve table metadata via Flight SQL ``CommandGetTables``."""
+        return self._require_flight().get_tables(
+            connection_id, table_name_filter=table_name_filter, include_schema=include_schema
+        )
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""

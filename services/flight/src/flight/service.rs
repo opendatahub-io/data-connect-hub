@@ -9,7 +9,7 @@ use arrow_flight::{
     error::FlightError,
     flight_service_server::FlightService,
     sql::{
-        CommandGetSqlInfo, CommandStatementQuery, ProstMessageExt, SqlInfo, TicketStatementQuery,
+        CommandGetSqlInfo, CommandGetTables, CommandStatementQuery, ProstMessageExt, SqlInfo, TicketStatementQuery,
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
@@ -32,6 +32,7 @@ const OPERATION_SQL_INFO: &str = "sql_info";
 const OPERATION_STATEMENT: &str = "statement";
 const STATUS_OK: &str = "OK";
 
+const OPERATION_TABLES: &str = "tables";
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 
 fn grpc_status_label(status: &Status) -> &'static str {
@@ -170,6 +171,134 @@ impl TabularDataService {
             .map_err(|e| {
                 tracing::error!(error = %e, "failed to encode flight data");
                 Status::internal("failed to encode sql_info response")
+            });
+
+        Ok(Response::new(
+            Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
+        ))
+    }
+
+    async fn handle_get_flight_info_tables(
+        &self,
+        query: CommandGetTables,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        debug!("get_flight_info_tables: include_schema={}", query.include_schema);
+
+        let metadata = request.metadata();
+        let connection_id = metadata
+            .get(X_DATA_CONNECTION_ID)
+            .ok_or(Status::invalid_argument(format!(
+                "{X_DATA_CONNECTION_ID} header is required"
+            )))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
+
+        let tenant_id = metadata
+            .get(X_TENANT_ID)
+            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
+
+        let connection = self.get_connection(tenant_id, connection_id).await?;
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
+            .await
+            .map_err(map_meta_store_error)?;
+        self.connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?;
+
+        let flight_descriptor = request.into_inner();
+        let ticket = Ticket::new(query.as_any().encode_to_vec());
+        let endpoint = FlightEndpoint::new().with_ticket(ticket);
+        let schema = query.into_builder().schema();
+
+        let flight_info = FlightInfo::new()
+            .try_with_schema(&schema)
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to encode tables schema");
+                Status::internal("failed to encode tables schema")
+            })?
+            .with_descriptor(flight_descriptor)
+            .with_endpoint(endpoint)
+            .with_total_records(-1);
+
+        Ok(Response::new(flight_info))
+    }
+
+    async fn handle_do_get_tables(
+        &self,
+        query: CommandGetTables,
+        request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        debug!("do_get_tables: include_schema={}", query.include_schema);
+
+        let metadata = request.metadata();
+        let connection_id = metadata
+            .get(X_DATA_CONNECTION_ID)
+            .ok_or(Status::invalid_argument(format!(
+                "{X_DATA_CONNECTION_ID} header is required"
+            )))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
+
+        let tenant_id = metadata
+            .get(X_TENANT_ID)
+            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
+            .to_str()
+            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
+
+        let connection = self.get_connection(tenant_id, connection_id).await?;
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
+            .await
+            .map_err(map_meta_store_error)?;
+
+        let connector = self
+            .connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?;
+
+        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+        let filter = query.table_name_filter_pattern.clone();
+        let include_schema = query.include_schema;
+        let tables = reader
+            .list_tables(filter.as_deref(), include_schema)
+            .await
+            .map_err(map_connector_error)?;
+
+        let mut builder = query.into_builder();
+        for table in &tables {
+            builder
+                .append(
+                    &table.catalog,
+                    &table.schema_name,
+                    &table.table_name,
+                    &table.table_type,
+                    &table.table_schema,
+                )
+                .map_err(|e| {
+                    tracing::error!(error = %e, "failed to append table to builder");
+                    Status::internal("failed to build tables response")
+                })?;
+        }
+
+        let batch = builder.build().map_err(|e| {
+            tracing::error!(error = %e, "failed to build tables response");
+            Status::internal("failed to build tables response")
+        })?;
+
+        let schema = batch.schema();
+        let stream = futures::stream::once(async { Ok(batch) });
+        let flight_stream = FlightDataEncoderBuilder::new()
+            .with_schema(schema)
+            .build(stream)
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to encode flight data");
+                Status::internal("failed to encode tables response")
             });
 
         Ok(Response::new(
@@ -395,6 +524,36 @@ impl FlightSqlService for TabularDataService {
             Err(e) => grpc_status_label(e),
         };
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_SQL_INFO, status, started.elapsed());
+        result
+    }
+
+    async fn get_flight_info_tables(
+        &self,
+        query: CommandGetTables,
+        request: Request<FlightDescriptor>,
+    ) -> Result<Response<FlightInfo>, Status> {
+        let started = Instant::now();
+        let result = self.handle_get_flight_info_tables(query, request).await;
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_GET_FLIGHT_INFO, OPERATION_TABLES, status, started.elapsed());
+        result
+    }
+
+    async fn do_get_tables(
+        &self,
+        query: CommandGetTables,
+        request: Request<Ticket>,
+    ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let started = Instant::now();
+        let result = self.handle_do_get_tables(query, request).await;
+        let status = match &result {
+            Ok(_) => STATUS_OK,
+            Err(e) => grpc_status_label(e),
+        };
+        metrics::observe_rpc(METHOD_DO_GET, OPERATION_TABLES, status, started.elapsed());
         result
     }
 
