@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from data_connect_hub.flight import FlightSQLClient
+from data_connect_hub import DataConnectClient
 
 
 class TestFlightServerInfo:
     def _get_info(self, flight_url: str, auth_token: str, tenant_id: str, insecure: bool) -> dict:
-        client = FlightSQLClient(flight_url, token=auth_token, tenant_id=tenant_id, insecure=insecure)
+        client = DataConnectClient(flight_url=flight_url, token=auth_token, tenant_id=tenant_id, insecure=insecure)
         return client.server_info()
 
     def test_server_name(self, flight_url: str, auth_token: str, tenant_id: str, insecure: bool) -> None:
