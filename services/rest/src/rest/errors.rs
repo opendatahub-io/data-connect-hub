@@ -205,9 +205,10 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "connection_check_failed".to_string(),
                 message: error,
                 status: 502,
-            ValidationError::UnsupportedProvider(message) => RestErrorResponse {
+            },
+            ValidationError::UnsupportedProvider(error) => RestErrorResponse {
                 code: "unsupported_provider".to_string(),
-                message,
+                message: error,
                 status: 400,
             },
         }

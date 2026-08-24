@@ -7,7 +7,6 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
@@ -55,11 +54,11 @@ fn extract_credentials(
 fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
     ConnectorError::ConnectionError(format!("Milvus error: {e}"))
 }
-
+const PROVIDER: &str = "milvus";
 #[async_trait::async_trait]
 impl FlightConnector for MilvusConnector {
     fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -117,7 +116,7 @@ pub struct MilvusReader {
 #[async_trait::async_trait]
 impl TabularReader for MilvusReader {
     fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {

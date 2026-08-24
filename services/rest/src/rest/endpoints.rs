@@ -152,27 +152,12 @@ pub async fn patch_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
-/// validate_provider rejects a provider identifier that is not one of the
-/// [`Provider`] variants known to Data Connect Hub.
-fn validate_provider(provider: &str) -> Result<(), ValidationError> {
-    if Provider::from_id(provider).is_some() {
-        Ok(())
-    } else {
-        let supported = Provider::ALL.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ");
-        Err(ValidationError::UnsupportedProvider(format!(
-            "unsupported provider '{provider}'; supported providers are: {supported}"
-        )))
-    }
-}
-
 pub async fn create_connection_type(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
     connection_type: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("create_connection_type: for tenant {:?}", ctx.tenant_id);
-
-    validate_provider(&connection_type.provider)?;
 
     let connection_type = service
         .meta_store
@@ -191,10 +176,6 @@ pub async fn patch_connection_type(
     info!("patch_connection_type: for tenant {:?}", ctx.tenant_id);
     let id = id.into_inner();
     let patch = body.into_inner();
-
-    if let Some(provider) = patch.get("provider").and_then(|v| v.as_str()) {
-        validate_provider(provider)?;
-    }
 
     let update_fn = Arc::new(move |ct: DataConnectionType| {
         let mut value = serde_json::to_value(&ct)
