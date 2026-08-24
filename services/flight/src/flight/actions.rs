@@ -49,12 +49,8 @@ impl TabularDataService {
         request: &Request<Action>,
     ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
         let metadata = request.metadata();
-        let query_context = QueryContext::from_request(metadata)?;
 
-        info!(
-            "Checking connection {} for tenant {}",
-            query_context.connection_id, query_context.tenant_id
-        );
+        let tenant_id = QueryContext::tenant_id(&metadata)?;
 
         let reader = if let Some(mut keys) = parse_credentials_body(&request.get_ref().body)? {
             let dct_id = keys
@@ -72,7 +68,7 @@ impl TabularDataService {
                 secret: Arc::new(credentials),
             };
 
-            let connector = self.get_connector_by_type_id(&query_context.tenant_id, &dct_id).await?;
+            let connector = self.get_connector_by_type_id(tenant_id, &dct_id).await?;
 
             // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.
             connector
@@ -81,7 +77,7 @@ impl TabularDataService {
                     &DataConnectionResource {
                         metadata: ResourceMetadata {
                             id: Uuid::new_v4().to_string(),
-                            tenant_id: Some(query_context.tenant_id.clone()),
+                            tenant_id: Some(tenant_id.to_string()),
                             created_at: "2021-01-01".to_string(),
                             updated_at: "2021-01-01".to_string(),
                         },
@@ -98,7 +94,8 @@ impl TabularDataService {
                 .await
                 .map_err(map_connector_error)?
         } else {
-            let (connection, connector) = self.get_connector(&query_context).await?;
+            let connection_id = QueryContext::connection_id(&metadata)?;
+            let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
             connector
                 .get_reader(true, &connection)
                 .await

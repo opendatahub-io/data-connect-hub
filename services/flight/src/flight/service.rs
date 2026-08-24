@@ -97,14 +97,14 @@ impl TabularDataService {
             .collect()
     }
 
-    async fn get_connection(&self, query_context: &QueryContext) -> Result<DataConnectionResource, Status> {
+    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnectionResource, Status> {
         debug!(
             "get_connection: tenant_id: {}, connection_id: {}",
-            query_context.tenant_id, query_context.connection_id
+            tenant_id, connection_id
         );
         let mut r = self
             .meta_store
-            .get_data_connection(query_context.tenant_id.as_str(), query_context.connection_id.as_str())
+            .get_data_connection(tenant_id, connection_id)
             .await
             .map_err(map_meta_store_error)?;
 
@@ -112,7 +112,7 @@ impl TabularDataService {
         if let Some(Admin::SecretRef { secret_ref: s }) = &r.resource.admin {
             let secret = self
                 .secret_store
-                .get_secret(&query_context.tenant_id, s)
+                .get_secret(tenant_id, s)
                 .await
                 .map_err(map_secret_store_error)?;
             r.resource.admin = Some(Admin::Secret {
@@ -176,16 +176,14 @@ impl TabularDataService {
 
     pub(crate) async fn get_connector(
         &self,
-        query_context: &QueryContext,
+        tenant_id: &str,
+        connection_id: &str,
     ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
-        let connection = self.get_connection(query_context).await?;
+        let connection = self.get_connection(tenant_id, connection_id).await?;
 
         let data_connection_type = self
             .meta_store
-            .get_data_connection_type(
-                &query_context.tenant_id,
-                connection.resource.data_connection_type_id.as_str(),
-            )
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
             .await
             .map_err(map_meta_store_error)?;
 
@@ -221,8 +219,9 @@ impl TabularDataService {
         debug!("Received SQL Query: '{}'", query.query);
 
         let metadata = request.metadata();
-        let query_context = QueryContext::from_request(metadata)?;
-        let (connection, connector) = self.get_connector(&query_context).await?;
+        let tenant_id = QueryContext::tenant_id(&metadata)?;
+        let connection_id = QueryContext::connection_id(&metadata)?;
+        let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
 
         let reader = connector
             .get_reader(true, &connection)
@@ -264,9 +263,9 @@ impl TabularDataService {
 
         let metadata = request.metadata();
 
-        let query_context = QueryContext::from_request(metadata)?;
-
-        let (connection, connector) = self.get_connector(&query_context).await?;
+        let tenant_id = QueryContext::tenant_id(&metadata)?;
+        let connection_id = QueryContext::connection_id(&metadata)?;
+        let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
 
         let reader = connector
             .get_reader(true, &connection)

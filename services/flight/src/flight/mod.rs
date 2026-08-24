@@ -13,18 +13,19 @@ use tonic::Status;
 use tonic::metadata::MetadataMap;
 
 #[derive(Debug, Clone)]
-pub(crate) struct QueryContext {
-    pub tenant_id: String,
-    pub connection_id: String,
-}
+pub(crate) struct QueryContext;
 
 impl QueryContext {
-    pub fn from_request(metadata: &MetadataMap) -> Result<Self, Status> {
+    pub fn tenant_id(metadata: &MetadataMap) -> Result<&str, Status> {
         let tenant_id = metadata
             .get(X_TENANT_ID)
             .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
             .to_str()
             .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
+        Ok(tenant_id)
+    }
+
+    pub fn connection_id(metadata: &MetadataMap) -> Result<&str, Status> {
         let connection_id = metadata
             .get(X_DATA_CONNECTION_ID)
             .ok_or(Status::invalid_argument(format!(
@@ -32,9 +33,6 @@ impl QueryContext {
             )))?
             .to_str()
             .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
-        Ok(Self {
-            tenant_id: tenant_id.to_string(),
-            connection_id: connection_id.to_string(),
-        })
+        Ok(connection_id)
     }
 }
