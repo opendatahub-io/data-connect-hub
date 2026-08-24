@@ -438,6 +438,42 @@ NAME                                  READY   STATUS    RESTARTS   AGE
 dch-flight-service-59d944f8f9-xxxxx   1/1     Running   0          6m
 ```
 
+Pod readiness only confirms the gRPC server is listening — it doesn't
+exercise auth or the Flight protocol itself. Verify with a real client,
+in-cluster via port-forward:
+
+```console
+oc port-forward -n $NS svc/dch-flight-service 50051:50051 &
+
+pip install -e 'sdk/python[flight]'   # from the repo root, one-time
+
+python3 - <<PYEOF
+from data_connect_hub import DataConnectClient
+
+client = DataConnectClient(
+    flight_url="grpc+tls://127.0.0.1:50051",
+    token="$(oc whoami -t)",
+    tenant_id="$NS",
+    insecure=True,  # skip cert verification -- 127.0.0.1 won't match the service's cert SAN
+)
+print(client.server_info())
+PYEOF
+```
+
+Expected output:
+
+```
+{'vendor_name': 'Data Connect Hub', 'vendor_version': '0.1.0', 'vendor_arrow_version': '1.3',
+ 'driver_name': 'ADBC Flight SQL Driver - Go', 'driver_version': 'v1.12.0', ...,
+ 'supported_connectors': ['sqlite', 'milvus', 'neo4j', 'postgres', 'elasticsearch', 's3']}
+```
+
+`insecure=True` here only skips certificate verification for the
+port-forwarded connection — it does not disable flight-service's own
+TLS listener or its TokenReview/SAR auth layer. A missing or invalid
+`token` still fails with `UNAUTHENTICATED`, and a `tenant_id` the token
+isn't authorized for still fails with `PERMISSION_DENIED`.
+
 ### Test through the gateway
 
 Get the gateway's external route and test the API with a bearer token.
@@ -491,6 +527,32 @@ Expected output:
 ```
 {"total_count":0,"items":[]}
 ```
+
+```console
+# Flight gRPC through the gateway
+python3 - <<PYEOF
+from data_connect_hub import DataConnectClient
+
+client = DataConnectClient(
+    flight_url="grpc+tls://$GATEWAY_URL:443",
+    token="$TOKEN",
+    tenant_id="$NS",
+    insecure=True,
+)
+print(client.server_info())
+PYEOF
+```
+
+Expected output: the same `server_info()` dict as the
+[direct port-forward check](#verify-services) above.
+
+If this fails instead with `UNAVAILABLE: upstream connect error or
+disconnect/reset before headers`, your gateway's Istio `DestinationRule`
+is missing a TLS policy for flight-service's port (`50051`) — see
+[Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error).
+On RHOAI/ODH `GatewayConfig`-managed gateways this is a platform-owned
+gap that a per-deployment override cannot reliably fix — see that
+section for why.
 
 ## Monitor status
 
