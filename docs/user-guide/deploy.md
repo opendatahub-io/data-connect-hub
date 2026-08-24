@@ -706,29 +706,46 @@ resources need to be touched):
    policy for its port. If the gateway is Istio-backed and traffic still
    fails after steps 1–2 with `UNAVAILABLE: upstream connect error`, the
    gateway's `DestinationRule` needs a `portLevelSettings` entry for
-   flight-service's port (`50051`). Avoid `insecureSkipVerify: true` (the
-   existing entries for the REST service use it, but that's a pre-existing
-   gap in the platform-owned `DestinationRule`, not something to carry
-   forward) — flight-service's certificate is issued by the cluster's
-   internal service-ca, so verify against that instead:
-
-   ```console
-   oc get configmap openshift-service-ca.crt -n openshift-ingress \
-     -o jsonpath='{.data.service-ca\.crt}' > /tmp/service-ca.crt
-   oc create secret generic flight-service-ca-bundle -n openshift-ingress \
-     --from-file=ca.crt=/tmp/service-ca.crt
-   ```
+   flight-service's port (`50051`), matching the existing entries for the
+   REST service:
 
    ```yaml
    - port:
        number: 50051
      tls:
        mode: SIMPLE
-       credentialName: flight-service-ca-bundle
-       sni: dch-flight-service.$NS.svc
-       subjectAltNames:
-         - dch-flight-service.$NS.svc
+       insecureSkipVerify: true
    ```
+
+   `insecureSkipVerify: true` does **not** mean this traffic is
+   unencrypted — `mode: SIMPLE` always makes Envoy originate a real TLS
+   connection to the backend; the flag only skips certificate chain and
+   hostname validation. flight-service still negotiates TLS+ALPN and
+   enforces its own auth layer exactly as it does for the REST-service
+   entry, which already uses this same setting.
+
+   An earlier revision of this doc replaced this snippet with a
+   certificate-verified alternative (`credentialName` + `sni` +
+   `subjectAltNames`, sourced from the cluster's service-ca) in response
+   to review feedback that we should avoid `insecureSkipVerify`. That
+   version is more correct in isolation, but we reverted it after finding
+   the following on a live RHOAI/ROSA cluster: **this `DestinationRule`
+   cannot be durably patched at all, regardless of which variant you use.**
+   It's owned and continuously reconciled by the platform's `GatewayConfig`
+   controller, which resets `portLevelSettings` back to its own desired
+   state (just the pre-existing `8443`/`443` entries) within about a
+   second of any external change — insecure or verified, it makes no
+   difference, neither survives. (The Route TLS certificate from step 2
+   is a plain field the controller doesn't fully own, so that one does
+   persist — this DestinationRule does not.)
+
+   Given that, swapping in the more complex verified variant bought no
+   real benefit: it never stayed applied any better than the simple one.
+   We're keeping the simpler `insecureSkipVerify: true` snippet here as
+   the honest baseline, and treating "this DestinationRule needs a
+   `50051` entry" as a platform gap to fix upstream in ODH's
+   `GatewayConfig` controller — not something to work around from the
+   DCH side, since no `oc patch` will survive the next reconcile.
 
 Both the Route and `DestinationRule` in a RHOAI/ODH deployment are owned
 and reconciled by the platform's `GatewayConfig` controller — file a
