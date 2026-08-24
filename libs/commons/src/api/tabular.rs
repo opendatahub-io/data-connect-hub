@@ -49,6 +49,7 @@ pub trait FlightConnector: Send + Sync {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError>;
 }

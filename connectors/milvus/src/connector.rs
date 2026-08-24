@@ -67,6 +67,7 @@ impl FlightConnector for MilvusConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
@@ -81,18 +82,24 @@ impl FlightConnector for MilvusConnector {
         let uri = format!("http://{host}:{port}");
         let token = credentials.get(KEY_TOKEN).cloned();
         let database = credentials.get(KEY_DATABASE).cloned();
+        let mut config = ConnectConfig::new().uri(&uri);
+        if let Some(ref token) = token {
+            config = config.token(token);
+        }
+        if let Some(ref db) = database {
+            config = config.database(db);
+        }
+
+        if !enable_cache {
+            return Ok(Arc::new(MilvusReader {
+                client: ClientV2::new(&config).await.map_err(map_milvus_error)?,
+            }));
+        }
 
         let cache_key = data_connection.metadata.id.clone();
         let client = self
             .clients
             .try_get_with(cache_key, async {
-                let mut config = ConnectConfig::new().uri(&uri);
-                if let Some(ref token) = token {
-                    config = config.token(token);
-                }
-                if let Some(ref db) = database {
-                    config = config.database(db);
-                }
                 ClientV2::new(&config).await.map_err(map_milvus_error)
             })
             .await

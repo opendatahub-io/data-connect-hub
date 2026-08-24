@@ -1,20 +1,20 @@
+use crate::flight::QueryContext;
 use crate::flight::errors::map_connector_error;
 use crate::flight::service::TabularDataService;
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
-use commons::api::connections::Admin;
-use std::collections::HashMap;
-use std::sync::Arc;
-use uuid::Uuid;
-
-use crate::flight::QueryContext;
 use commons::api::ResourceMetadata;
+use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
+use std::collections::HashMap;
+use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use tracing::info;
+use uuid::Uuid;
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
 
@@ -51,6 +51,11 @@ impl TabularDataService {
         let metadata = request.metadata();
         let query_context = QueryContext::from_request(metadata)?;
 
+        info!(
+            "Checking connection {} for tenant {}",
+            query_context.connection_id, query_context.tenant_id
+        );
+
         let reader = if let Some(mut keys) = parse_credentials_body(&request.get_ref().body)? {
             let dct_id = keys
                 .remove("data_connection_type_id")
@@ -71,31 +76,37 @@ impl TabularDataService {
 
             // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.
             connector
-                .get_reader(&DataConnectionResource {
-                    metadata: ResourceMetadata {
-                        id: Uuid::new_v4().to_string(),
-                        tenant_id: Some(query_context.tenant_id.clone()),
-                        created_at: "2021-01-01".to_string(),
-                        updated_at: "2021-01-01".to_string(),
+                .get_reader(
+                    false,
+                    &DataConnectionResource {
+                        metadata: ResourceMetadata {
+                            id: Uuid::new_v4().to_string(),
+                            tenant_id: Some(query_context.tenant_id.clone()),
+                            created_at: "2021-01-01".to_string(),
+                            updated_at: "2021-01-01".to_string(),
+                        },
+                        resource: DataConnection {
+                            name: "test".to_string(),
+                            data_connection_type_id: dct_id.clone(),
+                            format: DataFormat::Tabular,
+                            admin: Some(admin),
+                            properties: HashMap::new(),
+                        },
+                        status: DataConnectionStatus::default(),
                     },
-                    resource: DataConnection {
-                        name: "test".to_string(),
-                        data_connection_type_id: dct_id.clone(),
-                        format: DataFormat::Tabular,
-                        admin: Some(admin),
-                        properties: HashMap::new(),
-                    },
-                    status: DataConnectionStatus::default(),
-                })
+                )
                 .await
                 .map_err(map_connector_error)?
         } else {
             let (connection, connector) = self.get_connector(&query_context).await?;
-            connector.get_reader(&connection).await.map_err(map_connector_error)?
+            connector
+                .get_reader(true, &connection)
+                .await
+                .map_err(map_connector_error)?
         };
 
         reader.check_connection().await.map_err(map_connector_error)?;
-
+        info!("Connection checked successfully");
         let result = arrow_flight::Result {
             body: Vec::new().into(),
         };
@@ -143,6 +154,18 @@ impl TabularDataService {
     }
 }
 
+/// Parses an Arrow IPC stream containing credentials from the action body.
+///
+/// Returns `None` if the body is empty. Otherwise expects a single `RecordBatch`
+/// with two `Utf8` columns:
+///
+/// | key (Utf8)                  | value (Utf8)  |
+/// |-----------------------------|---------------|
+/// | `data_connection_type_id`   | `<type-id>`   |
+/// | `secret.<credential-name>`  | `<secret>`    |
+///
+/// The `data_connection_type_id` row is required. Rows prefixed with `secret.`
+/// are collected (with the prefix stripped) into the credentials map.
 fn parse_credentials_body(body: &[u8]) -> Result<Option<HashMap<String, String>>, Status> {
     if body.is_empty() {
         return Ok(None);

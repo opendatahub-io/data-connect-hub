@@ -59,6 +59,7 @@ impl FlightConnector for PgConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
@@ -70,6 +71,14 @@ impl FlightConnector for PgConnector {
         let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+
+        if !enable_cache {
+            return Ok(Arc::new(PgReader {
+                pool: PgPool::connect(url.as_str())
+                    .await
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))?,
+            }));
+        }
 
         let pool = self
             .pools

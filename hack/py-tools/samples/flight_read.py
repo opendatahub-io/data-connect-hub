@@ -24,10 +24,8 @@ connectors = reader.read_all()
 print(f"Supported connectors:\n{connectors.to_pandas()}")
 print()
 
-results = list(client.do_action(flight.Action("CheckConnection", b""), options))
-reader = pyarrow.ipc.open_stream(results[0].body.to_pybytes())
-connectors = reader.read_all()
-print(f"Connection checked:\n")
+list(client.do_action(flight.Action("CheckConnection", b""), options))
+print("Connection checked successfully")
 print()
 
 conn = dbapi.connect(

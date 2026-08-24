@@ -89,9 +89,18 @@ impl FlightConnector for S3Connector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+
+        if !enable_cache {
+            return Ok(Arc::new(S3Reader {
+                operator: build_operator(&credentials)?,
+                format_hint: data_connection.resource.properties.get("format").cloned(),
+            }));
+        }
+
         let operator = self
             .operators
             .try_get_with_by_ref(&data_connection.metadata.id, async { build_operator(&credentials) })

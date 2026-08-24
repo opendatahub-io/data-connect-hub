@@ -46,6 +46,7 @@ impl FlightConnector for SqliteConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
@@ -57,6 +58,15 @@ impl FlightConnector for SqliteConnector {
         let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+
+        if !enable_cache {
+            return Ok(Arc::new(SqliteReader {
+                pool: SqlitePool::connect(url.as_str())
+                    .await
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))?,
+            }));
+        }
+
         let pool = self
             .pools
             .try_get_with(url.clone(), async {

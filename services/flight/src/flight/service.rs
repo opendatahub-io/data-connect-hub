@@ -225,7 +225,10 @@ impl TabularDataService {
         let query_context = QueryContext::from_request(metadata)?;
         let (connection, connector) = self.get_connector(&query_context).await?;
 
-        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+        let reader = connector
+            .get_reader(true, &connection)
+            .await
+            .map_err(map_connector_error)?;
 
         let pg_state = reader.schema(query.query.as_str()).await.map_err(map_connector_error)?;
 
@@ -266,7 +269,10 @@ impl TabularDataService {
 
         let (connection, connector) = self.get_connector(&query_context).await?;
 
-        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+        let reader = connector
+            .get_reader(true, &connection)
+            .await
+            .map_err(map_connector_error)?;
 
         let state = reader.schema(query.as_str()).await.map_err(map_connector_error)?;
 

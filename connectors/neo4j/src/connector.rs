@@ -90,9 +90,17 @@ impl FlightConnector for Neo4jConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+
+        if !enable_cache {
+            return Ok(Arc::new(Neo4jReader {
+                graph: build_graph(&credentials).await?,
+            }));
+        }
+
         let cache_key = data_connection.metadata.id.clone();
         let graph = self
             .graphs

@@ -138,9 +138,18 @@ impl FlightConnector for ElasticsearchConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+
+        if !enable_cache {
+            return Ok(Arc::new(ElasticsearchReader {
+                client: build_client(&credentials)?,
+                default_index: None,
+            }));
+        }
+
         let cache_key = data_connection.metadata.id.clone();
         let client = self
             .clients
