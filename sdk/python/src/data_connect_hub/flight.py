@@ -34,7 +34,7 @@ def _is_auth_error(exc: Exception) -> bool:
     return _GRPC_UNAUTHENTICATED in str(exc).lower()
 
 
-class FlightSQLClient:
+class FlightClient:
     """Thin wrapper around ADBC Flight SQL for Data Connect Hub queries.
 
     Parameters
