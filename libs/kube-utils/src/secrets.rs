@@ -9,7 +9,6 @@ use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 pub struct KubeSecretStore {
     client: Client,
@@ -38,7 +37,6 @@ impl SecretStore for KubeSecretStore {
         let ns = namespace.to_string();
         let n = name.to_string();
 
-        info!("Getting secret {key}");
         self.cache
             .try_get_with(key, async move {
                 let api: Api<K8sSecret> = Api::namespaced(client, &ns);
