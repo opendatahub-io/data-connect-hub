@@ -133,6 +133,11 @@ def neo4j_secret() -> str | None:
     return os.environ.get("DCH_NEO4J_SECRET") or None
 
 
+@pytest.fixture(scope="session")
+def uri_secret() -> str | None:
+    return os.environ.get("DCH_URI_SECRET") or None
+
+
 # ---------------------------------------------------------------------------
 # Client fixtures
 # ---------------------------------------------------------------------------
@@ -451,6 +456,40 @@ def neo4j_flight_connection(
         connection_type_id=ct.id,
         data_format="tabular",
         admin=AdminSecretRef(secret_ref=neo4j_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def uri_flight_connection(
+    uri_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create connection type + connection for Flight URI query tests.
+
+    The K8s secret and test HTTP server are prepared by run-e2e.sh.
+    Returns the connection ID. Cleans up REST resources after the module.
+    """
+    if not uri_secret:
+        pytest.skip("DCH_URI_SECRET not set (set DCH_TENANT_URI in env file)")
+
+    ct = rest_client.create_connection_type(
+        name=_unique_name("e2e-uri-type"),
+        provider="uri",
+        description="e2e URI test",
+    )
+    conn = rest_client.create_connection(
+        name=_unique_name("e2e-uri-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        admin=AdminSecretRef(secret_ref=uri_secret),
         properties={},
     )
 

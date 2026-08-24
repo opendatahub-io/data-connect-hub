@@ -66,6 +66,7 @@ DCH_TENANT_NEO4J_URI="${DCH_TENANT_NEO4J_URI:-}"
 DCH_TENANT_NEO4J_ADMIN_PASSWORD="${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}"
 DCH_TENANT_NEO4J_USERNAME="${DCH_TENANT_NEO4J_USERNAME:-dch_reader}"
 DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
+DCH_TENANT_URI="${DCH_TENANT_URI:-}"
 
 E2E_SA_NAME="e2e-user"
 E2E_DENIED_SA_NAME="e2e-denied-user"
@@ -75,6 +76,7 @@ MILVUS_SECRET="e2e-milvus-creds"
 ES_SECRET="e2e-es-creds"
 ES_APIKEY_SECRET="e2e-es-apikey-creds"
 NEO4J_SECRET="e2e-neo4j-creds"
+URI_SECRET="e2e-uri-creds"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 # -------------------------------------------------------------------
@@ -233,6 +235,27 @@ setup_neo4j_secret() {
     fi
 }
 
+setup_uri_server_and_secret() {
+    E2E_URI_ENABLED="false"
+    if [[ -n "$DCH_TENANT_URI" ]]; then
+        # Use externally provided URI
+        kubectl create secret generic "$URI_SECRET" \
+            -n "$DCH_TENANT_ID" \
+            --from-literal="URI=${DCH_TENANT_URI}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        E2E_URI_ENABLED="true"
+    elif [[ "${DCH_URI_DEPLOY_SERVER:-true}" == "true" ]]; then
+        # Deploy a test HTTP server and create the secret automatically
+        bash "$(dirname "$0")/scripts/seed-uri-data.sh" -n "$DCH_TENANT_ID"
+        local uri="http://e2e-uri-server.${DCH_TENANT_ID}.svc:8080"
+        kubectl create secret generic "$URI_SECRET" \
+            -n "$DCH_TENANT_ID" \
+            --from-literal="URI=${uri}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        E2E_URI_ENABLED="true"
+    fi
+}
+
 setup_flight_secret_rbac() {
     local -a secret_names=()
     [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
@@ -241,6 +264,7 @@ setup_flight_secret_rbac() {
     [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
     [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
     [[ "$E2E_NEO4J_ENABLED" == "true" ]] && secret_names+=("--resource-name=$NEO4J_SECRET")
+    [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
 
     if [[ ${#secret_names[@]} -eq 0 ]]; then
         return 0
@@ -369,6 +393,12 @@ ES_APIKEY_EOF
 DCH_NEO4J_SECRET=e2e-neo4j-creds
 NEO4J_EOF
     fi
+
+    if [[ "$E2E_URI_ENABLED" == "true" ]]; then
+        cat >> "$ENV_FILE" <<'URI_EOF'
+DCH_URI_SECRET=e2e-uri-creds
+URI_EOF
+    fi
 }
 
 # ===================================================================
@@ -419,6 +449,7 @@ setup_milvus_secret
 setup_es_secret
 setup_es_apikey_secret
 setup_neo4j_secret
+setup_uri_server_and_secret
 setup_flight_secret_rbac
 
 SECRETS_MSG=""
@@ -427,6 +458,7 @@ SECRETS_MSG=""
 [[ "$E2E_MILVUS_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Milvus"
 [[ "$E2E_ES_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
 [[ "$E2E_NEO4J_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Neo4j"
+[[ "$E2E_URI_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }URI"
 echo "[5/11] ${SECRETS_MSG:-none} secrets + Flight RBAC ready"
 
 # 5. Seed test data

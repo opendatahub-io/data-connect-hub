@@ -59,6 +59,7 @@ pub enum Provider {
     Milvus,
     Elasticsearch,
     Neo4j,
+    Uri,
 }
 
 impl Provider {
@@ -70,6 +71,7 @@ impl Provider {
         Provider::Milvus,
         Provider::Elasticsearch,
         Provider::Neo4j,
+        Provider::Uri,
     ];
 
     /// as_str returns the canonical wire identifier for the provider.
@@ -81,6 +83,7 @@ impl Provider {
             Provider::Milvus => "milvus",
             Provider::Elasticsearch => "elasticsearch",
             Provider::Neo4j => "neo4j",
+            Provider::Uri => "uri",
         }
     }
 

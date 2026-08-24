@@ -131,6 +131,8 @@ pub struct ConnectorsConfig {
     milvus: ConnectorConfigOverride,
     #[serde(default)]
     s3: ConnectorConfigOverride,
+    #[serde(default)]
+    uri: ConnectorConfigOverride,
 }
 
 impl ConnectorsConfig {
@@ -151,6 +153,9 @@ impl ConnectorsConfig {
     }
     pub fn s3(&self) -> ConnectorConfig {
         self.default.merge(self.s3)
+    }
+    pub fn uri(&self) -> ConnectorConfig {
+        self.default.merge(self.uri)
     }
 }
 

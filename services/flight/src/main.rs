@@ -20,6 +20,7 @@ use sqlite_connector::SqliteConnector;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
+use uri_connector::UriConnector;
 
 mod utils;
 
@@ -111,6 +112,11 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
     let neo4j = connectors.neo4j();
     if neo4j.enabled {
         registry = registry.with_connector(Arc::new(Neo4jConnector::new(cache_ttl, cache_idle, cache_cap, neo4j)));
+    }
+
+    let uri = connectors.uri();
+    if uri.enabled {
+        registry = registry.with_connector(Arc::new(UriConnector::new(cache_ttl, cache_idle, cache_cap, uri)));
     }
 
     registry
