@@ -43,4 +43,4 @@ See `env.example` for all available settings. Required fields:
 | Variable | Description |
 |----------|-------------|
 | `DCH_SERVICE_NAMESPACE` | Namespace where DCH services run |
-| `DCH_GATEWAY_URL` | Gateway host or host:port serving REST and Flight (e.g. `dch.apps.example.com`) |
+| `DCH_GATEWAY_ENDPOINT` | Gateway host or host:port serving REST and Flight (e.g. `dch.apps.example.com`) |

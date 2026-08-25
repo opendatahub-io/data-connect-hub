@@ -3,12 +3,12 @@
 Configuration is read from environment variables, typically written
 by setup.sh into .env and loaded at the top of this file.
 
-    DCH_GATEWAY_URL        Gateway host or host:port (REST + Flight)
+    DCH_GATEWAY_ENDPOINT   Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
     DCH_AUTH_TOKEN         Bearer token
-    DCH_INSECURE           Skip TLS verify          (default: false)
+    DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
-    DCH_PG_SECRET      K8s secret name for PG    (set by setup.sh, enables query tests)
+    DCH_PG_SECRET          K8s secret name for PG    (set by setup.sh, enables query tests)
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ if _ENV_FILE.exists():
 
 @pytest.fixture(scope="session")
 def gateway_endpoint() -> str:
-    return os.environ.get("DCH_GATEWAY_URL", "https://localhost:8443")
+    return os.environ.get("DCH_GATEWAY_ENDPOINT", "https://localhost:8443")
 
 
 @pytest.fixture(scope="session")
