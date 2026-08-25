@@ -244,6 +244,38 @@ class TestLazyFlightClient:
         with pytest.raises(DCHConfigError, match="requires the 'flight' extra"):
             client.server_info()
 
+    def test_core_only_package_import_without_flight_extra(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import builtins
+        import importlib
+
+        real_import = builtins.__import__
+        blocked = {"adbc_driver_flightsql", "pyarrow"}
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name.split(".")[0] in blocked:
+                raise ModuleNotFoundError(f"No module named {name!r}")
+            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        for mod in list(sys.modules):
+            if mod.split(".")[0] in blocked:
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+            if mod == "data_connect_hub" or mod.startswith("data_connect_hub."):
+                monkeypatch.delitem(sys.modules, mod, raising=False)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        import data_connect_hub
+
+        importlib.reload(data_connect_hub)
+
+        assert "RecordBatchStream" in data_connect_hub.__all__
+        client = data_connect_hub.DataConnectClient("localhost")
+        with pytest.raises(data_connect_hub.DCHConfigError, match="requires the 'flight' extra"):
+            client.read_batches("SELECT 1", "conn-1")
+
+        with pytest.raises(ModuleNotFoundError):
+            _ = data_connect_hub.RecordBatchStream
+
 
 class TestBuildUrls:
     def test_bare_host(self) -> None:

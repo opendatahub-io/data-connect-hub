@@ -1,6 +1,7 @@
 """Data Connect Hub Python SDK."""
 
-from ._flight import RecordBatchStream
+from typing import TYPE_CHECKING
+
 from ._version import __version__
 from .client import DataConnectClient
 from .exceptions import (
@@ -33,6 +34,18 @@ from .models import (
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
+
+if TYPE_CHECKING:
+    from ._flight import RecordBatchStream
+
+
+def __getattr__(name: str) -> object:
+    if name == "RecordBatchStream":
+        from ._flight import RecordBatchStream
+
+        return RecordBatchStream
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Admin",
