@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from ._flight import FlightClient
 
 
-def _build_urls(url: str) -> tuple[str, str]:
-    """Derive REST and Flight SQL URLs from a single gateway *url*.
+def _build_urls(endpoint: str) -> tuple[str, str]:
+    """Derive REST and Flight SQL URLs from a single gateway *endpoint*.
 
     Accepts a bare host, ``host:port``, or a URL carrying a scheme; any scheme
     given is discarded.  Only TLS is supported (``https`` and ``grpc+tls``);
@@ -37,31 +37,31 @@ def _build_urls(url: str) -> tuple[str, str]:
 
     Returns ``(rest_url, flight_url)``.
     """
-    url = url.strip().rstrip("/")
-    if not url:
-        raise DCHConfigError("url must not be empty")
+    endpoint = endpoint.strip().rstrip("/")
+    if not endpoint:
+        raise DCHConfigError("endpoint must not be empty")
 
-    parsed = urlparse(url if "://" in url else f"//{url}", scheme="https")
+    parsed = urlparse(endpoint if "://" in endpoint else f"//{endpoint}", scheme="https")
 
     if parsed.username or parsed.password:
-        raise DCHConfigError("url must not contain credentials; pass a token or token_provider instead")
+        raise DCHConfigError("endpoint must not contain credentials; pass a token or token_provider instead")
 
     try:
         hostname, port = parsed.hostname, parsed.port
     except ValueError as exc:
-        raise DCHConfigError(f"invalid port in url {url!r}: {exc}") from exc
+        raise DCHConfigError(f"invalid port in endpoint {endpoint!r}: {exc}") from exc
 
     # ``urlparse`` reports an explicit ``:0`` as port 0, which would otherwise
     # be indistinguishable from "no port" and silently fall back to 443.
     if port == 0:
-        raise DCHConfigError(f"invalid port in url {url!r}: port must be between 1 and 65535")
+        raise DCHConfigError(f"invalid port in endpoint {endpoint!r}: port must be between 1 and 65535")
 
     if not hostname:
-        raise DCHConfigError(f"unable to extract host from url: {url!r}")
+        raise DCHConfigError(f"unable to extract host from endpoint: {endpoint!r}")
     if parsed.path:
-        raise DCHConfigError(f"url must not contain a path, got {parsed.path!r} in {url!r}")
+        raise DCHConfigError(f"endpoint must not contain a path, got {parsed.path!r} in {endpoint!r}")
     if parsed.query or parsed.fragment:
-        raise DCHConfigError(f"url must not contain a query string or fragment: {url!r}")
+        raise DCHConfigError(f"endpoint must not contain a query string or fragment: {endpoint!r}")
 
     # IPv6 literals lose their brackets via ``hostname``; restore them.
     netloc = f"[{hostname}]" if ":" in hostname else hostname
@@ -76,10 +76,11 @@ class DataConnectClient:
 
     Parameters
     ----------
-    url : str
-        Gateway host or host:port (e.g. ``gateway.example.com:8443``).
-        The SDK derives the HTTPS and gRPC+TLS URLs automatically.  Only TLS
-        endpoints are supported.
+    endpoint : str
+        Gateway host or host:port (e.g. ``gateway.example.com:8443``).  A
+        scheme is not required and is ignored if present.  The SDK derives
+        the HTTPS and gRPC+TLS URLs automatically.  Only TLS endpoints are
+        supported.
     token : str
         Static Bearer token value (without the "Bearer " prefix).
     token_provider : Callable[[], str], optional
@@ -110,7 +111,7 @@ class DataConnectClient:
 
     def __init__(
         self,
-        url: str,
+        endpoint: str,
         token: str = "",
         tenant_id: str = "",
         *,
@@ -130,7 +131,7 @@ class DataConnectClient:
                 " Please provide either a static token or a token_provider callable, not both."
             )
 
-        rest_url, flight_url = _build_urls(url)
+        rest_url, flight_url = _build_urls(endpoint)
 
         self._rest = RestClient(
             url=rest_url,

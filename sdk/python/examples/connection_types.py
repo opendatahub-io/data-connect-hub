@@ -15,7 +15,7 @@ from data_connect_hub import DataConnectClient
 from data_connect_hub.exceptions import DCHHTTPError
 
 client = DataConnectClient(
-    url=os.getenv("DCH_HOST", "localhost:8443"),
+    endpoint=os.getenv("DCH_HOST", "localhost:8443"),
     token=os.getenv("DCH_TOKEN", ""),
     tenant_id=os.getenv("DCH_TENANT_ID", "opendatahub"),
     ca_cert=os.getenv("DCH_CA_CERT") or None,

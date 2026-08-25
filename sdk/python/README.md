@@ -16,8 +16,9 @@ pip install "sdk/python[flight]"
 
 ## Quick Start
 
-The client takes a single gateway `url` — a host or `host:port` — and derives
-both the REST (`https://`) and Flight SQL (`grpc+tls://`) endpoints from it.
+The client takes a single gateway `endpoint` — a host or `host:port`, no scheme
+required — and derives both the REST (`https://`) and Flight SQL
+(`grpc+tls://`) URLs from it.
 Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control
 certificate verification.
 
@@ -25,14 +26,14 @@ certificate verification.
 from data_connect_hub import AdminSecretRef, DataConnectClient
 
 client = DataConnectClient(
-    url="dch.example.com:8443",
+    endpoint="dch.example.com:8443",
     token="<your-token>",  # or use token_provider= for auto-refresh
     tenant_id="my-tenant",
 )
 
 # Or use a token provider for automatic refresh on 401:
 client = DataConnectClient(
-    url="dch.example.com:8443",
+    endpoint="dch.example.com:8443",
     token_provider=lambda: get_fresh_token(),  # your function; called once, cached, refreshed on 401
     tenant_id="my-tenant",
 )

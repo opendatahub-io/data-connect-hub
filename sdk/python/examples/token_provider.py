@@ -55,7 +55,7 @@ def get_k8s_token() -> str:
 
 
 client = DataConnectClient(
-    url=os.getenv("DCH_HOST", "localhost:8443"),
+    endpoint=os.getenv("DCH_HOST", "localhost:8443"),
     token_provider=get_k8s_token,
     tenant_id=os.getenv("DCH_TENANT_ID", "default"),
 )

@@ -161,11 +161,16 @@ class TestTokenProviderGuard:
 
 
 class TestDerivedUrls:
-    """The single *url* must reach both sub-clients as the right scheme."""
+    """The single *endpoint* must reach both sub-clients as the right scheme."""
 
     def test_rest_client_gets_https_url(self) -> None:
         client = DataConnectClient("gateway.example.com:8443")
         assert client._rest._base_url == "https://gateway.example.com:8443"
+
+    def test_endpoint_accepted_as_keyword(self) -> None:
+        client = DataConnectClient(endpoint="gateway.example.com:8443")
+        assert client._rest._base_url == "https://gateway.example.com:8443"
+        assert client._flight_kwargs["url"] == "grpc+tls://gateway.example.com:8443"
 
     def test_flight_client_gets_grpc_tls_url(self) -> None:
         client = DataConnectClient("gateway.example.com:8443")

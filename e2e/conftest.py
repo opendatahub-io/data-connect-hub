@@ -44,18 +44,18 @@ if _ENV_FILE.exists():
 
 
 @pytest.fixture(scope="session")
-def gateway_url() -> str:
+def gateway_endpoint() -> str:
     return os.environ.get("DCH_GATEWAY_URL", "https://localhost:8443")
 
 
 @pytest.fixture(scope="session")
-def rest_url(gateway_url: str) -> str:
-    """REST base URL the SDK derives from *gateway_url*.
+def rest_url(gateway_endpoint: str) -> str:
+    """REST base URL the SDK derives from *gateway_endpoint*.
 
     Only for the raw ``httpx`` fixture below, so it targets the exact URL the
-    SDK targets; SDK-based tests should take ``gateway_url`` directly.
+    SDK targets; SDK-based tests should take ``gateway_endpoint`` directly.
     """
-    rest, _ = _build_urls(gateway_url)
+    rest, _ = _build_urls(gateway_endpoint)
     return rest
 
 
@@ -151,14 +151,14 @@ def uri_secret() -> str | None:
 
 @pytest.fixture(scope="session")
 def dch_client(
-    gateway_url: str,
+    gateway_endpoint: str,
     tenant_id: str,
     auth_token: str,
     ca_cert: str | None,
     insecure: bool,
 ) -> DataConnectClient:
     client = DataConnectClient(
-        gateway_url,
+        gateway_endpoint,
         token=auth_token,
         tenant_id=tenant_id,
         ca_cert=ca_cert,

@@ -450,12 +450,13 @@ pip install -e 'sdk/python[flight]'   # from the repo root, one-time
 python3 - <<PYEOF
 from data_connect_hub import DataConnectClient
 
-# The SDK takes one URL and derives both the REST and Flight endpoints
-# from it. Here the URL points straight at the port-forwarded
-# flight-service, so only Flight calls work -- a REST call on this client
-# would hit port 50051 and fail. Use the gateway URL (below) for both.
+# The SDK takes one endpoint (host:port, no scheme) and derives both the
+# REST and Flight URLs from it. Here the endpoint points straight at the
+# port-forwarded flight-service, so only Flight calls work -- a REST call on
+# this client would hit port 50051 and fail. Use the gateway endpoint (below)
+# for both.
 client = DataConnectClient(
-    url="127.0.0.1:50051",
+    endpoint="127.0.0.1:50051",
     token="$(oc whoami -t)",
     tenant_id="$NS",
     insecure=True,  # skip cert verification -- 127.0.0.1 won't match the service's cert SAN
@@ -533,12 +534,12 @@ Expected output:
 ```
 
 ```console
-# REST and Flight through the gateway -- one URL covers both
+# REST and Flight through the gateway -- one endpoint covers both
 python3 - <<PYEOF
 from data_connect_hub import DataConnectClient
 
 client = DataConnectClient(
-    url="$GATEWAY_URL:443",
+    endpoint="$GATEWAY_URL:443",
     token="$TOKEN",
     tenant_id="$NS",
     insecure=True,
