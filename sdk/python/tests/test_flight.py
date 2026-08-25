@@ -156,8 +156,7 @@ class TestReadBatches:
         mock_conn.cursor.return_value = _mock_streaming_cursor(table)
         mock_dbapi.connect.return_value = mock_conn
 
-        with flight_client.read_batches("SELECT 1", "conn-1") as stream:
-            batches = list(stream)
+        batches = list(flight_client.read_batches("SELECT 1", "conn-1"))
 
         assert len(batches) >= 1
         combined = pa.Table.from_batches(batches)
@@ -165,54 +164,14 @@ class TestReadBatches:
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
-    def test_schema_accessible(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1, 2, 3]})
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
-        mock_dbapi.connect.return_value = mock_conn
-
-        with flight_client.read_batches("SELECT 1", "conn-1") as stream:
-            assert stream.schema == table.schema
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_read_all_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1, 2, 3]})
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
-        mock_dbapi.connect.return_value = mock_conn
-
-        with flight_client.read_batches("SELECT 1", "conn-1") as stream:
-            result = stream.read_all()
-
-        assert result.equals(table)
-        mock_conn.close.assert_called_once()
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_close_without_context_manager(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1, 2, 3]})
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
-        mock_dbapi.connect.return_value = mock_conn
-
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
-        batches = list(stream)
-        assert len(batches) >= 1
-        mock_conn.close.assert_called_once()
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_close_idempotent(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+    def test_closes_on_exhaustion(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = _mock_streaming_cursor(table)
         mock_dbapi.connect.return_value = mock_conn
 
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
-        stream.close()
-        stream.close()
+        list(flight_client.read_batches("SELECT 1", "conn-1"))
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
@@ -223,10 +182,9 @@ class TestReadBatches:
         mock_conn.cursor.return_value = _mock_streaming_cursor(empty)
         mock_dbapi.connect.return_value = mock_conn
 
-        with flight_client.read_batches("SELECT 1", "conn-1") as stream:
-            batches = list(stream)
-
+        batches = list(flight_client.read_batches("SELECT 1", "conn-1"))
         assert len(batches) == 0
+        mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
     def test_query_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
@@ -238,7 +196,7 @@ class TestReadBatches:
         mock_dbapi.connect.return_value = mock_conn
 
         with pytest.raises(DCHQueryError, match="bad sql"):
-            flight_client.read_batches("BAD SQL", "conn-1")
+            list(flight_client.read_batches("BAD SQL", "conn-1"))
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
@@ -247,7 +205,7 @@ class TestReadBatches:
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
 
         with pytest.raises(DCHConnectionError, match="unreachable"):
-            flight_client.read_batches("SELECT 1", "conn-1")
+            list(flight_client.read_batches("SELECT 1", "conn-1"))
 
     @patch("data_connect_hub._flight.flight_dbapi")
     def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
@@ -258,9 +216,7 @@ class TestReadBatches:
         mock_conn.cursor.return_value = cursor
         mock_dbapi.connect.return_value = mock_conn
 
-        with flight_client.read_batches("SELECT $1", "conn-1", parameters=[42]) as stream:
-            list(stream)
-
+        list(flight_client.read_batches("SELECT $1", "conn-1", parameters=[42]))
         cursor.execute.assert_called_once_with("SELECT $1", [42])
 
     @patch("data_connect_hub._flight.flight_dbapi")
@@ -287,9 +243,7 @@ class TestReadBatches:
             mock_conn_ok,
         ]
 
-        with client.read_batches("SELECT 1", "conn-1") as stream:
-            batches = list(stream)
-
+        batches = list(client.read_batches("SELECT 1", "conn-1"))
         assert call_count == 2
         assert len(batches) >= 1
 
@@ -297,58 +251,23 @@ class TestReadBatches:
     def test_mid_stream_error_mapped_and_closes(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         reader = MagicMock()
-        reader.read_next_batch.side_effect = _OperationalError("stream broke")
+        reader.__iter__ = MagicMock(return_value=iter([]))
+        reader.__next__ = MagicMock(side_effect=_OperationalError("stream broke"))
+
+        def fake_iter(self: object) -> object:
+            raise _OperationalError("stream broke")
+
+        reader.__iter__ = lambda _self: reader
+        reader.__next__ = MagicMock(side_effect=_OperationalError("stream broke"))
         cursor = MagicMock()
         cursor.fetch_record_batch.return_value = reader
         mock_conn = MagicMock()
         mock_conn.cursor.return_value = cursor
         mock_dbapi.connect.return_value = mock_conn
 
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
         with pytest.raises(DCHQueryError, match="stream broke"):
-            next(iter(stream))
+            list(flight_client.read_batches("SELECT 1", "conn-1"))
         mock_conn.close.assert_called_once()
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_read_all_error_mapped_and_closes(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        reader = MagicMock()
-        reader.read_all.side_effect = _OperationalError("stream broke")
-        cursor = MagicMock()
-        cursor.fetch_record_batch.return_value = reader
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = cursor
-        mock_dbapi.connect.return_value = mock_conn
-
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
-        with pytest.raises(DCHQueryError, match="stream broke"):
-            stream.read_all()
-        mock_conn.close.assert_called_once()
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_del_suppresses_close_failure(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1]})
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
-        mock_conn.close.side_effect = RuntimeError("close failed")
-        mock_dbapi.connect.return_value = mock_conn
-
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
-        stream.__del__()
-        mock_conn.close.assert_called_once()
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_iteration_after_close_stops(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1, 2, 3]})
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
-        mock_dbapi.connect.return_value = mock_conn
-
-        stream = flight_client.read_batches("SELECT 1", "conn-1")
-        stream.close()
-        assert list(stream) == []
 
 
 class TestServerInfo:

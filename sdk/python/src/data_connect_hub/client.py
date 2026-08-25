@@ -21,10 +21,12 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     import pandas as pd
     import pyarrow as pa
 
-    from ._flight import FlightClient, RecordBatchStream
+    from ._flight import FlightClient
 
 
 def _build_urls(endpoint: str) -> tuple[str, str]:
@@ -291,17 +293,15 @@ class DataConnectClient:
 
     def read_batches(
         self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
-    ) -> RecordBatchStream:
+    ) -> Generator[pa.RecordBatch, None, None]:
         """Execute *sql* via Flight SQL and return a streaming iterator of RecordBatches.
 
-        Returns a :class:`RecordBatchStream` that yields one
-        :class:`pyarrow.RecordBatch` per iteration.  The caller owns the
-        returned stream and must close it — either by using it as a context
-        manager or by calling :meth:`~RecordBatchStream.close` explicitly::
+        Yields one :class:`pyarrow.RecordBatch` per iteration.  The
+        underlying cursor and connection are closed automatically when the
+        generator is exhausted or closed::
 
-            with client.read_batches("SELECT ...", "conn-1") as stream:
-                for batch in stream:
-                    process(batch)
+            for batch in client.read_batches("SELECT ...", "conn-1"):
+                process(batch)
         """
         return self._require_flight().read_batches(sql, connection_id, parameters=parameters)
 

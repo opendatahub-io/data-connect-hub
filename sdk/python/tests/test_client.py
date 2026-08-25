@@ -268,13 +268,9 @@ class TestLazyFlightClient:
 
         importlib.reload(data_connect_hub)
 
-        assert "RecordBatchStream" in data_connect_hub.__all__
         client = data_connect_hub.DataConnectClient("localhost")
         with pytest.raises(data_connect_hub.DCHConfigError, match="requires the 'flight' extra"):
-            client.read_batches("SELECT 1", "conn-1")
-
-        with pytest.raises(ModuleNotFoundError):
-            _ = data_connect_hub.RecordBatchStream
+            list(client.read_batches("SELECT 1", "conn-1"))
 
 
 class TestBuildUrls:
