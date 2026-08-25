@@ -11,6 +11,9 @@ spec:
   rules:
     - matches:
         - path:
+            type: Exact
+            value: /api/v1/data/health
+        - path:
             type: PathPrefix
             value: /api/v1/data/connections
         - path:
