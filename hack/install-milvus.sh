@@ -66,6 +66,7 @@ else
         --set pulsarv3.enabled=false \
         --set etcd.replicaCount=1 \
         --set minio.mode=standalone \
+        --set minio.resources.requests.memory=512Mi \
         --set standalone.resources.requests.memory=512Mi \
         --set standalone.resources.requests.cpu=200m \
         $SECURITY_OPTS \
