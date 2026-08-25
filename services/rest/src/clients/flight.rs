@@ -1,7 +1,10 @@
+use arrow::array::StringArray;
 use arrow::record_batch::RecordBatch;
 use arrow_flight::Action;
 use arrow_flight::flight_service_client::FlightServiceClient;
+use commons::api::creds::TestCredentials;
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
+use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
@@ -71,6 +74,44 @@ impl FlightClient {
             X_DATA_CONNECTION_ID,
             MetadataValue::try_from(connection_id)
                 .map_err(|_| tonic::Status::invalid_argument("invalid connection_id"))?,
+        );
+
+        let mut stream = client.do_action(request).await?.into_inner();
+        stream.message().await?;
+        Ok(())
+    }
+
+    pub async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status> {
+        let mut keys = vec!["data_connection_type_id".to_string()];
+        let mut values = vec![creds.data_connection_type_id.clone()];
+        for (k, v) in &creds.secret {
+            keys.push(format!("secret.{k}"));
+            values.push(v.clone());
+        }
+
+        let batch = RecordBatch::try_from_iter(vec![
+            ("key", Arc::new(StringArray::from(keys)) as _),
+            ("value", Arc::new(StringArray::from(values)) as _),
+        ])
+        .map_err(|e| tonic::Status::internal(format!("failed to build credentials batch: {e}")))?;
+
+        let mut buf = Vec::new();
+        {
+            let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut buf, &batch.schema())
+                .map_err(|e| tonic::Status::internal(format!("failed to create IPC writer: {e}")))?;
+            writer
+                .write(&batch)
+                .map_err(|e| tonic::Status::internal(format!("failed to write IPC batch: {e}")))?;
+            writer
+                .finish()
+                .map_err(|e| tonic::Status::internal(format!("failed to finish IPC stream: {e}")))?;
+        }
+
+        let mut client = self.client().await?;
+        let mut request = tonic::Request::new(Action::new("CheckConnection", buf));
+        request.metadata_mut().insert(
+            X_TENANT_ID,
+            MetadataValue::try_from(tenant_id).map_err(|_| tonic::Status::invalid_argument("invalid tenant_id"))?,
         );
 
         let mut stream = client.do_action(request).await?.into_inner();

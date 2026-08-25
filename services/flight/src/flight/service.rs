@@ -12,6 +12,7 @@ use arrow_flight::{
         metadata::SqlInfoDataBuilder, server::FlightSqlService,
     },
 };
+use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::storage::{MetaStore, SecretStore};
@@ -199,16 +200,19 @@ impl TabularDataService {
         &self,
         tenant_id: &str,
         data_connection_type_id: &str,
-    ) -> Result<&Arc<dyn FlightConnector>, Status> {
+    ) -> Result<(DataConnectionTypeResource, &Arc<dyn FlightConnector>), Status> {
         let data_connection_type = self
             .meta_store
             .get_data_connection_type(tenant_id, data_connection_type_id)
             .await
             .map_err(map_meta_store_error)?;
 
-        self.connectors_registry
+        let connector = self
+            .connectors_registry
             .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)
+            .map_err(map_connector_error)?;
+
+        Ok((data_connection_type, connector))
     }
 
     async fn handle_get_flight_info_statement(

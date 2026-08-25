@@ -56,3 +56,10 @@ pub enum SecretStoreError {
     #[error("Cannot set secret labels: {0}")]
     CannotSetSecretLabels(String),
 }
+
+/// Errors pertainint to data connection types.
+#[derive(Error, Debug)]
+pub enum DataConnectionTypeError {
+    #[error("Required field {0} is missing")]
+    MissingRequiredField(String),
+}

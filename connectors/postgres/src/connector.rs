@@ -18,6 +18,7 @@ use moka::future::Cache;
 use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
+use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
 
@@ -64,6 +65,8 @@ impl FlightConnector for PgConnector {
         enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+        info!("Creating Postgres reader");
+
         let credentials = match &data_connection.resource.admin {
             Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
             _ => None,
@@ -71,7 +74,7 @@ impl FlightConnector for PgConnector {
         .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
 
         let url = credentials
-            .get("url")
+            .get("URI")
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
 
         if !enable_cache {

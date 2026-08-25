@@ -1,8 +1,8 @@
+use crate::api::ResourceMetadata;
+use crate::api::errors::DataConnectionTypeError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-use crate::api::ResourceMetadata;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnumValue {
@@ -52,6 +52,17 @@ pub struct DataConnectionType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
+}
+
+impl DataConnectionType {
+    pub fn check_credentials(&self, secret: &HashMap<String, String>) -> Result<(), DataConnectionTypeError> {
+        for field in &self.credentials_fields {
+            if field.required && !secret.contains_key(&field.name) {
+                return Err(DataConnectionTypeError::MissingRequiredField(field.name.clone()));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]

@@ -33,13 +33,11 @@ pub async fn verify_data_connection(
             .await
             .map_err(|_| ValidationError::InvalidSecret)?;
 
-        for field in dct.resource.credentials_fields.iter() {
-            if field.required && !secret.properties.contains_key(field.name.as_str()) {
-                return Err(ValidationError::MissingRequiredKey(field.name.clone()));
-            }
-        }
+        dct.resource
+            .check_credentials(&secret.properties)
+            .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
     } else {
-        return Err(ValidationError::MissingRequiredKey("admin.secret_ref".to_string()));
+        return Err(ValidationError::MissingField("admin.secret_ref".to_string()));
     }
 
     match data_connection.resource.format {

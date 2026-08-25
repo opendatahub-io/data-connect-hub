@@ -57,18 +57,24 @@ impl TabularDataService {
                 .remove("data_connection_type_id")
                 .ok_or(Status::invalid_argument("data_connection_type_id is required"))?;
 
-            let credentials: HashMap<String, String> = keys
-                .into_iter()
-                .filter(|(k, _)| k.starts_with("secret."))
-                .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
-                .collect();
+            let credentials: Arc<HashMap<String, String>> = Arc::new(
+                keys.into_iter()
+                    .filter(|(k, _)| k.starts_with("secret."))
+                    .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
+                    .collect(),
+            );
 
             let admin = Admin::Secret {
                 name: String::new(),
-                secret: Arc::new(credentials),
+                secret: credentials.clone(),
             };
 
-            let connector = self.get_connector_by_type_id(tenant_id, &dct_id).await?;
+            let (data_connection_type, connector) = self.get_connector_by_type_id(tenant_id, &dct_id).await?;
+
+            data_connection_type
+                .resource
+                .check_credentials(&credentials.clone())
+                .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
             // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.
             connector

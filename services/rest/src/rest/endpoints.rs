@@ -8,6 +8,7 @@ use actix_web::{HttpResponse, web};
 use chrono::Utc;
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus};
+use commons::api::creds::TestCredentials;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
@@ -280,6 +281,23 @@ pub async fn check_existent_connection(
             return Err(ValidationError::ConnectionCheckFailed(connection_id).into());
         },
     };
+
+    info!("Connection checked successfully");
+    Ok(HttpResponse::NoContent().finish())
+}
+
+pub async fn test_credentials(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    body: web::Json<TestCredentials>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("test_credentials: for tenant {:?}", ctx.tenant_id);
+
+    service
+        .flight_client
+        .test_credentials(&ctx.tenant_id, &body)
+        .await
+        .map_err(|e| ValidationError::ConnectionCheckFailed(e.message().to_string()))?;
 
     info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
