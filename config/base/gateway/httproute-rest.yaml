@@ -25,6 +25,9 @@ spec:
     - matches:
         - path:
             type: PathPrefix
+            value: /grpc.health.v1.Health
+        - path:
+            type: PathPrefix
             value: /arrow.flight.protocol.FlightService
       backendRefs:
         - name: flight-service
