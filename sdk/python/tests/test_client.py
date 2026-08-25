@@ -270,6 +270,11 @@ class TestBuildUrls:
         with pytest.raises(DCHConfigError, match="invalid port"):
             _build_urls("gateway.example.com:99999")
 
+    def test_zero_port_raises_config_error(self) -> None:
+        """``:0`` must fail loudly rather than silently defaulting to 443."""
+        with pytest.raises(DCHConfigError, match="invalid port"):
+            _build_urls("gateway.example.com:0")
+
     def test_non_numeric_port_raises_config_error(self) -> None:
         with pytest.raises(DCHConfigError, match="invalid port"):
             _build_urls("gateway.example.com:https")

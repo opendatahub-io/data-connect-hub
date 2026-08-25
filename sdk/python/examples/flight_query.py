@@ -5,7 +5,8 @@ Usage:
 
 Requires a running DCH gateway (default: localhost:8443).
 Set environment variables to override defaults:
-    DCH_HOST, DCH_TOKEN, DCH_TENANT_ID, DCH_CONNECTION_ID
+    DCH_HOST, DCH_TOKEN, DCH_TENANT_ID, DCH_CONNECTION_ID,
+    DCH_CA_CERT, DCH_INSECURE
 """
 
 import os

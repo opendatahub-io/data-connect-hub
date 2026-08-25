@@ -51,6 +51,11 @@ def _build_urls(url: str) -> tuple[str, str]:
     except ValueError as exc:
         raise DCHConfigError(f"invalid port in url {url!r}: {exc}") from exc
 
+    # ``urlparse`` reports an explicit ``:0`` as port 0, which would otherwise
+    # be indistinguishable from "no port" and silently fall back to 443.
+    if port == 0:
+        raise DCHConfigError(f"invalid port in url {url!r}: port must be between 1 and 65535")
+
     if not hostname:
         raise DCHConfigError(f"unable to extract host from url: {url!r}")
     if parsed.path:
@@ -60,7 +65,7 @@ def _build_urls(url: str) -> tuple[str, str]:
 
     # IPv6 literals lose their brackets via ``hostname``; restore them.
     netloc = f"[{hostname}]" if ":" in hostname else hostname
-    if port:
+    if port is not None:
         netloc = f"{netloc}:{port}"
 
     return f"https://{netloc}", f"grpc+tls://{netloc}"

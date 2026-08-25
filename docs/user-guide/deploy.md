@@ -548,8 +548,9 @@ print(client.server_info())
 PYEOF
 ```
 
-Expected output: the same `server_info()` dict as the
-[direct port-forward check](#verify-services) above.
+Expected output: the connection-type list returned by the
+[REST check](#verify-services) above, followed by the same `server_info()`
+dict as the direct port-forward check — one client, both protocols.
 
 If this fails instead with `UNAVAILABLE: upstream connect error or
 disconnect/reset before headers`, your gateway's Istio `DestinationRule`
