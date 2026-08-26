@@ -44,13 +44,14 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 kube-utils = { workspace = true }
 tower = { workspace = true }
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+rustls = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
 actix-web = { workspace = true }
-metrics = "0.24.6"
-metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+uuid = { workspace = true }
+metrics = { workspace = true }
+metrics-exporter-prometheus = { workspace = true }
 
 [dev-dependencies]
 sqlx = { workspace = true }

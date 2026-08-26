@@ -24,6 +24,10 @@ connectors = reader.read_all()
 print(f"Supported connectors:\n{connectors.to_pandas()}")
 print()
 
+list(client.do_action(flight.Action("CheckConnection", b""), options))
+print("Connection checked successfully")
+print()
+
 conn = dbapi.connect(
     uri,
     db_kwargs={

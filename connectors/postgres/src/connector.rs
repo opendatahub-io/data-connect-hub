@@ -6,7 +6,6 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
@@ -21,8 +20,10 @@ use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
 use std::time::Duration;
+use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
+const KEY_URI: &str = "URI";
 
 fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     if let sqlx::Error::Database(ref db_err) = e
@@ -51,10 +52,12 @@ impl PgConnector {
     }
 }
 
+const PROVIDER: &str = "postgres";
+
 #[async_trait::async_trait]
 impl FlightConnector for PgConnector {
     fn provider(&self) -> String {
-        Provider::Postgres.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -63,8 +66,11 @@ impl FlightConnector for PgConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+        info!("Creating Postgres reader");
+
         let credentials = match &data_connection.resource.admin {
             Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
             _ => None,
@@ -72,8 +78,16 @@ impl FlightConnector for PgConnector {
         .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
 
         let url = credentials
-            .get("url")
+            .get(KEY_URI)
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+
+        if !enable_cache {
+            return Ok(Arc::new(PgReader {
+                pool: PgPool::connect(url.as_str())
+                    .await
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))?,
+            }));
+        }
 
         let connection_timeout = self.config.connection_timeout();
         let pool = self
@@ -101,7 +115,7 @@ impl PgReader {}
 #[async_trait::async_trait]
 impl TabularReader for PgReader {
     fn provider(&self) -> String {
-        Provider::Postgres.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -157,7 +171,11 @@ impl TabularReader for PgReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("PostgreSQL connection check failed".to_string()))?;
         Ok(())
     }
 

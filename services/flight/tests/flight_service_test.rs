@@ -63,6 +63,7 @@ impl MetaStore for TestMetaStore {
             status: DataConnectionStatus {
                 state: DataConnectionState::NotReady,
                 message: None,
+                updated_at: None,
                 phases: vec![],
             },
         })
@@ -80,6 +81,14 @@ impl MetaStore for TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }

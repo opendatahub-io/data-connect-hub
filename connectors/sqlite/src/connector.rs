@@ -4,7 +4,6 @@ use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
-use commons::api::connection_types::Provider;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
 use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
@@ -32,10 +31,12 @@ impl SqliteConnector {
     }
 }
 
+const PROVIDER: &str = "sqlite";
+
 #[async_trait::async_trait]
 impl FlightConnector for SqliteConnector {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -44,6 +45,7 @@ impl FlightConnector for SqliteConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
@@ -55,7 +57,19 @@ impl FlightConnector for SqliteConnector {
         let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+
         let connection_timeout = self.config.connection_timeout();
+
+        if !enable_cache {
+            return Ok(Arc::new(SqliteReader {
+                pool: sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
+                    .await
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))?,
+            }));
+        }
+
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
@@ -79,7 +93,7 @@ pub struct SqliteReader {
 #[async_trait::async_trait]
 impl TabularReader for SqliteReader {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -134,7 +148,11 @@ impl TabularReader for SqliteReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("SQLite connection check failed: {e}")))?;
         Ok(())
     }
 

@@ -8,7 +8,6 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
@@ -86,10 +85,12 @@ async fn build_graph(
         .map_err(|e| ConnectorError::ConnectionError(format!("Failed to connect to Neo4j: {e}")))
 }
 
+const PROVIDER: &str = "neo4j";
+
 #[async_trait::async_trait]
 impl FlightConnector for Neo4jConnector {
     fn provider(&self) -> String {
-        Provider::Neo4j.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -98,11 +99,20 @@ impl FlightConnector for Neo4jConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
-        let cache_key = data_connection.metadata.id.clone();
         let connection_timeout = self.config.connection_timeout();
+
+        if !enable_cache {
+            return Ok(Arc::new(Neo4jReader {
+                graph: build_graph(&credentials, connection_timeout).await?,
+            }));
+        }
+
+        let cache_key = data_connection.metadata.id.clone();
+
         let graph = self
             .graphs
             .try_get_with(cache_key, async { build_graph(&credentials, connection_timeout).await })
@@ -120,7 +130,7 @@ pub struct Neo4jReader {
 #[async_trait::async_trait]
 impl TabularReader for Neo4jReader {
     fn provider(&self) -> String {
-        Provider::Neo4j.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -201,7 +211,7 @@ impl TabularReader for Neo4jReader {
             >)
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
         let mut result = self
             .graph
             .execute(neo4rs::query("RETURN 1"))
@@ -222,7 +232,7 @@ fn map_neo4j_error(e: neo4rs::Error) -> ConnectorError {
     {
         return ConnectorError::InvalidRequest("Data source is read-only".to_string());
     }
-    ConnectorError::ConnectionError(format!("Neo4j error: {e}"))
+    ConnectorError::ConnectionError("Neo4j connection error".to_string())
 }
 
 fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[neo4rs::Row]) -> Result<RecordBatch, ConnectorError> {

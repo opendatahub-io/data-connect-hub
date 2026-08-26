@@ -47,7 +47,7 @@ pub trait TabularReader: Send + Sync {
 
     async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput;
 
-    async fn test_connection(&self) -> Result<(), ConnectorError>;
+    async fn check_connection(&self) -> Result<(), ConnectorError>;
 
     async fn list_tables(
         &self,
@@ -65,6 +65,7 @@ pub trait FlightConnector: Send + Sync {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError>;
 }

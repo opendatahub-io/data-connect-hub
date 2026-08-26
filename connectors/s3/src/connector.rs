@@ -4,13 +4,12 @@ use std::time::Duration;
 
 use crate::format::{self, FileFormat};
 use arrow::datatypes::Schema;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
-use opendal::{EntryMode, Operator, Reader, services::S3};
+use opendal::{EntryMode, Operator, Reader, layers::TimeoutLayer, services::S3};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -20,7 +19,6 @@ const KEY_ENDPOINT: &str = "AWS_S3_ENDPOINT";
 
 pub struct S3Connector {
     operators: Cache<String, Operator>,
-    #[allow(dead_code)]
     config: ConnectorConfig,
 }
 
@@ -52,7 +50,10 @@ fn extract_credentials(
     }
 }
 
-fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, ConnectorError> {
+fn build_operator(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<Operator, ConnectorError> {
     let bucket = credentials
         .get(KEY_BUCKET)
         .ok_or_else(|| ConnectorError::ConfigError(format!("{KEY_BUCKET} is required")))?;
@@ -80,13 +81,18 @@ fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, Con
         builder = builder.endpoint(endpoint);
     }
 
-    Operator::new(builder).map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))
+    let op = Operator::new(builder)
+        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))?
+        .layer(TimeoutLayer::new().with_timeout(connection_timeout));
+    Ok(op)
 }
+
+const PROVIDER: &str = "s3";
 
 #[async_trait::async_trait]
 impl FlightConnector for S3Connector {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -95,12 +101,24 @@ impl FlightConnector for S3Connector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+        let connection_timeout = self.config.connection_timeout();
+
+        if !enable_cache {
+            return Ok(Arc::new(S3Reader {
+                operator: build_operator(&credentials, connection_timeout)?,
+                format_hint: data_connection.resource.properties.get("format").cloned(),
+            }));
+        }
+
         let operator = self
             .operators
-            .try_get_with_by_ref(&data_connection.metadata.id, async { build_operator(&credentials) })
+            .try_get_with_by_ref(&data_connection.metadata.id, async {
+                build_operator(&credentials, connection_timeout)
+            })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get S3 operator: {e}")))?;
 
@@ -132,7 +150,7 @@ impl S3Reader {
 #[async_trait::async_trait]
 impl TabularReader for S3Reader {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -168,8 +186,11 @@ impl TabularReader for S3Reader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
-        Ok(())
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        self.operator
+            .check()
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("Failed to check S3 connection".to_string()))
     }
 
     async fn list_tables(
@@ -308,7 +329,7 @@ mod tests {
     #[test]
     fn test_build_operator_success() {
         let creds = make_credentials();
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -318,7 +339,7 @@ mod tests {
             (KEY_ACCESS_KEY_ID.to_string(), "key".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_BUCKET));
     }
@@ -329,7 +350,7 @@ mod tests {
             (KEY_BUCKET.to_string(), "bucket".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_ACCESS_KEY_ID));
     }
@@ -338,7 +359,7 @@ mod tests {
     fn test_build_operator_with_endpoint() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
         creds.insert(KEY_ENDPOINT.to_string(), "http://minio:9000".to_string());
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -372,7 +393,7 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: None,
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
@@ -384,13 +405,13 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format_with_hint() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("parquet".to_string()),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("jsonl".to_string()),
         };
         assert_eq!(

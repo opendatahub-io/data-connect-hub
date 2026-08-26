@@ -1669,6 +1669,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uri-connector",
+ "uuid",
 ]
 
 [[package]]
@@ -3715,6 +3716,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4332,6 +4334,7 @@ dependencies = [
  "arrow",
  "arrow-flight",
  "async-trait",
+ "chrono",
  "clap",
  "commons",
  "config",
