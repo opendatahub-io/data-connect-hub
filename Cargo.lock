@@ -1668,8 +1668,8 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
- "uuid",
  "uri-connector",
+ "uuid",
 ]
 
 [[package]]

@@ -31,12 +31,6 @@ impl SqliteConnector {
     }
 }
 
-impl SqliteConnector {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 const PROVIDER: &str = "sqlite";
 
 #[async_trait::async_trait]
@@ -64,15 +58,18 @@ impl FlightConnector for SqliteConnector {
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
 
+        let connection_timeout = self.config.connection_timeout();
+
         if !enable_cache {
             return Ok(Arc::new(SqliteReader {
-                pool: SqlitePool::connect(url.as_str())
+                pool: sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))?,
             }));
         }
 
-        let connection_timeout = self.config.connection_timeout();
         let pool = self
             .pools
             .try_get_with(url.clone(), async {

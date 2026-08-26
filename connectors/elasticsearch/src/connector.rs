@@ -152,16 +152,16 @@ impl FlightConnector for ElasticsearchConnector {
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
-
+        let connection_timeout = self.config.connection_timeout();
         if !enable_cache {
             return Ok(Arc::new(ElasticsearchReader {
-                client: build_client(&credentials)?,
+                client: build_client(&credentials, connection_timeout)?,
                 default_index: None,
             }));
         }
 
         let cache_key = data_connection.metadata.id.clone();
-        let connection_timeout = self.config.connection_timeout();
+
         let client = self
             .clients
             .try_get_with(cache_key, async { build_client(&credentials, connection_timeout) })

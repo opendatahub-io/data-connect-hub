@@ -19,8 +19,8 @@ use moka::future::Cache;
 use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
-use tracing::info;
 use std::time::Duration;
+use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
 

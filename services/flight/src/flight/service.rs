@@ -33,7 +33,8 @@ const OPERATION_STATEMENT: &str = "statement";
 const STATUS_OK: &str = "OK";
 
 const OPERATION_TABLES: &str = "tables";
-const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
+const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";
+const X_TENANT_ID: &str = "x-tenant-id";
 
 fn grpc_status_label(status: &Status) -> &'static str {
     match status.code() {
@@ -262,7 +263,10 @@ impl TabularDataService {
             .get_connector(data_connection_type.resource.provider.as_str())
             .map_err(map_connector_error)?;
 
-        let reader = connector.get_reader(&connection).await.map_err(map_connector_error)?;
+        let reader = connector
+            .get_reader(true, &connection)
+            .await
+            .map_err(map_connector_error)?;
         let filter = query.table_name_filter_pattern.clone();
         let include_schema = query.include_schema;
         let tables = reader
@@ -306,27 +310,6 @@ impl TabularDataService {
         ))
     }
 
-    async fn handle_get_flight_info_statement(
-        &self,
-        tenant_id: &str,
-        connection_id: &str,
-    ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
-        let connection = self.get_connection(tenant_id, connection_id).await?;
-
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-
-        Ok((
-            connection,
-            self.connectors_registry
-                .get_connector(data_connection_type.resource.provider.as_str())
-                .map_err(map_connector_error)?,
-        ))
-    }
-
     pub(crate) async fn get_connector_by_type_id(
         &self,
         tenant_id: &str,
@@ -346,6 +329,27 @@ impl TabularDataService {
         Ok((data_connection_type, connector))
     }
 
+    pub(crate) async fn get_connector_by_connection_id(
+        &self,
+        tenant_id: &str,
+        data_connection_id: &str,
+    ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
+        let connection = self.get_connection(tenant_id, data_connection_id).await?;
+
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
+            .await
+            .map_err(map_meta_store_error)?;
+
+        let connector = self
+            .connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?;
+
+        Ok((connection, connector))
+    }
+
     async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,
@@ -356,7 +360,7 @@ impl TabularDataService {
         let metadata = request.metadata();
         let tenant_id = QueryContext::tenant_id(metadata)?;
         let connection_id = QueryContext::connection_id(metadata)?;
-        let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
             .get_reader(true, &connection)
@@ -400,7 +404,7 @@ impl TabularDataService {
 
         let tenant_id = QueryContext::tenant_id(metadata)?;
         let connection_id = QueryContext::connection_id(metadata)?;
-        let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
             .get_reader(true, &connection)

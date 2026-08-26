@@ -103,15 +103,16 @@ impl FlightConnector for Neo4jConnector {
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+        let connection_timeout = self.config.connection_timeout();
 
         if !enable_cache {
             return Ok(Arc::new(Neo4jReader {
-                graph: build_graph(&credentials).await?,
+                graph: build_graph(&credentials, connection_timeout).await?,
             }));
         }
 
         let cache_key = data_connection.metadata.id.clone();
-        let connection_timeout = self.config.connection_timeout();
+
         let graph = self
             .graphs
             .try_get_with(cache_key, async { build_graph(&credentials, connection_timeout).await })

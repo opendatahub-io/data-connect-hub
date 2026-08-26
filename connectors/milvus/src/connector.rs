@@ -85,7 +85,9 @@ impl FlightConnector for MilvusConnector {
         let uri = format!("http://{host}:{port}");
         let token = credentials.get(KEY_TOKEN).cloned();
         let database = credentials.get(KEY_DATABASE).cloned();
-        let mut config = ConnectConfig::new().uri(&uri);
+
+        let connection_timeout = self.config.connection_timeout();
+        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
         if let Some(ref token) = token {
             config = config.token(token);
         }
@@ -100,7 +102,7 @@ impl FlightConnector for MilvusConnector {
         }
 
         let cache_key = data_connection.metadata.id.clone();
-        let connection_timeout = self.config.connection_timeout();
+
         let client = self
             .clients
             .try_get_with(cache_key, async {

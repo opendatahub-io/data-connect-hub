@@ -101,7 +101,7 @@ impl TabularDataService {
                 .map_err(map_connector_error)?
         } else {
             let connection_id = QueryContext::connection_id(metadata)?;
-            let (connection, connector) = self.get_connector(tenant_id, connection_id).await?;
+            let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
             connector
                 .get_reader(true, &connection)
                 .await
