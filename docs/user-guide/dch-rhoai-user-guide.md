@@ -36,7 +36,7 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - You have installed `helm` which will be used to install DCH operator.
 - You have installed `curl`, `grpcurl`. We will use these to test DCH REST and flight service. There are different versions of `grpcurl` and they work differently. `grpcurl` used in this document was installed with `go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest`.
 - You have installed `jq` which will be used to display json.
-- You have logged in as a user with cluster-admin privileges.
+- You have logged in as a user with cluster-admin privileges - the cluster admin.
 - You have installed {productname-long} {vernum}.
 - A `DataScienceClusterInitialization` (DSCI) exists in your cluster. The `DataScienceClusterInitialization` gets created by the Red Hat OpenShift-AI operator out of the box. Verify DSCI as follows:
   ```
@@ -48,11 +48,11 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - By design, DCH related components are in different namespaces. Here is the list of the namespaces for you to note:
   - `redhat-ods-applications`: This is where DCH operator runs.
   - `openshift-ingress`: This is where the `data-science-gateway-class` `gateways` are.
-  - Tenant-infra-namespaces: A tenant's DCH services run in its infrastructure namespace. For this demo, we will use `dch-infra-example` namespace. You can create a namespace as follows:
+  - Tenant-infra-namespaces: A tenant's DCH services run in its infrastructure namespace. For Dev Preview, DCH supports only `soft tenancy` model where there is only 1 DCH instance in the whole cluster for all the tenants. For this demo, we will use `dch-infra-example` namespace. You can create a namespace as follows:
     ```
     $ oc new-project dch-infra-example
     ```
-  - Tenant-namespaces: A tenant's credential secrets are in its namespace. For this demo, we will use `dch-example` namespace. You can create a namespace as follows:
+  - Tenant-namespaces: A tenant is a user of DCH service. A tenant's credential secrets are in its namespace. For this demo, we will use `dch-example` namespace. You can create a namespace as follows:
     ```
     $ oc new-project dch-example
     ```
@@ -100,7 +100,10 @@ As a cluster admin, you can install DCH operator.
 - For Post Dev Preview, you can install the operator as follows: [TBD]
 
 ### Install `DataConnectService`
-Once the DCH operator is running and there's an available `Gateway`, as a tenant admin, you can install `DataConnectService` into your tenant namespace. This creates a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. Run the commands in [scripts/install-dch-services.sh](scripts/install-dch-services.sh) to create `DataConnectService` CR.
+Currently DCH only support `soft tenancy` model where there's only 1 instance of DCH service in the whole cluster. All tenants share this one DCH service, and this instance will be managed by cluster admin, not by tenant admins.
+
+
+Once the DCH operator is running and there's an available `Gateway`, as a cluster admin, you can install the `DataConnectService`. This creates a REST service, a flight service, and `HttpRoute` attaching to the `Gateway`. Run the commands in [scripts/install-dch-services.sh](scripts/install-dch-services.sh) to create `DataConnectService` CR in `dch-infra-example` namespace.
 
 You can verify the `DataConnectService` as follows:
 - Verify all pods are up and running:
@@ -118,11 +121,11 @@ You can verify the `DataConnectService` as follows:
   ```
 
 ### Prepare Test Users
-There are 2 cluster roles in DCH; namely, `dch-read` and `dch-read-write`. The `dch-read` role has read-only permissions. The `dch-read-write` role has all permissions. To only ingest data, users need to have `dch-read` role. To ingest data as well as to create connection types and connections, users need to have `dch-read-write` role. For clarity, We refer to a user with read/write access as `DCH admin user` and `DCH user` for any user with read access.
+There are 2 cluster roles in DCH; namely, `dch-read` and `dch-read-write`. The `dch-read` role has read-only permissions. The `dch-read-write` role has all permissions. To only ingest data, users need to have `dch-read` role. To ingest data as well as to create connection types and connections, users need to have `dch-read-write` role. For clarity, we refer to a user with read/write access as `DCH admin user` and `DCH user` for any user with read access.
 
 #### Create Test Users
-An admin can create users who consume DCH services.
-For the purpose of the demo, we create `serviceaccount` (SA) instead of users in `dch-example` namespace.
+The cluster admin can create users who consume DCH services.
+For the purpose of the demo, we create `serviceaccount` (SA) instead of users in `dch-example` tenant namespace.
 You can run the commands in [scripts/create-test-user.sh](scripts/create-test-user.sh) to create `dch-test-user` SA in `dch-example` namespace:
 
 You can verify the users as follows:
@@ -133,8 +136,8 @@ dch-test-user      1         3m7s
 ```
 
 #### Authorize Test User
-A tenant admin can authorize users to consume the tenant's DCH services.
-To allow `dch-test-user` to have read/write access, you can run the commands in [scripts/auth-test-user.sh](scripts/auth-test-user.sh). You can verify as follows:
+The cluster admin can authorize users to consume the tenant's DCH services.
+To allow `dch-test-user` of `dch-example` tenant to have read/write access, you can run the commands in [scripts/auth-test-user.sh](scripts/auth-test-user.sh). You can verify as follows:
 ```console
 $  oc get rolebindings -n dch-example dch-test-user-dch-read-write
 NAME                           ROLE                         AGE
