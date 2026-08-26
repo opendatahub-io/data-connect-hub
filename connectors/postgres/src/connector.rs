@@ -23,6 +23,7 @@ use std::time::Duration;
 use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
+const KEY_URI: &str = "URI";
 
 fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     if let sqlx::Error::Database(ref db_err) = e
@@ -77,7 +78,7 @@ impl FlightConnector for PgConnector {
         .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
 
         let url = credentials
-            .get("URI")
+            .get(KEY_URI)
             .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
 
         if !enable_cache {
