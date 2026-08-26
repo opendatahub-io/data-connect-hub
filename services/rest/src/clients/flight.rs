@@ -1,4 +1,6 @@
 use arrow::array::AsArray;
+use arrow::array::StringArray;
+use arrow::record_batch::RecordBatch;
 use arrow_flight::Action;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use commons::api::creds::TestCredentials;
