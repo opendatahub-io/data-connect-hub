@@ -159,12 +159,17 @@ class FlightClient:
         """Execute *sql* and return a streaming iterator of RecordBatches.
 
         Yields one :class:`pyarrow.RecordBatch` per iteration.  The
-        underlying cursor and connection are closed automatically when the
-        generator is exhausted or closed::
+        connection is opened and the cursor closed automatically when the
+        generator is first iterated and when it is exhausted or closed::
 
             for batch in client.read_batches("SELECT ...", "conn-1"):
                 process(batch)
         """
+        return self._iter_batches(sql, connection_id, parameters)
+
+    def _iter_batches(
+        self, sql: str, connection_id: str, parameters: Sequence[Any] | None
+    ) -> Generator[pa.RecordBatch, None, None]:
         try:
             conn = self._connect(connection_id)
         except DCHConnectionError as exc:
@@ -173,11 +178,6 @@ class FlightClient:
                 conn = self._connect(connection_id)
             else:
                 raise
-        return self._iter_batches(conn, sql, parameters)
-
-    def _iter_batches(
-        self, conn: flight_dbapi.Connection, sql: str, parameters: Sequence[Any] | None
-    ) -> Generator[pa.RecordBatch, None, None]:
         try:
             cursor = conn.cursor()
             try:
@@ -190,7 +190,8 @@ class FlightClient:
                 with contextlib.suppress(Exception):
                     cursor.close()
         finally:
-            conn.close()
+            with contextlib.suppress(Exception):
+                conn.close()
 
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* and return the result as a pandas DataFrame."""
