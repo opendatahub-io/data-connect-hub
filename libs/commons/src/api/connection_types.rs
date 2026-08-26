@@ -55,7 +55,7 @@ pub struct DataConnectionType {
 }
 
 impl DataConnectionType {
-    pub fn check_credentials(&self, secret: &HashMap<String, String>) -> Result<(), DataConnectionTypeError> {
+    pub fn check_credentials_schema(&self, secret: &HashMap<String, String>) -> Result<(), DataConnectionTypeError> {
         for field in &self.credentials_fields {
             if field.required && !secret.contains_key(&field.name) {
                 return Err(DataConnectionTypeError::MissingRequiredField(field.name.clone()));

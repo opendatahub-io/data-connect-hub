@@ -73,7 +73,7 @@ impl TabularDataService {
 
             data_connection_type
                 .resource
-                .check_credentials(&credentials.clone())
+                .check_credentials_schema(&credentials.clone())
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
             // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.

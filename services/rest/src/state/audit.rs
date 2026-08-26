@@ -33,7 +33,7 @@ pub async fn verify_data_connection(
             .map_err(|_| ValidationError::InvalidSecret)?;
 
         dct.resource
-            .check_credentials(&secret.properties)
+            .check_credentials_schema(&secret.properties)
             .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
     } else {
         return Err(ValidationError::MissingField("admin.secret_ref".to_string()));
