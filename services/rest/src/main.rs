@@ -41,10 +41,6 @@ struct CommandLineArgs {
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/api/v1/data/health", web::get().to(health))
-        .route(
-            "/api-internal/v1/audit/data-connection-types",
-            web::post().to(audit_connection_types),
-        )
         .service(
             web::scope("/api/v1/data")
                 .wrap(middleware::from_fn(validate_headers))

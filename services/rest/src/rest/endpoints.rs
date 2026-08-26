@@ -2,7 +2,7 @@ use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
-use crate::state::audit::audit_data_connection_types;
+use crate::rest::update_connection_type_status;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -179,6 +179,8 @@ pub async fn create_connection_type(
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
         .await?;
 
+    update_connection_type_status(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
+
     Ok(HttpResponse::Created().json(connection_type))
 }
 
@@ -207,6 +209,8 @@ pub async fn patch_connection_type(
         .meta_store
         .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
         .await?;
+
+    update_connection_type_status(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
 
     Ok(HttpResponse::Ok().json(connection_type))
 }
@@ -243,12 +247,6 @@ pub async fn get_ingestion_data(
     _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
-}
-
-pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
-    info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
-    Ok(HttpResponse::Accepted().finish())
 }
 
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {

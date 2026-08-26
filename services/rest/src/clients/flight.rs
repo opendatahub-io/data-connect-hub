@@ -1,8 +1,15 @@
-use arrow::record_batch::RecordBatch;
+use arrow::array::AsArray;
 use arrow_flight::Action;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use tokio::sync::OnceCell;
 use tonic::transport::Channel;
+
+#[derive(Debug, Clone)]
+pub struct SupportedConnector {
+    pub name: String,
+    #[allow(dead_code)]
+    pub description: String,
+}
 
 pub struct FlightClient {
     endpoint: String,
@@ -31,7 +38,7 @@ impl FlightClient {
             .cloned()
     }
 
-    pub async fn get_supported_connectors(&self) -> Result<RecordBatch, tonic::Status> {
+    pub async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let action = Action::new("GetSupportedConnectors", "");
 
@@ -53,7 +60,24 @@ impl FlightClient {
             ));
         }
 
-        arrow::compute::concat_batches(&batches[0].schema(), &batches)
-            .map_err(|e| tonic::Status::internal(format!("failed to concat batches: {e}")))
+        let batch = arrow::compute::concat_batches(&batches[0].schema(), &batches)
+            .map_err(|e| tonic::Status::internal(format!("failed to concat batches: {e}")))?;
+
+        let names = batch
+            .column_by_name("name")
+            .ok_or_else(|| tonic::Status::internal("missing 'name' column"))?
+            .as_string::<i32>();
+
+        let descriptions = batch
+            .column_by_name("description")
+            .ok_or_else(|| tonic::Status::internal("missing 'description' column"))?
+            .as_string::<i32>();
+
+        Ok((0..batch.num_rows())
+            .map(|i| SupportedConnector {
+                name: names.value(i).to_string(),
+                description: descriptions.value(i).to_string(),
+            })
+            .collect())
     }
 }
