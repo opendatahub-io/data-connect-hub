@@ -66,7 +66,7 @@ else
         --set replicas=1 \
         --set minimumMasterNodes=1 \
         --set secret.password="$PASSWORD" \
-        --set resources.requests.memory=1Gi \
+        --set resources.requests.memory=512Mi \
         --set resources.requests.cpu=500m \
         --set persistence.enabled=true \
         $SECURITY_OPTS \

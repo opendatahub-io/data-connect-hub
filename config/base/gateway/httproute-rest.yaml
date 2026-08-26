@@ -11,6 +11,9 @@ spec:
   rules:
     - matches:
         - path:
+            type: Exact
+            value: /api/v1/data/health
+        - path:
             type: PathPrefix
             value: /api/v1/data/connections
         - path:
@@ -20,6 +23,9 @@ spec:
         - name: rest-service
           port: 8443
     - matches:
+        - path:
+            type: PathPrefix
+            value: /grpc.health.v1.Health
         - path:
             type: PathPrefix
             value: /arrow.flight.protocol.FlightService

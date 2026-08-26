@@ -9,6 +9,7 @@ members = [
     "connectors/milvus",
     "connectors/elasticsearch",
     "connectors/neo4j",
+    "connectors/uri",
     "services/flight",
     "services/rest",
 ]
@@ -28,6 +29,7 @@ s3-connector = { path = "connectors/s3" }
 milvus-connector = { path = "connectors/milvus" }
 elasticsearch-connector = { path = "connectors/elasticsearch" }
 neo4j-connector = { path = "connectors/neo4j" }
+uri-connector = { path = "connectors/uri" }
 milvus-sdk-rust = "2.6"
 neo4rs = "0.8"
 kube-utils = { path = "libs/kube-utils" }

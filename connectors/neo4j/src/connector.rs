@@ -11,6 +11,7 @@ use arrow::record_batch::RecordBatch;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use futures::Stream;
 use moka::future::Cache;
 use neo4rs::{BoltType, Graph};
@@ -24,16 +25,18 @@ const KEY_DATABASE: &str = "NEO4J_DATABASE";
 
 pub struct Neo4jConnector {
     graphs: Cache<String, Graph>,
+    config: ConnectorConfig,
 }
 
 impl Neo4jConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             graphs: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
@@ -49,7 +52,10 @@ fn extract_credentials(
     }
 }
 
-async fn build_graph(credentials: &HashMap<String, String>) -> Result<Graph, ConnectorError> {
+async fn build_graph(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<Graph, ConnectorError> {
     let uri = credentials
         .get(KEY_URI)
         .ok_or_else(|| ConnectorError::ConnectionError("NEO4J_URI is required".to_string()))?;
@@ -73,8 +79,9 @@ async fn build_graph(credentials: &HashMap<String, String>) -> Result<Graph, Con
         .build()
         .map_err(|e| ConnectorError::ConnectionError(format!("Invalid Neo4j config: {e}")))?;
 
-    Graph::connect(config)
+    tokio::time::timeout(connection_timeout, Graph::connect(config))
         .await
+        .map_err(|_| ConnectorError::ConnectionError("Connection timeout".to_string()))?
         .map_err(|e| ConnectorError::ConnectionError(format!("Failed to connect to Neo4j: {e}")))
 }
 
@@ -104,9 +111,10 @@ impl FlightConnector for Neo4jConnector {
         }
 
         let cache_key = data_connection.metadata.id.clone();
+        let connection_timeout = self.config.connection_timeout();
         let graph = self
             .graphs
-            .try_get_with(cache_key, async { build_graph(&credentials).await })
+            .try_get_with(cache_key, async { build_graph(&credentials, connection_timeout).await })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Neo4j client: {e}")))?;
 
@@ -335,13 +343,23 @@ mod tests {
 
     #[test]
     fn test_connector_provider() {
-        let connector = Neo4jConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = Neo4jConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "neo4j");
     }
 
     #[test]
     fn test_connector_description() {
-        let connector = Neo4jConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = Neo4jConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.description(), "Neo4j graph database connector");
     }
 

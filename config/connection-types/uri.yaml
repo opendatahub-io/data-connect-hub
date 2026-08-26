@@ -1,0 +1,29 @@
+name: URI
+provider: uri
+description: HTTP/REST JSON API endpoint
+credentials_fields:
+  - name: URI
+    label: URI
+    description: Base URL for the HTTP endpoint
+    required: true
+    type: string
+  - name: TOKEN
+    label: Token
+    description: Bearer token for authentication (takes precedence over username/password)
+    required: false
+    type: string
+  - name: USERNAME
+    label: Username
+    description: Username for HTTP Basic authentication
+    required: false
+    type: string
+  - name: PASSWORD
+    label: Password
+    description: Password for HTTP Basic authentication
+    required: false
+    type: string
+  - name: CA_CERT
+    label: CA Certificate
+    description: CA certificate for custom TLS verification
+    required: false
+    type: string
