@@ -8,8 +8,9 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
+use commons::api::tabular::CredentialsResolver;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
@@ -86,17 +87,6 @@ impl ElasticsearchConnector {
     }
 }
 
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "Elasticsearch credentials are required".to_string(),
-        )),
-    }
-}
-
 fn build_client(
     credentials: &HashMap<String, String>,
     connection_timeout: Duration,
@@ -148,23 +138,19 @@ impl FlightConnector for ElasticsearchConnector {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
         let connection_timeout = self.config.connection_timeout();
-        if !enable_cache {
-            return Ok(Arc::new(ElasticsearchReader {
-                client: build_client(&credentials, connection_timeout)?,
-                default_index: None,
-            }));
-        }
+        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
-            .try_get_with(cache_key, async { build_client(&credentials, connection_timeout) })
+            .try_get_with(cache_key, async {
+                build_client(&credentials, connection_timeout)
+            })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Elasticsearch client: {e}")))?;
 
@@ -495,56 +481,6 @@ mod tests {
             ConnectorConfig::default(),
         );
         assert_eq!(connector.provider(), "elasticsearch");
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("t-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-es".to_string(),
-                data_connection_type_id: "es-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-es".to_string(),
-                    secret: Arc::new(HashMap::from([(
-                        KEY_HOST.to_string(),
-                        "http://localhost:9200".to_string(),
-                    )])),
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_HOST).unwrap(), "http://localhost:9200");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("t-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-es".to_string(),
-                data_connection_type_id: "es-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: None,
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        assert!(extract_credentials(&conn).is_err());
     }
 
     #[test]

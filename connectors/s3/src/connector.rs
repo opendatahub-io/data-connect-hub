@@ -4,8 +4,9 @@ use std::time::Duration;
 
 use crate::format::{self, FileFormat};
 use arrow::datatypes::Schema;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
+use commons::api::tabular::CredentialsResolver;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
@@ -36,17 +37,6 @@ impl S3Connector {
 
     pub async fn insert_operator(&self, connection_id: &str, operator: Operator) {
         self.operators.insert(connection_id.to_string(), operator).await;
-    }
-}
-
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "S3 credentials are required".to_string(),
-        )),
     }
 }
 
@@ -101,18 +91,11 @@ impl FlightConnector for S3Connector {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
         let connection_timeout = self.config.connection_timeout();
-
-        if !enable_cache {
-            return Ok(Arc::new(S3Reader {
-                operator: build_operator(&credentials, connection_timeout)?,
-                format_hint: data_connection.resource.properties.get("format").cloned(),
-            }));
-        }
+        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let operator = self
             .operators
@@ -278,8 +261,6 @@ fn sql_like_match(value: &str, pattern: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commons::api::ResourceMetadata;
-    use commons::api::connections::{DataConnection, DataFormat};
 
     fn make_credentials() -> Arc<HashMap<String, String>> {
         Arc::new(HashMap::from([
@@ -291,28 +272,6 @@ mod tests {
             ),
             (KEY_REGION.to_string(), "us-east-1".to_string()),
         ]))
-    }
-
-    fn make_connection(credentials: Arc<HashMap<String, String>>) -> DataConnectionResource {
-        DataConnectionResource {
-            metadata: ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: DataConnection {
-                name: "test-s3".to_string(),
-                data_connection_type_id: "s3-type".to_string(),
-                format: DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-s3".to_string(),
-                    secret: credentials,
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        }
     }
 
     #[test]
@@ -361,33 +320,6 @@ mod tests {
         creds.insert(KEY_ENDPOINT.to_string(), "http://minio:9000".to_string());
         let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let creds = make_credentials();
-        let conn = make_connection(creds.clone());
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_BUCKET).unwrap(), "test-bucket");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let mut conn = make_connection(make_credentials());
-        conn.resource.admin = None;
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_credentials_secret_ref() {
-        let mut conn = make_connection(make_credentials());
-        conn.resource.admin = Some(Admin::SecretRef {
-            secret_ref: "some-ref".to_string(),
-        });
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
     }
 
     #[test]

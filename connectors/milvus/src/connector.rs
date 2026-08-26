@@ -7,8 +7,9 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
+use commons::api::tabular::CredentialsResolver;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
 use commons::utils::config::ConnectorConfig;
 use milvus::v2::prelude::{
@@ -41,16 +42,29 @@ impl MilvusConnector {
             config,
         }
     }
-}
 
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "Milvus credentials are required".to_string(),
-        )),
+    fn make_config(&self, credentials: &HashMap<String, String>) -> Result<ConnectConfig, ConnectorError> {
+        let host = credentials
+            .get(KEY_HOST)
+            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_HOST is required".to_string()))?
+            .clone();
+
+        let port = credentials.get(KEY_PORT).map(|s| s.as_str()).unwrap_or(DEFAULT_PORT);
+
+        let uri = format!("http://{host}:{port}");
+        let token = credentials.get(KEY_TOKEN).cloned();
+        let database = credentials.get(KEY_DATABASE).cloned();
+
+        let connection_timeout = self.config.connection_timeout();
+
+        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
+        if let Some(ref token) = token {
+            config = config.token(token);
+        }
+        if let Some(ref db) = database {
+            config = config.database(db);
+        }
+        Ok(config)
     }
 }
 
@@ -70,43 +84,19 @@ impl FlightConnector for MilvusConnector {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
-
-        let host = credentials
-            .get(KEY_HOST)
-            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_HOST is required".to_string()))?
-            .clone();
-
-        let port = credentials.get(KEY_PORT).map(|s| s.as_str()).unwrap_or(DEFAULT_PORT);
-
-        let uri = format!("http://{host}:{port}");
-        let token = credentials.get(KEY_TOKEN).cloned();
-        let database = credentials.get(KEY_DATABASE).cloned();
-
-        let connection_timeout = self.config.connection_timeout();
-        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
-        if let Some(ref token) = token {
-            config = config.token(token);
-        }
-        if let Some(ref db) = database {
-            config = config.database(db);
-        }
-
-        if !enable_cache {
-            return Ok(Arc::new(MilvusReader {
-                client: ClientV2::new(&config).await.map_err(map_milvus_error)?,
-            }));
-        }
+        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
             .try_get_with(cache_key, async {
-                ClientV2::new(&config).await.map_err(map_milvus_error)
+                ClientV2::new(&self.make_config(&credentials)?)
+                    .await
+                    .map_err(map_milvus_error)
             })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Milvus client: {e}")))?;
@@ -500,59 +490,6 @@ mod tests {
             ConnectorConfig::default(),
         );
         assert_eq!(connector.provider(), "milvus");
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-milvus".to_string(),
-                data_connection_type_id: "milvus-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-milvus".to_string(),
-                    secret: Arc::new(HashMap::from([
-                        (KEY_HOST.to_string(), "localhost".to_string()),
-                        (KEY_PORT.to_string(), "19530".to_string()),
-                        (KEY_TOKEN.to_string(), "root:milvus".to_string()),
-                        (KEY_DATABASE.to_string(), "default".to_string()),
-                    ])),
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_HOST).unwrap(), "localhost");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-milvus".to_string(),
-                data_connection_type_id: "milvus-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: None,
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
     }
 
     #[test]

@@ -3,11 +3,16 @@ use crate::api::errors::ConnectorError;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use futures::Stream;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 
 pub type OutputStream = Pin<Box<dyn Stream<Item = Result<RecordBatch, ConnectorError>> + Send>>;
 pub type QueryOutput = Result<OutputStream, ConnectorError>;
+#[async_trait::async_trait]
+pub trait CredentialsResolver: Send + Sync {
+    async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError>;
+}
 
 pub struct TabularState {
     pub query: String,
@@ -65,8 +70,8 @@ pub trait FlightConnector: Send + Sync {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError>;
 }
 

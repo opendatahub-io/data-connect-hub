@@ -14,6 +14,7 @@ use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 use futures::StreamExt;
 
 use commons::api::tabular::FlightConnector;
+use commons::api::tabular::CredentialsResolver;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
@@ -39,6 +40,8 @@ pub struct PgConnector {
     config: ConnectorConfig,
 }
 
+const PROVIDER: &str = "postgres";
+
 impl PgConnector {
     pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
@@ -51,9 +54,6 @@ impl PgConnector {
         }
     }
 }
-
-const PROVIDER: &str = "postgres";
-
 #[async_trait::async_trait]
 impl FlightConnector for PgConnector {
     fn provider(&self) -> String {
@@ -66,33 +66,20 @@ impl FlightConnector for PgConnector {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         info!("Creating Postgres reader");
 
-        let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
-            _ => None,
-        }
-        .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
-
-        let url = credentials
-            .get(KEY_URI)
-            .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
-
-        if !enable_cache {
-            return Ok(Arc::new(PgReader {
-                pool: PgPool::connect(url.as_str())
-                    .await
-                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))?,
-            }));
-        }
-
         let connection_timeout = self.config.connection_timeout();
+        let credentials = credentials_resolver.resolve(data_connection).await?;
         let pool = self
             .pools
-            .try_get_with(url.clone(), async {
+            .try_get_with(data_connection.metadata.id.clone(), async {
+                let url = credentials
+                    .get(KEY_URI)
+                    .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+
                 sqlx::pool::PoolOptions::<sqlx::Postgres>::new()
                     .acquire_timeout(connection_timeout)
                     .connect(url.as_str())

@@ -10,12 +10,15 @@ use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
 use commons::api::tabular::FlightConnector;
+use commons::api::tabular::CredentialsResolver;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Executor, Row, SqlitePool, Statement, TypeInfo};
+
+const KEY_URI: &str = "URI";
 
 pub struct SqliteConnector {
     pools: Cache<String, SqlitePool>,
@@ -45,34 +48,19 @@ impl FlightConnector for SqliteConnector {
 
     async fn get_reader(
         &self,
-        enable_cache: bool,
         data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
-            _ => None,
-        }
-        .ok_or_else(|| ConnectorError::ConnectionError("SQLite credentials are required".to_string()))?;
-
-        let url = credentials
-            .get("url")
-            .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
-
         let connection_timeout = self.config.connection_timeout();
-
-        if !enable_cache {
-            return Ok(Arc::new(SqliteReader {
-                pool: sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
-                    .acquire_timeout(connection_timeout)
-                    .connect(url.as_str())
-                    .await
-                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))?,
-            }));
-        }
+        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let pool = self
             .pools
-            .try_get_with(url.clone(), async {
+            .try_get_with(data_connection.metadata.id.clone(), async {
+                let url = credentials
+                    .get(KEY_URI)
+                    .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+
                 sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
                     .acquire_timeout(connection_timeout)
                     .connect(url.as_str())

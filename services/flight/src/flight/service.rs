@@ -1,5 +1,5 @@
 use crate::flight::QueryContext;
-use crate::flight::errors::{map_connector_error, map_meta_store_error, map_secret_store_error};
+use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
 use arrow_flight::{
@@ -16,11 +16,11 @@ use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::storage::{MetaStore, SecretStore};
-use commons::api::tabular::FlightConnector;
-use commons::api::tabular::QueryOptions;
+use commons::api::tabular::{CredentialsResolver, FlightConnector, QueryOptions};
 use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
@@ -102,31 +102,48 @@ impl TabularDataService {
             .collect()
     }
 
-    async fn get_connection(&self, tenant_id: &str, connection_id: &str) -> Result<DataConnectionResource, Status> {
-        debug!(
-            "get_connection: tenant_id: {}, connection_id: {}",
-            tenant_id, connection_id
-        );
-        let mut r = self
+    pub(crate) async fn get_connector_by_type_id(
+        &self,
+        tenant_id: &str,
+        data_connection_type_id: &str,
+    ) -> Result<(DataConnectionTypeResource, &Arc<dyn FlightConnector>), Status> {
+        let data_connection_type = self
             .meta_store
-            .get_data_connection(tenant_id, connection_id)
+            .get_data_connection_type(tenant_id, data_connection_type_id)
             .await
             .map_err(map_meta_store_error)?;
 
-        debug!("Resolving credentials");
-        if let Some(Admin::SecretRef { secret_ref: s }) = &r.resource.admin {
-            let secret = self
-                .secret_store
-                .get_secret(tenant_id, s)
-                .await
-                .map_err(map_secret_store_error)?;
-            r.resource.admin = Some(Admin::Secret {
-                name: secret.name.clone(),
-                secret: secret.properties.clone(),
-            });
-        }
+        let connector = self
+            .connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?;
 
-        Ok(r)
+        Ok((data_connection_type, connector))
+    }
+
+    pub(crate) async fn get_connector_by_connection_id(
+        &self,
+        tenant_id: &str,
+        data_connection_id: &str,
+    ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
+        let connection = self
+            .meta_store
+            .get_data_connection(tenant_id, data_connection_id)
+            .await
+            .map_err(map_meta_store_error)?;
+
+        let data_connection_type = self
+            .meta_store
+            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
+            .await
+            .map_err(map_meta_store_error)?;
+
+        let connector = self
+            .connectors_registry
+            .get_connector(data_connection_type.resource.provider.as_str())
+            .map_err(map_connector_error)?;
+
+        Ok((connection, connector))
     }
 
     fn handle_get_flight_info_sql_info(
@@ -186,31 +203,6 @@ impl TabularDataService {
     ) -> Result<Response<FlightInfo>, Status> {
         debug!("get_flight_info_tables: include_schema={}", query.include_schema);
 
-        let metadata = request.metadata();
-        let connection_id = metadata
-            .get(X_DATA_CONNECTION_ID)
-            .ok_or(Status::invalid_argument(format!(
-                "{X_DATA_CONNECTION_ID} header is required"
-            )))?
-            .to_str()
-            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
-
-        let tenant_id = metadata
-            .get(X_TENANT_ID)
-            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
-            .to_str()
-            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
-
-        let connection = self.get_connection(tenant_id, connection_id).await?;
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-        self.connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
-
         let flight_descriptor = request.into_inner();
         let ticket = Ticket::new(query.as_any().encode_to_vec());
         let endpoint = FlightEndpoint::new().with_ticket(ticket);
@@ -237,36 +229,17 @@ impl TabularDataService {
         debug!("do_get_tables: include_schema={}", query.include_schema);
 
         let metadata = request.metadata();
-        let connection_id = metadata
-            .get(X_DATA_CONNECTION_ID)
-            .ok_or(Status::invalid_argument(format!(
-                "{X_DATA_CONNECTION_ID} header is required"
-            )))?
-            .to_str()
-            .map_err(|_| Status::invalid_argument(format!("{X_DATA_CONNECTION_ID} header must be valid ASCII")))?;
 
-        let tenant_id = metadata
-            .get(X_TENANT_ID)
-            .ok_or(Status::invalid_argument(format!("{X_TENANT_ID} header is required")))?
-            .to_str()
-            .map_err(|_| Status::invalid_argument(format!("{X_TENANT_ID} header must be valid ASCII")))?;
+        let tenant_id = QueryContext::tenant_id(metadata)?;
+        let connection_id = QueryContext::connection_id(metadata)?;
 
-        let connection = self.get_connection(tenant_id, connection_id).await?;
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-
-        let connector = self
-            .connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
+        let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(true, &connection)
+            .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
             .map_err(map_connector_error)?;
+
         let filter = query.table_name_filter_pattern.clone();
         let include_schema = query.include_schema;
         let tables = reader
@@ -310,46 +283,6 @@ impl TabularDataService {
         ))
     }
 
-    pub(crate) async fn get_connector_by_type_id(
-        &self,
-        tenant_id: &str,
-        data_connection_type_id: &str,
-    ) -> Result<(DataConnectionTypeResource, &Arc<dyn FlightConnector>), Status> {
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, data_connection_type_id)
-            .await
-            .map_err(map_meta_store_error)?;
-
-        let connector = self
-            .connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
-
-        Ok((data_connection_type, connector))
-    }
-
-    pub(crate) async fn get_connector_by_connection_id(
-        &self,
-        tenant_id: &str,
-        data_connection_id: &str,
-    ) -> Result<(DataConnectionResource, &Arc<dyn FlightConnector>), Status> {
-        let connection = self.get_connection(tenant_id, data_connection_id).await?;
-
-        let data_connection_type = self
-            .meta_store
-            .get_data_connection_type(tenant_id, connection.resource.data_connection_type_id.as_str())
-            .await
-            .map_err(map_meta_store_error)?;
-
-        let connector = self
-            .connectors_registry
-            .get_connector(data_connection_type.resource.provider.as_str())
-            .map_err(map_connector_error)?;
-
-        Ok((connection, connector))
-    }
-
     async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,
@@ -363,7 +296,7 @@ impl TabularDataService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(true, &connection)
+            .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
             .map_err(map_connector_error)?;
 
@@ -407,7 +340,7 @@ impl TabularDataService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(true, &connection)
+            .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
             .map_err(map_connector_error)?;
 
@@ -548,5 +481,23 @@ impl FlightSqlService for TabularDataService {
         };
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_STATEMENT, status, started.elapsed());
         result
+    }
+}
+
+#[async_trait::async_trait]
+impl CredentialsResolver for TabularDataService {
+    async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
+        match (&connection.metadata.tenant_id, &connection.resource.admin) {
+            (Some(tenant_id), Some(Admin::SecretRef { secret_ref })) => {
+                let secret = self
+                    .secret_store
+                    .get_secret(tenant_id, secret_ref)
+                    .await
+                    .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
+                Ok((*secret.properties).clone())
+            },
+            (_, Some(Admin::Secret { name: _, secret })) => Ok((**secret).clone()),
+            _ => Err(ConnectorError::ConnectionError("No credentials found".to_string())),
+        }
     }
 }

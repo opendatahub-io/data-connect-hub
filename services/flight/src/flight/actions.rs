@@ -10,13 +10,16 @@ use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
+use commons::api::tabular::CredentialsResolver;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 use tracing::info;
 use uuid::Uuid;
+
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
+const ACTION_GET_BINARY_DATA: &str = "GetBinaryData";
 
 impl TabularDataService {
     pub fn custom_actions() -> Vec<Result<ActionType, Status>> {
@@ -29,6 +32,10 @@ impl TabularDataService {
                 r#type: ACTION_CHECK_CONNECTION.into(),
                 description: "Checks the connection to the data source".into(),
             }),
+            Ok(ActionType {
+                r#type: ACTION_GET_BINARY_DATA.into(),
+                description: "Returns the binary data of the data source".into(),
+            }),
         ]
     }
 
@@ -40,8 +47,41 @@ impl TabularDataService {
         match action.r#type.as_str() {
             ACTION_CHECK_CONNECTION => self.action_check_connection(&request).await,
             ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
+            ACTION_GET_BINARY_DATA => self.action_get_binary_data(&request).await,
             _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
         }
+    }
+
+    async fn action_get_binary_data(
+        &self,
+        request: &Request<Action>,
+    ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
+        let metadata = request.metadata();
+        let tenant_id = QueryContext::tenant_id(metadata)?;
+        let connection_id = QueryContext::connection_id(metadata)?;
+
+        let props = parse_kv_body(&request.get_ref().body)?;
+        match props {
+            Some(props) => {
+                let _path = props.get("path").ok_or(Status::invalid_argument("path is required"))?;
+
+                let (data_connection, connector) =
+                    self.get_connector_by_connection_id(tenant_id, &connection_id).await?;
+
+                let _reader = connector
+                    .get_reader(&data_connection, self as &dyn CredentialsResolver)
+                    .await
+                    .map_err(map_connector_error)?;
+            },
+            None => return Err(Status::invalid_argument("path is required")),
+        }
+
+        let result = arrow_flight::Result {
+            body: Vec::new().into(),
+        };
+        Ok(Response::new(
+            Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
+        ))
     }
 
     async fn action_check_connection(
@@ -52,7 +92,7 @@ impl TabularDataService {
 
         let tenant_id = QueryContext::tenant_id(metadata)?;
 
-        let reader = if let Some(mut keys) = parse_credentials_body(&request.get_ref().body)? {
+        let reader = if let Some(mut keys) = parse_kv_body(&request.get_ref().body)? {
             let dct_id = keys
                 .remove("data_connection_type_id")
                 .ok_or(Status::invalid_argument("data_connection_type_id is required"))?;
@@ -76,10 +116,8 @@ impl TabularDataService {
                 .check_credentials_schema(&credentials.clone())
                 .map_err(|e| Status::invalid_argument(e.to_string()))?;
 
-            // Create a fake DataConnectionResource as this is not stored anywhere. We only need to pass the credentials to the connector.
             connector
                 .get_reader(
-                    false,
                     &DataConnectionResource {
                         metadata: ResourceMetadata {
                             id: Uuid::new_v4().to_string(),
@@ -96,14 +134,16 @@ impl TabularDataService {
                         },
                         status: DataConnectionStatus::default(),
                     },
+                    self as &dyn CredentialsResolver,
                 )
                 .await
                 .map_err(map_connector_error)?
         } else {
             let connection_id = QueryContext::connection_id(metadata)?;
             let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
+
             connector
-                .get_reader(true, &connection)
+                .get_reader(&connection, self as &dyn CredentialsResolver)
                 .await
                 .map_err(map_connector_error)?
         };
@@ -160,16 +200,7 @@ impl TabularDataService {
 /// Parses an Arrow IPC stream containing credentials from the action body.
 ///
 /// Returns `None` if the body is empty. Otherwise expects a single `RecordBatch`
-/// with two `Utf8` columns:
-///
-/// | key (Utf8)                  | value (Utf8)  |
-/// |-----------------------------|---------------|
-/// | `data_connection_type_id`   | `<type-id>`   |
-/// | `secret.<credential-name>`  | `<secret>`    |
-///
-/// The `data_connection_type_id` row is required. Rows prefixed with `secret.`
-/// are collected (with the prefix stripped) into the credentials map.
-fn parse_credentials_body(body: &[u8]) -> Result<Option<HashMap<String, String>>, Status> {
+fn parse_kv_body(body: &[u8]) -> Result<Option<HashMap<String, String>>, Status> {
     if body.is_empty() {
         return Ok(None);
     }
