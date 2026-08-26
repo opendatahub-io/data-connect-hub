@@ -61,6 +61,8 @@ paths:
                 $ref: "#/components/schemas/DataConnectionResource"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -82,8 +84,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-        "501":
-          $ref: "#/components/responses/Unimplemented"
     patch:
       operationId: patchConnection
       summary: Update a connection
@@ -91,11 +91,9 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          application/merge-patch+json:
             schema:
-              type: array
-              items:
-                $ref: "#/components/schemas/JsonPatch"
+              $ref: "#/components/schemas/DataConnectionMergePatch"
       responses:
         "200":
           description: Connection updated
@@ -107,8 +105,8 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-        "501":
-          $ref: "#/components/responses/Unimplemented"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
     delete:
       operationId: deleteConnection
       summary: Delete a connection
@@ -120,8 +118,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-        "501":
-          $ref: "#/components/responses/Unimplemented"
 
   /connection-types:
     get:
@@ -186,11 +182,9 @@ paths:
       requestBody:
         required: true
         content:
-          application/json:
+          application/merge-patch+json:
             schema:
-              type: array
-              items:
-                $ref: "#/components/schemas/JsonPatch"
+              $ref: "#/components/schemas/DataConnectionTypeMergePatch"
       responses:
         "200":
           description: Connection type updated
@@ -202,8 +196,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-        "501":
-          $ref: "#/components/responses/Unimplemented"
     delete:
       operationId: deleteConnectionType
       summary: Delete a connection type
@@ -215,8 +207,6 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
-        "501":
-          $ref: "#/components/responses/Unimplemented"
 
 components:
   securitySchemes:
@@ -248,8 +238,8 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
-    Unimplemented:
-      description: Endpoint not yet implemented
+    UnprocessableEntity:
+      description: Request semantically invalid
       content:
         application/json:
           schema:
@@ -283,24 +273,46 @@ components:
           type: string
           example: Data Connect Hub
 
-    JsonPatch:
+    DataConnectionMergePatch:
       type: object
-      required: [op, path]
+      description: >
+        RFC 7396 JSON Merge Patch for a DataConnection. Supply only
+        the fields you want to change.
       properties:
-        op:
+        name:
           type: string
-          description: Patch operation
-          enum: [add, remove, replace, move, copy, test]
-        path:
+        data_connection_type_id:
           type: string
-          description: JSON Pointer to the target field
-          example: /resource/name
-        value:
-          description: Value to apply (required for add, replace, test)
+        format:
+          $ref: "#/components/schemas/DataFormat"
+        admin:
+          $ref: "#/components/schemas/Admin"
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+
+    DataConnectionTypeMergePatch:
+      type: object
+      description: >
+        RFC 7396 JSON Merge Patch for a DataConnectionType. Supply only
+        the fields you want to change.
+      properties:
+        name:
+          type: string
+        provider:
+          type: string
+        description:
+          type: string
+          nullable: true
+        credentials_fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/Field"
 
     ResourceMetadata:
       type: object
-      required: [id, tenant_id, created_at, updated_at]
+      required: [id, created_at, updated_at]
       properties:
         id:
           type: string
@@ -308,6 +320,7 @@ components:
           example: 550e8400-e29b-41d4-a716-446655440000
         tenant_id:
           type: string
+          description: Tenant identifier. Omitted when not applicable.
           example: tenant-1
         created_at:
           type: string
@@ -327,13 +340,24 @@ components:
       enum: [ready, not_ready]
 
     PhaseState:
-      type: string
-      enum:
-        - secret_ready
-        - secret_valid
-        - secret_not_found
-        - ingestion_ready
-        - ingestion_not_ready
+      description: >
+        Phase state. Most variants are bare strings. The `secret_valid`
+        variant carries a detail message and is serialized as an object
+        `{"secret_valid": "<message>"}`.
+      oneOf:
+        - type: string
+          enum:
+            - secret_ready
+            - secret_not_found
+            - ingestion_ready
+            - ingestion_not_ready
+        - type: object
+          required: [secret_valid]
+          properties:
+            secret_valid:
+              type: string
+              description: Detail message for the secret-valid state
+          additionalProperties: false
 
     PhaseCondition:
       type: object
@@ -493,25 +517,23 @@ components:
           items:
             $ref: "#/components/schemas/Field"
 
-    SupportedApi:
-      type: string
-      enum: [flight, rest, none]
-
-    IngestionStatus:
+    Capabilities:
       type: object
-      required: [supported_apis]
+      required: [flight, rest]
       properties:
-        supported_apis:
-          type: array
-          items:
-            $ref: "#/components/schemas/SupportedApi"
+        flight:
+          type: boolean
+          description: Whether the Flight gRPC API is supported
+        rest:
+          type: boolean
+          description: Whether the REST API is supported
 
     DataConnectionTypeStatus:
       type: object
-      required: [ingestion]
+      required: [capabilities]
       properties:
-        ingestion:
-          $ref: "#/components/schemas/IngestionStatus"
+        capabilities:
+          $ref: "#/components/schemas/Capabilities"
 
     DataConnectionTypeResource:
       type: object

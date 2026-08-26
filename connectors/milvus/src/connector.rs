@@ -7,10 +7,10 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use milvus::v2::prelude::{
     ClientV2, ConnectConfig, FieldData, GetRequest, Ids, QueryRequest, QueryResponse, SearchRequest, SearchResponse,
     SearchVectors,
@@ -27,16 +27,18 @@ const DEFAULT_PORT: &str = "19530";
 
 pub struct MilvusConnector {
     clients: Cache<String, ClientV2>,
+    config: ConnectorConfig,
 }
 
 impl MilvusConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             clients: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
@@ -55,11 +57,11 @@ fn extract_credentials(
 fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
     ConnectorError::ConnectionError(format!("Milvus error: {e}"))
 }
-
+const PROVIDER: &str = "milvus";
 #[async_trait::async_trait]
 impl FlightConnector for MilvusConnector {
     fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -68,6 +70,7 @@ impl FlightConnector for MilvusConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
@@ -83,17 +86,26 @@ impl FlightConnector for MilvusConnector {
         let token = credentials.get(KEY_TOKEN).cloned();
         let database = credentials.get(KEY_DATABASE).cloned();
 
+        let connection_timeout = self.config.connection_timeout();
+        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
+        if let Some(ref token) = token {
+            config = config.token(token);
+        }
+        if let Some(ref db) = database {
+            config = config.database(db);
+        }
+
+        if !enable_cache {
+            return Ok(Arc::new(MilvusReader {
+                client: ClientV2::new(&config).await.map_err(map_milvus_error)?,
+            }));
+        }
+
         let cache_key = data_connection.metadata.id.clone();
+
         let client = self
             .clients
             .try_get_with(cache_key, async {
-                let mut config = ConnectConfig::new().uri(&uri);
-                if let Some(ref token) = token {
-                    config = config.token(token);
-                }
-                if let Some(ref db) = database {
-                    config = config.database(db);
-                }
                 ClientV2::new(&config).await.map_err(map_milvus_error)
             })
             .await
@@ -110,7 +122,7 @@ pub struct MilvusReader {
 #[async_trait::async_trait]
 impl TabularReader for MilvusReader {
     fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -161,7 +173,19 @@ impl TabularReader for MilvusReader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        use milvus::v2::request::utility::CheckHealthRequest;
+        let req = CheckHealthRequest::builder()
+            .build()
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build health check request: {e}")))?;
+        let resp = self
+            .client
+            .check_health(req)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Milvus health check failed: {e}")))?;
+        if !resp.is_healthy() {
+            return Err(ConnectorError::ConnectionError("Milvus reported unhealthy".to_string()));
+        }
         Ok(())
     }
 }
@@ -469,7 +493,12 @@ mod tests {
 
     #[test]
     fn test_milvus_connector_provider() {
-        let connector = MilvusConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = MilvusConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "milvus");
     }
 

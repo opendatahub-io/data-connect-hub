@@ -35,12 +35,16 @@ pub enum ValidationError {
     InvalidDataConnectionType,
     #[error("Invalid secret")]
     InvalidSecret,
-    #[error("Missing required key: {0}")]
-    MissingRequiredKey(String),
     #[error("{0}")]
     UnsupportedProvider(String),
     #[error("Flight service error: {0}")]
     FlightServiceError(String),
+    #[error("Missing field: {0}")]
+    MissingField(String),
+    #[error("Connection check failed: {0}")]
+    ConnectionCheckFailed(String),
+    #[error("Credentials check failed: {0}")]
+    CredentialsCheckFailed(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -189,19 +193,29 @@ impl From<ValidationError> for RestErrorResponse {
                 message: "Invalid secret".to_string(),
                 status: 400,
             },
-            ValidationError::MissingRequiredKey(key) => RestErrorResponse {
-                code: "missing_required_key".to_string(),
-                message: format!("Missing required key: {}", key),
-                status: 400,
-            },
             ValidationError::FlightServiceError(error) => RestErrorResponse {
                 code: "flight_service_error".to_string(),
                 message: error,
                 status: 500,
             },
-            ValidationError::UnsupportedProvider(message) => RestErrorResponse {
+            ValidationError::ConnectionCheckFailed(error) => RestErrorResponse {
+                code: "connection_check_failed".to_string(),
+                message: error,
+                status: 502,
+            },
+            ValidationError::UnsupportedProvider(error) => RestErrorResponse {
                 code: "unsupported_provider".to_string(),
-                message,
+                message: error,
+                status: 400,
+            },
+            ValidationError::MissingField(field) => RestErrorResponse {
+                code: "missing_field".to_string(),
+                message: format!("Missing field: {}", field),
+                status: 400,
+            },
+            ValidationError::CredentialsCheckFailed(error) => RestErrorResponse {
+                code: "credentials_check_failed".to_string(),
+                message: error,
                 status: 400,
             },
         }

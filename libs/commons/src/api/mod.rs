@@ -1,5 +1,6 @@
 pub mod connection_types;
 pub mod connections;
+pub mod creds;
 pub mod errors;
 pub mod storage;
 pub mod tabular;

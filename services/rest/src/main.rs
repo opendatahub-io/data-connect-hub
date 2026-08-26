@@ -42,7 +42,7 @@ struct CommandLineArgs {
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/api/v1/data/health", web::get().to(health))
         .route(
-            "/api-internal/v1/audit/data-connection-types",
+            "/api/v1/audit/data-connection-types",
             web::post().to(audit_connection_types),
         )
         .service(
@@ -58,7 +58,9 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connections/{id}", web::patch().to(patch_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))
-                .route("/ingestion/{id}", web::get().to(get_ingestion_data)),
+                .route("/connections/{id}/readiness", web::post().to(check_existent_connection))
+                .route("/ingestion/{id}", web::get().to(get_ingestion_data))
+                .route("/test/credentials", web::post().to(test_credentials)),
         )
         .default_service(web::route().to(not_found));
 }

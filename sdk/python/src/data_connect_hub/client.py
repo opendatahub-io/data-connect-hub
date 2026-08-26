@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
+from ._rest import RestClient
 from .exceptions import DCHConfigError
 from .models import (
     Admin,
@@ -17,13 +19,56 @@ from .models import (
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
-from .rest import RestClient
 
 if TYPE_CHECKING:
     import pandas as pd
     import pyarrow as pa
 
-    from .flight import FlightSQLClient
+    from ._flight import FlightClient
+
+
+def _build_urls(endpoint: str) -> tuple[str, str]:
+    """Derive REST and Flight SQL URLs from a single gateway *endpoint*.
+
+    Accepts a bare host, ``host:port``, or a URL carrying a scheme; any scheme
+    given is discarded.  Only TLS is supported (``https`` and ``grpc+tls``);
+    the ``insecure`` flag on the client controls certificate verification, not
+    the transport.
+
+    Returns ``(rest_url, flight_url)``.
+    """
+    endpoint = endpoint.strip().rstrip("/")
+    if not endpoint:
+        raise DCHConfigError("endpoint must not be empty")
+
+    parsed = urlparse(endpoint if "://" in endpoint else f"//{endpoint}", scheme="https")
+
+    if parsed.username or parsed.password:
+        raise DCHConfigError("endpoint must not contain credentials; pass a token or token_provider instead")
+
+    try:
+        hostname, port = parsed.hostname, parsed.port
+    except ValueError as exc:
+        raise DCHConfigError(f"invalid port in endpoint {endpoint!r}: {exc}") from exc
+
+    # ``urlparse`` reports an explicit ``:0`` as port 0, which would otherwise
+    # be indistinguishable from "no port" and silently fall back to 443.
+    if port == 0:
+        raise DCHConfigError(f"invalid port in endpoint {endpoint!r}: port must be between 1 and 65535")
+
+    if not hostname:
+        raise DCHConfigError(f"unable to extract host from endpoint: {endpoint!r}")
+    if parsed.path:
+        raise DCHConfigError(f"endpoint must not contain a path, got {parsed.path!r} in {endpoint!r}")
+    if parsed.query or parsed.fragment:
+        raise DCHConfigError(f"endpoint must not contain a query string or fragment: {endpoint!r}")
+
+    # IPv6 literals lose their brackets via ``hostname``; restore them.
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None:
+        netloc = f"{netloc}:{port}"
+
+    return f"https://{netloc}", f"grpc+tls://{netloc}"
 
 
 class DataConnectClient:
@@ -31,10 +76,11 @@ class DataConnectClient:
 
     Parameters
     ----------
-    rest_url : str, optional
-        Base URL of the DCH REST service.
-    flight_url : str, optional
-        gRPC endpoint of the DCH Flight SQL service.
+    endpoint : str
+        Gateway host or host:port (e.g. ``gateway.example.com:8443``).  A
+        scheme is not required and is ignored if present.  The SDK derives
+        the HTTPS and gRPC+TLS URLs automatically.  Only TLS endpoints are
+        supported.
     token : str
         Static Bearer token value (without the "Bearer " prefix).
     token_provider : Callable[[], str], optional
@@ -65,8 +111,7 @@ class DataConnectClient:
 
     def __init__(
         self,
-        rest_url: str | None = None,
-        flight_url: str | None = None,
+        endpoint: str,
         token: str = "",
         tenant_id: str = "",
         *,
@@ -86,36 +131,47 @@ class DataConnectClient:
                 " Please provide either a static token or a token_provider callable, not both."
             )
 
-        self._rest: RestClient | None = None
-        self._flight: FlightSQLClient | None = None
+        rest_url, flight_url = _build_urls(endpoint)
 
-        if rest_url:
-            self._rest = RestClient(
-                base_url=rest_url,
-                token=token,
-                tenant_id=tenant_id,
-                token_provider=token_provider,
-                api_base=api_base,
-                timeout=rest_timeout,
-                ca_cert=ca_cert,
-                insecure=insecure,
-                max_retries=max_retries,
-                backoff_base=backoff_base,
-                backoff_max=backoff_max,
-            )
+        self._rest = RestClient(
+            url=rest_url,
+            token=token,
+            tenant_id=tenant_id,
+            token_provider=token_provider,
+            api_base=api_base,
+            timeout=rest_timeout,
+            ca_cert=ca_cert,
+            insecure=insecure,
+            max_retries=max_retries,
+            backoff_base=backoff_base,
+            backoff_max=backoff_max,
+        )
 
-        if flight_url:
-            from .flight import FlightSQLClient as _FlightSQLClient
+        # Built on first use: ``_flight`` imports pyarrow and
+        # adbc-driver-flightsql at module scope, which only the ``[flight]``
+        # extra installs.  Deferring the import keeps the package importable
+        # on a REST-only install.
+        self._flight: FlightClient | None = None
+        self._flight_kwargs: dict[str, Any] = {
+            "url": flight_url,
+            "token": token,
+            "tenant_id": tenant_id,
+            "token_provider": token_provider,
+            "timeout": flight_timeout,
+            "ca_cert": ca_cert,
+            "insecure": insecure,
+        }
 
-            self._flight = _FlightSQLClient(
-                flight_url=flight_url,
-                token=token,
-                tenant_id=tenant_id,
-                token_provider=token_provider,
-                timeout=flight_timeout,
-                ca_cert=ca_cert,
-                insecure=insecure,
-            )
+    def _require_flight(self) -> FlightClient:
+        if self._flight is None:
+            try:
+                from ._flight import FlightClient
+            except ImportError as exc:
+                raise DCHConfigError(
+                    "Flight SQL support requires the 'flight' extra: pip install \"data-connect-hub[flight]\""
+                ) from exc
+            self._flight = FlightClient(**self._flight_kwargs)
+        return self._flight
 
     # -- context manager --
 
@@ -127,30 +183,17 @@ class DataConnectClient:
 
     def close(self) -> None:
         """Close underlying clients."""
-        if self._rest:
-            self._rest.close()
-        if self._flight:
+        self._rest.close()
+        if self._flight is not None:
             self._flight.close()
-
-    # -- guards --
-
-    def _require_rest(self) -> RestClient:
-        if self._rest is None:
-            raise DCHConfigError("rest_url is required for this operation")
-        return self._rest
-
-    def _require_flight(self) -> FlightSQLClient:
-        if self._flight is None:
-            raise DCHConfigError("flight_url is required for this operation")
-        return self._flight
 
     # -- Connections --
 
     def list_connections(self) -> list[DataConnection]:
-        return self._require_rest().list_connections()
+        return self._rest.list_connections()
 
     def get_connection(self, connection_id: str) -> DataConnection:
-        return self._require_rest().get_connection(connection_id)
+        return self._rest.get_connection(connection_id)
 
     def create_connection(
         self,
@@ -168,7 +211,7 @@ class DataConnectClient:
             admin=admin,
             properties=properties or {},
         )
-        return self._require_rest().create_connection(req)
+        return self._rest.create_connection(req)
 
     def update_connection(
         self,
@@ -189,18 +232,18 @@ class DataConnectClient:
             admin=admin,
             properties=properties,
         )
-        return self._require_rest().update_connection(connection_id, req)
+        return self._rest.update_connection(connection_id, req)
 
     def delete_connection(self, connection_id: str) -> None:
-        self._require_rest().delete_connection(connection_id)
+        self._rest.delete_connection(connection_id)
 
     # -- Connection Types --
 
     def list_connection_types(self) -> list[ConnectionType]:
-        return self._require_rest().list_connection_types()
+        return self._rest.list_connection_types()
 
     def get_connection_type(self, type_id: str) -> ConnectionType:
-        return self._require_rest().get_connection_type(type_id)
+        return self._rest.get_connection_type(type_id)
 
     def create_connection_type(
         self,
@@ -216,7 +259,7 @@ class DataConnectClient:
             description=description,
             credentials_fields=credentials_fields or [],
         )
-        return self._require_rest().create_connection_type(req)
+        return self._rest.create_connection_type(req)
 
     def update_connection_type(
         self,
@@ -235,10 +278,10 @@ class DataConnectClient:
             description=description,
             credentials_fields=credentials_fields,
         )
-        return self._require_rest().update_connection_type(type_id, req)
+        return self._rest.update_connection_type(type_id, req)
 
     def delete_connection_type(self, type_id: str) -> None:
-        self._require_rest().delete_connection_type(type_id)
+        self._rest.delete_connection_type(type_id)
 
     # -- Flight SQL queries --
 
@@ -249,6 +292,18 @@ class DataConnectClient:
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
         return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
+
+    def get_tables(
+        self,
+        connection_id: str,
+        *,
+        table_name_filter: str | None = None,
+        include_schema: bool = False,
+    ) -> pa.Table:
+        """Retrieve table metadata via Flight SQL ``CommandGetTables``."""
+        return self._require_flight().get_tables(
+            connection_id, table_name_filter=table_name_filter, include_schema=include_schema
+        )
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""

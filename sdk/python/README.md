@@ -16,19 +16,24 @@ pip install "sdk/python[flight]"
 
 ## Quick Start
 
+The client takes a single gateway `endpoint` — a host or `host:port`, no scheme
+required — and derives both the REST (`https://`) and Flight SQL
+(`grpc+tls://`) URLs from it.
+Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control
+certificate verification.
+
 ```python
 from data_connect_hub import AdminSecretRef, DataConnectClient
 
 client = DataConnectClient(
-    rest_url="https://dch.example.com",
-    flight_url="grpc://dch.example.com:50051",
+    endpoint="dch.example.com:8443",
     token="<your-token>",  # or use token_provider= for auto-refresh
     tenant_id="my-tenant",
 )
 
 # Or use a token provider for automatic refresh on 401:
 client = DataConnectClient(
-    rest_url="https://dch.example.com",
+    endpoint="dch.example.com:8443",
     token_provider=lambda: get_fresh_token(),  # your function; called once, cached, refreshed on 401
     tenant_id="my-tenant",
 )
@@ -79,8 +84,13 @@ client.delete_connection_type(type_id) -> None
 ```python
 client.read(sql, connection_id) -> pyarrow.Table       # full result as Arrow Table
 client.read_pandas(sql, connection_id) -> pd.DataFrame # full result as pandas DataFrame
+client.get_tables(connection_id) -> pyarrow.Table      # table metadata
 client.server_info() -> dict                           # server metadata
 ```
+
+These require the `flight` extra. On a REST-only install the client still
+imports and all REST calls work; the first Flight call raises `DCHConfigError`
+telling you to install `data-connect-hub[flight]`.
 
 ## Development
 

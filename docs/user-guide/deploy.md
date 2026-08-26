@@ -438,6 +438,47 @@ NAME                                  READY   STATUS    RESTARTS   AGE
 dch-flight-service-59d944f8f9-xxxxx   1/1     Running   0          6m
 ```
 
+Pod readiness only confirms the gRPC server is listening — it doesn't
+exercise auth or the Flight protocol itself. Verify with a real client,
+in-cluster via port-forward:
+
+```console
+oc port-forward -n $NS svc/dch-flight-service 50051:50051 &
+
+pip install -e 'sdk/python[flight]'   # from the repo root, one-time
+
+python3 - <<PYEOF
+from data_connect_hub import DataConnectClient
+
+# The SDK takes one endpoint (host:port, no scheme) and derives both the
+# REST and Flight URLs from it. Here the endpoint points straight at the
+# port-forwarded flight-service, so only Flight calls work -- a REST call on
+# this client would hit port 50051 and fail. Use the gateway endpoint (below)
+# for both.
+client = DataConnectClient(
+    endpoint="127.0.0.1:50051",
+    token="$(oc whoami -t)",
+    tenant_id="$NS",
+    insecure=True,  # skip cert verification -- 127.0.0.1 won't match the service's cert SAN
+)
+print(client.server_info())
+PYEOF
+```
+
+Expected output:
+
+```
+{'vendor_name': 'Data Connect Hub', 'vendor_version': '0.1.0', 'vendor_arrow_version': '1.3',
+ 'driver_name': 'ADBC Flight SQL Driver - Go', 'driver_version': 'v1.12.0', ...,
+ 'supported_connectors': ['sqlite', 'milvus', 'neo4j', 'postgres', 'elasticsearch', 's3']}
+```
+
+`insecure=True` here only skips certificate verification for the
+port-forwarded connection — it does not disable flight-service's own
+TLS listener or its TokenReview/SAR auth layer. A missing or invalid
+`token` still fails with `UNAUTHENTICATED`, and a `tenant_id` the token
+isn't authorized for still fails with `PERMISSION_DENIED`.
+
 ### Test through the gateway
 
 Get the gateway's external route and test the API with a bearer token.
@@ -491,6 +532,34 @@ Expected output:
 ```
 {"total_count":0,"items":[]}
 ```
+
+```console
+# REST and Flight through the gateway -- one endpoint covers both
+python3 - <<PYEOF
+from data_connect_hub import DataConnectClient
+
+client = DataConnectClient(
+    endpoint="$GATEWAY_URL:443",
+    token="$TOKEN",
+    tenant_id="$NS",
+    insecure=True,
+)
+print(client.list_connection_types())
+print(client.server_info())
+PYEOF
+```
+
+Expected output: the connection-type list returned by the
+[REST check](#verify-services) above, followed by the same `server_info()`
+dict as the direct port-forward check — one client, both protocols.
+
+If this fails instead with `UNAVAILABLE: upstream connect error or
+disconnect/reset before headers`, your gateway's Istio `DestinationRule`
+is missing a TLS policy for flight-service's port (`50051`) — see
+[Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error).
+On RHOAI/ODH `GatewayConfig`-managed gateways this is a platform-owned
+gap that a per-deployment override cannot reliably fix — see that
+section for why.
 
 ## Monitor status
 
@@ -706,29 +775,46 @@ resources need to be touched):
    policy for its port. If the gateway is Istio-backed and traffic still
    fails after steps 1–2 with `UNAVAILABLE: upstream connect error`, the
    gateway's `DestinationRule` needs a `portLevelSettings` entry for
-   flight-service's port (`50051`). Avoid `insecureSkipVerify: true` (the
-   existing entries for the REST service use it, but that's a pre-existing
-   gap in the platform-owned `DestinationRule`, not something to carry
-   forward) — flight-service's certificate is issued by the cluster's
-   internal service-ca, so verify against that instead:
-
-   ```console
-   oc get configmap openshift-service-ca.crt -n openshift-ingress \
-     -o jsonpath='{.data.service-ca\.crt}' > /tmp/service-ca.crt
-   oc create secret generic flight-service-ca-bundle -n openshift-ingress \
-     --from-file=ca.crt=/tmp/service-ca.crt
-   ```
+   flight-service's port (`50051`), matching the existing entries for the
+   REST service:
 
    ```yaml
    - port:
        number: 50051
      tls:
        mode: SIMPLE
-       credentialName: flight-service-ca-bundle
-       sni: dch-flight-service.$NS.svc
-       subjectAltNames:
-         - dch-flight-service.$NS.svc
+       insecureSkipVerify: true
    ```
+
+   `insecureSkipVerify: true` does **not** mean this traffic is
+   unencrypted — `mode: SIMPLE` always makes Envoy originate a real TLS
+   connection to the backend; the flag only skips certificate chain and
+   hostname validation. flight-service still negotiates TLS+ALPN and
+   enforces its own auth layer exactly as it does for the REST-service
+   entry, which already uses this same setting.
+
+   An earlier revision of this doc replaced this snippet with a
+   certificate-verified alternative (`credentialName` + `sni` +
+   `subjectAltNames`, sourced from the cluster's service-ca) in response
+   to review feedback that we should avoid `insecureSkipVerify`. That
+   version is more correct in isolation, but we reverted it after finding
+   the following on a live RHOAI/ROSA cluster: **this `DestinationRule`
+   cannot be durably patched at all, regardless of which variant you use.**
+   It's owned and continuously reconciled by the platform's `GatewayConfig`
+   controller, which resets `portLevelSettings` back to its own desired
+   state (just the pre-existing `8443`/`443` entries) within about a
+   second of any external change — insecure or verified, it makes no
+   difference, neither survives. (The Route TLS certificate from step 2
+   is a plain field the controller doesn't fully own, so that one does
+   persist — this DestinationRule does not.)
+
+   Given that, swapping in the more complex verified variant bought no
+   real benefit: it never stayed applied any better than the simple one.
+   We're keeping the simpler `insecureSkipVerify: true` snippet here as
+   the honest baseline, and treating "this DestinationRule needs a
+   `50051` entry" as a platform gap to fix upstream in ODH's
+   `GatewayConfig` controller — not something to work around from the
+   DCH side, since no `oc patch` will survive the next reconcile.
 
 Both the Route and `DestinationRule` in a RHOAI/ODH deployment are owned
 and reconciled by the platform's `GatewayConfig` controller — file a

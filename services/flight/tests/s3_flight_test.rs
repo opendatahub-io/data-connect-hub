@@ -8,7 +8,7 @@ use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connection_types::Secret;
 use commons::api::connections::{Admin, DataConnection};
-use commons::api::connections::{DataConnectionResource, DataFormat};
+use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
@@ -76,6 +76,14 @@ impl MetaStore for S3TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }
@@ -211,7 +219,12 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 10);
+    let connector = S3Connector::new(
+        Duration::from_secs(300),
+        Duration::from_secs(60),
+        10,
+        Default::default(),
+    );
     connector.insert_operator("s3-conn-1", operator).await;
 
     let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(connector));

@@ -3,12 +3,13 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::format::{self, FileFormat};
-use commons::api::connection_types::Provider;
+use arrow::datatypes::Schema;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
-use opendal::{Operator, Reader, services::S3};
+use opendal::{EntryMode, Operator, Reader, layers::TimeoutLayer, services::S3};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -18,16 +19,18 @@ const KEY_ENDPOINT: &str = "AWS_S3_ENDPOINT";
 
 pub struct S3Connector {
     operators: Cache<String, Operator>,
+    config: ConnectorConfig,
 }
 
 impl S3Connector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             operators: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 
@@ -47,7 +50,10 @@ fn extract_credentials(
     }
 }
 
-fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, ConnectorError> {
+fn build_operator(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<Operator, ConnectorError> {
     let bucket = credentials
         .get(KEY_BUCKET)
         .ok_or_else(|| ConnectorError::ConfigError(format!("{KEY_BUCKET} is required")))?;
@@ -75,13 +81,18 @@ fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, Con
         builder = builder.endpoint(endpoint);
     }
 
-    Operator::new(builder).map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))
+    let op = Operator::new(builder)
+        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))?
+        .layer(TimeoutLayer::new().with_timeout(connection_timeout));
+    Ok(op)
 }
+
+const PROVIDER: &str = "s3";
 
 #[async_trait::async_trait]
 impl FlightConnector for S3Connector {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -90,12 +101,24 @@ impl FlightConnector for S3Connector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+        let connection_timeout = self.config.connection_timeout();
+
+        if !enable_cache {
+            return Ok(Arc::new(S3Reader {
+                operator: build_operator(&credentials, connection_timeout)?,
+                format_hint: data_connection.resource.properties.get("format").cloned(),
+            }));
+        }
+
         let operator = self
             .operators
-            .try_get_with_by_ref(&data_connection.metadata.id, async { build_operator(&credentials) })
+            .try_get_with_by_ref(&data_connection.metadata.id, async {
+                build_operator(&credentials, connection_timeout)
+            })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get S3 operator: {e}")))?;
 
@@ -127,7 +150,7 @@ impl S3Reader {
 #[async_trait::async_trait]
 impl TabularReader for S3Reader {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -163,9 +186,93 @@ impl TabularReader for S3Reader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
-        Ok(())
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        self.operator
+            .check()
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("Failed to check S3 connection".to_string()))
     }
+
+    async fn list_tables(
+        &self,
+        table_name_filter: Option<&str>,
+        include_schema: bool,
+    ) -> Result<Vec<TableInfo>, ConnectorError> {
+        let entries = self
+            .operator
+            .list_with("")
+            .recursive(true)
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("Failed to list S3 objects: {e}")))?;
+
+        let paths: Vec<String> = entries
+            .into_iter()
+            .filter(|e| e.metadata().mode() == EntryMode::FILE)
+            .map(|e| e.path().to_string())
+            .filter(|p| FileFormat::detect(p, self.format_hint.as_deref()).is_ok())
+            .collect();
+
+        let mut tables = Vec::new();
+        for path in &paths {
+            if let Some(pattern) = table_name_filter
+                && !sql_like_match(path, pattern)
+            {
+                continue;
+            }
+
+            let table_schema = if include_schema {
+                match self.schema(path).await {
+                    Ok(state) => state.schema.as_ref().clone(),
+                    Err(e) => {
+                        tracing::warn!(path, error = %e, "failed to read schema");
+                        Schema::empty()
+                    },
+                }
+            } else {
+                Schema::empty()
+            };
+
+            tables.push(TableInfo {
+                catalog: String::new(),
+                schema_name: String::new(),
+                table_name: path.clone(),
+                table_type: "TABLE".to_string(),
+                table_schema,
+            });
+        }
+
+        Ok(tables)
+    }
+}
+
+fn sql_like_match(value: &str, pattern: &str) -> bool {
+    let v: Vec<char> = value.chars().collect();
+    let p: Vec<char> = pattern.chars().collect();
+
+    let (mut vi, mut pi) = (0usize, 0usize);
+    let (mut star_pi, mut star_vi): (Option<usize>, usize) = (None, 0);
+
+    while vi < v.len() {
+        if pi < p.len() && (p[pi] == '_' || p[pi] == v[vi]) {
+            vi += 1;
+            pi += 1;
+        } else if pi < p.len() && p[pi] == '%' {
+            star_pi = Some(pi);
+            pi += 1;
+            star_vi = vi;
+        } else if let Some(sp) = star_pi {
+            pi = sp + 1;
+            star_vi += 1;
+            vi = star_vi;
+        } else {
+            return false;
+        }
+    }
+
+    while pi < p.len() && p[pi] == '%' {
+        pi += 1;
+    }
+    pi == p.len()
 }
 
 #[cfg(test)]
@@ -210,14 +317,19 @@ mod tests {
 
     #[test]
     fn test_s3_connector_provider() {
-        let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = S3Connector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "s3");
     }
 
     #[test]
     fn test_build_operator_success() {
         let creds = make_credentials();
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -227,7 +339,7 @@ mod tests {
             (KEY_ACCESS_KEY_ID.to_string(), "key".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_BUCKET));
     }
@@ -238,7 +350,7 @@ mod tests {
             (KEY_BUCKET.to_string(), "bucket".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_ACCESS_KEY_ID));
     }
@@ -247,7 +359,7 @@ mod tests {
     fn test_build_operator_with_endpoint() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
         creds.insert(KEY_ENDPOINT.to_string(), "http://minio:9000".to_string());
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -281,7 +393,7 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: None,
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
@@ -293,18 +405,44 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format_with_hint() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("parquet".to_string()),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("jsonl".to_string()),
         };
         assert_eq!(
             reader.detect_format("data/no-extension").unwrap(),
             FileFormat::JsonLines
         );
+    }
+
+    #[test]
+    fn test_sql_like_exact() {
+        assert!(sql_like_match("cities.parquet", "cities.parquet"));
+        assert!(!sql_like_match("cities.parquet", "cities.csv"));
+    }
+
+    #[test]
+    fn test_sql_like_percent() {
+        assert!(sql_like_match("data/cities.parquet", "%cities%"));
+        assert!(sql_like_match("cities.parquet", "%"));
+        assert!(sql_like_match("data/cities.parquet", "data/%"));
+        assert!(!sql_like_match("data/cities.parquet", "other/%"));
+    }
+
+    #[test]
+    fn test_sql_like_underscore() {
+        assert!(sql_like_match("a.csv", "_.csv"));
+        assert!(!sql_like_match("ab.csv", "_.csv"));
+    }
+
+    #[test]
+    fn test_sql_like_combined() {
+        assert!(!sql_like_match("data/cities.parquet", "%/_.parquet"));
+        assert!(sql_like_match("data/x.parquet", "%/_.parquet"));
     }
 }

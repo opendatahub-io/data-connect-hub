@@ -12,12 +12,12 @@ import re
 import httpx
 import pytest
 
-from data_connect_hub.flight import FlightSQLClient
+from data_connect_hub import DataConnectClient
 
 
 @pytest.fixture(scope="module")
 def metrics_body(
-    flight_url: str,
+    gateway_endpoint: str,
     flight_metrics_url: str | None,
     auth_token: str,
     tenant_id: str,
@@ -26,7 +26,7 @@ def metrics_body(
     if not flight_metrics_url:
         pytest.skip("DCH_FLIGHT_METRICS_URL not set")
 
-    client = FlightSQLClient(flight_url, token=auth_token, tenant_id=tenant_id, insecure=insecure)
+    client = DataConnectClient(gateway_endpoint, token=auth_token, tenant_id=tenant_id, insecure=insecure)
     client.server_info()
 
     r = httpx.get(f"{flight_metrics_url}/metrics", timeout=10.0)

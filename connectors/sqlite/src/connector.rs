@@ -4,41 +4,39 @@ use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
-use commons::api::connection_types::Provider;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{QueryOptions, TabularState};
-use commons::api::tabular::{QueryOutput, TabularReader};
+use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::tabular::FlightConnector;
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Executor, Row, SqlitePool, Statement, TypeInfo};
 
 pub struct SqliteConnector {
     pools: Cache<String, SqlitePool>,
+    config: ConnectorConfig,
 }
 
-impl Default for SqliteConnector {
-    fn default() -> Self {
+impl SqliteConnector {
+    pub fn new(config: ConnectorConfig) -> Self {
         Self {
             pools: Cache::builder().max_capacity(2).build(),
+            config,
         }
     }
 }
 
-impl SqliteConnector {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
+const PROVIDER: &str = "sqlite";
 
 #[async_trait::async_trait]
 impl FlightConnector for SqliteConnector {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -47,6 +45,7 @@ impl FlightConnector for SqliteConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = match &data_connection.resource.admin {
@@ -58,10 +57,25 @@ impl FlightConnector for SqliteConnector {
         let url = credentials
             .get("url")
             .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+
+        let connection_timeout = self.config.connection_timeout();
+
+        if !enable_cache {
+            return Ok(Arc::new(SqliteReader {
+                pool: sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
+                    .await
+                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))?,
+            }));
+        }
+
         let pool = self
             .pools
             .try_get_with(url.clone(), async {
-                SqlitePool::connect(url.as_str())
+                sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
             })
@@ -79,7 +93,7 @@ pub struct SqliteReader {
 #[async_trait::async_trait]
 impl TabularReader for SqliteReader {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -134,8 +148,70 @@ impl TabularReader for SqliteReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("SQLite connection check failed: {e}")))?;
         Ok(())
+    }
+
+    async fn list_tables(
+        &self,
+        table_name_filter: Option<&str>,
+        include_schema: bool,
+    ) -> Result<Vec<TableInfo>, ConnectorError> {
+        let rows: Vec<(String, String)> = match table_name_filter {
+            Some(pattern) => sqlx::query_as(
+                "SELECT name, type FROM sqlite_master \
+                     WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' \
+                     AND name LIKE ?1 \
+                     ORDER BY name",
+            )
+            .bind(pattern)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| ConnectorError::SQLError(e.to_string()))?,
+            None => sqlx::query_as(
+                "SELECT name, type FROM sqlite_master \
+                     WHERE type IN ('table', 'view') AND name NOT LIKE 'sqlite_%' \
+                     ORDER BY name",
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| ConnectorError::SQLError(e.to_string()))?,
+        };
+
+        let mut tables = Vec::with_capacity(rows.len());
+        for (table_name, table_type) in rows {
+            let table_schema = if include_schema {
+                let query = format!("SELECT * FROM \"{}\" LIMIT 0", table_name.replace('"', "\"\""));
+                let statement = self
+                    .pool
+                    .prepare(&query)
+                    .await
+                    .map_err(|e| ConnectorError::SQLError(e.to_string()))?;
+
+                let fields: Vec<Field> = statement
+                    .columns()
+                    .iter()
+                    .map(|col| Field::new(col.name(), sqlite_type_to_arrow(col.type_info().name()), true))
+                    .collect();
+                Schema::new(fields)
+            } else {
+                Schema::empty()
+            };
+
+            tables.push(TableInfo {
+                catalog: String::new(),
+                schema_name: String::new(),
+                table_name,
+                table_type: table_type.to_uppercase(),
+                table_schema,
+            });
+        }
+
+        Ok(tables)
     }
 }
 
@@ -247,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_sqlite_connector_new() {
-        let connector = SqliteConnector::new();
+        let connector = SqliteConnector::new(ConnectorConfig::default());
         assert_eq!(connector.provider(), "sqlite");
     }
 }

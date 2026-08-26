@@ -13,10 +13,12 @@ End-to-end tests for Data Connect Hub, driven by the Python SDK against a live d
 ```bash
 cd /path/to/data-connect-hub
 
-# 1. Start port-forwards
+# 1. Find the gateway host. REST and Flight are served on the same
+#    host:port, so one value covers both (see docs/user-guide/deploy.md).
 DCH_NS=dch   # namespace where DCH services run
-kubectl port-forward -n $DCH_NS svc/dch-flight-service 50051:50051 &
-kubectl port-forward -n $DCH_NS svc/dch-rest-service 18443:8443 &
+oc get route -n openshift-ingress data-science-gateway -o jsonpath='{.spec.host}'   # RHOAI
+# oc get route -n opendatahub odh-gateway -o jsonpath='{.spec.host}'                # ODH
+
 kubectl port-forward -n $DCH_NS svc/dch-flight-service 19090:9090 &  # metrics (optional)
 
 # 2. Copy the example config and fill in your values
@@ -41,5 +43,4 @@ See `env.example` for all available settings. Required fields:
 | Variable | Description |
 |----------|-------------|
 | `DCH_SERVICE_NAMESPACE` | Namespace where DCH services run |
-| `DCH_REST_URL` | REST service URL (e.g. `https://127.0.0.1:18443`) |
-| `DCH_FLIGHT_URL` | Flight gRPC URL (e.g. `grpc+tls://127.0.0.1:50051`) |
+| `DCH_GATEWAY_ENDPOINT` | Gateway host or host:port serving REST and Flight (e.g. `dch.apps.example.com`) |

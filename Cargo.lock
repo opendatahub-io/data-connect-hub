@@ -1668,6 +1668,8 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uri-connector",
+ "uuid",
 ]
 
 [[package]]
@@ -3714,6 +3716,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4331,6 +4334,7 @@ dependencies = [
  "arrow",
  "arrow-flight",
  "async-trait",
+ "chrono",
  "clap",
  "commons",
  "config",
@@ -5783,6 +5787,25 @@ name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
+
+[[package]]
+name = "uri-connector"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "commons",
+ "futures",
+ "moka",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
 
 [[package]]
 name = "url"

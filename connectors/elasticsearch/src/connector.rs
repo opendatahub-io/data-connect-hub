@@ -8,10 +8,10 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
 use commons::api::connections::{Admin, DataConnectionResource};
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 
 use crate::query::EsRequestInput;
@@ -36,6 +36,8 @@ enum EsAuth {
     Basic { username: String, password: String },
     ApiKey { encoded: String },
 }
+
+const PROVIDER: &str = "elasticsearch";
 
 impl EsClient {
     fn request(&self, method: reqwest::Method, path: &str) -> reqwest::RequestBuilder {
@@ -68,16 +70,18 @@ impl EsClient {
 
 pub struct ElasticsearchConnector {
     clients: Cache<String, EsClient>,
+    config: ConnectorConfig,
 }
 
 impl ElasticsearchConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             clients: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
@@ -93,13 +97,18 @@ fn extract_credentials(
     }
 }
 
-fn build_client(credentials: &HashMap<String, String>) -> Result<EsClient, ConnectorError> {
+fn build_client(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<EsClient, ConnectorError> {
     let base_url = credentials
         .get(KEY_HOST)
         .ok_or_else(|| ConnectorError::ConnectionError("Elasticsearch 'ES_HOST' is required".to_string()))?
         .clone();
 
-    let mut builder = reqwest::Client::builder().no_proxy();
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(connection_timeout);
 
     if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
         let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
@@ -130,7 +139,7 @@ fn build_client(credentials: &HashMap<String, String>) -> Result<EsClient, Conne
 #[async_trait::async_trait]
 impl FlightConnector for ElasticsearchConnector {
     fn provider(&self) -> String {
-        Provider::Elasticsearch.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -139,13 +148,23 @@ impl FlightConnector for ElasticsearchConnector {
 
     async fn get_reader(
         &self,
+        enable_cache: bool,
         data_connection: &DataConnectionResource,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let credentials = extract_credentials(data_connection)?;
+        let connection_timeout = self.config.connection_timeout();
+        if !enable_cache {
+            return Ok(Arc::new(ElasticsearchReader {
+                client: build_client(&credentials, connection_timeout)?,
+                default_index: None,
+            }));
+        }
+
         let cache_key = data_connection.metadata.id.clone();
+
         let client = self
             .clients
-            .try_get_with(cache_key, async { build_client(&credentials) })
+            .try_get_with(cache_key, async { build_client(&credentials, connection_timeout) })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Elasticsearch client: {e}")))?;
 
@@ -163,7 +182,7 @@ pub struct ElasticsearchReader {
 #[async_trait::async_trait]
 impl TabularReader for ElasticsearchReader {
     fn provider(&self) -> String {
-        Provider::Elasticsearch.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
@@ -290,7 +309,7 @@ impl TabularReader for ElasticsearchReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
         let response = self
             .client
             .get("/")
@@ -469,7 +488,12 @@ mod tests {
 
     #[test]
     fn test_connector_provider() {
-        let connector = ElasticsearchConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = ElasticsearchConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "elasticsearch");
     }
 
