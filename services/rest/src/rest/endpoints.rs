@@ -3,6 +3,7 @@ use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
 use crate::rest::update_connection_type_status;
+use crate::state::audit::audit_data_connection_types;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -14,7 +15,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
-
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
@@ -247,6 +247,12 @@ pub async fn get_ingestion_data(
     _id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::Unimplemented.into())
+}
+
+pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
+    info!("audit_connection_types");
+    audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
+    Ok(HttpResponse::Accepted().finish())
 }
 
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
