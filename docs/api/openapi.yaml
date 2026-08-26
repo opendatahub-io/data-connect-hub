@@ -272,14 +272,27 @@ paths:
         "400":
           $ref: "#/components/responses/BadRequest"
 
-  /api/v1/data/ingestion/{id}:
+  /api/v1/data/connections/{id}/binary:
     parameters:
       - $ref: "#/components/parameters/resourceId"
     get:
-      operationId: getIngestionData
-      summary: Get ingestion data (not yet implemented)
+      operationId: getConnectionBinaryData
+      summary: Get binary data from a connection (not yet implemented)
       tags: [connections]
       responses:
+        "200":
+          description: Binary data streamed from the connection
+          headers:
+            Transfer-Encoding:
+              schema:
+                type: string
+                enum: [chunked]
+              description: Response is streamed using chunked transfer encoding
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
         "501":
           description: Not implemented
           content:
