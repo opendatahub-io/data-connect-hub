@@ -114,7 +114,7 @@ setup_pg_secret() {
         PG_INTERNAL_URL="$DCH_TENANT_PG_URL"
         kubectl create secret generic "$PG_SECRET" \
             -n "$DCH_TENANT_ID" \
-            --from-literal="url=${PG_INTERNAL_URL}" \
+            --from-literal="URI=${PG_INTERNAL_URL}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         E2E_PG_ENABLED="true"
     fi
