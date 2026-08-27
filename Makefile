@@ -197,12 +197,19 @@ generate-openapi-docs:
 	fi
 
 _generate-openapi-docs-native:
+	@echo "1. Bundling external spec to openapi.yaml (with x-internal removed)..."
 	redocly bundle external@latest --output docs/api/openapi.yaml --remove-unused-components
+	@echo "2. Bundling external spec to openapi.json (with x-internal removed)..."
 	redocly bundle external@latest --ext json --output docs/api/openapi.json
+	@echo "3. Bundling internal spec to openapi-internal.yaml..."
 	redocly bundle internal@latest --output docs/api/openapi-internal.yaml --remove-unused-components
+	@echo "4. Bundling internal spec to openapi-internal.json..."
 	redocly bundle internal@latest --ext json --output docs/api/openapi-internal.json
+	@echo "5. Building public HTML from external spec..."
 	redocly build-docs docs/api/openapi.json --output=docs/api/index-public.html
+	@echo "6. Building private HTML from internal spec..."
 	redocly build-docs docs/api/openapi-internal.json --output=docs/api/index-private.html
+	@echo "7. Copying public HTML to index.html..."
 	cp docs/api/index-public.html docs/api/index.html
 
 _generate-openapi-docs-container:
