@@ -100,6 +100,11 @@ def pg_secret() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def pg_url() -> str | None:
+    return os.environ.get("DCH_TENANT_PG_URL") or None
+
+
+@pytest.fixture(scope="session")
 def s3_secret() -> str | None:
     return os.environ.get("DCH_S3_SECRET") or None
 
@@ -185,6 +190,31 @@ def http_client(rest_url: str, ca_cert: str | None, insecure: bool) -> httpx.Cli
     else:
         verify = True
     client = httpx.Client(base_url=rest_url, timeout=10.0, verify=verify)
+    yield client  # type: ignore[misc]
+    client.close()
+
+
+@pytest.fixture(scope="session")
+def authed_http_client(
+    rest_url: str,
+    auth_token: str,
+    tenant_id: str,
+    ca_cert: str | None,
+    insecure: bool,
+) -> httpx.Client:
+    """Raw httpx client with gateway auth headers, for endpoints not yet in the SDK."""
+    if insecure:
+        verify: str | bool = False
+    elif ca_cert:
+        verify = ca_cert
+    else:
+        verify = True
+    client = httpx.Client(
+        base_url=rest_url,
+        timeout=30.0,
+        verify=verify,
+        headers={"Authorization": f"Bearer {auth_token}", "x-tenant-id": tenant_id},
+    )
     yield client  # type: ignore[misc]
     client.close()
 

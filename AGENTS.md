@@ -118,6 +118,8 @@ All routes are under `/api/v1/data`:
 - `GET /api/v1/data/connection-types/{id}` — get connection type
 - `PATCH /api/v1/data/connection-types/{id}` — update connection type
 - `DELETE /api/v1/data/connection-types/{id}` — delete connection type
+- `POST /api/v1/data/connections/{id}/readiness` — check an existent connection
+- `POST /api/v1/data/test/credentials` — test credentials before creating a connection
 
 ## Container Builds
 
