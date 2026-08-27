@@ -2,4 +2,5 @@
 extend-exclude = [
     "dc-controller/config/crd/",
     "dc-controller/charts/crds/",
+    "docs/api/*.html",
 ]
