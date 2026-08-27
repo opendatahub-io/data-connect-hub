@@ -15,6 +15,8 @@ pub enum ConnectorError {
     ConfigError(String),
     #[error("IO error: {0}")]
     IOError(String),
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
 }
 
 /// Only meta store implementations should emit this error.

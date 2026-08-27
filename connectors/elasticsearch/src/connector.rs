@@ -11,7 +11,7 @@ use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 
@@ -140,7 +140,7 @@ impl FlightConnector for ElasticsearchConnector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
 
         let cache_key = data_connection.metadata.id.clone();
@@ -166,12 +166,12 @@ pub struct ElasticsearchReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for ElasticsearchReader {
+impl DataReader for ElasticsearchReader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let request = EsRequestInput::parse(query)?;
         let index = request.resolve_index(self.default_index.as_deref())?;
 
@@ -202,13 +202,13 @@ impl TabularReader for ElasticsearchReader {
         }
 
         let schema = types::mapping_fields_to_schema(&mapping_fields);
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let request = EsRequestInput::parse(&state.query)?;
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let request = EsRequestInput::parse(&query.query)?;
         let index = request.resolve_index(self.default_index.as_deref())?;
-        let schema = state.schema.clone();
+        let schema = query.schema.clone();
         let batch_size = options.batch_size as u64;
         let total_limit = request.size;
         let client = self.client.clone();

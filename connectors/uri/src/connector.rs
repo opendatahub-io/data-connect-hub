@@ -13,7 +13,7 @@ use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 
@@ -144,10 +144,10 @@ impl FlightConnector for UriConnector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
         let cache_key = data_connection.metadata.id.clone();
-        
+
         let client = self
             .clients
             .try_get_with(cache_key, async {
@@ -216,12 +216,12 @@ async fn fetch_json(client: &UriClient, request: &UriRequest) -> Result<serde_js
 }
 
 #[async_trait::async_trait]
-impl TabularReader for UriReader {
+impl DataReader for UriReader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let request = UriRequest::parse(query)?;
         let response_json = fetch_json(&self.client, &request).await?;
         let rows = types::extract_rows(&response_json, request.data_path.as_deref())?;
@@ -232,12 +232,12 @@ impl TabularReader for UriReader {
 
         let schema = types::infer_schema(rows);
         *self.cached_response.lock().await = Some(response_json);
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let request = UriRequest::parse(&state.query)?;
-        let schema = state.schema.clone();
+    async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let request = UriRequest::parse(&view.query)?;
+        let schema = view.schema.clone();
         let client = self.client.clone();
         let batch_size = options.batch_size;
         let cached = self.cached_response.lock().await.take();
@@ -257,7 +257,7 @@ impl TabularReader for UriReader {
 
         Ok(Box::pin(stream))
     }
-
+    
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         let response = self
             .client

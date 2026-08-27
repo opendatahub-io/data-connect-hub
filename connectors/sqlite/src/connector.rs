@@ -5,8 +5,8 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{QueryOptions, TabularState};
-use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
+use commons::api::tabular::{BinaryQuery, QueryOptions, Query};
+use commons::api::tabular::{QueryOutput, TableInfo, DataReader};
 
 use futures::StreamExt;
 
@@ -50,7 +50,7 @@ impl FlightConnector for SqliteConnector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
         let cache_key = data_connection.metadata.id.clone();
 
@@ -81,12 +81,12 @@ pub struct SqliteReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for SqliteReader {
+impl DataReader for SqliteReader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let statement = self
             .pool
             .prepare(query)
@@ -99,16 +99,16 @@ impl TabularReader for SqliteReader {
             .map(|col| Field::new(col.name(), sqlite_type_to_arrow(col.type_info().name()), true))
             .collect();
 
-        Ok(Arc::new(TabularState::new(
+        Ok(Arc::new(Query::new(
             query.to_owned(),
             Arc::new(Schema::new(fields)),
         )))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
+    async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
-        let schema = state.schema.clone();
-        let query = state.query.clone();
+        let schema = view.schema.clone();
+        let query = view.query.clone();
         let batch_size = options.batch_size;
 
         let stream = async_stream::try_stream! {

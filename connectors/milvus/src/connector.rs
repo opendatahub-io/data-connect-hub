@@ -10,7 +10,7 @@ use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use milvus::v2::prelude::{
     ClientV2, ConnectConfig, FieldData, GetRequest, Ids, QueryRequest, QueryResponse, SearchRequest, SearchResponse,
@@ -86,7 +86,7 @@ impl FlightConnector for MilvusConnector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
@@ -109,12 +109,12 @@ pub struct MilvusReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for MilvusReader {
+impl DataReader for MilvusReader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let mut request = MilvusRequestInput::parse(query)?;
 
         if let MilvusOperation::Query = request.operation() {
@@ -129,13 +129,13 @@ impl TabularReader for MilvusReader {
 
         let field_data = normalize_field_order(&request, field_data);
         let schema = schema_from_field_data(&field_data);
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let request = MilvusRequestInput::parse(&state.query)?;
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let request = MilvusRequestInput::parse(&query.query)?;
         let batch_size = options.batch_size;
-        let schema = state.schema.clone();
+        let schema = query.schema.clone();
 
         match request.operation() {
             MilvusOperation::Query => self.read_query_paginated(request, schema, batch_size),

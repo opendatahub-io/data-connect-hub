@@ -1,4 +1,4 @@
-use commons::api::errors::{ConnectorError, MetaStoreError, SecretStoreError};
+use commons::api::errors::{ConnectorError, MetaStoreError};
 use tonic::Status;
 
 pub(crate) fn map_meta_store_error(e: MetaStoreError) -> Status {
@@ -34,25 +34,6 @@ pub(crate) fn map_meta_store_error(e: MetaStoreError) -> Status {
     }
 }
 
-pub(crate) fn map_secret_store_error(e: SecretStoreError) -> Status {
-    match e {
-        SecretStoreError::SecretNotFound(msg) => Status::not_found(msg),
-        SecretStoreError::Forbidden(msg) => Status::permission_denied(msg),
-        e @ SecretStoreError::CannotCreateSecret(_) => {
-            tracing::error!(error = %e, "failed to create secret");
-            Status::internal("cannot create secret")
-        },
-        e @ SecretStoreError::CannotDeleteSecret(_) => {
-            tracing::error!(error = %e, "failed to delete secret");
-            Status::internal("cannot delete secret")
-        },
-        e @ SecretStoreError::CannotSetSecretLabels(_) => {
-            tracing::error!(error = %e, "failed to set secret labels");
-            Status::internal("cannot set secret labels")
-        },
-    }
-}
-
 pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
     match e {
         ConnectorError::InvalidRequest(msg) => Status::invalid_argument(msg),
@@ -72,6 +53,10 @@ pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
         e @ ConnectorError::IOError(_) => {
             tracing::error!(error = %e, "connector IO error");
             Status::internal("data source IO error")
+        },
+        e @ ConnectorError::UnsupportedOperation(_) => {
+            tracing::error!(error = %e, "connector unsupported operation");
+            Status::unimplemented("unsupported operation")
         },
     }
 }

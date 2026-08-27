@@ -11,7 +11,7 @@ use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use futures::Stream;
 use moka::future::Cache;
@@ -91,7 +91,7 @@ impl FlightConnector for Neo4jConnector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
 
         let cache_key = data_connection.metadata.id.clone();
@@ -114,12 +114,12 @@ pub struct Neo4jReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for Neo4jReader {
+impl DataReader for Neo4jReader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let mut result = self
             .graph
             .execute(neo4rs::query(query))
@@ -129,7 +129,7 @@ impl TabularReader for Neo4jReader {
         let row = match result.next().await.map_err(map_neo4j_error)? {
             Some(row) => row,
             None => {
-                return Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(Schema::empty()))));
+                return Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::empty()))));
             },
         };
 
@@ -152,16 +152,16 @@ impl TabularReader for Neo4jReader {
             })
             .collect();
 
-        Ok(Arc::new(TabularState::new(
+        Ok(Arc::new(Query::new(
             query.to_owned(),
             Arc::new(Schema::new(fields)),
         )))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let graph = self.graph.clone();
-        let schema = state.schema.clone();
-        let query = state.query.clone();
+        let schema = query.schema.clone();
+        let query = query.query.clone();
         let batch_size = options.batch_size;
 
         #[allow(clippy::while_let_loop)]

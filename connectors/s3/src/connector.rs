@@ -7,7 +7,7 @@ use arrow::datatypes::Schema;
 use commons::api::connections::DataConnectionResource;
 use commons::api::errors::ConnectorError;
 use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
+use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, TableInfo, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use opendal::{EntryMode, Operator, Reader, layers::TimeoutLayer, services::S3};
@@ -93,7 +93,7 @@ impl FlightConnector for S3Connector {
         &self,
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
         let cache_key = data_connection.metadata.id.clone();
 
@@ -132,12 +132,12 @@ impl S3Reader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for S3Reader {
+impl DataReader for S3Reader {
     fn provider(&self) -> String {
         PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let format = self.detect_format(query)?;
         let reader = self.make_reader(query).await?;
 
@@ -147,25 +147,25 @@ impl TabularReader for S3Reader {
             FileFormat::JsonLines => format::read_jsonl_schema(reader).await?,
         };
 
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let format = self.detect_format(&state.query)?;
+    async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let format = self.detect_format(&view.query)?;
         let batch_size = options.batch_size;
 
         match format {
             FileFormat::Parquet => {
-                let reader = self.make_reader(&state.query).await?;
+                let reader = self.make_reader(&view.query).await?;
                 format::read_parquet_batches(reader, batch_size).await
             },
             FileFormat::Csv => {
-                let reader = self.make_reader(&state.query).await?;
-                format::read_csv_batches(reader, &state.schema, batch_size).await
+                let reader = self.make_reader(&view.query).await?;
+                format::read_csv_batches(reader, &view.schema, batch_size).await
             },
             FileFormat::JsonLines => {
-                let reader = self.make_reader(&state.query).await?;
-                format::read_jsonl_batches(reader, &state.schema, batch_size).await
+                let reader = self.make_reader(&view.query).await?;
+                format::read_jsonl_batches(reader, &view.schema, batch_size).await
             },
         }
     }
