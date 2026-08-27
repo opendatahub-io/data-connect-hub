@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, Float64Array, Int32Array, StringArray};
+use arrow::array::{Array, BinaryArray, Float64Array, Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
+use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connection_types::Secret;
@@ -19,6 +19,7 @@ mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
 use opendal::{Operator, services::Memory};
+use prost::Message;
 use s3_connector::S3Connector;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -325,4 +326,43 @@ async fn test_flight_s3_read_csv() {
 
     let names = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(names.value(0), "alice");
+}
+
+#[tokio::test]
+async fn test_flight_s3_binary_download() {
+    let binary_data = b"binary model data for testing".to_vec();
+    let op = setup_memory_operator("models/model.bin", binary_data.clone()).await;
+
+    let url = start_flight_server(
+        S3TestMetaStore {
+            format: DataFormat::Binary,
+        },
+        op,
+    )
+    .await;
+
+    let channel = Channel::from_shared(url).unwrap().connect().await.unwrap();
+    let mut client = arrow_flight::FlightClient::new(channel);
+    client.add_header(X_DATA_CONNECTION_ID, "s3-conn-1").unwrap();
+    client.add_header(X_TENANT_ID, "default").unwrap();
+
+    let download_cmd = arrow_flight::sql::Any {
+        type_url: "dataconnethub.opendatahub.io/download".to_string(),
+        value: prost::bytes::Bytes::from("models/model.bin"),
+    };
+    let descriptor = FlightDescriptor::new_cmd(download_cmd.encode_to_vec());
+    let flight_info = client.get_flight_info(descriptor).await.unwrap();
+
+    let ticket = flight_info.endpoint[0].ticket.clone().unwrap();
+    let stream = client.do_get(ticket).await.unwrap();
+    let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+
+    let mut result = Vec::new();
+    for batch in &batches {
+        let col = batch.column(0).as_any().downcast_ref::<BinaryArray>().unwrap();
+        for i in 0..col.len() {
+            result.extend_from_slice(col.value(i));
+        }
+    }
+    assert_eq!(result, binary_data);
 }

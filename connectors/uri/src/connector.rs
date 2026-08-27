@@ -5,14 +5,14 @@ use std::time::Duration;
 use crate::query::UriRequest;
 use crate::types;
 use arrow::array::{
-    ArrayRef, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, StringArray,
-    TimestampMillisecondArray,
+    ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
+    StringArray, TimestampMillisecondArray,
 };
-use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
+use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connector::CredentialsResolver;
-use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
+use commons::api::connector::{BinaryQuery, DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
@@ -102,6 +102,7 @@ fn build_client(
         .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(connection_timeout)
+        .read_timeout(request_timeout)
         .timeout(request_timeout);
 
     if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
@@ -251,6 +252,64 @@ impl DataReader for UriReader {
 
             for chunk in rows.chunks(batch_size) {
                 let batch = rows_to_record_batch(&schema, chunk)?;
+                yield batch;
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn can_read_binary(&self, query: Arc<BinaryQuery>) -> Result<(), ConnectorError> {
+        let response = self
+            .client
+            .request(reqwest::Method::HEAD, &query.path)?
+            .send()
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("HTTP HEAD failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            return Err(ConnectorError::IOError(format!(
+                "Cannot read '{}': HTTP {status}",
+                query.path
+            )));
+        }
+        Ok(())
+    }
+
+    async fn read_binary(&self, query: Arc<BinaryQuery>) -> QueryOutput {
+        // Disable the total request deadline — binary downloads can be
+        // arbitrarily large.  The client-level read_timeout still guards
+        // against stalled connections (it resets on each received chunk).
+        let response = self
+            .client
+            .request(reqwest::Method::GET, &query.path)?
+            .timeout(Duration::from_secs(24 * 60 * 60))
+            .send()
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("HTTP request failed: {e}")))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            return Err(ConnectorError::ConnectionError(format!(
+                "HTTP request failed (status {status}): {body}"
+            )));
+        }
+
+        let schema = Arc::new(Schema::new(vec![Field::new("data", ArrowDataType::Binary, false)]));
+
+        let mut byte_stream = response.bytes_stream();
+
+        let stream = async_stream::try_stream! {
+            use futures::StreamExt;
+            while let Some(result) = byte_stream.next().await {
+                let chunk = result
+                    .map_err(|e| ConnectorError::IOError(format!("Stream read error: {e}")))?;
+                let data: &[u8] = &chunk;
+                let array = BinaryArray::from_vec(vec![data]);
+                let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(array)])
+                    .map_err(|e| ConnectorError::IOError(format!("Failed to create batch: {e}")))?;
                 yield batch;
             }
         };

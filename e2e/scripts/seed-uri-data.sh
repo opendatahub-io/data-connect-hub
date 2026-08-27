@@ -42,6 +42,8 @@ kubectl create configmap "${APP_NAME}-data" \
     --from-literal='cities.json=[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]' \
     --from-literal='nested.json={"status":"ok","data":{"items":[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]}}' \
     --from-literal='empty.json=[]' \
+    --from-literal="binary.dat=binary-test-data-for-e2e
+" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 # --- ConfigMap: nginx config ---

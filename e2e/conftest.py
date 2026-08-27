@@ -120,6 +120,11 @@ def s3_jsonl_query() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def s3_binary_path() -> str | None:
+    return os.environ.get("DCH_S3_BINARY_PATH") or None
+
+
+@pytest.fixture(scope="session")
 def milvus_secret() -> str | None:
     return os.environ.get("DCH_MILVUS_SECRET") or None
 
@@ -257,6 +262,39 @@ def create_connection(rest_client: DataConnectClient):
 # ---------------------------------------------------------------------------
 # Flight query fixture (module-scoped)
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def flight_client_factory(
+    gateway_endpoint: str,
+    auth_token: str,
+    tenant_id: str,
+    ca_cert: str | None,
+    insecure: bool,
+):
+    """Factory that creates a raw pyarrow.flight client with headers for a given connection."""
+    import pyarrow.flight as flight
+    from data_connect_hub.client import _build_urls
+
+    _, flight_url = _build_urls(gateway_endpoint)
+
+    def _factory(connection_id: str) -> tuple[flight.FlightClient, flight.FlightCallOptions]:
+        kwargs: dict = {}
+        if insecure:
+            kwargs["disable_server_verification"] = True
+        if ca_cert:
+            kwargs["tls_root_certs"] = Path(ca_cert).read_bytes()
+
+        client = flight.connect(flight_url, **kwargs)
+        headers = [
+            (b"x-data-connection-id", connection_id.encode()),
+            (b"x-tenant-id", tenant_id.encode()),
+            (b"authorization", f"Bearer {auth_token}".encode()),
+        ]
+        opts = flight.FlightCallOptions(headers=headers)
+        return client, opts
+
+    return _factory
 
 
 @pytest.fixture(scope="module")

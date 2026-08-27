@@ -365,6 +365,7 @@ DCH_S3_SECRET=${S3_SECRET}
 DCH_S3_CSV_QUERY=datasets/dch-test-prompts.csv
 DCH_S3_PARQUET_QUERY=datasets/dch-test-prompts.parquet
 DCH_S3_JSONL_QUERY=datasets/dch-test-prompts.jsonl
+DCH_S3_BINARY_PATH=datasets/dch-test-binary.bin
 EOF
     fi
 
