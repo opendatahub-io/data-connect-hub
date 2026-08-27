@@ -1,0 +1,8 @@
+description: Backend service unavailable
+content:
+  application/json:
+    schema:
+      $ref: "../schemas/ErrorResponse.yaml"
+    example:
+      code: service_unavailable
+      message: "Metadata store is not available"

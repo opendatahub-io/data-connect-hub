@@ -1,0 +1,18 @@
+description: >
+  Phase state. Most variants are bare strings. The `secret_valid`
+  variant carries a detail message and is serialized as an object
+  `{"secret_valid": "<message>"}`.
+oneOf:
+  - type: string
+    enum:
+      - secret_ready
+      - secret_not_found
+      - ingestion_ready
+      - ingestion_not_ready
+  - type: object
+    required: [secret_valid]
+    properties:
+      secret_valid:
+        type: string
+        description: Detail message for the secret-valid state
+    additionalProperties: false

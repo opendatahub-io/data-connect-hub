@@ -1,0 +1,8 @@
+description: Request semantically invalid
+content:
+  application/json:
+    schema:
+      $ref: "../schemas/ErrorResponse.yaml"
+    example:
+      code: unprocessable_entity
+      message: "Connection type '550e8400-e29b-41d4-a716-446655440000' does not exist"

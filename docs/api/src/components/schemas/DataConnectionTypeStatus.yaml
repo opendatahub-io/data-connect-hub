@@ -1,0 +1,5 @@
+type: object
+required: [capabilities]
+properties:
+  capabilities:
+    $ref: "Capabilities.yaml"

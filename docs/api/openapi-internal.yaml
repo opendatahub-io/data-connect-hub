@@ -15,27 +15,7 @@ tags:
   - name: connection-types
     description: Connection type definitions
 paths:
-  /api/v1/audit/data-connection-types:
-    post:
-      operationId: auditConnectionTypes
-      summary: Audit connection type capabilities
-      description: >
-        Queries the Flight service for supported connectors and updates
-        the capabilities status of all connection types accordingly.
-        This endpoint does not require a tenant header.
-      security: []
-      tags: [audit]
-      responses:
-        "202":
-          description: Audit completed
-        "500":
-          description: Internal error
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
-  /api/v1/data/health:
+  /health:
     get:
       operationId: health
       summary: Health check

@@ -1,0 +1,6 @@
+type: object
+required: [service]
+properties:
+  service:
+    type: string
+    example: Data Connect Hub

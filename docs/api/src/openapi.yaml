@@ -1,0 +1,232 @@
+openapi: 3.0.3
+info:
+  title: Data Connect Hub REST API
+  description: REST API for managing data connections and connection types.
+  version: 0.1.0
+  license:
+    name: Apache-2.0
+
+servers:
+  - url: /api/v1/data
+
+security:
+  - tenantHeader: []
+
+paths:
+  /health:
+    get:
+      operationId: health
+      summary: Health check
+      security: []
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/HealthResponse.yaml"
+
+  /connections:
+    get:
+      operationId: listConnections
+      summary: List connections
+      tags: [connections]
+      responses:
+        "200":
+          description: Connection list
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionResourceList.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+    post:
+      operationId: createConnection
+      summary: Create a connection
+      tags: [connections]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "components/schemas/DataConnection.yaml"
+      responses:
+        "201":
+          description: Connection created
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "422":
+          $ref: "components/responses/UnprocessableEntity.yaml"
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+
+  /connections/{id}:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: getConnection
+      summary: Get a connection
+      tags: [connections]
+      responses:
+        "200":
+          description: Connection details
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+    patch:
+      operationId: patchConnection
+      summary: Update a connection
+      tags: [connections]
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "components/schemas/DataConnectionMergePatch.yaml"
+      responses:
+        "200":
+          description: Connection updated
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+        "422":
+          $ref: "components/responses/UnprocessableEntity.yaml"
+    delete:
+      operationId: deleteConnection
+      summary: Delete a connection
+      tags: [connections]
+      responses:
+        "204":
+          description: Connection deleted
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+
+  /connection-types:
+    get:
+      operationId: listConnectionTypes
+      summary: List connection types
+      tags: [connection-types]
+      responses:
+        "200":
+          description: Connection type list
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionTypeResourceList.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+    post:
+      operationId: createConnectionType
+      summary: Create a connection type
+      tags: [connection-types]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "components/schemas/DataConnectionType.yaml"
+      responses:
+        "201":
+          description: Connection type created
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionTypeResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+
+  /connection-types/{id}:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: getConnectionType
+      summary: Get a connection type
+      tags: [connection-types]
+      responses:
+        "200":
+          description: Connection type details
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionTypeResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+    patch:
+      operationId: patchConnectionType
+      summary: Update a connection type
+      tags: [connection-types]
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "components/schemas/DataConnectionTypeMergePatch.yaml"
+      responses:
+        "200":
+          description: Connection type updated
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/DataConnectionTypeResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+    delete:
+      operationId: deleteConnectionType
+      summary: Delete a connection type
+      tags: [connection-types]
+      responses:
+        "204":
+          description: Connection type deleted
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+
+components:
+  securitySchemes:
+    tenantHeader:
+      type: apiKey
+      in: header
+      name: x-tenant-id
+      description: Tenant identifier. Required on all endpoints except /health.
+
+  parameters:
+    resourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource unique identifier
+
+tags:
+  - name: connections
+    description: Data connection management
+  - name: connection-types
+    description: Connection type definitions

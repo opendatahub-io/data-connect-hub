@@ -1,0 +1,17 @@
+type: object
+description: >
+  RFC 7396 JSON Merge Patch for a DataConnection. Supply only
+  the fields you want to change.
+properties:
+  name:
+    type: string
+  data_connection_type_id:
+    type: string
+  format:
+    $ref: "DataFormat.yaml"
+  admin:
+    $ref: "Admin.yaml"
+  properties:
+    type: object
+    additionalProperties:
+      type: string

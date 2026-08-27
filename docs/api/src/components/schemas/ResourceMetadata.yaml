@@ -1,0 +1,19 @@
+type: object
+required: [id, created_at, updated_at]
+properties:
+  id:
+    type: string
+    description: Unique identifier (UUID)
+    example: 550e8400-e29b-41d4-a716-446655440000
+  tenant_id:
+    type: string
+    description: Tenant identifier. Omitted when not applicable.
+    example: tenant-1
+  created_at:
+    type: string
+    format: date-time
+    example: "2026-01-01T00:00:00Z"
+  updated_at:
+    type: string
+    format: date-time
+    example: "2026-01-01T00:00:00Z"

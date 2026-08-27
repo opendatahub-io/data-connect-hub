@@ -1,0 +1,25 @@
+type: object
+required: [name, label, required, type]
+properties:
+  name:
+    type: string
+    example: url
+  label:
+    type: string
+    example: Connection URL
+  description:
+    type: string
+    nullable: true
+  required:
+    type: boolean
+  type:
+    type: string
+    example: string
+  enum_values:
+    type: array
+    nullable: true
+    items:
+      $ref: "EnumValue.yaml"
+  default_value:
+    type: string
+    nullable: true

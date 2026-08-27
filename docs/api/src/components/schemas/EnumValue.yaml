@@ -1,0 +1,9 @@
+type: object
+required: [value, label]
+properties:
+  value:
+    type: string
+    example: us-east-1
+  label:
+    type: string
+    example: US East
