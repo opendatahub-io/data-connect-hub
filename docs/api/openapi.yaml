@@ -7,13 +7,33 @@ info:
     name: Apache-2.0
 
 servers:
-  - url: /api/v1/data
+  - url: /
 
 security:
   - tenantHeader: []
 
 paths:
-  /health:
+  /api/v1/audit/data-connection-types:
+    post:
+      operationId: auditConnectionTypes
+      summary: Audit connection type capabilities
+      description: >
+        Queries the Flight service for supported connectors and updates
+        the capabilities status of all connection types accordingly.
+        This endpoint does not require a tenant header.
+      security: []
+      tags: [audit]
+      responses:
+        "202":
+          description: Audit completed
+        "500":
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/data/health:
     get:
       operationId: health
       summary: Health check
@@ -26,7 +46,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
 
-  /connections:
+  /api/v1/data/connections:
     get:
       operationId: listConnections
       summary: List connections
@@ -66,7 +86,7 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
-  /connections/{id}:
+  /api/v1/data/connections/{id}:
     parameters:
       - $ref: "#/components/parameters/resourceId"
     get:
@@ -119,7 +139,7 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
-  /connection-types:
+  /api/v1/data/connection-types:
     get:
       operationId: listConnectionTypes
       summary: List connection types
@@ -157,7 +177,7 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
-  /connection-types/{id}:
+  /api/v1/data/connection-types/{id}:
     parameters:
       - $ref: "#/components/parameters/resourceId"
     get:
@@ -207,6 +227,78 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/data/connections/{id}/readiness:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    post:
+      operationId: checkConnection
+      summary: Check connection readiness
+      description: >
+        Tests whether the connection is reachable. Updates the connection
+        status to ready or not_ready accordingly.
+      tags: [connections]
+      responses:
+        "204":
+          description: Connection check successful
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: Connection check failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/data/test/credentials:
+    post:
+      operationId: testCredentials
+      summary: Test credentials
+      description: >
+        Validates that the given credentials can successfully connect
+        to the data source without creating a persisted connection.
+      tags: [test]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TestCredentials"
+      responses:
+        "204":
+          description: Credentials are valid
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/v1/data/connections/{id}/binary:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: getConnectionBinaryData
+      summary: Get binary data from a connection (not yet implemented)
+      tags: [connections]
+      responses:
+        "200":
+          description: Binary data streamed from the connection
+          headers:
+            Transfer-Encoding:
+              schema:
+                type: string
+                enum: [chunked]
+              description: Response is streamed using chunked transfer encoding
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "501":
+          description: Not implemented
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
 components:
   securitySchemes:
@@ -383,6 +475,11 @@ components:
           type: string
           nullable: true
           description: Optional human-readable status message
+        updated_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: When the status was last updated
         phases:
           type: array
           items:
@@ -499,6 +596,20 @@ components:
           type: string
           nullable: true
 
+    TestCredentials:
+      type: object
+      required: [data_connection_type_id, secret]
+      properties:
+        data_connection_type_id:
+          type: string
+          description: References a connection type id
+          example: 550e8400-e29b-41d4-a716-446655440000
+        secret:
+          type: object
+          additionalProperties:
+            type: string
+          description: Inline secret key-value pairs to test
+
     DataConnectionType:
       type: object
       required: [name, provider, credentials_fields]
@@ -563,3 +674,7 @@ tags:
     description: Data connection management
   - name: connection-types
     description: Connection type definitions
+  - name: test
+    description: Credential and connectivity testing
+  - name: audit
+    description: Internal audit operations

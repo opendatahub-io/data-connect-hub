@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -152,6 +152,46 @@ class FlightClient:
                     cursor.close()
         finally:
             conn.close()
+
+    def read_batches(
+        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
+    ) -> Generator[pa.RecordBatch, None, None]:
+        """Execute *sql* and return a streaming iterator of RecordBatches.
+
+        Yields one :class:`pyarrow.RecordBatch` per iteration.  The
+        connection is opened and the cursor closed automatically when the
+        generator is first iterated and when it is exhausted or closed::
+
+            for batch in client.read_batches("SELECT ...", "conn-1"):
+                process(batch)
+        """
+        return self._iter_batches(sql, connection_id, parameters)
+
+    def _iter_batches(
+        self, sql: str, connection_id: str, parameters: Sequence[Any] | None
+    ) -> Generator[pa.RecordBatch, None, None]:
+        try:
+            conn = self._connect(connection_id)
+        except DCHConnectionError as exc:
+            if self._token_cache is not None and _is_auth_error(exc):
+                self._token_cache.refresh()
+                conn = self._connect(connection_id)
+            else:
+                raise
+        try:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(sql, parameters)
+                reader = cursor.fetch_record_batch()
+                yield from reader
+            except flight_dbapi.Error as exc:
+                raise DCHQueryError(str(exc)) from exc
+            finally:
+                with contextlib.suppress(Exception):
+                    cursor.close()
+        finally:
+            with contextlib.suppress(Exception):
+                conn.close()
 
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* and return the result as a pandas DataFrame."""

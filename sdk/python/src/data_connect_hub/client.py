@@ -21,6 +21,8 @@ from .models import (
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
+
     import pandas as pd
     import pyarrow as pa
 
@@ -288,6 +290,20 @@ class DataConnectClient:
     def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
         """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
         return self._require_flight().read(sql, connection_id, parameters=parameters)
+
+    def read_batches(
+        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
+    ) -> Generator[pa.RecordBatch, None, None]:
+        """Execute *sql* via Flight SQL and return a streaming iterator of RecordBatches.
+
+        Yields one :class:`pyarrow.RecordBatch` per iteration.  The
+        underlying cursor and connection are closed automatically when the
+        generator is exhausted or closed::
+
+            for batch in client.read_batches("SELECT ...", "conn-1"):
+                process(batch)
+        """
+        return self._require_flight().read_batches(sql, connection_id, parameters=parameters)
 
     def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
