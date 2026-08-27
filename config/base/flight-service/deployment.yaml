@@ -44,7 +44,7 @@ spec:
             - /config/config.toml
           ports:
             - name: grpc
-              containerPort: 50051
+              containerPort: 8443
             - name: metrics
               containerPort: 9090
           env:

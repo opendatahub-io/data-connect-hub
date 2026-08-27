@@ -210,7 +210,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			flightSvc := &corev1.Service{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService, Namespace: targetNamespace}, flightSvc)).To(Succeed())
-			Expect(flightSvc.Spec.Ports[0].Port).To(Equal(int32(50051)))
+			Expect(flightSvc.Spec.Ports[0].Port).To(Equal(int32(8443)))
 		})
 
 		It("should set PlatformObject status fields", func() {

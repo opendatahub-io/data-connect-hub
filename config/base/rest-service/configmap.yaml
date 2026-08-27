@@ -16,4 +16,4 @@ data:
 
     [flight-service]
     address = "flight-service"
-    port = 50051
+    port = 8443
