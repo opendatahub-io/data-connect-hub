@@ -95,11 +95,12 @@ impl FlightConnector for S3Connector {
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
-        let credentials = credentials_resolver.resolve(data_connection).await?;
+        let cache_key = data_connection.metadata.id.clone();
 
         let operator = self
             .operators
-            .try_get_with_by_ref(&data_connection.metadata.id, async {
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 build_operator(&credentials, connection_timeout)
             })
             .await

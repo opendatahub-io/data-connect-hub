@@ -142,13 +142,13 @@ impl FlightConnector for ElasticsearchConnector {
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
-        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
             .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 build_client(&credentials, connection_timeout)
             })
             .await

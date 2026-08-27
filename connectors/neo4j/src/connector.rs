@@ -93,13 +93,13 @@ impl FlightConnector for Neo4jConnector {
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
-        let credentials = credentials_resolver.resolve(data_connection).await?;
 
         let cache_key = data_connection.metadata.id.clone();
 
         let graph = self
             .graphs
             .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 build_graph(&credentials, connection_timeout).await
             })
             .await

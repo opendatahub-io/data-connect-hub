@@ -13,8 +13,8 @@ use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
-use commons::api::tabular::FlightConnector;
 use commons::api::tabular::CredentialsResolver;
+use commons::api::tabular::FlightConnector;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
@@ -72,10 +72,12 @@ impl FlightConnector for PgConnector {
         info!("Creating Postgres reader");
 
         let connection_timeout = self.config.connection_timeout();
-        let credentials = credentials_resolver.resolve(data_connection).await?;
+        let cache_key = data_connection.metadata.id.clone();
+
         let pool = self
             .pools
-            .try_get_with(data_connection.metadata.id.clone(), async {
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 let url = credentials
                     .get(KEY_URI)
                     .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;

@@ -87,13 +87,12 @@ impl FlightConnector for MilvusConnector {
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = credentials_resolver.resolve(data_connection).await?;
-
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
             .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 ClientV2::new(&self.make_config(&credentials)?)
                     .await
                     .map_err(map_milvus_error)

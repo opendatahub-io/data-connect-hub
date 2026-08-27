@@ -52,11 +52,13 @@ impl FlightConnector for SqliteConnector {
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
-        let credentials = credentials_resolver.resolve(data_connection).await?;
+        let cache_key = data_connection.metadata.id.clone();
 
         let pool = self
             .pools
-            .try_get_with(data_connection.metadata.id.clone(), async {
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+
                 let url = credentials
                     .get(KEY_URI)
                     .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;

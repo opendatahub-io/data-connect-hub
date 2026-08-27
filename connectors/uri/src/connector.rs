@@ -145,12 +145,13 @@ impl FlightConnector for UriConnector {
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = credentials_resolver.resolve(data_connection).await?;
+        let connection_timeout = self.config.connection_timeout();
+        let cache_key = data_connection.metadata.id.clone();
+        
         let client = self
             .clients
-            .try_get_with(data_connection.metadata.id.clone(), async {
-                let connection_timeout = self.config.connection_timeout();
-
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
                 build_client(&credentials, connection_timeout)
             })
             .await
