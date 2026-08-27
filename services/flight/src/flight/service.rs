@@ -61,7 +61,7 @@ fn grpc_status_label(status: &Status) -> &'static str {
     }
 }
 
-pub struct TabularDataService {
+pub struct DataIngestionService {
     pub(crate) connectors_registry: Arc<ConnectorsRegistry>,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
@@ -69,7 +69,7 @@ pub struct TabularDataService {
     query_options: QueryOptions,
 }
 
-impl TabularDataService {
+impl DataIngestionService {
     pub fn new(
         connectors_registry: Arc<ConnectorsRegistry>,
         meta_store: Arc<dyn MetaStore + Send + Sync>,
@@ -484,8 +484,8 @@ impl TabularDataService {
 }
 
 #[tonic::async_trait]
-impl FlightSqlService for TabularDataService {
-    type FlightService = TabularDataService;
+impl FlightSqlService for DataIngestionService {
+    type FlightService = DataIngestionService;
 
     async fn register_sql_info(&self, _id: i32, _result: &SqlInfo) {}
 
@@ -625,7 +625,7 @@ impl FlightSqlService for TabularDataService {
 }
 
 #[async_trait::async_trait]
-impl CredentialsResolver for TabularDataService {
+impl CredentialsResolver for DataIngestionService {
     async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
         match (&connection.metadata.tenant_id, &connection.resource.admin) {
             (Some(tenant_id), Some(Admin::SecretRef { secret_ref })) => {

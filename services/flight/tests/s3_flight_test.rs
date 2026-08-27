@@ -13,7 +13,7 @@ use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
-use flight_service::flight::service::TabularDataService;
+use flight_service::flight::service::DataIngestionService;
 
 mod common;
 use common::InMemorySecretStore;
@@ -237,7 +237,7 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
         annotations: Arc::new(HashMap::new()),
     }]);
 
-    let service = TabularDataService::new(
+    let service = DataIngestionService::new(
         Arc::new(connectors_registry),
         Arc::new(meta_store),
         Arc::new(secret_store),

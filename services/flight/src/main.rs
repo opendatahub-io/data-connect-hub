@@ -5,7 +5,7 @@ use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 use config::{Config, File};
 use elasticsearch_connector::ElasticsearchConnector;
-use flight_service::flight::TabularDataService;
+use flight_service::flight::DataIngestionService;
 use flight_service::flight::auth::AuthLayer;
 use flight_service::flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
 use flight_service::flight::registry::ConnectorsRegistry;
@@ -158,12 +158,12 @@ fn configure_metrics(config: &ServerConfig) -> Result<()> {
 async fn start_server(
     mut builder: tonic::transport::Server,
     auth: &utils::AuthConfig,
-    service: FlightServiceServer<TabularDataService>,
+    service: FlightServiceServer<DataIngestionService>,
     addr: std::net::SocketAddr,
 ) -> Result<()> {
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
-        .set_serving::<FlightServiceServer<TabularDataService>>()
+        .set_serving::<FlightServiceServer<DataIngestionService>>()
         .await;
 
     if auth.enabled {
@@ -224,7 +224,7 @@ async fn main() -> Result<()> {
     let auth = config.auth;
     let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
 
-    let service = FlightServiceServer::new(TabularDataService::new(
+    let service = FlightServiceServer::new(DataIngestionService::new(
         connectors_registry,
         meta_store,
         secret_store,

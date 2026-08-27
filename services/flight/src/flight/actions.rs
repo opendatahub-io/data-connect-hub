@@ -1,6 +1,6 @@
 use crate::flight::QueryContext;
 use crate::flight::errors::map_connector_error;
-use crate::flight::service::TabularDataService;
+use crate::flight::service::DataIngestionService;
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
@@ -20,7 +20,7 @@ use uuid::Uuid;
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
 
-impl TabularDataService {
+impl DataIngestionService {
     pub fn custom_actions() -> Vec<Result<ActionType, Status>> {
         vec![
             Ok(ActionType {

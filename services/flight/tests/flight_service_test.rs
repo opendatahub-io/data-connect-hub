@@ -18,7 +18,7 @@ use commons::api::storage::MetaStore;
 
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
-use flight_service::flight::service::TabularDataService;
+use flight_service::flight::service::DataIngestionService;
 mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
@@ -160,8 +160,8 @@ impl MetaStore for TestMetaStore {
                 provider: "sqlite".to_string(),
                 description: None,
                 credentials_fields: vec![Field {
-                    name: "url".to_string(),
-                    label: "Url".to_string(),
+                    name: "URI".to_string(),
+                    label: "Uri".to_string(),
                     d_type: "string".to_string(),
                     description: Some("SQLite connection URL".to_string()),
                     required: true,
@@ -285,12 +285,12 @@ async fn test_flight_sql_select_prompts() {
     let secret_store = Arc::new(InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),
         namespace: "default".to_string(),
-        properties: Arc::new(HashMap::from([("url".to_string(), sqlite_url)])),
+        properties: Arc::new(HashMap::from([("URI".to_string(), sqlite_url)])),
         labels: Arc::new(HashMap::new()),
         annotations: Arc::new(HashMap::new()),
     }]));
 
-    let service = TabularDataService::new(
+    let service = DataIngestionService::new(
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
         secret_store,
