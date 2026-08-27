@@ -9,9 +9,9 @@ use arrow::array::{
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use futures::Stream;
 use moka::future::Cache;
@@ -152,10 +152,7 @@ impl DataReader for Neo4jReader {
             })
             .collect();
 
-        Ok(Arc::new(Query::new(
-            query.to_owned(),
-            Arc::new(Schema::new(fields)),
-        )))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
     async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {

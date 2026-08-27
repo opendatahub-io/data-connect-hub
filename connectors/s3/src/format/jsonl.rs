@@ -2,8 +2,8 @@ use std::io::Cursor;
 use std::sync::Arc;
 
 use arrow::datatypes::Schema;
+use commons::api::connector::QueryOutput;
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::QueryOutput;
 use opendal::Reader;
 
 pub async fn read_jsonl_schema(reader: Reader) -> Result<Schema, ConnectorError> {

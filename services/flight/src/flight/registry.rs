@@ -1,5 +1,5 @@
+use commons::api::connector::FlightConnector;
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::FlightConnector;
 use std::collections::HashMap;
 use std::sync::Arc;
 

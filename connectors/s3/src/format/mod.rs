@@ -2,8 +2,8 @@ mod csv;
 mod jsonl;
 mod parquet;
 
+use commons::api::connector::QueryOutput;
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::QueryOutput;
 use futures::TryStreamExt;
 use opendal::Reader;
 

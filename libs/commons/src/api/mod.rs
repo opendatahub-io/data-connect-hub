@@ -1,9 +1,9 @@
 pub mod connection_types;
 pub mod connections;
+pub mod connector;
 pub mod creds;
 pub mod errors;
 pub mod storage;
-pub mod tabular;
 
 pub const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";
 pub const X_TENANT_ID: &str = "x-tenant-id";
@@ -26,5 +26,3 @@ pub struct ResourceList<T> {
     pub total_count: usize,
     pub items: Vec<T>,
 }
-
-

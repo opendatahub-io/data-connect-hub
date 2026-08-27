@@ -16,10 +16,10 @@ use arrow_flight::{
 };
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connector::BinaryQuery;
+use commons::api::connector::{CredentialsResolver, FlightConnector, QueryOptions};
 use commons::api::errors::ConnectorError;
 use commons::api::storage::{MetaStore, SecretStore};
-use commons::api::tabular::BinaryQuery;
-use commons::api::tabular::{CredentialsResolver, FlightConnector, QueryOptions};
 use futures::TryStreamExt;
 use prost::Message;
 use prost::bytes::Bytes;
@@ -407,7 +407,10 @@ impl TabularDataService {
             .await
             .map_err(map_connector_error)?;
 
-        reader.can_read_binary(Arc::new(BinaryQuery::new(path))).await.map_err(map_connector_error)?;
+        reader
+            .can_read_binary(Arc::new(BinaryQuery::new(path)))
+            .await
+            .map_err(map_connector_error)?;
 
         let ticket = Ticket::new(any.encode_to_vec());
         let endpoint = FlightEndpoint::new().with_ticket(ticket);

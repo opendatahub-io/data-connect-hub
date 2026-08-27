@@ -7,14 +7,14 @@ use arrow::array::{
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
+use commons::api::connector::{DataReader, QueryOutput, TableInfo};
+use commons::api::connector::{Query, QueryOptions};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{BinaryQuery, QueryOptions, Query};
-use commons::api::tabular::{QueryOutput, TableInfo, DataReader};
 
 use futures::StreamExt;
 
-use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::FlightConnector;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::FlightConnector;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
@@ -116,10 +116,7 @@ impl DataReader for PgReader {
             .map(|col| Field::new(col.name(), pg_type_to_arrow(col.type_info().name()), true))
             .collect();
 
-        Ok(Arc::new(Query::new(
-            query.to_owned(),
-            Arc::new(Schema::new(fields)),
-        )))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
     async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {

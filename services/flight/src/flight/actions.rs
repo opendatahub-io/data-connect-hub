@@ -10,7 +10,7 @@ use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::tabular::CredentialsResolver;
+use commons::api::connector::CredentialsResolver;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
@@ -19,7 +19,6 @@ use uuid::Uuid;
 
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
 const ACTION_CHECK_CONNECTION: &str = "CheckConnection";
-const ACTION_GET_BINARY_DATA: &str = "GetBinaryData";
 
 impl TabularDataService {
     pub fn custom_actions() -> Vec<Result<ActionType, Status>> {
@@ -32,10 +31,6 @@ impl TabularDataService {
                 r#type: ACTION_CHECK_CONNECTION.into(),
                 description: "Checks the connection to the data source".into(),
             }),
-            Ok(ActionType {
-                r#type: ACTION_GET_BINARY_DATA.into(),
-                description: "Returns the binary data of the data source".into(),
-            }),
         ]
     }
 
@@ -47,41 +42,8 @@ impl TabularDataService {
         match action.r#type.as_str() {
             ACTION_CHECK_CONNECTION => self.action_check_connection(&request).await,
             ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
-            ACTION_GET_BINARY_DATA => self.action_get_binary_data(&request).await,
             _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
         }
-    }
-
-    async fn action_get_binary_data(
-        &self,
-        request: &Request<Action>,
-    ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
-        let metadata = request.metadata();
-        let tenant_id = QueryContext::tenant_id(metadata)?;
-        let connection_id = QueryContext::connection_id(metadata)?;
-
-        let props = parse_kv_body(&request.get_ref().body)?;
-        match props {
-            Some(props) => {
-                let _path = props.get("path").ok_or(Status::invalid_argument("path is required"))?;
-
-                let (data_connection, connector) =
-                    self.get_connector_by_connection_id(tenant_id, &connection_id).await?;
-
-                let _reader = connector
-                    .get_reader(&data_connection, self as &dyn CredentialsResolver)
-                    .await
-                    .map_err(map_connector_error)?;
-            },
-            None => return Err(Status::invalid_argument("path is required")),
-        }
-
-        let result = arrow_flight::Result {
-            body: Vec::new().into(),
-        };
-        Ok(Response::new(
-            Box::pin(futures::stream::once(async { Ok(result) })) as <Self as FlightService>::DoActionStream
-        ))
     }
 
     async fn action_check_connection(

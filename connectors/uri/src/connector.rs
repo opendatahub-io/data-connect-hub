@@ -11,9 +11,9 @@ use arrow::array::{
 use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::CredentialsResolver;
-use commons::api::tabular::{BinaryQuery, FlightConnector, QueryOptions, QueryOutput, DataReader, Query};
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 
@@ -257,7 +257,7 @@ impl DataReader for UriReader {
 
         Ok(Box::pin(stream))
     }
-    
+
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         let response = self
             .client
