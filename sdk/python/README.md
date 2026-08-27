@@ -59,7 +59,52 @@ df = table.to_pandas()
 
 ## API Reference
 
+### Connection Types (REST)
+
+Connection types describe a category of data source (e.g. PostgreSQL). They define
+the provider backend and the credential fields required to connect.
+
+```python
+client.list_connection_types() -> list[ConnectionType]
+client.get_connection_type(type_id) -> ConnectionType
+client.create_connection_type(name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
+client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
+client.delete_connection_type(type_id) -> None
+```
+
+#### `ConnectionType`
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `str` | Unique identifier |
+| `name` | `str` | Display name |
+| `provider` | `str` | Backend driver (e.g. `"postgres"`) |
+| `description` | `str \| None` | Optional description |
+| `tenant_id` | `str` | Owning namespace |
+| `created_at` | `datetime \| None` | Creation timestamp |
+| `updated_at` | `datetime \| None` | Last update timestamp |
+| `credentials_fields` | `list[CredentialField]` | Schema of credential fields required to connect |
+
+#### `CredentialField`
+
+Describes a single input field in the connection credential form.
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | `str` | Field key (used as the secret key) |
+| `label` | `str` | Human-readable label |
+| `description` | `str \| None` | Optional help text |
+| `required` | `bool` | Whether the field must be provided |
+| `type` | `str` | Field type (e.g. `"string"`, `"password"`, `"enum"`) |
+| `enum_values` | `list[EnumValue] \| None` | Allowed values when `type` is `"enum"` |
+| `default_value` | `str \| None` | Optional default value |
+
+`EnumValue` has two fields: `value` (the stored string) and `label` (the display string).
+
 ### Connection Management (REST)
+
+A connection pairs a connection type with the actual credentials (stored in a Kubernetes
+secret) and tracks the live status of the data source.
 
 ```python
 client.list_connections() -> list[DataConnection]
@@ -69,15 +114,33 @@ client.update_connection(connection_id, name=..., connection_type_id=..., data_f
 client.delete_connection(connection_id) -> None
 ```
 
-### Connection Types (REST)
+#### `DataConnection`
 
-```python
-client.list_connection_types() -> list[ConnectionType]
-client.get_connection_type(type_id) -> ConnectionType
-client.create_connection_type(name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
-client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
-client.delete_connection_type(type_id) -> None
-```
+| Field | Type | Description |
+|---|---|---|
+| `id` | `str` | Unique identifier |
+| `name` | `str` | Display name |
+| `data_connection_type_id` | `str` | ID of the associated `ConnectionType` |
+| `format` | `"tabular" \| "binary"` | Data format of the source |
+| `tenant_id` | `str` | Owning namespace |
+| `created_at` | `datetime` | Creation timestamp |
+| `updated_at` | `datetime` | Last update timestamp |
+| `admin` | `AdminSecretRef \| AdminSecret \| None` | Credential reference or inline credentials |
+| `properties` | `dict[str, str]` | Additional driver-specific properties (values masked in repr) |
+| `status` | `DataConnectionStatus` | Live connection health |
+
+**`admin` types:**
+
+- `AdminSecretRef(secret_ref="my-secret")` — reference to an existing Kubernetes secret by name
+- `AdminSecret(name="...", secret={"key": "value"})` — inline credentials (secret values are masked in repr)
+
+**`DataConnectionStatus`:**
+
+| Field | Type | Description |
+|---|---|---|
+| `state` | `"ready" \| "not_ready"` | Connection health |
+| `message` | `str \| None` | Status detail message |
+| `phases` | `list[dict]` | Provisioning phase history |
 
 ### Tabular Data Queries (Flight SQL)
 
@@ -106,22 +169,12 @@ These require the `flight` extra. On a REST-only install the client still
 imports and all REST calls work; the first Flight call raises `DCHConfigError`
 telling you to install `data-connect-hub[flight]`.
 
-## Development
-
-A virtual environment at `sdk/python/.venv` is created automatically on first run.
-If `VIRTUAL_ENV` is already set (e.g. a manually activated venv), the Makefile uses the system Python directly.
-
-```bash
-make sdk-install     # install in editable mode with dev deps
-make sdk-test        # run tests with coverage
-make sdk-lint        # ruff check + format check
-make sdk-fmt         # auto-format
-make sdk-typecheck   # run mypy strict type checking
-make sdk-all         # lint + typecheck + test
-```
-
 ## Requirements
 
 - Python 3.11+
 - Core dependencies: httpx, pydantic
 - Flight SQL extras: adbc-driver-flightsql, pyarrow, pandas (`pip install "data-connect-hub[flight]"`)
+
+## Contributing
+
+See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup, commands, and contribution guidelines.
