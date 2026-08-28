@@ -16,6 +16,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+
+use crate::state::audit::verify_data_connection;
+
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
@@ -245,46 +248,16 @@ pub async fn check_existent_connection(
     info!("check_existent_connection: for tenant {:?}", ctx.tenant_id);
 
     let connection_id = id.into_inner();
+    let tenant_id = ctx.tenant_id.clone();
 
-    let result = service
-        .flight_client
-        .check_connection(&ctx.tenant_id, &connection_id)
-        .await;
-
-    match result {
-        Ok(_) => {
-            let update_fn = Arc::new(|_: DataConnectionStatus| {
-                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                Ok(DataConnectionStatus {
-                    state: DataConnectionState::Ready,
-                    message: Some("Connection check successful".to_string()),
-                    updated_at: Some(now),
-                    phases: vec![],
-                })
-            });
-            service
-                .meta_store
-                .update_data_connection_status(&connection_id, update_fn)
-                .await?;
-        },
-        Err(_) => {
-            let update_fn = Arc::new(|_: DataConnectionStatus| {
-                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                Ok(DataConnectionStatus {
-                    state: DataConnectionState::NotReady,
-                    message: Some("Connection check failed".to_string()),
-                    updated_at: Some(now),
-                    phases: vec![],
-                })
-            });
-            service
-                .meta_store
-                .update_data_connection_status(&connection_id, update_fn)
-                .await?;
-
-            return Err(ValidationError::ConnectionCheckFailed(connection_id).into());
-        },
-    };
+    verify_data_connection(
+        tenant_id.as_str(),
+        connection_id.as_str(),
+        service.meta_store.clone(),
+        service.secret_store.clone(),
+        &service.flight_client,
+    )
+    .await?;
 
     info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())

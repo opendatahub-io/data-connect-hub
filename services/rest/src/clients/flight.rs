@@ -87,7 +87,7 @@ impl FlightClient {
             .collect())
     }
 
-    pub async fn check_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
+    pub async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new("CheckConnection", ""));
         let metadata = request.metadata_mut();

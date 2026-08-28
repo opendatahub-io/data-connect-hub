@@ -6,50 +6,90 @@ use commons::api::storage::MetaStore;
 
 use crate::clients::flight::FlightClient;
 use crate::rest::errors::ValidationError;
+use chrono::Utc;
+use commons::api::connections::DataConnectionState;
+use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
 use commons::api::storage::SecretStore;
 use std::sync::Arc;
 use tracing::info;
 
 pub async fn verify_data_connection(
-    data_connection: &DataConnectionResource,
+    tenant_id: &str,
+    data_connection_id: &str,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
+    flight_client: &FlightClient,
 ) -> Result<(), ValidationError> {
-    let tenant_id = data_connection
-        .metadata
-        .tenant_id
-        .clone()
-        .ok_or(ValidationError::InvalidTenantId)?;
+    let data_connection = meta_store
+        .get_data_connection(tenant_id, data_connection_id)
+        .await
+        .map_err(|e| ValidationError::ConnectionCheckFailed(data_connection_id.to_string()))?;
+
     let dct = meta_store
-        .get_data_connection_type(tenant_id.as_str(), &data_connection.resource.data_connection_type_id)
+        .get_data_connection_type(&tenant_id, &data_connection.resource.data_connection_type_id)
         .await
         .map_err(|_| ValidationError::InvalidDataConnectionType)?;
 
-    if let Some(Admin::SecretRef { secret_ref }) = &data_connection.resource.admin {
-        let secret = secret_store
-            .get_secret(&tenant_id, secret_ref)
-            .await
-            .map_err(|_| ValidationError::InvalidSecret)?;
-
-        dct.resource
-            .check_credentials_schema(&secret.properties)
-            .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
-    } else {
-        return Err(ValidationError::MissingField("admin.secret_ref".to_string()));
-    }
-
-    match data_connection.resource.format {
-        DataFormat::Tabular => {
-            // TODO: Validate connection via Flight connectors
-            // Update the data connection status if the connection is possible or not
+    let keys = match data_connection.resource.admin {
+        Some(Admin::SecretRef { secret_ref }) => {
+            let secret = secret_store
+                .get_secret(&tenant_id, secret_ref.as_str())
+                .await
+                .map_err(|_| ValidationError::InvalidSecret)?;
+            secret.properties
         },
-        DataFormat::Binary => {
-            // TODO: Validate connection via Rest connectors
-            // Update the data connection status if the connection is possible or not
+        Some(Admin::Secret { name: _, secret }) => secret,
+        _ => {
+            return Err(ValidationError::MissingField("admin.secret_ref".to_string()));
         },
-    }
+    };
 
+    dct.resource
+        .check_credentials_schema(&keys)
+        .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+
+    let connection_id = data_connection.metadata.id.clone();
+    let result = flight_client.check_data_connection(&tenant_id, &connection_id).await;
+
+    match result {
+        Ok(_) => {
+            let update_fn = Arc::new(|_: DataConnectionStatus| {
+                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                Ok(DataConnectionStatus {
+                    state: DataConnectionState::Ready,
+                    message: Some("Connection check successful".to_string()),
+                    updated_at: Some(now),
+                    phases: vec![],
+                })
+            });
+            meta_store
+                .update_data_connection_status(&connection_id, update_fn)
+                .await
+                .map_err(|_| {
+                    ValidationError::StatusUpdateFailed("Failed to update data connection status".to_string())
+                })?;
+        },
+        Err(_) => {
+            let update_fn = Arc::new(|_: DataConnectionStatus| {
+                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+                Ok(DataConnectionStatus {
+                    state: DataConnectionState::NotReady,
+                    message: Some("Connection check failed".to_string()),
+                    updated_at: Some(now),
+                    phases: vec![],
+                })
+            });
+            meta_store
+                .update_data_connection_status(&connection_id, update_fn)
+                .await
+                .map_err(|_| {
+                    ValidationError::StatusUpdateFailed("Failed to update data connection status".to_string())
+                })?;
+
+            return Err(ValidationError::ConnectionCheckFailed(connection_id).into());
+        },
+    };
     Ok(())
 }
 
