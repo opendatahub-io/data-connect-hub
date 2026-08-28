@@ -37,6 +37,7 @@ pub trait MetaStore {
     /// Updates the status of the data connection identified by `uid`.
     async fn update_data_connection_status(
         &self,
+        tenant_id: &str,
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError>;

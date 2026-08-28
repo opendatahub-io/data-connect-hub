@@ -14,6 +14,29 @@ use commons::api::storage::SecretStore;
 use std::sync::Arc;
 use tracing::info;
 
+async fn set_data_connection_status(
+    tenant_id: &str,
+    data_connection_id: &str,
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    status: DataConnectionState,
+    message: Option<String>,
+) -> Result<(), ValidationError> {
+    let update_fn = Arc::new(|_: DataConnectionStatus| {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        Ok(DataConnectionStatus {
+            state: DataConnectionState::Ready,
+            message: Some("Connection check successful".to_string()),
+            updated_at: Some(now),
+            phases: vec![],
+        })
+    });
+    meta_store
+        .update_data_connection_status(tenant_id, data_connection_id, update_fn)
+        .await
+        .map_err(|_| ValidationError::StatusUpdateFailed("Failed to update data connection status".to_string()))?;
+    Ok(())
+}
+
 pub async fn verify_data_connection(
     tenant_id: &str,
     data_connection_id: &str,
@@ -27,14 +50,14 @@ pub async fn verify_data_connection(
         .map_err(|e| ValidationError::ConnectionCheckFailed(data_connection_id.to_string()))?;
 
     let dct = meta_store
-        .get_data_connection_type(&tenant_id, &data_connection.resource.data_connection_type_id)
+        .get_data_connection_type(tenant_id, &data_connection.resource.data_connection_type_id)
         .await
         .map_err(|_| ValidationError::InvalidDataConnectionType)?;
 
     let keys = match data_connection.resource.admin {
         Some(Admin::SecretRef { secret_ref }) => {
             let secret = secret_store
-                .get_secret(&tenant_id, secret_ref.as_str())
+                .get_secret(tenant_id, secret_ref.as_str())
                 .await
                 .map_err(|_| ValidationError::InvalidSecret)?;
             secret.properties
@@ -45,49 +68,45 @@ pub async fn verify_data_connection(
         },
     };
 
-    dct.resource
-        .check_credentials_schema(&keys)
-        .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+    let result = dct.resource.check_credentials_schema(&keys);
+
+    if let Err(e) = result {
+        set_data_connection_status(
+            tenant_id,
+            data_connection_id,
+            meta_store,
+            DataConnectionState::NotReady,
+            Some(e.to_string()),
+        )
+        .await?;
+        return Err(ValidationError::CredentialsCheckFailed(e.to_string()));
+    }
 
     let connection_id = data_connection.metadata.id.clone();
-    let result = flight_client.check_data_connection(&tenant_id, &connection_id).await;
+    let result = flight_client.check_data_connection(tenant_id, &connection_id).await;
 
     match result {
         Ok(_) => {
-            let update_fn = Arc::new(|_: DataConnectionStatus| {
-                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                Ok(DataConnectionStatus {
-                    state: DataConnectionState::Ready,
-                    message: Some("Connection check successful".to_string()),
-                    updated_at: Some(now),
-                    phases: vec![],
-                })
-            });
-            meta_store
-                .update_data_connection_status(&connection_id, update_fn)
-                .await
-                .map_err(|_| {
-                    ValidationError::StatusUpdateFailed("Failed to update data connection status".to_string())
-                })?;
+            set_data_connection_status(
+                tenant_id,
+                data_connection_id,
+                meta_store,
+                DataConnectionState::Ready,
+                Some("Connection check successful".to_string()),
+            )
+            .await?;
         },
         Err(_) => {
-            let update_fn = Arc::new(|_: DataConnectionStatus| {
-                let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-                Ok(DataConnectionStatus {
-                    state: DataConnectionState::NotReady,
-                    message: Some("Connection check failed".to_string()),
-                    updated_at: Some(now),
-                    phases: vec![],
-                })
-            });
-            meta_store
-                .update_data_connection_status(&connection_id, update_fn)
-                .await
-                .map_err(|_| {
-                    ValidationError::StatusUpdateFailed("Failed to update data connection status".to_string())
-                })?;
+            set_data_connection_status(
+                tenant_id,
+                data_connection_id,
+                meta_store,
+                DataConnectionState::NotReady,
+                Some("Connection check failed".to_string()),
+            )
+            .await?;
 
-            return Err(ValidationError::ConnectionCheckFailed(connection_id).into());
+            return Err(ValidationError::ConnectionCheckFailed(connection_id));
         },
     };
     Ok(())
@@ -141,4 +160,291 @@ pub async fn audit_data_connection_types(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use commons::api::ResourceList;
+    use commons::api::ResourceMetadata;
+    use commons::api::connection_types::{
+        DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Field, Secret,
+    };
+    use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus, DataFormat};
+    use commons::api::errors::{MetaStoreError, SecretStoreError};
+    use std::collections::HashMap;
+
+    struct MockMetaStore {
+        connection: Option<DataConnectionResource>,
+        connection_type: Option<DataConnectionTypeResource>,
+    }
+
+    impl MockMetaStore {
+        fn with_connection_and_type(conn: DataConnectionResource, dct: DataConnectionTypeResource) -> Self {
+            Self {
+                connection: Some(conn),
+                connection_type: Some(dct),
+            }
+        }
+
+        fn not_found() -> Self {
+            Self {
+                connection: None,
+                connection_type: None,
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MetaStore for MockMetaStore {
+        async fn get_data_connections(&self, _: &str) -> Result<ResourceList<DataConnectionResource>, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection(&self, _: &str, _: &str) -> Result<DataConnectionResource, MetaStoreError> {
+            self.connection
+                .clone()
+                .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
+        }
+        async fn create_data_connection(
+            &self,
+            _: &str,
+            _: &DataConnection,
+        ) -> Result<DataConnectionResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection(
+            &self,
+            _: &str,
+            _: &str,
+            _: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+        ) -> Result<DataConnectionResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection_status(
+            &self,
+            _tenant_id: &str,
+            _: &str,
+            _: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
+        ) -> Result<DataConnectionResource, MetaStoreError> {
+            Ok(self.connection.clone().unwrap())
+        }
+        async fn delete_data_connection(&self, _: &str, _: &str) -> Result<(), MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection_types(
+            &self,
+            _: &str,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_all_data_connection_types(
+            &self,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection_type(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+            self.connection_type
+                .clone()
+                .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
+        }
+        async fn create_data_connection_type(
+            &self,
+            _: &str,
+            _: &DataConnectionType,
+        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection_type(
+            &self,
+            _: &str,
+            _: &str,
+            _: Arc<dyn Fn(DataConnectionType) -> Result<DataConnectionType, MetaStoreError> + Send + Sync>,
+        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_data_connection_type_status(
+            &self,
+            _: &str,
+            _: Arc<dyn Fn(DataConnectionTypeStatus) -> Result<DataConnectionTypeStatus, MetaStoreError> + Send + Sync>,
+        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn delete_data_connection_type(&self, _: &str, _: &str) -> Result<(), MetaStoreError> {
+            unimplemented!()
+        }
+    }
+
+    struct MockSecretStore {
+        secret: Option<Secret>,
+    }
+
+    #[async_trait::async_trait]
+    impl SecretStore for MockSecretStore {
+        async fn get_secret(&self, _: &str, _: &str) -> Result<Secret, SecretStoreError> {
+            self.secret
+                .clone()
+                .ok_or_else(|| SecretStoreError::SecretNotFound("not found".into()))
+        }
+        async fn create_secret(&self, _: &Secret) -> Result<(), SecretStoreError> {
+            unimplemented!()
+        }
+        async fn delete_secret(&self, _: &str, _: &str) -> Result<(), SecretStoreError> {
+            unimplemented!()
+        }
+        async fn set_secret_labels(
+            &self,
+            _: &str,
+            _: &str,
+            _: HashMap<String, String>,
+        ) -> Result<(), SecretStoreError> {
+            unimplemented!()
+        }
+    }
+
+    fn make_metadata(id: &str) -> ResourceMetadata {
+        ResourceMetadata {
+            id: id.to_string(),
+            tenant_id: Some("tenant".to_string()),
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            updated_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn make_connection(admin: Option<Admin>) -> DataConnectionResource {
+        DataConnectionResource {
+            metadata: make_metadata("conn-1"),
+            resource: DataConnection {
+                name: "test".to_string(),
+                data_connection_type_id: "pg".to_string(),
+                format: DataFormat::Tabular,
+                admin,
+                properties: HashMap::new(),
+            },
+            status: DataConnectionStatus {
+                state: DataConnectionState::NotReady,
+                message: None,
+                updated_at: None,
+                phases: vec![],
+            },
+        }
+    }
+
+    fn make_dct(required_fields: Vec<&str>) -> DataConnectionTypeResource {
+        DataConnectionTypeResource {
+            metadata: make_metadata("pg"),
+            resource: DataConnectionType {
+                name: "PostgreSQL".to_string(),
+                provider: "postgres".to_string(),
+                description: None,
+                credentials_fields: required_fields
+                    .into_iter()
+                    .map(|name| Field {
+                        name: name.to_string(),
+                        label: name.to_string(),
+                        d_type: "string".to_string(),
+                        description: None,
+                        required: true,
+                        enum_values: None,
+                        default_value: None,
+                    })
+                    .collect(),
+            },
+            status: Default::default(),
+        }
+    }
+
+    fn make_secret(keys: Vec<(&str, &str)>) -> Secret {
+        Secret {
+            name: "creds".to_string(),
+            namespace: "tenant".to_string(),
+            properties: Arc::new(keys.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
+            labels: Arc::new(HashMap::new()),
+            annotations: Arc::new(HashMap::new()),
+        }
+    }
+
+    fn flight_client() -> FlightClient {
+        FlightClient::new("http://127.0.0.1:1".to_string())
+    }
+
+    #[tokio::test]
+    async fn test_connection_not_found() {
+        let meta = Arc::new(MockMetaStore::not_found()) as Arc<dyn MetaStore + Send + Sync>;
+        let secrets = Arc::new(MockSecretStore { secret: None }) as Arc<dyn SecretStore + Send + Sync>;
+
+        let result = verify_data_connection("tenant", "missing", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_missing_admin() {
+        let conn = make_connection(None);
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore { secret: None });
+
+        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::MissingField(_))));
+    }
+
+    #[tokio::test]
+    async fn test_secret_not_found() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "missing-secret".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore { secret: None });
+
+        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::InvalidSecret)));
+    }
+
+    #[tokio::test]
+    async fn test_credentials_schema_check_fails() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "creds".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST", "PORT"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore {
+            secret: Some(make_secret(vec![("HOST", "localhost")])),
+        });
+
+        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_inline_secret_missing_required_field() {
+        let conn = make_connection(Some(Admin::Secret {
+            name: "inline".to_string(),
+            secret: Arc::new(HashMap::from([("HOST".to_string(), "localhost".to_string())])),
+        }));
+        let dct = make_dct(vec!["HOST", "PASSWORD"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore { secret: None });
+
+        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_flight_check_fails() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "creds".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore {
+            secret: Some(make_secret(vec![("HOST", "localhost")])),
+        });
+
+        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
+    }
 }

@@ -4,11 +4,11 @@ use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
 use crate::rest::update_connection_type_status;
 use crate::state::audit::audit_data_connection_types;
+use crate::state::audit::verify_data_connection;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
-use chrono::Utc;
 use commons::api::connection_types::DataConnectionType;
-use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus};
+use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
@@ -16,8 +16,6 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
-
-use crate::state::audit::verify_data_connection;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -291,6 +289,7 @@ mod tests {
     use commons::api::connection_types::DataConnectionTypeResource;
     use commons::api::connection_types::Secret;
     use commons::api::connections::DataConnectionResource;
+    use commons::api::connections::DataConnectionStatus;
     use commons::api::errors::SecretStoreError;
     use commons::api::storage::MetaStore;
     use commons::api::storage::SecretStore;
@@ -422,6 +421,7 @@ mod tests {
 
         async fn update_data_connection_status(
             &self,
+            _tenant_id: &str,
             _uid: &str,
             _update_fn: Arc<
                 dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, commons::api::errors::MetaStoreError>
