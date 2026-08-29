@@ -18,12 +18,18 @@ fn default_connection_timeout_secs() -> u64 {
     10
 }
 
+fn default_chunk_size() -> usize {
+    4 * 1024 * 1024
+}
+
 #[derive(Debug, Deserialize, Clone, Copy)]
 pub struct ConnectorConfig {
     #[serde(default = "default_enabled")]
     pub enabled: bool,
     #[serde(default = "default_connection_timeout_secs")]
     pub connection_timeout_secs: u64,
+    #[serde(default = "default_chunk_size")]
+    pub chunk_size: usize,
 }
 
 fn default_enabled() -> bool {
@@ -35,6 +41,7 @@ impl Default for ConnectorConfig {
         Self {
             enabled: default_enabled(),
             connection_timeout_secs: default_connection_timeout_secs(),
+            chunk_size: default_chunk_size(),
         }
     }
 }
@@ -50,6 +57,7 @@ impl ConnectorConfig {
             connection_timeout_secs: overrides
                 .connection_timeout_secs
                 .unwrap_or(self.connection_timeout_secs),
+            chunk_size: overrides.chunk_size.unwrap_or(self.chunk_size),
         }
     }
 }
@@ -58,4 +66,5 @@ impl ConnectorConfig {
 pub struct ConnectorConfigOverride {
     pub enabled: Option<bool>,
     pub connection_timeout_secs: Option<u64>,
+    pub chunk_size: Option<usize>,
 }

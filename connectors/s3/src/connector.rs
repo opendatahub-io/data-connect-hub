@@ -110,13 +110,18 @@ impl FlightConnector for S3Connector {
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get S3 operator: {e}")))?;
 
         let format_hint = data_connection.resource.properties.get("format").cloned();
-        Ok(Arc::new(S3Reader { operator, format_hint }))
+        Ok(Arc::new(S3Reader {
+            operator,
+            format_hint,
+            config: self.config,
+        }))
     }
 }
 
 pub struct S3Reader {
     operator: Operator,
     format_hint: Option<String>,
+    config: ConnectorConfig,
 }
 
 impl S3Reader {
@@ -127,7 +132,8 @@ impl S3Reader {
     async fn make_reader(&self, path: &str) -> Result<Reader, ConnectorError> {
         let reader = self
             .operator
-            .reader(path)
+            .reader_with(path)
+            .chunk(self.config.chunk_size)
             .await
             .map_err(|e| ConnectorError::IOError(format!("Failed to create S3 reader for '{path}': {e}")))?;
         Ok(reader)
@@ -366,6 +372,7 @@ mod tests {
         let reader = S3Reader {
             operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: None,
+            config: ConnectorConfig::default(),
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
         assert_eq!(reader.detect_format("data/file.csv").unwrap(), FileFormat::Csv);
@@ -378,12 +385,14 @@ mod tests {
         let reader = S3Reader {
             operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("parquet".to_string()),
+            config: ConnectorConfig::default(),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
         let reader = S3Reader {
             operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("jsonl".to_string()),
+            config: ConnectorConfig::default(),
         };
         assert_eq!(
             reader.detect_format("data/no-extension").unwrap(),
@@ -424,6 +433,7 @@ mod tests {
         let reader = S3Reader {
             operator: op,
             format_hint: None,
+            config: ConnectorConfig::default(),
         };
         let query = Arc::new(BinaryQuery::new("data/model.bin".to_string()));
         assert!(reader.can_read_binary(query).await.is_ok());
@@ -435,6 +445,7 @@ mod tests {
         let reader = S3Reader {
             operator: op,
             format_hint: None,
+            config: ConnectorConfig::default(),
         };
         let query = Arc::new(BinaryQuery::new("does/not/exist.bin".to_string()));
         assert!(reader.can_read_binary(query).await.is_err());
@@ -448,6 +459,7 @@ mod tests {
         let reader = S3Reader {
             operator: op,
             format_hint: None,
+            config: ConnectorConfig::default(),
         };
         let query = Arc::new(BinaryQuery::new("test.bin".to_string()));
         let stream = reader.read_binary(query).await.unwrap();
