@@ -2,9 +2,9 @@ use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
-use crate::rest::update_connection_type_status;
 use crate::state::audit::audit_data_connection_types;
-use crate::state::audit::verify_data_connection;
+use crate::state::audit::audit_connection_type;
+use crate::state::audit::audit_data_connection;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
@@ -175,7 +175,7 @@ pub async fn create_connection_type(
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
         .await?;
 
-    update_connection_type_status(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
+    audit_connection_type(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
 
     Ok(HttpResponse::Created().json(connection_type))
 }
@@ -202,7 +202,7 @@ pub async fn patch_connection_type(
         .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
         .await?;
 
-    update_connection_type_status(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
+    audit_connection_type(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
 
     Ok(HttpResponse::Ok().json(connection_type))
 }
@@ -257,7 +257,7 @@ pub async fn check_existent_connection(
     let connection_id = id.into_inner();
     let tenant_id = ctx.tenant_id.clone();
 
-    verify_data_connection(
+    audit_data_connection(
         tenant_id.as_str(),
         connection_id.as_str(),
         service.meta_store.clone(),

@@ -7,11 +7,14 @@ use commons::api::storage::MetaStore;
 use crate::clients::flight::FlightClient;
 use crate::rest::errors::ValidationError;
 use chrono::Utc;
+use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
 use commons::api::storage::SecretStore;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tracing::info;
 
 async fn set_data_connection_status(
@@ -36,7 +39,7 @@ async fn set_data_connection_status(
     Ok(())
 }
 
-pub async fn verify_data_connection(
+pub async fn audit_data_connection(
     tenant_id: &str,
     data_connection_id: &str,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
@@ -169,6 +172,34 @@ pub async fn audit_data_connection_types(
         }
     }
 
+    Ok(())
+}
+
+pub(crate) async fn audit_connection_type(
+    flight_client: &FlightClient,
+    meta_store: &Arc<dyn MetaStore + Send + Sync>,
+    connection_type: DataConnectionTypeResource,
+) -> Result<(), ValidationError> {
+    let connectors = flight_client.get_supported_connectors().await;
+
+    if let Ok(connectors) = connectors {
+        let names: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
+        let provider = &connection_type.resource.provider;
+
+        let supports_flight = Arc::new(AtomicBool::new(names.iter().any(|n| n == provider)));
+
+        let update_fn = Arc::new(move |current: DataConnectionTypeStatus| {
+            let mut status = current.capabilities.clone();
+            status.flight = supports_flight.load(Ordering::Relaxed);
+
+            Ok(DataConnectionTypeStatus { capabilities: status })
+        });
+
+        meta_store
+            .update_data_connection_type_status(connection_type.metadata.id.as_str(), update_fn)
+            .await
+            .map_err(|e| ValidationError::StatusUpdateFailed(connection_type.metadata.id.clone()))?;
+    }
     Ok(())
 }
 
@@ -385,7 +416,7 @@ mod tests {
         let meta = Arc::new(MockMetaStore::not_found()) as Arc<dyn MetaStore + Send + Sync>;
         let secrets = Arc::new(MockSecretStore { secret: None }) as Arc<dyn SecretStore + Send + Sync>;
 
-        let result = verify_data_connection("tenant", "missing", meta, secrets, &flight_client()).await;
+        let result = audit_data_connection("tenant", "missing", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
     }
 
@@ -396,7 +427,7 @@ mod tests {
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
 
-        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        let result = audit_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::MissingField(_))));
     }
 
@@ -409,7 +440,7 @@ mod tests {
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
 
-        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        let result = audit_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::InvalidSecret)));
     }
 
@@ -424,7 +455,7 @@ mod tests {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
 
-        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        let result = audit_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
     }
 
@@ -439,7 +470,7 @@ mod tests {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
 
-        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
+        let result = audit_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
     }
 }
