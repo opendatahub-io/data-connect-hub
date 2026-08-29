@@ -83,14 +83,18 @@ pub async fn create_connection(
     info!("create_connection: for tenant {:?}", ctx.tenant_id);
     let tenant_id = ctx.tenant_id.clone();
 
-    let connection = transform_data_connection(&tenant_id, &connection).await;
+    let (connection, secret) = transform_data_connection(&tenant_id, &connection).await;
 
-    let connection_res = service
-        .meta_store
-        .create_data_connection(ctx.tenant_id.as_str(), &connection.0)
-        .await?;
+    if let Some(secret) = secret {
+        let dct = service
+            .meta_store
+            .get_data_connection_type(ctx.tenant_id.as_str(), &connection.data_connection_type_id)
+            .await?;
 
-    if let Some(secret) = connection.1 {
+        dct.resource
+            .check_credentials_schema(&secret.properties)
+            .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+
         let secret = &mut secret.clone();
         secret.labels = Arc::new(HashMap::from([(
             "dataconnecthub.opendatahub.io/attached".to_string(),
@@ -99,6 +103,11 @@ pub async fn create_connection(
 
         service.secret_store.create_secret(secret).await?;
     }
+
+    let connection_res = service
+        .meta_store
+        .create_data_connection(ctx.tenant_id.as_str(), &connection)
+        .await?;
 
     Ok(HttpResponse::Created().json(connection_res))
 }
@@ -530,8 +539,8 @@ mod tests {
 
         async fn update_data_connection_type_status(
             &self,
-            _uid: &str,
-            _update_fn: Arc<
+            uid: &str,
+            update_fn: Arc<
                 dyn Fn(
                         commons::api::connection_types::DataConnectionTypeStatus,
                     ) -> Result<
@@ -542,7 +551,13 @@ mod tests {
             >,
         ) -> Result<commons::api::connection_types::DataConnectionTypeResource, commons::api::errors::MetaStoreError>
         {
-            unimplemented!()
+            let dct = self.get_data_connection_type("test-tenant", uid).await?;
+            let status = update_fn(dct.status)?;
+            Ok(DataConnectionTypeResource {
+                metadata: dct.metadata,
+                resource: dct.resource,
+                status,
+            })
         }
 
         async fn delete_data_connection_type(

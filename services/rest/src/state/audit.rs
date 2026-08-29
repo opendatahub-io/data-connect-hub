@@ -27,7 +27,6 @@ async fn set_data_connection_status(
             state: DataConnectionState::Ready,
             message: Some("Connection check successful".to_string()),
             updated_at: Some(now),
-            phases: vec![],
         })
     });
     meta_store
@@ -59,10 +58,21 @@ pub async fn verify_data_connection(
             let secret = secret_store
                 .get_secret(tenant_id, secret_ref.as_str())
                 .await
-                .map_err(|_| ValidationError::InvalidSecret)?;
-            secret.properties
+                .map_err(|_| ValidationError::InvalidSecret);
+            if let Ok(secret) = secret {
+                secret.properties
+            } else {
+                set_data_connection_status(
+                    tenant_id,
+                    data_connection_id,
+                    meta_store,
+                    DataConnectionState::NotReady,
+                    Some("Secret cannot be read".to_string()),
+                )
+                .await?;
+                return Err(ValidationError::InvalidSecret);
+            }
         },
-        Some(Admin::Secret { name: _, secret }) => secret,
         _ => {
             return Err(ValidationError::MissingField("admin.secret_ref".to_string()));
         },
@@ -101,7 +111,7 @@ pub async fn verify_data_connection(
                 tenant_id,
                 data_connection_id,
                 meta_store,
-                DataConnectionState::NotReady,
+                DataConnectionState::IngestionNotReady,
                 Some("Connection check failed".to_string()),
             )
             .await?;
@@ -328,7 +338,6 @@ mod tests {
                 state: DataConnectionState::NotReady,
                 message: None,
                 updated_at: None,
-                phases: vec![],
             },
         }
     }
@@ -414,20 +423,6 @@ mod tests {
         let secrets = Arc::new(MockSecretStore {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
-
-        let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
-        assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
-    }
-
-    #[tokio::test]
-    async fn test_inline_secret_missing_required_field() {
-        let conn = make_connection(Some(Admin::Secret {
-            name: "inline".to_string(),
-            secret: Arc::new(HashMap::from([("HOST".to_string(), "localhost".to_string())])),
-        }));
-        let dct = make_dct(vec!["HOST", "PASSWORD"]);
-        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
-        let secrets = Arc::new(MockSecretStore { secret: None });
 
         let result = verify_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));

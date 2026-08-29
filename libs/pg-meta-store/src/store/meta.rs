@@ -182,7 +182,6 @@ impl MetaStore for PgMetaStore {
                 state: DataConnectionState::NotReady,
                 message: None,
                 updated_at: Some(now.clone()),
-                phases: vec![],
             },
         };
 

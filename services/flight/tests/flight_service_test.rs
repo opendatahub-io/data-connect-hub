@@ -64,7 +64,6 @@ impl MetaStore for TestMetaStore {
                 state: DataConnectionState::NotReady,
                 message: None,
                 updated_at: None,
-                phases: vec![],
             },
         })
     }
