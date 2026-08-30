@@ -15,6 +15,7 @@ use commons::api::storage::SecretStore;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::error;
 use tracing::info;
 
 #[derive(Clone)]
@@ -85,7 +86,7 @@ pub async fn create_connection(
 
     let (connection, secret) = transform_data_connection(&tenant_id, &connection).await;
 
-    if let Some(secret) = secret {
+    if let Some(ref secret) = secret {
         let dct = service
             .meta_store
             .get_data_connection_type(ctx.tenant_id.as_str(), &connection.data_connection_type_id)
@@ -107,9 +108,20 @@ pub async fn create_connection(
     let connection_res = service
         .meta_store
         .create_data_connection(ctx.tenant_id.as_str(), &connection)
-        .await?;
+        .await;
 
-    Ok(HttpResponse::Created().json(connection_res))
+    match connection_res {
+        Ok(connection_res) => Ok(HttpResponse::Created().json(connection_res)),
+        Err(e) => {
+            if let Some(secret) = secret {
+                let res = service.secret_store.delete_secret(&tenant_id, &secret.name).await;
+                if let Err(e) = res {
+                    error!("Failed to delete secret: {:?}", e);
+                }
+            }
+            Err(e.into())
+        },
+    }
 }
 
 pub async fn list_connection_types(
