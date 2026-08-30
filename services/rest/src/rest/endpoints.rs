@@ -86,7 +86,7 @@ pub async fn create_connection(
 
     let (connection, secret) = transform_data_connection(&tenant_id, &connection).await;
 
-    if let Some(ref secret) = secret {
+    if let Some(secret) = &secret {
         let dct = service
             .meta_store
             .get_data_connection_type(ctx.tenant_id.as_str(), &connection.data_connection_type_id)
