@@ -44,5 +44,10 @@ jobs:
       - name: Doc check
         run: make doc
 
+      - name: Verify API documentation is up to date
+        run: |
+          make generate-openapi-docs
+          git diff --exit-code -- docs/api/ || (echo "API documentation is out of date. Run 'make generate-openapi-docs' locally." && exit 1)
+
       - name: Security audit
         run: make audit
