@@ -81,8 +81,17 @@ client.delete_connection_type(type_id) -> None
 | `created_at` | `datetime \| None` | Creation timestamp |
 | `updated_at` | `datetime \| None` | Last update timestamp |
 | `credentials_fields` | `list[CredentialField]` | Credential fields required to connect |
+| `status` | `ConnectionTypeStatus` | Transports the provider supports |
 
 Pass `id` as the `type_id` argument to `get_connection_type`, `update_connection_type`, and `delete_connection_type` — and as `connection_type_id` to `create_connection`.
+
+`status.capabilities` reports which transports the provider supports (`flight` and `rest`, both `bool`), so you can check before issuing a Flight SQL query:
+
+```python
+ct = client.get_connection_type("dct-a1b2c3d4")
+if ct.status.capabilities.flight:
+    table = client.read("SELECT * FROM prompts", connection_id=conn.id)
+```
 
 #### `CredentialField`
 
@@ -116,8 +125,8 @@ A connection pairs a connection type with the actual credentials (stored in a Ku
 ```python
 client.list_connections() -> list[DataConnection]
 client.get_connection(connection_id) -> DataConnection
-client.create_connection(name=..., connection_type_id=..., data_format=..., admin=..., properties=...) -> DataConnection
-client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., admin=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
+client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=...) -> DataConnection
 client.delete_connection(connection_id) -> None
 ```
 
@@ -132,7 +141,7 @@ client.delete_connection(connection_id) -> None
 | `tenant_id` | `str` | Owning namespace |
 | `created_at` | `datetime` | Creation timestamp |
 | `updated_at` | `datetime` | Last update timestamp |
-| `admin` | `AdminSecretRef \| AdminSecret \| None` | Credential reference or inline credentials |
+| `credentials_ref` | `CredentialsRef` | Credential secret reference |
 | `properties` | `dict[str, str]` | Driver-specific properties (values masked in repr) |
 | `status` | `DataConnectionStatus` | Live connection health |
 
@@ -149,19 +158,23 @@ Tabular connections are read with the [Flight SQL methods](#tabular-data-queries
 
 You normally set `format` once, at `create_connection`, but it is not immutable: `update_connection(connection_id, data_format=...)` changes it, and the server accepts the new value without checking it against the provider or re-evaluating `status`. So switching a `postgres` connection to `binary` succeeds, leaves `status` reporting `ready`, and fails only when you try to read.
 
-**`admin` types:**
-
-`AdminSecretRef(secret_ref="my-secret")` — the **name** of an existing Kubernetes secret. The server looks it up in the tenant namespace, i.e. the namespace named by the connection's `tenant_id` (the `tenant_id` you passed to `DataConnectClient`). This is a bare secret name, not a `namespace/name` pair; cross-namespace references are not supported. If the secret is missing or unreadable, `status.state` becomes `"not_ready"`.
-
-`AdminSecret(name="...", secret={"key": "value"})` — inline credentials. The server creates a Kubernetes secret with this `name` in the tenant namespace, then stores the connection with `admin` rewritten to `AdminSecretRef(secret_ref=name)`, so subsequent reads always return the `AdminSecretRef` form. The keys of `secret` must cover every `CredentialField` on the connection type that has `required=True`. Values are masked in `repr`.
+`credentials_ref` is a reference to a Kubernetes secret containing the connection credentials. Use `CredentialsRef(secret="secret-name")` where `secret-name` is the **name** of an existing secret in the tenant namespace (the namespace named by the connection's `tenant_id` that you passed to `DataConnectClient`). This is a bare secret name, not a `namespace/name` pair; cross-namespace references are not supported. If the secret is missing or unreadable, `status.state` becomes `"not_ready"`. The secret's keys must cover every `CredentialField` on the connection type that has `required=True`.
 
 **`DataConnectionStatus`:**
 
 | Field | Type | Description |
 |---|---|---|
-| `state` | `"ready" \| "not_ready"` | Connection health |
+| `state` | `"ready" \| "ingestion_not_ready" \| "not_ready"` | Connection health (see below) |
 | `message` | `str \| None` | Status detail message |
-| `phases` | `list[dict]` | Provisioning phase history |
+| `updated_at` | `datetime \| None` | When the status was last evaluated |
+
+**`state` values:**
+
+| Value | Meaning |
+|---|---|
+| `"ready"` | Credentials are valid and the source is queryable |
+| `"ingestion_not_ready"` | Credentials are valid, but the source cannot be queried |
+| `"not_ready"` | The referenced secret is missing or invalid |
 
 ### Tabular Data Queries (Flight SQL)
 
@@ -183,6 +196,35 @@ for batch in client.read_batches("SELECT * FROM prompts", "conn-uuid"):
 A server-side failure surfaced mid-stream raises `DCHQueryError`. Automatic token refresh applies when the stream is opened; an authentication failure that occurs after the stream is open is not retried.
 
 These require the `flight` extra. On a REST-only install the client still imports and all REST calls work; the first Flight call raises `DCHConfigError` telling you to install `data-connect-hub[flight]`.
+
+## Error Handling
+
+Every failure raised by the SDK derives from `DCHError`, so a single `except` covers transport failures, HTTP errors, and malformed responses alike:
+
+```python
+from data_connect_hub import DCHError, DCHNotFoundError
+
+try:
+    conn = client.get_connection("conn-uuid")
+except DCHNotFoundError:
+    ...
+except DCHError as exc:  # connection, timeout, auth, schema drift, ...
+    ...
+```
+
+| Exception | Raised when |
+|---|---|
+| `DCHConfigError` | Invalid client configuration or argument (e.g. a blank id) |
+| `DCHConnectionError` | The server was unreachable or the transport failed |
+| `DCHTimeoutError` | The request exceeded `rest_timeout` |
+| `DCHAuthenticationError` / `DCHForbiddenError` | HTTP 401 / 403 |
+| `DCHNotFoundError` | HTTP 404 |
+| `DCHValidationError` | HTTP 400 / 422 |
+| `DCHServerError` | HTTP 5xx |
+| `DCHResponseError` | The response was not JSON, or did not match the expected schema |
+| `DCHQueryError` | A Flight SQL query failed |
+
+Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol errors — are retried automatically with exponential backoff on idempotent methods. See `max_retries`, `backoff_base`, and `backoff_max`.
 
 ## Requirements
 

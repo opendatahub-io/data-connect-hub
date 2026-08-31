@@ -7,12 +7,21 @@ import logging
 import random
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypeVar
+from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel, ValidationError
 
 from ._auth import TokenCache, build_headers
-from .exceptions import DCHConfigError, DCHConnectionError, DCHError, DCHTimeoutError, map_http_error
+from .exceptions import (
+    DCHConfigError,
+    DCHConnectionError,
+    DCHError,
+    DCHResponseError,
+    DCHTimeoutError,
+    map_http_error,
+)
 from .models import (
     ConnectionType,
     CreateConnectionRequest,
@@ -30,6 +39,8 @@ _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "PUT", "DELETE", "OPTIONS"})
 
 _log = logging.getLogger(__name__)
 
+_M = TypeVar("_M", bound=BaseModel)
+
 
 def _unwrap_list(data: Any) -> list[Any]:
     """Extract items from either a bare JSON array or a ``{"items": [...]}`` wrapper."""
@@ -38,7 +49,36 @@ def _unwrap_list(data: Any) -> list[Any]:
     if isinstance(data, dict) and "items" in data:
         items: list[Any] = data["items"]
         return items
-    raise DCHError(f'Unexpected response format: expected list or {{"items": [...]}}, got {type(data).__name__}')
+    raise DCHResponseError(
+        f'Unexpected response format: expected list or {{"items": [...]}}, got {type(data).__name__}'
+    )
+
+
+def _validate(model: type[_M], data: Any) -> _M:
+    """Validate *data* against *model*, translating schema drift into a ``DCHError``."""
+    try:
+        return model.model_validate(data)
+    except ValidationError as exc:
+        raise DCHResponseError(f"Server returned an unexpected {model.__name__} payload: {exc}") from exc
+
+
+def _segment(value: str, *, name: str) -> str:
+    """Percent-encode *value* for use as a single URL path segment.
+
+    Without this an id containing ``/``, ``?`` or ``..`` would silently
+    retarget the request at a different endpoint.
+    """
+    if not value or not value.strip():
+        raise DCHConfigError(f"{name} must be a non-empty string")
+    return quote(value, safe="")
+
+
+def _map_request_error(exc: httpx.RequestError, base_url: str) -> DCHError:
+    if isinstance(exc, httpx.TimeoutException):
+        return DCHTimeoutError(f"Request timed out: {exc}")
+    if isinstance(exc, httpx.ConnectError):
+        return DCHConnectionError(f"Failed to connect to {base_url}: {exc}")
+    return DCHConnectionError(f"Transport error contacting {base_url} ({type(exc).__name__}): {exc}")
 
 
 class RestClient:
@@ -168,19 +208,21 @@ class RestClient:
                     headers=self._headers(),
                     json=json,
                 )
-            except httpx.ConnectError as exc:
-                last_exc = DCHConnectionError(f"Failed to connect to {self._base_url}: {exc}")
-                if attempt < attempts - 1:
+            except httpx.RequestError as exc:
+                last_exc = _map_request_error(exc, self._base_url)
+                # ``TransportError`` covers connect/read/write/pool timeouts,
+                # network errors, proxy errors and protocol errors such as a
+                # mid-response disconnect — all transient.  Anything else
+                # (e.g. TooManyRedirects) will not improve on a retry.
+                if isinstance(exc, httpx.TransportError) and attempt < attempts - 1:
                     delay = self._backoff_delay(attempt)
-                    _log.debug("Retry %d/%d after ConnectError, sleeping %.2fs", attempt + 1, self._max_retries, delay)
-                    time.sleep(delay)
-                    continue
-                raise last_exc from exc
-            except httpx.TimeoutException as exc:
-                last_exc = DCHTimeoutError(f"Request timed out: {exc}")
-                if attempt < attempts - 1:
-                    delay = self._backoff_delay(attempt)
-                    _log.debug("Retry %d/%d after timeout, sleeping %.2fs", attempt + 1, self._max_retries, delay)
+                    _log.debug(
+                        "Retry %d/%d after %s, sleeping %.2fs",
+                        attempt + 1,
+                        self._max_retries,
+                        type(exc).__name__,
+                        delay,
+                    )
                     time.sleep(delay)
                     continue
                 raise last_exc from exc
@@ -220,17 +262,19 @@ class RestClient:
         try:
             return resp.json()
         except _json.JSONDecodeError as exc:
-            raise DCHError(f"Unexpected non-JSON response (status {resp.status_code}): {resp.text[:200]}") from exc
+            raise DCHResponseError(
+                f"Unexpected non-JSON response (status {resp.status_code}): {resp.text[:200]}"
+            ) from exc
 
     # -- Connections CRUD --
 
     def list_connections(self) -> list[DataConnection]:
         resp = self._request("GET", _CONNECTIONS_ENDPOINT)
-        return [DataConnection.model_validate(c) for c in _unwrap_list(self._parse_json(resp))]
+        return [_validate(DataConnection, c) for c in _unwrap_list(self._parse_json(resp))]
 
     def get_connection(self, connection_id: str) -> DataConnection:
-        resp = self._request("GET", f"{_CONNECTIONS_ENDPOINT}/{connection_id}")
-        return DataConnection.model_validate(self._parse_json(resp))
+        resp = self._request("GET", f"{_CONNECTIONS_ENDPOINT}/{_segment(connection_id, name='connection_id')}")
+        return _validate(DataConnection, self._parse_json(resp))
 
     def create_connection(self, request: CreateConnectionRequest) -> DataConnection:
         resp = self._request(
@@ -238,28 +282,28 @@ class RestClient:
             _CONNECTIONS_ENDPOINT,
             json=request.model_dump(exclude_none=True),
         )
-        return DataConnection.model_validate(self._parse_json(resp))
+        return _validate(DataConnection, self._parse_json(resp))
 
     def update_connection(self, connection_id: str, request: UpdateConnectionRequest) -> DataConnection:
         resp = self._request(
             "PATCH",
-            f"{_CONNECTIONS_ENDPOINT}/{connection_id}",
+            f"{_CONNECTIONS_ENDPOINT}/{_segment(connection_id, name='connection_id')}",
             json=request.model_dump(exclude_none=True),
         )
-        return DataConnection.model_validate(self._parse_json(resp))
+        return _validate(DataConnection, self._parse_json(resp))
 
     def delete_connection(self, connection_id: str) -> None:
-        self._request("DELETE", f"{_CONNECTIONS_ENDPOINT}/{connection_id}")
+        self._request("DELETE", f"{_CONNECTIONS_ENDPOINT}/{_segment(connection_id, name='connection_id')}")
 
     # -- Connection Types CRUD --
 
     def list_connection_types(self) -> list[ConnectionType]:
         resp = self._request("GET", _CONNECTION_TYPES_ENDPOINT)
-        return [ConnectionType.model_validate(ct) for ct in _unwrap_list(self._parse_json(resp))]
+        return [_validate(ConnectionType, ct) for ct in _unwrap_list(self._parse_json(resp))]
 
     def get_connection_type(self, type_id: str) -> ConnectionType:
-        resp = self._request("GET", f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}")
-        return ConnectionType.model_validate(self._parse_json(resp))
+        resp = self._request("GET", f"{_CONNECTION_TYPES_ENDPOINT}/{_segment(type_id, name='type_id')}")
+        return _validate(ConnectionType, self._parse_json(resp))
 
     def create_connection_type(self, request: CreateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
@@ -267,15 +311,15 @@ class RestClient:
             _CONNECTION_TYPES_ENDPOINT,
             json=request.model_dump(exclude_none=True),
         )
-        return ConnectionType.model_validate(self._parse_json(resp))
+        return _validate(ConnectionType, self._parse_json(resp))
 
     def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
         resp = self._request(
             "PATCH",
-            f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}",
+            f"{_CONNECTION_TYPES_ENDPOINT}/{_segment(type_id, name='type_id')}",
             json=request.model_dump(exclude_none=True),
         )
-        return ConnectionType.model_validate(self._parse_json(resp))
+        return _validate(ConnectionType, self._parse_json(resp))
 
     def delete_connection_type(self, type_id: str) -> None:
-        self._request("DELETE", f"{_CONNECTION_TYPES_ENDPOINT}/{type_id}")
+        self._request("DELETE", f"{_CONNECTION_TYPES_ENDPOINT}/{_segment(type_id, name='type_id')}")

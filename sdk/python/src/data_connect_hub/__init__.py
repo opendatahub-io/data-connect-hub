@@ -12,12 +12,15 @@ from .exceptions import (
     DCHNoDataError,
     DCHNotFoundError,
     DCHQueryError,
+    DCHResponseError,
     DCHServerError,
     DCHTimeoutError,
     DCHValidationError,
 )
 from .models import (
+    Capabilities,
     ConnectionType,
+    ConnectionTypeStatus,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     CredentialField,
@@ -32,7 +35,9 @@ from .models import (
 )
 
 __all__ = [
+    "Capabilities",
     "ConnectionType",
+    "ConnectionTypeStatus",
     "CreateConnectionRequest",
     "CreateConnectionTypeRequest",
     "CredentialField",
@@ -46,6 +51,7 @@ __all__ = [
     "DCHNoDataError",
     "DCHNotFoundError",
     "DCHQueryError",
+    "DCHResponseError",
     "DCHServerError",
     "DCHTimeoutError",
     "DCHValidationError",

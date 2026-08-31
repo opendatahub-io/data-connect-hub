@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
+import pytest
+
 from data_connect_hub.models import (
     ConnectionType,
     CreateConnectionRequest,
@@ -85,6 +87,27 @@ class TestDataConnection:
         del data["status"]
         conn = DataConnection.model_validate(data)
         assert conn.status == DataConnectionStatus()
+
+
+class TestDataConnectionStatus:
+    @pytest.mark.parametrize("state", ["ready", "ingestion_not_ready", "not_ready"])
+    def test_accepts_every_server_state(self, state: str) -> None:
+        """All three ``commons::api::connections::DataConnectionState`` variants."""
+        data = {**SAMPLE_CONNECTION_JSON, "status": {"state": state}}
+        conn = DataConnection.model_validate(data)
+        assert conn.status.state == state
+
+    def test_status_updated_at_is_parsed(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_JSON,
+            "status": {"state": "ready", "message": "OK", "updated_at": "2026-02-03T04:05:06Z"},
+        }
+        conn = DataConnection.model_validate(data)
+        assert conn.status.updated_at == datetime(2026, 2, 3, 4, 5, 6, tzinfo=UTC)
+
+    def test_status_updated_at_defaults_to_none(self) -> None:
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
+        assert conn.status.updated_at is None
 
 
 class TestAdmin:
@@ -177,6 +200,17 @@ class TestConnectionType:
         assert ct.created_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert ct.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert ct.credentials_fields == []
+
+    def test_capabilities_from_wrapped_status(self) -> None:
+        data = {**SAMPLE_CONNECTION_TYPE_WRAPPED_JSON, "status": {"capabilities": {"flight": True, "rest": False}}}
+        ct = ConnectionType.model_validate(data)
+        assert ct.status.capabilities.flight is True
+        assert ct.status.capabilities.rest is False
+
+    def test_capabilities_default_to_false(self) -> None:
+        ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_WRAPPED_JSON)
+        assert ct.status.capabilities.flight is False
+        assert ct.status.capabilities.rest is False
 
     def test_credentials_field_with_enum_values(self) -> None:
         ct = ConnectionType.model_validate(

@@ -46,6 +46,15 @@ class DCHServerError(DCHHTTPError):
     """5xx Server error."""
 
 
+class DCHResponseError(DCHError):
+    """The server responded successfully but the payload could not be understood.
+
+    Raised for non-JSON bodies, unexpected list envelopes, and payloads that
+    fail model validation.  Keeps schema drift inside the :class:`DCHError`
+    hierarchy instead of surfacing a raw ``pydantic.ValidationError``.
+    """
+
+
 class DCHQueryError(DCHError):
     """SQL or query execution error."""
 

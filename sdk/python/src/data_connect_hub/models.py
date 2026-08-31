@@ -13,7 +13,12 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 DataFormat = Literal["tabular", "binary"]
-DataConnectionState = Literal["ready", "not_ready"]
+
+#: Mirrors ``commons::api::connections::DataConnectionState``.  ``ready`` means
+#: usable for ingestion, ``ingestion_not_ready`` means the secret is valid but
+#: the source is not queryable, and ``not_ready`` means the secret itself is
+#: missing or invalid.
+DataConnectionState = Literal["ready", "ingestion_not_ready", "not_ready"]
 
 
 class _MaskProperties:
@@ -32,7 +37,7 @@ class CredentialsRef(BaseModel):
 class DataConnectionStatus(BaseModel):
     state: DataConnectionState = "not_ready"
     message: str | None = None
-    phases: list[dict[str, Any]] = Field(default_factory=list)
+    updated_at: datetime | None = None
 
 
 class DataConnection(_MaskProperties, BaseModel):
@@ -93,6 +98,17 @@ class CredentialField(BaseModel):
     default_value: str | None = None
 
 
+class Capabilities(BaseModel):
+    """Transports a connection type's provider supports."""
+
+    flight: bool = False
+    rest: bool = False
+
+
+class ConnectionTypeStatus(BaseModel):
+    capabilities: Capabilities = Field(default_factory=Capabilities)
+
+
 class ConnectionType(BaseModel):
     id: str
     name: str
@@ -102,12 +118,15 @@ class ConnectionType(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     credentials_fields: list[CredentialField] = Field(default_factory=list)
+    status: ConnectionTypeStatus = Field(default_factory=ConnectionTypeStatus)
 
     @model_validator(mode="before")
     @classmethod
     def _flatten_resource(cls, data: Any) -> Any:
         if isinstance(data, dict) and "metadata" in data and "resource" in data:
             flat = {**data["metadata"], **data["resource"]}
+            if "status" in data:
+                flat["status"] = data["status"]
             return flat
         return data
 

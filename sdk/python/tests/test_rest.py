@@ -11,9 +11,11 @@ import pytest
 from data_connect_hub._rest import RestClient
 from data_connect_hub.exceptions import (
     DCHAuthenticationError,
+    DCHConfigError,
     DCHConnectionError,
     DCHForbiddenError,
     DCHNotFoundError,
+    DCHResponseError,
     DCHServerError,
     DCHTimeoutError,
     DCHValidationError,
@@ -304,6 +306,55 @@ class TestTransportErrors:
         with pytest.raises(DCHTimeoutError, match="timed out"):
             client.list_connections()
 
+    def test_protocol_error_raises_dch_connection_error(self) -> None:
+        """A mid-response disconnect is neither a ConnectError nor a timeout."""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.RemoteProtocolError("server disconnected", request=request)
+
+        transport = httpx.MockTransport(handler)
+        client = _make_client(transport, max_retries=0)
+        with pytest.raises(DCHConnectionError, match="RemoteProtocolError"):
+            client.list_connections()
+
+    def test_pool_timeout_raises_dch_timeout_error(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            raise httpx.PoolTimeout("pool exhausted")
+
+        transport = httpx.MockTransport(handler)
+        client = _make_client(transport, max_retries=0)
+        with pytest.raises(DCHTimeoutError, match="timed out"):
+            client.list_connections()
+
+    def test_non_transport_request_error_is_not_retried(self) -> None:
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            raise httpx.TooManyRedirects("redirect loop", request=request)
+
+        transport = httpx.MockTransport(handler)
+        client = _make_client(transport, max_retries=3)
+        with pytest.raises(DCHConnectionError, match="TooManyRedirects"):
+            client.list_connections()
+        assert call_count == 1
+
+    def test_retries_on_protocol_error(self) -> None:
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 2:
+                raise httpx.RemoteProtocolError("server disconnected", request=request)
+            return httpx.Response(200, json=[])
+
+        transport = httpx.MockTransport(handler)
+        client = _make_client(transport, max_retries=3)
+        assert client.list_connections() == []
+        assert call_count == 2
+
 
 class TestJsonParseSafety:
     def test_non_json_response_raises_dch_error(self) -> None:
@@ -316,6 +367,75 @@ class TestJsonParseSafety:
         client = _make_client(transport)
         with pytest.raises(DCHError, match="Unexpected non-JSON response"):
             client.list_connections()
+
+    def test_schema_mismatch_raises_dch_response_error(self) -> None:
+        """A payload that fails validation must not leak pydantic.ValidationError."""
+        transport = _make_transport(body={"id": "1"})
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError, match="unexpected DataConnection payload"):
+            client.get_connection("1")
+
+    def test_schema_mismatch_in_list_raises_dch_response_error(self) -> None:
+        transport = _make_transport(body=[{"id": "1"}])
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError):
+            client.list_connections()
+
+    def test_unexpected_list_envelope_raises_dch_response_error(self) -> None:
+        transport = _make_transport(body={"connections": []})
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError, match="Unexpected response format"):
+            client.list_connections()
+
+
+class TestPathSegmentEncoding:
+    """Ids are percent-encoded so a hostile or malformed id cannot retarget the request."""
+
+    @pytest.mark.parametrize(
+        ("connection_id", "expected_path"),
+        [
+            ("../../../../evil", "/api/v1/data/connections/..%2F..%2F..%2F..%2Fevil"),
+            ("abc?force=true", "/api/v1/data/connections/abc%3Fforce%3Dtrue"),
+            ("a/b", "/api/v1/data/connections/a%2Fb"),
+            ("id with space", "/api/v1/data/connections/id%20with%20space"),
+            ("a#frag", "/api/v1/data/connections/a%23frag"),
+        ],
+    )
+    def test_connection_id_is_encoded(self, connection_id: str, expected_path: str) -> None:
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.raw_path.decode())
+            return httpx.Response(204)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.delete_connection(connection_id)
+        assert seen == [expected_path]
+
+    def test_type_id_is_encoded(self) -> None:
+        seen: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen.append(request.url.raw_path.decode())
+            return httpx.Response(204)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.delete_connection_type("../connections/123")
+        assert seen == ["/api/v1/data/connection-types/..%2Fconnections%2F123"]
+
+    def test_ordinary_id_is_unchanged(self) -> None:
+        transport = _make_transport(
+            body=SAMPLE_CONNECTION_JSON,
+            assert_path="/api/v1/data/connections/550e8400-e29b-41d4-a716-446655440000",
+        )
+        client = _make_client(transport)
+        client.get_connection("550e8400-e29b-41d4-a716-446655440000")
+
+    @pytest.mark.parametrize("bad_id", ["", "   "])
+    def test_blank_id_rejected(self, bad_id: str) -> None:
+        client = _make_client(_make_transport())
+        with pytest.raises(DCHConfigError, match="connection_id must be a non-empty string"):
+            client.get_connection(bad_id)
 
 
 class TestListUnwrapping:
