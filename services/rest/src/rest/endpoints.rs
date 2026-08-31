@@ -4,18 +4,22 @@ use super::errors::ValidationError;
 use crate::clients::flight::FlightClient;
 use crate::rest::update_connection_type_status;
 use crate::state::audit::audit_data_connection_types;
+use crate::utils::default_secret_labels;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use chrono::Utc;
 use commons::api::connection_types::DataConnectionType;
+use commons::api::connections::Admin;
 use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus};
 use commons::api::creds::TestCredentials;
+use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::info;
+
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
@@ -91,12 +95,9 @@ pub async fn create_connection(
 
     if let Some(secret) = connection.1 {
         let secret = &mut secret.clone();
-        secret.labels = Arc::new(HashMap::from([(
-            "dataconnecthub.opendatahub.io/attached".to_string(),
-            "true".to_string(),
-        )]));
+        secret.labels = Some(default_secret_labels());
 
-        service.secret_store.create_secret(secret).await?;
+        service.secret_store.create_secret(secret, false).await?;
     }
 
     Ok(HttpResponse::Created().json(connection_res))
@@ -307,6 +308,56 @@ pub async fn test_credentials(
     Ok(HttpResponse::NoContent().finish())
 }
 
+pub async fn export_connection(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    parts: web::Path<(String, String)>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("export_connection: for tenant {:?}", ctx.tenant_id);
+    let (id, secret_name) = parts.into_inner();
+
+    let connection = service
+        .meta_store
+        .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+
+    let mut props = HashMap::new();
+
+    if let Some(Admin::SecretRef { secret_ref }) = &connection.resource.admin {
+        // Export the credentials into the new secret
+        let existing_secret = service.secret_store.get_secret(&ctx.tenant_id, secret_ref).await?;
+        for (key, value) in existing_secret.properties.iter() {
+            props.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    props.insert("data_connection.id".to_string(), connection.metadata.id.to_string());
+    props.insert(
+        "data_connection_type.id".to_string(),
+        connection.resource.data_connection_type_id.clone(),
+    );
+    props.insert("data_connection.name".to_string(), connection.resource.name.clone());
+    props.insert(
+        "data_connection.format".to_string(),
+        connection.resource.format.to_string(),
+    );
+    for (key, value) in connection.resource.properties.iter() {
+        props.insert(format!("data_connection.properties.{}", key), value.to_string());
+    }
+
+    let secret = Secret {
+        name: secret_name,
+        namespace: ctx.tenant_id.clone(),
+        properties: props,
+        labels: Some(default_secret_labels()),
+        annotations: None,
+    };
+
+    service.secret_store.create_secret(&secret, true).await?;
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
@@ -316,7 +367,6 @@ mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
-    use commons::api::connection_types::Secret;
     use commons::api::connections::DataConnectionResource;
     use commons::api::errors::SecretStoreError;
     use commons::api::storage::MetaStore;
@@ -594,7 +644,7 @@ mod tests {
         async fn get_secret(&self, _n: &str, _k: &str) -> Result<Secret, SecretStoreError> {
             unimplemented!()
         }
-        async fn create_secret(&self, _s: &Secret) -> Result<(), SecretStoreError> {
+        async fn create_secret(&self, _s: &Secret, _overwrite: bool) -> Result<(), SecretStoreError> {
             unimplemented!()
         }
         async fn delete_secret(&self, _n: &str, _k: &str) -> Result<(), SecretStoreError> {

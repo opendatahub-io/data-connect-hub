@@ -59,12 +59,11 @@ impl DataIngestionService {
                 .remove("data_connection_type_id")
                 .ok_or(Status::invalid_argument("data_connection_type_id is required"))?;
 
-            let credentials: Arc<HashMap<String, String>> = Arc::new(
-                keys.into_iter()
-                    .filter(|(k, _)| k.starts_with("secret."))
-                    .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
-                    .collect(),
-            );
+            let credentials: HashMap<String, String> = keys
+                .into_iter()
+                .filter(|(k, _)| k.starts_with("secret."))
+                .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
+                .collect();
 
             let admin = Admin::Secret {
                 name: String::new(),

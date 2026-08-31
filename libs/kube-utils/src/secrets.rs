@@ -1,5 +1,5 @@
-use commons::api::connection_types::Secret;
 use commons::api::errors::SecretStoreError;
+use commons::api::secret::Secret;
 use commons::api::storage::SecretStore;
 use k8s_openapi::api::core::v1::Secret as K8sSecret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
@@ -9,6 +9,7 @@ use moka::future::Cache;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::error;
 
 pub struct KubeSecretStore {
     client: Client,
@@ -49,7 +50,7 @@ impl SecretStore for KubeSecretStore {
                     name: n,
                     namespace: ns,
                     properties,
-                    labels: Arc::new(
+                    labels: Some(
                         k8s_secret
                             .metadata
                             .labels
@@ -58,7 +59,7 @@ impl SecretStore for KubeSecretStore {
                             .into_iter()
                             .collect(),
                     ),
-                    annotations: Arc::new(
+                    annotations: Some(
                         k8s_secret
                             .metadata
                             .annotations
@@ -73,22 +74,13 @@ impl SecretStore for KubeSecretStore {
             .map_err(|e: Arc<SecretStoreError>| e.as_ref().clone())
     }
 
-    async fn create_secret(&self, secret: &Secret) -> Result<(), SecretStoreError> {
+    async fn create_secret(&self, secret: &Secret, overwrite: bool) -> Result<(), SecretStoreError> {
         let ns = Arc::new(secret.namespace.clone());
 
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), &ns);
 
-        let labels = if secret.labels.is_empty() {
-            None
-        } else {
-            Some(secret.labels.as_ref().clone().into_iter().collect())
-        };
-
-        let annotations = if secret.annotations.is_empty() {
-            None
-        } else {
-            Some(secret.annotations.as_ref().clone().into_iter().collect())
-        };
+        let labels = secret.labels.clone().map(|l| l.into_iter().collect());
+        let annotations = secret.annotations.clone().map(|a| a.into_iter().collect());
 
         let k8s_secret = K8sSecret {
             metadata: ObjectMeta {
@@ -98,13 +90,24 @@ impl SecretStore for KubeSecretStore {
                 annotations,
                 ..Default::default()
             },
-            string_data: Some(secret.properties.as_ref().clone().into_iter().collect()),
+            string_data: Some(secret.properties.clone().into_iter().collect()),
             ..Default::default()
         };
 
-        api.create(&PostParams::default(), &k8s_secret)
+        if overwrite {
+            api.patch(
+                &secret.name,
+                &PatchParams::apply("data-connect-hub"),
+                &Patch::Apply(&k8s_secret),
+            )
             .await
-            .map_err(|e| SecretStoreError::CannotCreateSecret(e.to_string()))?;
+        } else {
+            api.create(&PostParams::default(), &k8s_secret).await
+        }
+        .map_err(|e| {
+            error!("Failed to create secret {}: {}", secret.name, e);
+            SecretStoreError::CannotCreateSecret(secret.name.clone())
+        })?;
 
         Ok(())
     }
@@ -141,15 +144,14 @@ impl SecretStore for KubeSecretStore {
     }
 }
 
-fn extract_properties(k8s_secret: &K8sSecret) -> Arc<HashMap<String, String>> {
-    let props = k8s_secret
+fn extract_properties(k8s_secret: &K8sSecret) -> HashMap<String, String> {
+    k8s_secret
         .data
         .clone()
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(key, value)| String::from_utf8(value.0).ok().map(|v| (key, v)))
-        .collect();
-    Arc::new(props)
+        .collect()
 }
 
 #[cfg(test)]

@@ -58,6 +58,10 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connections/{id}", web::patch().to(patch_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))
+                .route(
+                    "/connections/{id}/exports/secrets/{secret_name}",
+                    web::put().to(export_connection),
+                )
                 .route("/connections/{id}/readiness", web::post().to(check_existent_connection))
                 .route("/connections/{id}/binary", web::get().to(get_ingestion_data))
                 .route("/test/credentials", web::post().to(test_credentials)),

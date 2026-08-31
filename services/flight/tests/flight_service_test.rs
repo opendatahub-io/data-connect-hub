@@ -7,13 +7,13 @@ use commons::api::ResourceMetadata;
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connection_types::Field;
-use commons::api::connection_types::Secret;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
 use commons::api::connections::{Admin, DataConnection};
 use commons::api::errors::MetaStoreError;
+use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
@@ -285,9 +285,9 @@ async fn test_flight_sql_select_prompts() {
     let secret_store = Arc::new(InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),
         namespace: "default".to_string(),
-        properties: Arc::new(HashMap::from([("URI".to_string(), sqlite_url)])),
-        labels: Arc::new(HashMap::new()),
-        annotations: Arc::new(HashMap::new()),
+        properties: HashMap::from([("URI".to_string(), sqlite_url)]),
+        labels: None,
+        annotations: None,
     }]));
 
     let service = DataIngestionService::new(

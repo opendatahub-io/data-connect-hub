@@ -1,11 +1,10 @@
-use commons::api::connection_types::Secret;
 use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
+use commons::api::secret::Secret;
 use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Server {
@@ -49,8 +48,8 @@ pub async fn transform_data_connection(
                 name: name.to_string(),
                 namespace: tenant_id.to_string(),
                 properties: properties.clone(),
-                labels: Arc::new(HashMap::new()),
-                annotations: Arc::new(HashMap::new()),
+                labels: Some(default_secret_labels()),
+                annotations: Some(HashMap::new()),
             };
             data_connection.admin = Some(Admin::SecretRef {
                 secret_ref: name.to_string(),
@@ -59,6 +58,10 @@ pub async fn transform_data_connection(
         },
         _ => (data_connection, None),
     }
+}
+
+pub fn default_secret_labels() -> HashMap<String, String> {
+    HashMap::from([("dataconnecthub.opendatahub.io/attached".to_string(), "true".to_string())])
 }
 
 #[cfg(test)]
