@@ -9,6 +9,18 @@ data:
   config-file.yaml: |
     authorization:
       endpoints:
+        - path: /api/v1/data/connections/*/readiness
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: create
         - path: /api/v1/data/connections/*
           mappings:
             - methods: [get, post, patch, delete]
@@ -57,3 +69,15 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
                     verb: "{{.FromMethod}}"
+        - path: /api/v1/data/test/credentials
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: create
