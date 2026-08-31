@@ -83,6 +83,7 @@ impl MetaStore for S3TestMetaStore {
 
     async fn update_data_connection_status(
         &self,
+        _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {

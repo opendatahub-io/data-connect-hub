@@ -182,7 +182,6 @@ impl MetaStore for PgMetaStore {
                 state: DataConnectionState::NotReady,
                 message: None,
                 updated_at: Some(now.clone()),
-                phases: vec![],
             },
         };
 
@@ -289,6 +288,7 @@ impl MetaStore for PgMetaStore {
 
     async fn update_data_connection_status(
         &self,
+        tenant_id: &str,
         uid: &str,
         update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
@@ -297,8 +297,9 @@ impl MetaStore for PgMetaStore {
             MetaStoreError::Query("failed to update data connection status".to_string())
         })?;
 
-        let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 FOR UPDATE")
+        let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
             .bind(uid)
+            .bind(tenant_id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| match e {
@@ -336,9 +337,10 @@ impl MetaStore for PgMetaStore {
             MetaStoreError::Serialization("failed to serialize data connection".to_string())
         })?;
 
-        sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2")
+        sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
             .bind(&json_value)
             .bind(uid)
+            .bind(tenant_id)
             .execute(&mut *tx)
             .await
             .map_err(|e| {

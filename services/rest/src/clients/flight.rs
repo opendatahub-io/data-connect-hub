@@ -10,6 +10,9 @@ use tokio::sync::OnceCell;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
 
+const ACTION_CHECK_DATA_CONNECTION: &str = "CheckDataConnection";
+const ACTION_CHECK_CREDENTIALS: &str = "CheckCredentials";
+
 #[derive(Debug, Clone)]
 pub struct SupportedConnector {
     pub name: String,
@@ -87,9 +90,9 @@ impl FlightClient {
             .collect())
     }
 
-    pub async fn check_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
+    pub async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
         let mut client = self.client().await?;
-        let mut request = tonic::Request::new(Action::new("CheckConnection", ""));
+        let mut request = tonic::Request::new(Action::new(ACTION_CHECK_DATA_CONNECTION, ""));
         let metadata = request.metadata_mut();
         metadata.insert(
             X_TENANT_ID,
@@ -133,7 +136,7 @@ impl FlightClient {
         }
 
         let mut client = self.client().await?;
-        let mut request = tonic::Request::new(Action::new("CheckConnection", buf));
+        let mut request = tonic::Request::new(Action::new(ACTION_CHECK_CREDENTIALS, buf));
         request.metadata_mut().insert(
             X_TENANT_ID,
             MetadataValue::try_from(tenant_id).map_err(|_| tonic::Status::invalid_argument("invalid tenant_id"))?,

@@ -30,6 +30,36 @@ Data Connect Hub is deployed in two steps:
   `quay.io/opendatahub/odh-data-connect-hub-{rest,flight}:odh-stable`,
   built by Konflux CI with `imagePullPolicy: Always`.
 
+### Namespaces
+
+Set these before anything below — every step that follows uses `$NS` and
+`$CONTROLLER_NS`. Data Connect Hub installs alongside an existing ODH or
+RHOAI deployment: the services run in the same namespace as the platform.
+
+| Platform | `$NS` |
+|----------|-------|
+| RHOAI (OpenShift AI) | `redhat-ods-applications` |
+| ODH (Open Data Hub) | `opendatahub` |
+
+The `$NS` platform namespace is created by the platform operator, so it
+will already exist — the `AlreadyExists` error is safe to ignore:
+
+```console
+export CONTROLLER_NS=dc-controller-system
+export NS=redhat-ods-applications   # use "opendatahub" for ODH
+oc create namespace $CONTROLLER_NS
+oc create namespace $NS             # safe to ignore "AlreadyExists"
+oc project $NS
+```
+
+Expected output:
+
+```
+namespace/dc-controller-system created
+Error from server (AlreadyExists): namespaces "redhat-ods-applications" already exists
+Now using project "redhat-ods-applications" on server "https://api.<cluster>:443".
+```
+
 ### Database
 
 Data Connect Hub requires a PostgreSQL database. Provision an instance
@@ -85,35 +115,8 @@ oc patch installplan $(oc get installplan -n openshift-operators --no-headers | 
   -n openshift-operators --type=merge -p '{"spec":{"approved":true}}'
 ```
 
-Set the namespaces. Data Connect Hub installs alongside an existing
-ODH or RHOAI deployment — the services run in the same namespace as
-the platform:
-
-| Platform | `$NS` |
-|----------|-------|
-| RHOAI (OpenShift AI) | `redhat-ods-applications` |
-| ODH (Open Data Hub) | `opendatahub` |
-
-These namespaces are created by the platform operator, so they will
-already exist — the `AlreadyExists` error is safe to ignore:
-
-```console
-export CONTROLLER_NS=dc-controller-system
-export NS=redhat-ods-applications   # use "opendatahub" for ODH
-oc create namespace $CONTROLLER_NS
-oc create namespace $NS             # safe to ignore "AlreadyExists"
-oc project $NS
-```
-
-Expected output:
-
-```
-namespace/dc-controller-system created
-Error from server (AlreadyExists): namespaces "redhat-ods-applications" already exists
-Now using project "redhat-ods-applications" on server "https://api.<cluster>:443".
-```
-
-Create the CloudNativePG cluster:
+Create the CloudNativePG cluster (`$NS` was set in the
+[Namespaces](#namespaces) step above):
 
 ```console
 oc apply -n $NS -f - <<'EOF'
@@ -201,6 +204,10 @@ or malformed.
 
 ## Step 1: Install the operator
 
+To pin custom images (dev/testing against a private registry), add the
+`--set` flags from [Override controller images](#override-controller-images)
+to the command below instead of running it as-is.
+
 ```console
 cd dc-controller
 
@@ -243,6 +250,51 @@ Set the `gateway` section to match your platform:
 |----------|-------------|-----------|
 | RHOAI | `data-science-gateway` | `openshift-ingress` |
 | ODH | `odh-gateway` | `opendatahub` |
+
+**ROSA / custom OIDC — do this before applying the CR below.** On ROSA
+clusters (and others with external OIDC providers), the default Kubernetes
+API audience does not match the cluster's OIDC provider URL. Both the
+flight service and the kube-rbac-proxy sidecar on the REST service need the
+correct audience to validate tokens via TokenReview — otherwise every
+authenticated call is rejected. On standard OCP / ODH / RHOAI clusters no
+audience is needed; skip to the CR apply.
+
+Check whether you need this — a non-empty result means an external issuer:
+
+```console
+oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}'
+```
+
+If it returns an external issuer URL, configure the audience by one of:
+
+*Option A: Platform ConfigMap (recommended for cluster-wide defaults).*
+Create the `opendatahub-dataconnecthub-config` ConfigMap in the operand
+namespace with `auth.tokenReviewAudiences` (comma-separated). All CRs in
+that namespace pick it up automatically; the controller watches it. On
+ODH / RHOAI the platform operator manages this ConfigMap — no manual
+creation needed.
+
+```console
+oc apply -n $NS -f - <<EOF
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opendatahub-dataconnecthub-config
+data:
+  auth.tokenReviewAudiences: "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+EOF
+```
+
+*Option B: CR spec override.* Set `spec.tokenReviewAudiences` on the CR
+below (takes priority over the ConfigMap):
+
+```yaml
+spec:
+  tokenReviewAudiences:
+    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
+```
+
+Now create the CR:
 
 ```console
 oc apply -f - <<EOF
@@ -302,57 +354,6 @@ spec:
 
 Available `ServiceOverrides` fields: `image`, `replicas`, `resources`, `env`,
 `envFrom`, `volumes`, `volumeMounts`, `imagePullSecrets`.
-
-### Token review audiences (ROSA / custom OIDC)
-
-On ROSA clusters (and other clusters with external OIDC providers), the
-default Kubernetes API audience does not match the cluster's OIDC
-provider URL. The controller needs the correct audience so that both the
-flight service and the kube-rbac-proxy sidecar on the REST service can
-validate tokens via TokenReview.
-
-To find the correct audience on a ROSA cluster:
-
-```console
-oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}'
-```
-
-When no audience is configured, the Kubernetes API server's own audience
-is used — this is correct for standard OCP / ODH / RHOAI clusters.
-
-**Option A: Platform ConfigMap (recommended for cluster-wide defaults)**
-
-Create the `opendatahub-dataconnecthub-config` ConfigMap in the operand
-namespace with `auth.tokenReviewAudiences` (comma-separated):
-
-```console
-oc apply -n $NS -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: opendatahub-dataconnecthub-config
-data:
-  auth.tokenReviewAudiences: "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
-EOF
-```
-
-All DataConnectService CRs in that namespace pick up the value
-automatically. The controller watches this ConfigMap and reconciles
-on changes.
-
-On ODH / RHOAI, the platform operator manages this ConfigMap — no
-manual creation needed.
-
-**Option B: CR spec override**
-
-Set `spec.tokenReviewAudiences` directly on the CR. This takes priority
-over the ConfigMap value:
-
-```yaml
-spec:
-  tokenReviewAudiences:
-    - "https://rh-oidc.s3.us-east-1.amazonaws.com/<cluster-id>"
-```
 
 Image resolution priority (highest wins):
 1. CR spec override (`spec.restService.image`)
@@ -443,7 +444,7 @@ exercise auth or the Flight protocol itself. Verify with a real client,
 in-cluster via port-forward:
 
 ```console
-oc port-forward -n $NS svc/dch-flight-service 50051:50051 &
+oc port-forward -n $NS svc/dch-flight-service 8443:8443 &
 
 pip install -e 'sdk/python[flight]'   # from the repo root, one-time
 
@@ -453,10 +454,10 @@ from data_connect_hub import DataConnectClient
 # The SDK takes one endpoint (host:port, no scheme) and derives both the
 # REST and Flight URLs from it. Here the endpoint points straight at the
 # port-forwarded flight-service, so only Flight calls work -- a REST call on
-# this client would hit port 50051 and fail. Use the gateway endpoint (below)
+# this client would hit port 8443 and fail. Use the gateway endpoint (below)
 # for both.
 client = DataConnectClient(
-    endpoint="127.0.0.1:50051",
+    endpoint="127.0.0.1:8443",
     token="$(oc whoami -t)",
     tenant_id="$NS",
     insecure=True,  # skip cert verification -- 127.0.0.1 won't match the service's cert SAN
@@ -515,10 +516,11 @@ curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
   "https://$GATEWAY_URL/api/v1/data/connection-types"
 ```
 
-Expected output (5 default types from IDCT + 3 from ConfigMap migration):
+Expected output (the seeded global connection types — exact count varies
+by release):
 
 ```
-{"total_count":8,"items":[...]}
+{"total_count":9,"items":[...]}
 ```
 
 ```console
@@ -553,13 +555,13 @@ Expected output: the connection-type list returned by the
 [REST check](#verify-services) above, followed by the same `server_info()`
 dict as the direct port-forward check — one client, both protocols.
 
-If this fails instead with `UNAVAILABLE: upstream connect error or
-disconnect/reset before headers`, your gateway's Istio `DestinationRule`
-is missing a TLS policy for flight-service's port (`50051`) — see
+If Flight fails instead with an ALPN handshake error (e.g. `missing
+selected ALPN property`), HTTP/2 is not being negotiated at the cluster
+ingress — see
 [Flight (gRPC) calls fail with an ALPN handshake error](#flight-grpc-calls-fail-with-an-alpn-handshake-error).
-On RHOAI/ODH `GatewayConfig`-managed gateways this is a platform-owned
-gap that a per-deployment override cannot reliably fix — see that
-section for why.
+flight-service listens on `8443`, which the platform gateway's Istio
+`DestinationRule` already covers, so no per-port `DestinationRule` change
+is needed.
 
 ## Monitor status
 
@@ -578,9 +580,9 @@ Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`,
 | Resource | Name | Notes |
 |----------|------|-------|
 | Deployment | `dch-rest-service` | HTTP API on port 8080 |
-| Deployment | `dch-flight-service` | Arrow Flight gRPC on port 50051 |
+| Deployment | `dch-flight-service` | Arrow Flight gRPC on port 8443 |
 | Service | `dch-rest-service` | ClusterIP, port 8443 |
-| Service | `dch-flight-service` | ClusterIP, port 50051 |
+| Service | `dch-flight-service` | ClusterIP, port 8443 |
 | ServiceAccount | `dch-data-connect-hub-sa` | For rest-service |
 | ServiceAccount | `dch-flight-service-sa` | For flight-service |
 | ConfigMap | `dch-rest-service-config` | Server config (config.toml) |
@@ -625,7 +627,7 @@ the secret format).
 config/
   base/
     rest-service/      # HTTP API (actix-web), port 8080
-    flight-service/    # Arrow Flight gRPC service, port 50051
+    flight-service/    # Arrow Flight gRPC service, port 8443
     gateway/           # HTTPRoute for external traffic
   overlays/
     dev/               # Dev overlay aggregating base (includes gateway)
@@ -771,55 +773,17 @@ resources need to be touched):
    (Find `<default-ingress-cert-secret>` via
    `oc get ingresscontroller default -n openshift-ingress-operator -o jsonpath='{.spec.defaultCertificate.name}'`.)
 
-3. flight-service's own TLS listener requires a matching backend TLS
-   policy for its port. If the gateway is Istio-backed and traffic still
-   fails after steps 1–2 with `UNAVAILABLE: upstream connect error`, the
-   gateway's `DestinationRule` needs a `portLevelSettings` entry for
-   flight-service's port (`50051`), matching the existing entries for the
-   REST service:
+No backend `DestinationRule` change is required. flight-service listens on
+`8443`, the same port the platform gateway's Istio `DestinationRule`
+already originates backend TLS to for the REST service, so the existing
+`portLevelSettings` entry covers Flight traffic as well.
 
-   ```yaml
-   - port:
-       number: 50051
-     tls:
-       mode: SIMPLE
-       insecureSkipVerify: true
-   ```
-
-   `insecureSkipVerify: true` does **not** mean this traffic is
-   unencrypted — `mode: SIMPLE` always makes Envoy originate a real TLS
-   connection to the backend; the flag only skips certificate chain and
-   hostname validation. flight-service still negotiates TLS+ALPN and
-   enforces its own auth layer exactly as it does for the REST-service
-   entry, which already uses this same setting.
-
-   An earlier revision of this doc replaced this snippet with a
-   certificate-verified alternative (`credentialName` + `sni` +
-   `subjectAltNames`, sourced from the cluster's service-ca) in response
-   to review feedback that we should avoid `insecureSkipVerify`. That
-   version is more correct in isolation, but we reverted it after finding
-   the following on a live RHOAI/ROSA cluster: **this `DestinationRule`
-   cannot be durably patched at all, regardless of which variant you use.**
-   It's owned and continuously reconciled by the platform's `GatewayConfig`
-   controller, which resets `portLevelSettings` back to its own desired
-   state (just the pre-existing `8443`/`443` entries) within about a
-   second of any external change — insecure or verified, it makes no
-   difference, neither survives. (The Route TLS certificate from step 2
-   is a plain field the controller doesn't fully own, so that one does
-   persist — this DestinationRule does not.)
-
-   Given that, swapping in the more complex verified variant bought no
-   real benefit: it never stayed applied any better than the simple one.
-   We're keeping the simpler `insecureSkipVerify: true` snippet here as
-   the honest baseline, and treating "this DestinationRule needs a
-   `50051` entry" as a platform gap to fix upstream in ODH's
-   `GatewayConfig` controller — not something to work around from the
-   DCH side, since no `oc patch` will survive the next reconcile.
-
-Both the Route and `DestinationRule` in a RHOAI/ODH deployment are owned
-and reconciled by the platform's `GatewayConfig` controller — file a
-platform issue to have this fixed at the source rather than carrying a
-permanent manual override.
+The gateway's Route is owned and reconciled by the platform's
+`GatewayConfig` controller, but the Route TLS certificate from step 2 is a
+plain field the controller does not fully own, so that change persists. If
+your platform later locks down the Route certificate, file a platform issue
+to enable HTTP/2 / ALPN at the source rather than carrying a manual
+override.
 
 ### API calls return 400 Bad Request
 
@@ -903,7 +867,7 @@ To also remove the CloudNativePG operator:
 ```console
 oc delete subscription cloudnative-pg -n openshift-operators
 oc delete csv -n openshift-operators -l operators.coreos.com/cloudnative-pg.openshift-operators=
-oc delete crd -l cnpg.io/reload=
+oc get crd -o name | grep '\.cnpg\.io$' | xargs -r oc delete
 ```
 
 ### 4. Delete the namespaces (optional)

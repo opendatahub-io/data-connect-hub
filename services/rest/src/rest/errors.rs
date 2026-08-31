@@ -45,6 +45,8 @@ pub enum ValidationError {
     ConnectionCheckFailed(String),
     #[error("Credentials check failed: {0}")]
     CredentialsCheckFailed(String),
+    #[error("Status update failed: {0}")]
+    StatusUpdateFailed(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -218,6 +220,11 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "credentials_check_failed".to_string(),
                 message: error,
                 status: 400,
+            },
+            ValidationError::StatusUpdateFailed(error) => RestErrorResponse {
+                code: "status_update_failed".to_string(),
+                message: error,
+                status: 500,
             },
         }
     }
