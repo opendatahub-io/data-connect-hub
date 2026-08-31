@@ -24,11 +24,11 @@ async fn set_data_connection_status(
     status: DataConnectionState,
     message: Option<String>,
 ) -> Result<(), ValidationError> {
-    let update_fn = Arc::new(|_: DataConnectionStatus| {
+    let update_fn = Arc::new(move |_: DataConnectionStatus| {
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
         Ok(DataConnectionStatus {
-            state: DataConnectionState::Ready,
-            message: Some("Connection check successful".to_string()),
+            state: status.clone(),
+            message: message.clone(),
             updated_at: Some(now),
         })
     });
@@ -214,10 +214,12 @@ mod tests {
     use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus, DataFormat};
     use commons::api::errors::{MetaStoreError, SecretStoreError};
     use std::collections::HashMap;
+    use std::sync::RwLock;
 
     struct MockMetaStore {
         connection: Option<DataConnectionResource>,
         connection_type: Option<DataConnectionTypeResource>,
+        last_status: RwLock<Option<DataConnectionStatus>>,
     }
 
     impl MockMetaStore {
@@ -225,6 +227,7 @@ mod tests {
             Self {
                 connection: Some(conn),
                 connection_type: Some(dct),
+                last_status: RwLock::new(None),
             }
         }
 
@@ -232,6 +235,7 @@ mod tests {
             Self {
                 connection: None,
                 connection_type: None,
+                last_status: RwLock::new(None),
             }
         }
     }
@@ -265,9 +269,13 @@ mod tests {
             &self,
             _tenant_id: &str,
             _: &str,
-            _: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
+            update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
         ) -> Result<DataConnectionResource, MetaStoreError> {
-            Ok(self.connection.clone().unwrap())
+            let mut conn = self.connection.clone().unwrap();
+            let new_status = update_fn(conn.status.clone())?;
+            *self.last_status.write().unwrap() = Some(new_status.clone());
+            conn.status = new_status;
+            Ok(conn)
         }
         async fn delete_data_connection(&self, _: &str, _: &str) -> Result<(), MetaStoreError> {
             unimplemented!()
@@ -472,5 +480,60 @@ mod tests {
 
         let result = audit_data_connection("tenant", "conn-1", meta, secrets, &flight_client()).await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_secret_not_found_sets_not_ready_status() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "missing-secret".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore { secret: None });
+
+        let _ = audit_data_connection("tenant", "conn-1", meta.clone(), secrets, &flight_client()).await;
+
+        let status = meta.last_status.read().unwrap();
+        let status = status.as_ref().expect("status should have been updated");
+        assert_eq!(status.state, DataConnectionState::NotReady);
+        assert_eq!(status.message.as_deref(), Some("Secret cannot be read"));
+    }
+
+    #[tokio::test]
+    async fn test_credentials_check_fails_sets_not_ready_status() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "creds".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST", "PORT"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore {
+            secret: Some(make_secret(vec![("HOST", "localhost")])),
+        });
+
+        let _ = audit_data_connection("tenant", "conn-1", meta.clone(), secrets, &flight_client()).await;
+
+        let status = meta.last_status.read().unwrap();
+        let status = status.as_ref().expect("status should have been updated");
+        assert_eq!(status.state, DataConnectionState::NotReady);
+        assert!(status.message.as_ref().unwrap().contains("PORT"));
+    }
+
+    #[tokio::test]
+    async fn test_flight_check_fails_sets_ingestion_not_ready_status() {
+        let conn = make_connection(Some(Admin::SecretRef {
+            secret_ref: "creds".to_string(),
+        }));
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
+        let secrets = Arc::new(MockSecretStore {
+            secret: Some(make_secret(vec![("HOST", "localhost")])),
+        });
+
+        let _ = audit_data_connection("tenant", "conn-1", meta.clone(), secrets, &flight_client()).await;
+
+        let status = meta.last_status.read().unwrap();
+        let status = status.as_ref().expect("status should have been updated");
+        assert_eq!(status.state, DataConnectionState::IngestionNotReady);
+        assert_eq!(status.message.as_deref(), Some("Connection check failed"));
     }
 }
