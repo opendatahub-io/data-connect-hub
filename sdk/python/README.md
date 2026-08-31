@@ -59,6 +59,10 @@ df = table.to_pandas()
 
 ## API Reference
 
+The REST API is the source of truth for every model below. See the OpenAPI spec at
+[`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) (rendered:
+[`docs/api/index.html`](../../docs/api/index.html)) for the full request/response schemas.
+
 ### Connection Types (REST)
 
 Connection types describe a category of data source (e.g. PostgreSQL). They define
@@ -76,7 +80,7 @@ client.delete_connection_type(type_id) -> None
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique identifier |
+| `id` | `str` | Unique identifier — this is the value you pass as the `type_id` argument to `get_connection_type` / `update_connection_type` / `delete_connection_type`, and as `connection_type_id` to `create_connection` |
 | `name` | `str` | Display name |
 | `provider` | `str` | Backend driver (e.g. `"postgres"`) |
 | `description` | `str \| None` | Optional description |
@@ -95,11 +99,31 @@ Describes a single input field in the connection credential form.
 | `label` | `str` | Human-readable label |
 | `description` | `str \| None` | Optional help text |
 | `required` | `bool` | Whether the field must be provided |
-| `type` | `str` | Field type (e.g. `"string"`, `"password"`, `"enum"`) |
+| `type` | `str` | Rendering hint for the credential form — see [Field types](#field-types) below |
 | `enum_values` | `list[EnumValue] \| None` | Allowed values when `type` is `"enum"` |
 | `default_value` | `str \| None` | Optional default value |
 
 `EnumValue` has two fields: `value` (the stored string) and `label` (the display string).
+
+##### Field types
+
+`type` is a free-form string that tells a UI how to render the input. The server does
+**not** validate or interpret it — the only server-side check on credentials is that
+every field with `required=True` is present in the submitted secret. See the `Field`
+schema in [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) for the authoritative
+definition.
+
+| Value | Meaning |
+|---|---|
+| `"string"` | Free-text single-line input. Used by all of the connection types shipped in [`config/connection-types/`](../../config/connection-types/). |
+| `"enum"` | Pick one of `enum_values`. Set `enum_values` when you use this. |
+
+Because the value is not constrained, a connection type you create yourself may use
+any other string (e.g. `"password"` to hint that a client should mask the input);
+clients that do not recognize it should fall back to treating it as `"string"`.
+
+Whatever the `type`, the value the user supplies is stored verbatim as a key in the
+connection's Kubernetes secret, under the field's `name`.
 
 ### Connection Management (REST)
 
@@ -118,10 +142,10 @@ client.delete_connection(connection_id) -> None
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique identifier |
+| `id` | `str` | Unique identifier — this is the value you pass as the `connection_id` argument to `get_connection` / `update_connection` / `delete_connection` and to the Flight SQL methods |
 | `name` | `str` | Display name |
-| `data_connection_type_id` | `str` | ID of the associated `ConnectionType` |
-| `format` | `"tabular" \| "binary"` | Data format of the source |
+| `data_connection_type_id` | `str` | `id` of the associated `ConnectionType` |
+| `format` | `"tabular" \| "binary"` | Data format of the source — see [Data formats](#data-formats) below |
 | `tenant_id` | `str` | Owning namespace |
 | `created_at` | `datetime` | Creation timestamp |
 | `updated_at` | `datetime` | Last update timestamp |
@@ -129,10 +153,37 @@ client.delete_connection(connection_id) -> None
 | `properties` | `dict[str, str]` | Additional driver-specific properties (values masked in repr) |
 | `status` | `DataConnectionStatus` | Live connection health |
 
+##### Data formats
+
+`format` tells the server how the source is read; it is fixed per connection and
+determines which read path is available.
+
+| Value | Meaning |
+|---|---|
+| `"tabular"` | The source is queried with SQL and returns rows. Use the [Flight SQL methods](#tabular-data-queries-flight-sql) (`read`, `read_pandas`, `read_batches`, `get_tables`). Supported by the `postgres`, `sqlite`, `elasticsearch`, `milvus`, `neo4j`, `uri`, and `s3` providers. |
+| `"binary"` | The source serves opaque objects/blobs addressed by path rather than queried with SQL — e.g. an object in an S3 bucket or a file behind an HTTP endpoint. Supported by the `s3` and `uri` providers only. |
+
+Binary connections are created, listed, and deleted through the same REST methods as
+tabular ones. Reading their contents uses a separate Flight download path that **this
+SDK does not wrap yet** — there is no `client.download(...)`. Until it is added, read
+binary sources with `pyarrow.flight` directly; see
+[`hack/py-tools/samples/binary_download.py`](../../hack/py-tools/samples/binary_download.py)
+for a worked example.
+
 **`admin` types:**
 
-- `AdminSecretRef(secret_ref="my-secret")` — reference to an existing Kubernetes secret by name
-- `AdminSecret(name="...", secret={"key": "value"})` — inline credentials (secret values are masked in repr)
+- `AdminSecretRef(secret_ref="my-secret")` — the **name** of an existing Kubernetes
+  secret. The server looks it up in the **tenant namespace** — the namespace given by
+  the connection's `tenant_id` (the `tenant_id` you passed to `DataConnectClient`).
+  Cross-namespace references are not supported, so this is a bare secret name, not a
+  `namespace/name` pair. If the secret is missing or unreadable, the connection's
+  `status.state` becomes `"not_ready"`.
+- `AdminSecret(name="...", secret={"key": "value"})` — inline credentials. The server
+  creates a Kubernetes secret with this `name` in the tenant namespace, then stores the
+  connection with `admin` rewritten to `AdminSecretRef(secret_ref=name)` — so reads of
+  the connection always return the `AdminSecretRef` form. Secret values are masked in
+  `repr`. The keys of `secret` must cover every `CredentialField` on the connection type
+  that has `required=True`.
 
 **`DataConnectionStatus`:**
 
