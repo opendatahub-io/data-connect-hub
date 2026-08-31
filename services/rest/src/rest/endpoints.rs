@@ -17,7 +17,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
-use tracing::warn;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -130,20 +129,10 @@ pub async fn list_connection_types(
     ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("list_connection_types: for tenant {:?}", ctx.tenant_id);
-    let mut connection_types = service
+    let connection_types = service
         .meta_store
         .get_data_connection_types(ctx.tenant_id.as_str())
         .await?;
-
-    // Deserialization errors are already logged by the meta store; keep them out
-    // of the response so clients only receive successfully parsed connection types.
-    if !connection_types.errors.is_empty() {
-        warn!(
-            "list_connection_types: dropping {} deserialization error(s) from response",
-            connection_types.errors.len()
-        );
-        connection_types.errors.clear();
-    }
 
     Ok(HttpResponse::Ok().json(connection_types))
 }
@@ -342,7 +331,6 @@ mod tests {
             Ok(ResourceList {
                 total_count: 0,
                 items: vec![],
-                errors: vec![],
             })
         }
 
@@ -472,7 +460,6 @@ mod tests {
             Ok(ResourceList {
                 total_count: 0,
                 items: vec![],
-                errors: vec![],
             })
         }
 
