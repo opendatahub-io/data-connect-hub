@@ -31,12 +31,8 @@ type Gateway struct {
 	Namespace string `json:"namespace"`
 }
 
-// ServiceOverrides allows per-service customisation of image, scaling, and pod spec fields.
+// ServiceOverrides allows per-service customisation of scaling and pod spec fields.
 type ServiceOverrides struct {
-	// image overrides the container image for this service
-	// +optional
-	Image *string `json:"image,omitempty"`
-
 	// replicas overrides the number of pods
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:default=1
@@ -62,10 +58,6 @@ type ServiceOverrides struct {
 	// volumeMounts is a list of additional volume mounts to add to the container
 	// +optional
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
-
-	// imagePullSecrets is a list of references to secrets for pulling the container image
-	// +optional
-	ImagePullSecrets []corev1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 
 	// connectors configures individual data connectors.
 	// When omitted, all connectors are enabled with their default settings.

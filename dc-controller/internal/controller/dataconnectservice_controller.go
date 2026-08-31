@@ -351,12 +351,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	restImage := resolveServiceImage(nameRestService, cr.Spec.RestService, r.RestImage, r.FlightImage)
-	setDeploymentImage(resources, nameRestService, restImage)
+	setDeploymentImage(resources, nameRestService, r.RestImage)
 	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
-	flightImage := resolveServiceImage(nameFlightService, cr.Spec.FlightService, r.RestImage, r.FlightImage)
-	setDeploymentImage(resources, nameFlightService, flightImage)
+	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapFlightServiceAddress(resources)

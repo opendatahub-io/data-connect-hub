@@ -168,17 +168,6 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 		patchParts = append(patchParts, fmt.Sprintf("spec:\n  replicas: %d", *overrides.Replicas))
 	}
 
-	if overrides.ImagePullSecrets != nil {
-		ipsBytes, err := json.Marshal(overrides.ImagePullSecrets)
-		if err == nil {
-			ipsYAML, err := sigyaml.JSONToYAML(ipsBytes)
-			if err == nil {
-				patchParts = append(patchParts, fmt.Sprintf("spec:\n  template:\n    spec:\n      imagePullSecrets:\n%s",
-					indent(string(ipsYAML), 8)))
-			}
-		}
-	}
-
 	if overrides.Resources != nil {
 		resBytes, err := json.Marshal(overrides.Resources)
 		if err == nil {
@@ -247,16 +236,6 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 	}
 
 	return patches
-}
-
-func resolveServiceImage(name string, overrides *dchv1alpha1.ServiceOverrides, restImage, flightImage string) string {
-	if overrides != nil && overrides.Image != nil {
-		return *overrides.Image
-	}
-	if name == nameRestService {
-		return restImage
-	}
-	return flightImage
 }
 
 func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
