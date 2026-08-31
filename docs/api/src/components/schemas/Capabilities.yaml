@@ -1,0 +1,9 @@
+type: object
+required: [flight, rest]
+properties:
+  flight:
+    type: boolean
+    description: Whether the Flight gRPC API is supported
+  rest:
+    type: boolean
+    description: Whether the REST API is supported

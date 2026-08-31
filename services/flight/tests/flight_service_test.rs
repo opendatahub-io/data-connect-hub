@@ -18,7 +18,7 @@ use commons::api::storage::MetaStore;
 
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
-use flight_service::flight::service::TabularDataService;
+use flight_service::flight::service::DataIngestionService;
 mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
@@ -63,7 +63,7 @@ impl MetaStore for TestMetaStore {
             status: DataConnectionStatus {
                 state: DataConnectionState::NotReady,
                 message: None,
-                phases: vec![],
+                updated_at: None,
             },
         })
     }
@@ -80,6 +80,15 @@ impl MetaStore for TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }
@@ -151,8 +160,8 @@ impl MetaStore for TestMetaStore {
                 provider: "sqlite".to_string(),
                 description: None,
                 credentials_fields: vec![Field {
-                    name: "url".to_string(),
-                    label: "Url".to_string(),
+                    name: "URI".to_string(),
+                    label: "Uri".to_string(),
                     d_type: "string".to_string(),
                     description: Some("SQLite connection URL".to_string()),
                     required: true,
@@ -270,17 +279,18 @@ async fn test_flight_sql_select_prompts() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(SqliteConnector::new()));
+    let connectors_registry =
+        ConnectorsRegistry::new().with_connector(Arc::new(SqliteConnector::new(Default::default())));
 
     let secret_store = Arc::new(InMemorySecretStore::new(vec![Secret {
         name: "sqlite_creds".to_string(),
         namespace: "default".to_string(),
-        properties: Arc::new(HashMap::from([("url".to_string(), sqlite_url)])),
+        properties: Arc::new(HashMap::from([("URI".to_string(), sqlite_url)])),
         labels: Arc::new(HashMap::new()),
         annotations: Arc::new(HashMap::new()),
     }]));
 
-    let service = TabularDataService::new(
+    let service = DataIngestionService::new(
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
         secret_store,

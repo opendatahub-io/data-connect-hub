@@ -28,6 +28,7 @@ MC_IMAGE="${DCH_MINIO_MC_IMAGE:-minio/mc:latest}"
 CSV_KEY="${DCH_S3_CSV_OBJECT_KEY:-datasets/dch-test-prompts.csv}"
 PARQUET_KEY="${DCH_S3_PARQUET_OBJECT_KEY:-datasets/dch-test-prompts.parquet}"
 JSONL_KEY="${DCH_S3_JSONL_OBJECT_KEY:-datasets/dch-test-prompts.jsonl}"
+BINARY_KEY="${DCH_S3_BINARY_OBJECT_KEY:-datasets/dch-test-binary.bin}"
 
 usage() {
     echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-i mc-image]"
@@ -98,16 +99,21 @@ cat <<'JSONL' >/tmp/dch-test-prompts.jsonl
 JSONL
 
 echo \"seed s3 dataset for csv: ${CSV_KEY}\"
-mc rm --force local/${BUCKET}/${CSV_KEY} >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.csv local/${BUCKET}/${CSV_KEY}
+mc rm --force \"local/${BUCKET}/${CSV_KEY}\" >/dev/null 2>&1 || true
+mc cp /tmp/dch-test-prompts.csv \"local/${BUCKET}/${CSV_KEY}\"
 
 echo \"seed s3 dataset for parquet: ${PARQUET_KEY}\"
-mc rm --force local/${BUCKET}/${PARQUET_KEY} >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.parquet local/${BUCKET}/${PARQUET_KEY}
+mc rm --force \"local/${BUCKET}/${PARQUET_KEY}\" >/dev/null 2>&1 || true
+mc cp /tmp/dch-test-prompts.parquet \"local/${BUCKET}/${PARQUET_KEY}\"
 
 echo \"seed s3 dataset for jsonl: ${JSONL_KEY}\"
-mc rm --force local/${BUCKET}/${JSONL_KEY} >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.jsonl local/${BUCKET}/${JSONL_KEY}
+mc rm --force \"local/${BUCKET}/${JSONL_KEY}\" >/dev/null 2>&1 || true
+mc cp /tmp/dch-test-prompts.jsonl \"local/${BUCKET}/${JSONL_KEY}\"
+
+printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
+echo \"seed s3 dataset for binary: ${BINARY_KEY}\"
+mc rm --force \"local/${BUCKET}/${BINARY_KEY}\" >/dev/null 2>&1 || true
+mc cp /tmp/dch-test-binary.bin \"local/${BUCKET}/${BINARY_KEY}\"
 "
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \

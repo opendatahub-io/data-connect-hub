@@ -1668,6 +1668,8 @@ dependencies = [
  "tower",
  "tracing",
  "tracing-subscriber",
+ "uri-connector",
+ "uuid",
 ]
 
 [[package]]
@@ -3714,6 +3716,7 @@ dependencies = [
  "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -4253,6 +4256,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "futures-core",
+ "futures-util",
  "http 1.5.0",
  "http-body",
  "http-body-util",
@@ -4272,12 +4276,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
  "webpki-roots 1.0.9",
 ]
@@ -4316,7 +4322,7 @@ dependencies = [
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "wasm-streams",
+ "wasm-streams 0.5.0",
  "web-sys",
 ]
 
@@ -4331,6 +4337,7 @@ dependencies = [
  "arrow",
  "arrow-flight",
  "async-trait",
+ "chrono",
  "clap",
  "commons",
  "config",
@@ -5785,6 +5792,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
+name = "uri-connector"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "async-stream",
+ "async-trait",
+ "chrono",
+ "commons",
+ "futures",
+ "moka",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "url"
 version = "2.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5931,6 +5957,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef64dbcc55df09c7e5a46182d181c2cfa3e925f3da937ea764728b4bbb9dcbf"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "15053d8d85c7eccdbefef60f06769760a563c7f0a9d6902a13d35c7800b0ad65"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

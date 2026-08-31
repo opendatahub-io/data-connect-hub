@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use arrow::datatypes::Schema;
 use bytes::Bytes;
+use commons::api::connector::QueryOutput;
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::QueryOutput;
 use futures::future::BoxFuture;
 use futures::{FutureExt, StreamExt};
 use opendal::{BytesRange, Reader};

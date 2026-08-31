@@ -1,0 +1,21 @@
+type: object
+required: [name, data_connection_type_id, format, properties]
+properties:
+  name:
+    type: string
+    example: my-postgres
+  data_connection_type_id:
+    type: string
+    description: References a connection type id
+    example: 550e8400-e29b-41d4-a716-446655440000
+  format:
+    $ref: "DataFormat.yaml"
+  admin:
+    $ref: "Admin.yaml"
+  properties:
+    type: object
+    additionalProperties:
+      type: string
+    example:
+      host: localhost
+      port: "5432"

@@ -1,0 +1,892 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Data Connect Hub REST API",
+    "description": "REST API for managing data connections and connection types.",
+    "version": "0.1.0",
+    "license": {
+      "name": "Apache-2.0"
+    }
+  },
+  "servers": [
+    {
+      "url": "/api/v1/data"
+    }
+  ],
+  "security": [
+    {
+      "tenantHeader": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "connections",
+      "description": "Data connection management"
+    },
+    {
+      "name": "connection-types",
+      "description": "Connection type definitions"
+    }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Health check",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/connections": {
+      "get": {
+        "operationId": "listConnections",
+        "summary": "List connections",
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionResourceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createConnection",
+        "summary": "Create a connection",
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataConnection"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Connection created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/connections/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/resourceId"
+        }
+      ],
+      "get": {
+        "operationId": "getConnection",
+        "summary": "Get a connection",
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchConnection",
+        "summary": "Update a connection",
+        "tags": [
+          "connections"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataConnectionMergePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/UnprocessableEntity"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteConnection",
+        "summary": "Delete a connection",
+        "tags": [
+          "connections"
+        ],
+        "responses": {
+          "204": {
+            "description": "Connection deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/connection-types": {
+      "get": {
+        "operationId": "listConnectionTypes",
+        "summary": "List connection types",
+        "tags": [
+          "connection-types"
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection type list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionTypeResourceList"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      },
+      "post": {
+        "operationId": "createConnectionType",
+        "summary": "Create a connection type",
+        "tags": [
+          "connection-types"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataConnectionType"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Connection type created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionTypeResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
+    "/connection-types/{id}": {
+      "parameters": [
+        {
+          "$ref": "#/components/parameters/resourceId"
+        }
+      ],
+      "get": {
+        "operationId": "getConnectionType",
+        "summary": "Get a connection type",
+        "tags": [
+          "connection-types"
+        ],
+        "responses": {
+          "200": {
+            "description": "Connection type details",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionTypeResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "patch": {
+        "operationId": "patchConnectionType",
+        "summary": "Update a connection type",
+        "tags": [
+          "connection-types"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/merge-patch+json": {
+              "schema": {
+                "$ref": "#/components/schemas/DataConnectionTypeMergePatch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Connection type updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataConnectionTypeResource"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      },
+      "delete": {
+        "operationId": "deleteConnectionType",
+        "summary": "Delete a connection type",
+        "tags": [
+          "connection-types"
+        ],
+        "responses": {
+          "204": {
+            "description": "Connection type deleted"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "tenantHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-tenant-id",
+        "description": "Tenant identifier. Required on all endpoints except /health."
+      }
+    },
+    "parameters": {
+      "resourceId": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": {
+          "type": "string"
+        },
+        "description": "Resource unique identifier"
+      }
+    },
+    "schemas": {
+      "HealthResponse": {
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "properties": {
+          "service": {
+            "type": "string",
+            "example": "Data Connect Hub"
+          }
+        }
+      },
+      "ResourceMetadata": {
+        "type": "object",
+        "required": [
+          "id",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier (UUID)",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "tenant_id": {
+            "type": "string",
+            "description": "Tenant identifier. Omitted when not applicable.",
+            "example": "tenant-1"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-01-01T00:00:00Z"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2026-01-01T00:00:00Z"
+          }
+        }
+      },
+      "DataFormat": {
+        "type": "string",
+        "enum": [
+          "tabular",
+          "binary"
+        ]
+      },
+      "Admin": {
+        "description": "Credentials reference. Exactly one of secret_ref or (name + secret) must be provided.\n",
+        "oneOf": [
+          {
+            "type": "object",
+            "required": [
+              "secret_ref"
+            ],
+            "properties": {
+              "secret_ref": {
+                "type": "string",
+                "description": "Reference to an existing secret",
+                "example": "secret/my-conn"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "name",
+              "secret"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Name for the secret to create",
+                "example": "my-conn-secret"
+              },
+              "secret": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "description": "Inline secret key-value pairs"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "DataConnection": {
+        "type": "object",
+        "required": [
+          "name",
+          "data_connection_type_id",
+          "format",
+          "properties"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "my-postgres"
+          },
+          "data_connection_type_id": {
+            "type": "string",
+            "description": "References a connection type id",
+            "example": "550e8400-e29b-41d4-a716-446655440000"
+          },
+          "format": {
+            "$ref": "#/components/schemas/DataFormat"
+          },
+          "admin": {
+            "$ref": "#/components/schemas/Admin"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            },
+            "example": {
+              "host": "localhost",
+              "port": "5432"
+            }
+          }
+        }
+      },
+      "DataConnectionState": {
+        "type": "string",
+        "enum": [
+          "ready",
+          "not_ready"
+        ]
+      },
+      "PhaseState": {
+        "description": "Phase state. Most variants are bare strings. The `secret_valid` variant carries a detail message and is serialized as an object `{\"secret_valid\": \"<message>\"}`.\n",
+        "oneOf": [
+          {
+            "type": "string",
+            "enum": [
+              "secret_ready",
+              "secret_not_found",
+              "ingestion_ready",
+              "ingestion_not_ready"
+            ]
+          },
+          {
+            "type": "object",
+            "required": [
+              "secret_valid"
+            ],
+            "properties": {
+              "secret_valid": {
+                "type": "string",
+                "description": "Detail message for the secret-valid state"
+              }
+            },
+            "additionalProperties": false
+          }
+        ]
+      },
+      "PhaseCondition": {
+        "type": "object",
+        "required": [
+          "state",
+          "message",
+          "timestamp"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/PhaseState"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable phase description"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When this phase was last evaluated"
+          }
+        }
+      },
+      "DataConnectionStatus": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/DataConnectionState"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional human-readable status message"
+          },
+          "phases": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PhaseCondition"
+            },
+            "description": "Detailed phase conditions for this connection"
+          }
+        }
+      },
+      "DataConnectionResource": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "resource",
+          "status"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/DataConnection"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataConnectionStatus"
+          }
+        }
+      },
+      "DataConnectionResourceList": {
+        "type": "object",
+        "required": [
+          "total_count",
+          "items"
+        ],
+        "properties": {
+          "total_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DataConnectionResource"
+            }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "Machine-readable error code",
+            "example": "not_found"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable error description",
+            "example": "Data connection 'abc' not found for tenant 't1'"
+          }
+        }
+      },
+      "DataConnectionMergePatch": {
+        "type": "object",
+        "description": "RFC 7396 JSON Merge Patch for a DataConnection. Supply only the fields you want to change.\n",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "data_connection_type_id": {
+            "type": "string"
+          },
+          "format": {
+            "$ref": "#/components/schemas/DataFormat"
+          },
+          "admin": {
+            "$ref": "#/components/schemas/Admin"
+          },
+          "properties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "EnumValue": {
+        "type": "object",
+        "required": [
+          "value",
+          "label"
+        ],
+        "properties": {
+          "value": {
+            "type": "string",
+            "example": "us-east-1"
+          },
+          "label": {
+            "type": "string",
+            "example": "US East"
+          }
+        }
+      },
+      "Field": {
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "required",
+          "type"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "url"
+          },
+          "label": {
+            "type": "string",
+            "example": "Connection URL"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "required": {
+            "type": "boolean"
+          },
+          "type": {
+            "type": "string",
+            "example": "string"
+          },
+          "enum_values": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/EnumValue"
+            }
+          },
+          "default_value": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "DataConnectionType": {
+        "type": "object",
+        "required": [
+          "name",
+          "provider",
+          "credentials_fields"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "PostgreSQL"
+          },
+          "provider": {
+            "type": "string",
+            "example": "postgres"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "credentials_fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            }
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "flight",
+          "rest"
+        ],
+        "properties": {
+          "flight": {
+            "type": "boolean",
+            "description": "Whether the Flight gRPC API is supported"
+          },
+          "rest": {
+            "type": "boolean",
+            "description": "Whether the REST API is supported"
+          }
+        }
+      },
+      "DataConnectionTypeStatus": {
+        "type": "object",
+        "required": [
+          "capabilities"
+        ],
+        "properties": {
+          "capabilities": {
+            "$ref": "#/components/schemas/Capabilities"
+          }
+        }
+      },
+      "DataConnectionTypeResource": {
+        "type": "object",
+        "required": [
+          "metadata",
+          "resource"
+        ],
+        "properties": {
+          "metadata": {
+            "$ref": "#/components/schemas/ResourceMetadata"
+          },
+          "resource": {
+            "$ref": "#/components/schemas/DataConnectionType"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DataConnectionTypeStatus"
+          }
+        }
+      },
+      "DataConnectionTypeResourceList": {
+        "type": "object",
+        "required": [
+          "total_count",
+          "items"
+        ],
+        "properties": {
+          "total_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DataConnectionTypeResource"
+            }
+          }
+        }
+      },
+      "DataConnectionTypeMergePatch": {
+        "type": "object",
+        "description": "RFC 7396 JSON Merge Patch for a DataConnectionType. Supply only the fields you want to change.\n",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "credentials_fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Field"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "Bad request",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "bad_request",
+              "message": "Invalid request: missing required field 'name'"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "Backend service unavailable",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "service_unavailable",
+              "message": "Metadata store is not available"
+            }
+          }
+        }
+      },
+      "UnprocessableEntity": {
+        "description": "Request semantically invalid",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "unprocessable_entity",
+              "message": "Connection type '550e8400-e29b-41d4-a716-446655440000' does not exist"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Resource not found",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "not_found",
+              "message": "Data connection 'abc' not found for tenant 't1'"
+            }
+          }
+        }
+      }
+    }
+  }
+}

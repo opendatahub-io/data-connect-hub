@@ -8,10 +8,11 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use futures::Stream;
 use moka::future::Cache;
 use neo4rs::{BoltType, Graph};
@@ -25,32 +26,26 @@ const KEY_DATABASE: &str = "NEO4J_DATABASE";
 
 pub struct Neo4jConnector {
     graphs: Cache<String, Graph>,
+    config: ConnectorConfig,
 }
 
 impl Neo4jConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             graphs: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
 
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "Neo4j credentials are required".to_string(),
-        )),
-    }
-}
-
-async fn build_graph(credentials: &HashMap<String, String>) -> Result<Graph, ConnectorError> {
+async fn build_graph(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<Graph, ConnectorError> {
     let uri = credentials
         .get(KEY_URI)
         .ok_or_else(|| ConnectorError::ConnectionError("NEO4J_URI is required".to_string()))?;
@@ -74,15 +69,18 @@ async fn build_graph(credentials: &HashMap<String, String>) -> Result<Graph, Con
         .build()
         .map_err(|e| ConnectorError::ConnectionError(format!("Invalid Neo4j config: {e}")))?;
 
-    Graph::connect(config)
+    tokio::time::timeout(connection_timeout, Graph::connect(config))
         .await
+        .map_err(|_| ConnectorError::ConnectionError("Connection timeout".to_string()))?
         .map_err(|e| ConnectorError::ConnectionError(format!("Failed to connect to Neo4j: {e}")))
 }
+
+const PROVIDER: &str = "neo4j";
 
 #[async_trait::async_trait]
 impl FlightConnector for Neo4jConnector {
     fn provider(&self) -> String {
-        Provider::Neo4j.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -92,12 +90,18 @@ impl FlightConnector for Neo4jConnector {
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
+        credentials_resolver: &dyn CredentialsResolver,
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
+        let connection_timeout = self.config.connection_timeout();
+
         let cache_key = data_connection.metadata.id.clone();
+
         let graph = self
             .graphs
-            .try_get_with(cache_key, async { build_graph(&credentials).await })
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+                build_graph(&credentials, connection_timeout).await
+            })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Neo4j client: {e}")))?;
 
@@ -110,12 +114,12 @@ pub struct Neo4jReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for Neo4jReader {
+impl DataReader for Neo4jReader {
     fn provider(&self) -> String {
-        Provider::Neo4j.as_str().to_string()
+        PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let mut result = self
             .graph
             .execute(neo4rs::query(query))
@@ -125,7 +129,7 @@ impl TabularReader for Neo4jReader {
         let row = match result.next().await.map_err(map_neo4j_error)? {
             Some(row) => row,
             None => {
-                return Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(Schema::empty()))));
+                return Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::empty()))));
             },
         };
 
@@ -148,16 +152,13 @@ impl TabularReader for Neo4jReader {
             })
             .collect();
 
-        Ok(Arc::new(TabularState::new(
-            query.to_owned(),
-            Arc::new(Schema::new(fields)),
-        )))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let graph = self.graph.clone();
-        let schema = state.schema.clone();
-        let query = state.query.clone();
+        let schema = query.schema.clone();
+        let query = query.query.clone();
         let batch_size = options.batch_size;
 
         #[allow(clippy::while_let_loop)]
@@ -193,7 +194,7 @@ impl TabularReader for Neo4jReader {
             >)
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
         let mut result = self
             .graph
             .execute(neo4rs::query("RETURN 1"))
@@ -214,7 +215,7 @@ fn map_neo4j_error(e: neo4rs::Error) -> ConnectorError {
     {
         return ConnectorError::InvalidRequest("Data source is read-only".to_string());
     }
-    ConnectorError::ConnectionError(format!("Neo4j error: {e}"))
+    ConnectorError::ConnectionError("Neo4j connection error".to_string())
 }
 
 fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[neo4rs::Row]) -> Result<RecordBatch, ConnectorError> {
@@ -326,64 +327,24 @@ mod tests {
 
     #[test]
     fn test_connector_provider() {
-        let connector = Neo4jConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = Neo4jConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "neo4j");
     }
 
     #[test]
     fn test_connector_description() {
-        let connector = Neo4jConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = Neo4jConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.description(), "Neo4j graph database connector");
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("t-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-neo4j".to_string(),
-                data_connection_type_id: "neo4j-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-neo4j".to_string(),
-                    secret: Arc::new(HashMap::from([
-                        (KEY_URI.to_string(), "bolt://localhost:7687".to_string()),
-                        (KEY_PASSWORD.to_string(), "password".to_string()),
-                    ])),
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_URI).unwrap(), "bolt://localhost:7687");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("t-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-neo4j".to_string(),
-                data_connection_type_id: "neo4j-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: None,
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        assert!(extract_credentials(&conn).is_err());
     }
 
     #[test]

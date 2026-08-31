@@ -1,0 +1,24 @@
+description: >
+  Credentials reference. Exactly one of secret_ref or (name + secret) must be provided.
+oneOf:
+  - type: object
+    required: [secret_ref]
+    properties:
+      secret_ref:
+        type: string
+        description: Reference to an existing secret
+        example: secret/my-conn
+    additionalProperties: false
+  - type: object
+    required: [name, secret]
+    properties:
+      name:
+        type: string
+        description: Name for the secret to create
+        example: my-conn-secret
+      secret:
+        type: object
+        additionalProperties:
+          type: string
+        description: Inline secret key-value pairs
+    additionalProperties: false

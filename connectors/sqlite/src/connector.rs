@@ -4,41 +4,42 @@ use arrow::array::{ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
-use commons::api::connection_types::Provider;
+use commons::api::connector::{DataReader, QueryOutput, TableInfo};
+use commons::api::connector::{Query, QueryOptions};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{QueryOptions, TabularState};
-use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
-use commons::api::connections::{Admin, DataConnectionResource};
-use commons::api::tabular::FlightConnector;
+use commons::api::connections::DataConnectionResource;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::FlightConnector;
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::sqlite::SqliteRow;
 use sqlx::{Column, Executor, Row, SqlitePool, Statement, TypeInfo};
 
+const KEY_URI: &str = "URI";
+
 pub struct SqliteConnector {
     pools: Cache<String, SqlitePool>,
+    config: ConnectorConfig,
 }
 
-impl Default for SqliteConnector {
-    fn default() -> Self {
+impl SqliteConnector {
+    pub fn new(config: ConnectorConfig) -> Self {
         Self {
             pools: Cache::builder().max_capacity(2).build(),
+            config,
         }
     }
 }
 
-impl SqliteConnector {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
+const PROVIDER: &str = "sqlite";
 
 #[async_trait::async_trait]
 impl FlightConnector for SqliteConnector {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -48,20 +49,23 @@ impl FlightConnector for SqliteConnector {
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
-            _ => None,
-        }
-        .ok_or_else(|| ConnectorError::ConnectionError("SQLite credentials are required".to_string()))?;
+        credentials_resolver: &dyn CredentialsResolver,
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
+        let connection_timeout = self.config.connection_timeout();
+        let cache_key = data_connection.metadata.id.clone();
 
-        let url = credentials
-            .get("url")
-            .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
         let pool = self
             .pools
-            .try_get_with(url.clone(), async {
-                SqlitePool::connect(url.as_str())
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+
+                let url = credentials
+                    .get(KEY_URI)
+                    .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+
+                sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
             })
@@ -77,12 +81,12 @@ pub struct SqliteReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for SqliteReader {
+impl DataReader for SqliteReader {
     fn provider(&self) -> String {
-        Provider::Sqlite.as_str().to_string()
+        PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let statement = self
             .pool
             .prepare(query)
@@ -95,16 +99,13 @@ impl TabularReader for SqliteReader {
             .map(|col| Field::new(col.name(), sqlite_type_to_arrow(col.type_info().name()), true))
             .collect();
 
-        Ok(Arc::new(TabularState::new(
-            query.to_owned(),
-            Arc::new(Schema::new(fields)),
-        )))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
+    async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
-        let schema = state.schema.clone();
-        let query = state.query.clone();
+        let schema = view.schema.clone();
+        let query = view.query.clone();
         let batch_size = options.batch_size;
 
         let stream = async_stream::try_stream! {
@@ -134,7 +135,11 @@ impl TabularReader for SqliteReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("SQLite connection check failed: {e}")))?;
         Ok(())
     }
 
@@ -305,7 +310,7 @@ mod tests {
 
     #[test]
     fn test_sqlite_connector_new() {
-        let connector = SqliteConnector::new();
+        let connector = SqliteConnector::new(ConnectorConfig::default());
         assert_eq!(connector.provider(), "sqlite");
     }
 }

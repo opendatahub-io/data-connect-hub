@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
+from data_connect_hub._rest import RestClient
 from data_connect_hub.exceptions import (
     DCHAuthenticationError,
     DCHConnectionError,
@@ -23,7 +24,6 @@ from data_connect_hub.models import (
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
-from data_connect_hub.rest import RestClient
 
 from .conftest import (
     SAMPLE_CONNECTION_JSON,
@@ -64,7 +64,7 @@ def _make_client(
 ) -> RestClient:
     http_client = httpx.Client(transport=transport, base_url="http://test")
     return RestClient(
-        base_url="http://test",
+        url="http://test",
         token="test-token",
         tenant_id="test-tenant",
         api_base=api_base,
@@ -509,7 +509,7 @@ class TestTokenProviderGuard:
 
         with pytest.raises(DCHConfigError, match="Cannot specify both"):
             RestClient(
-                base_url="http://test",
+                url="http://test",
                 token="tok",
                 tenant_id="t1",
                 token_provider=lambda: "fresh",
@@ -534,7 +534,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=provider,
@@ -568,7 +568,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=provider,
@@ -589,7 +589,7 @@ class TestTokenProvider:
         transport = httpx.MockTransport(handler)
         http_client = httpx.Client(transport=transport, base_url="http://test")
         client = RestClient(
-            base_url="http://test",
+            url="http://test",
             token="",
             tenant_id="t1",
             token_provider=lambda: "bad-token",

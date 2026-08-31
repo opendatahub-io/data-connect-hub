@@ -9,8 +9,8 @@ import pandas as pd
 import pyarrow as pa
 import pytest
 
+from data_connect_hub._flight import FlightClient, _encode_varint
 from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
-from data_connect_hub.flight import FlightClient, _encode_varint
 
 
 class _Error(Exception):
@@ -31,12 +31,20 @@ class _ProgrammingError(_Error):
 
 @pytest.fixture()
 def flight_client() -> FlightClient:
-    return FlightClient(flight_url="grpc://localhost:50051", token="tok", tenant_id="t1")
+    return FlightClient(url="grpc://localhost:50051", token="tok", tenant_id="t1")
 
 
 def _mock_cursor(table: pa.Table) -> MagicMock:
     cursor = MagicMock()
     cursor.fetch_arrow_table.return_value = table
+    return cursor
+
+
+def _mock_streaming_cursor(table: pa.Table) -> MagicMock:
+    cursor = MagicMock()
+    cursor.fetch_arrow_table.return_value = table
+    reader = pa.RecordBatchReader.from_batches(table.schema, table.to_batches())
+    cursor.fetch_record_batch.return_value = reader
     return cursor
 
 
@@ -64,7 +72,7 @@ def _set_mock_flight(mock_flight: MagicMock, connectors: list[str] | None = None
 
 
 class TestRead:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_returns_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
@@ -76,7 +84,7 @@ class TestRead:
         assert result.equals(table)
         mock_conn.close.assert_called_once()
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_empty_result_returns_empty_table(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
@@ -87,7 +95,7 @@ class TestRead:
         result = flight_client.read("SELECT 1", "conn-1")
         assert result.num_rows == 0
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
@@ -99,7 +107,7 @@ class TestRead:
         with pytest.raises(DCHQueryError, match="bad sql"):
             flight_client.read("BAD SQL", "conn-1")
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_programming_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
@@ -113,7 +121,7 @@ class TestRead:
 
 
 class TestReadPandas:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_returns_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
@@ -126,7 +134,7 @@ class TestReadPandas:
         assert list(result["col"]) == [1, 2, 3]
         mock_conn.close.assert_called_once()
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_empty_result_returns_empty_dataframe(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         empty = pa.table({"col": pa.array([], type=pa.int64())})
@@ -139,9 +147,132 @@ class TestReadPandas:
         assert len(result) == 0
 
 
+class TestReadBatches:
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_yields_batches(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1, 2, 3]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        batches = list(flight_client.read_batches("SELECT 1", "conn-1"))
+
+        assert len(batches) >= 1
+        combined = pa.Table.from_batches(batches)
+        assert combined.equals(table)
+        mock_conn.close.assert_called_once()
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_closes_on_exhaustion(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
+        mock_dbapi.connect.return_value = mock_conn
+
+        list(flight_client.read_batches("SELECT 1", "conn-1"))
+        mock_conn.close.assert_called_once()
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_empty_result(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        empty = pa.table({"col": pa.array([], type=pa.int64())})
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = _mock_streaming_cursor(empty)
+        mock_dbapi.connect.return_value = mock_conn
+
+        batches = list(flight_client.read_batches("SELECT 1", "conn-1"))
+        assert len(batches) == 0
+        mock_conn.close.assert_called_once()
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_query_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        cursor = MagicMock()
+        cursor.execute.side_effect = _OperationalError("bad sql")
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        with pytest.raises(DCHQueryError, match="bad sql"):
+            list(flight_client.read_batches("BAD SQL", "conn-1"))
+        mock_conn.close.assert_called_once()
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_connection_error_on_connect(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
+
+        with pytest.raises(DCHConnectionError, match="unreachable"):
+            list(flight_client.read_batches("SELECT 1", "conn-1"))
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        table = pa.table({"col": [1]})
+        cursor = _mock_streaming_cursor(table)
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        list(flight_client.read_batches("SELECT $1", "conn-1", parameters=[42]))
+        cursor.execute.assert_called_once_with("SELECT $1", [42])
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_auth_error_triggers_refresh(self, mock_dbapi: MagicMock) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        call_count = 0
+
+        def provider() -> str:
+            nonlocal call_count
+            call_count += 1
+            return f"token-{call_count}"
+
+        client = FlightClient(
+            url="grpc://localhost:50051",
+            tenant_id="t1",
+            token_provider=provider,
+        )
+        table = pa.table({"col": [1]})
+        mock_conn_ok = MagicMock()
+        mock_conn_ok.cursor.return_value = _mock_streaming_cursor(table)
+
+        mock_dbapi.connect.side_effect = [
+            _OperationalError("UNAUTHENTICATED: token expired"),
+            mock_conn_ok,
+        ]
+
+        batches = list(client.read_batches("SELECT 1", "conn-1"))
+        assert call_count == 2
+        assert len(batches) >= 1
+
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_mid_stream_error_mapped_and_closes(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        reader = MagicMock()
+        reader.__iter__ = MagicMock(return_value=iter([]))
+        reader.__next__ = MagicMock(side_effect=_OperationalError("stream broke"))
+
+        def fake_iter(self: object) -> object:
+            raise _OperationalError("stream broke")
+
+        reader.__iter__ = lambda _self: reader
+        reader.__next__ = MagicMock(side_effect=_OperationalError("stream broke"))
+        cursor = MagicMock()
+        cursor.fetch_record_batch.return_value = reader
+        mock_conn = MagicMock()
+        mock_conn.cursor.return_value = cursor
+        mock_dbapi.connect.return_value = mock_conn
+
+        with pytest.raises(DCHQueryError, match="stream broke"):
+            list(flight_client.read_batches("SELECT 1", "conn-1"))
+        mock_conn.close.assert_called_once()
+
+
 class TestServerInfo:
-    @patch("data_connect_hub.flight.flight")
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_returns_dict_with_connectors(
         self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightClient
     ) -> None:
@@ -158,8 +289,8 @@ class TestServerInfo:
         assert result["supported_connectors"] == ["postgres", "sqlite"]
         mock_conn.close.assert_called_once()
 
-    @patch("data_connect_hub.flight.flight")
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_server_info_connectors_error_propagates(
         self, mock_dbapi: MagicMock, mock_flight: MagicMock, flight_client: FlightClient
     ) -> None:
@@ -178,7 +309,7 @@ class TestServerInfo:
 
 
 class TestConnectionError:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_interface_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
@@ -186,7 +317,7 @@ class TestConnectionError:
         with pytest.raises(DCHConnectionError, match="unreachable"):
             flight_client.read("SELECT 1", "conn-1")
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_operational_error_on_connect_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _OperationalError("connection refused")
@@ -194,7 +325,7 @@ class TestConnectionError:
         with pytest.raises(DCHConnectionError, match="connection refused"):
             flight_client.read("SELECT 1", "conn-1")
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_server_info_connect_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_dbapi.connect.side_effect = _InterfaceError("unreachable")
@@ -202,7 +333,7 @@ class TestConnectionError:
         with pytest.raises(DCHConnectionError, match="unreachable"):
             flight_client.server_info()
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_server_info_operational_error_mapped(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         mock_conn = MagicMock()
@@ -214,7 +345,7 @@ class TestConnectionError:
 
 
 class TestHeaders:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_connection_id_injected(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -235,14 +366,14 @@ class TestTokenProviderGuard:
     def test_token_and_provider_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="Cannot specify both"):
             FlightClient(
-                flight_url="grpc://localhost:50051",
+                url="grpc://localhost:50051",
                 token="tok",
                 token_provider=lambda: "fresh",
             )
 
 
 class TestTokenProvider:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_provider_called_once_and_cached(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
@@ -253,7 +384,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -271,12 +402,12 @@ class TestTokenProvider:
         assert kwargs2["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer token-1"
         assert call_count == 1
 
-    @patch("data_connect_hub.flight.flight")
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_provider_used_for_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
         )
@@ -290,11 +421,11 @@ class TestTokenProvider:
         db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
         assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer fresh-token"
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_provider_with_timeout(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "fresh-token",
             timeout=10.0,
@@ -311,7 +442,7 @@ class TestTokenProvider:
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_connect_auth_error_triggers_refresh_and_retry(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
@@ -322,7 +453,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -340,7 +471,7 @@ class TestTokenProvider:
         assert call_count == 2
         assert result.equals(table)
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_query_auth_error_not_retried(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
@@ -351,7 +482,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -366,11 +497,11 @@ class TestTokenProvider:
             client.read("SELECT 1", "conn-1")
         assert call_count == 1
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_auth_error_after_refresh_raises(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=lambda: "bad-token",
         )
@@ -379,7 +510,7 @@ class TestTokenProvider:
         with pytest.raises(DCHConnectionError, match="UNAUTHENTICATED"):
             client.read("SELECT 1", "conn-1")
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_non_auth_error_not_retried(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
@@ -390,7 +521,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -400,8 +531,8 @@ class TestTokenProvider:
             client.read("SELECT 1", "conn-1")
         assert call_count == 1
 
-    @patch("data_connect_hub.flight.flight")
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_server_info_auth_error_triggers_refresh(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         call_count = 0
@@ -412,7 +543,7 @@ class TestTokenProvider:
             return f"token-{call_count}"
 
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             tenant_id="t1",
             token_provider=provider,
         )
@@ -433,11 +564,11 @@ class TestTokenProvider:
 
 
 class TestTimeouts:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_timeouts_injected(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
             timeout=10.0,
@@ -453,12 +584,12 @@ class TestTimeouts:
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
 
-    @patch("data_connect_hub.flight.flight")
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_timeouts_applied_to_server_info(self, mock_dbapi: MagicMock, mock_flight: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc://localhost:50051",
+            url="grpc://localhost:50051",
             token="tok",
             tenant_id="t1",
             timeout=10.0,
@@ -474,7 +605,7 @@ class TestTimeouts:
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.query"] == "10.0"
         assert db_kwargs["adbc.flight.sql.rpc.timeout_seconds.fetch"] == "10.0"
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_no_timeouts_by_default(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -490,11 +621,11 @@ class TestTimeouts:
 
 
 class TestTLS:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_insecure_sets_tls_skip_verify(self, mock_dbapi: MagicMock) -> None:
         _set_mock_exceptions(mock_dbapi)
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             insecure=True,
@@ -509,14 +640,14 @@ class TestTLS:
         db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
         assert db_kwargs["adbc.flight.sql.client_option.tls_skip_verify"] == "true"
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_ca_cert_sets_tls_root_certs(self, mock_dbapi: MagicMock, tmp_path: Any) -> None:
         _set_mock_exceptions(mock_dbapi)
         cert_file = tmp_path / "ca.pem"
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             ca_cert=str(cert_file),
@@ -534,20 +665,20 @@ class TestTLS:
     def test_ca_cert_file_not_found_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="CA certificate file not found"):
             FlightClient(
-                flight_url="grpc+tls://localhost:50051",
+                url="grpc+tls://localhost:50051",
                 token="tok",
                 tenant_id="t1",
                 ca_cert="/nonexistent/ca.pem",
             )
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_insecure_overrides_ca_cert(self, mock_dbapi: MagicMock, tmp_path: Any) -> None:
         _set_mock_exceptions(mock_dbapi)
         cert_file = tmp_path / "ca.pem"
         cert_file.write_text("-----BEGIN CERTIFICATE-----\nfake\n-----END CERTIFICATE-----\n")
 
         client = FlightClient(
-            flight_url="grpc+tls://localhost:50051",
+            url="grpc+tls://localhost:50051",
             token="tok",
             tenant_id="t1",
             ca_cert=str(cert_file),
@@ -564,7 +695,7 @@ class TestTLS:
         assert db_kwargs["adbc.flight.sql.client_option.tls_skip_verify"] == "true"
         assert "adbc.flight.sql.client_option.tls_root_certs" not in db_kwargs
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_no_tls_options_by_default(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -580,7 +711,7 @@ class TestTLS:
 
 
 class TestParameters:
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -594,7 +725,7 @@ class TestParameters:
 
         cursor.execute.assert_called_once_with("SELECT $1", [42])
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_none_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -607,7 +738,7 @@ class TestParameters:
 
         cursor.execute.assert_called_once_with("SELECT 1", None)
 
-    @patch("data_connect_hub.flight.flight_dbapi")
+    @patch("data_connect_hub._flight.flight_dbapi")
     def test_read_pandas_forwards_parameters(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1]})
@@ -679,7 +810,7 @@ class TestBuildCommandGetTables:
         return type_url.decode(), inner
 
     def test_no_args(self) -> None:
-        from data_connect_hub.flight import _build_command_get_tables
+        from data_connect_hub._flight import _build_command_get_tables
 
         raw = _build_command_get_tables()
         type_url, fields = self._parse(raw)
@@ -687,7 +818,7 @@ class TestBuildCommandGetTables:
         assert fields == {}
 
     def test_table_name_filter(self) -> None:
-        from data_connect_hub.flight import _build_command_get_tables
+        from data_connect_hub._flight import _build_command_get_tables
 
         raw = _build_command_get_tables(table_name_filter_pattern="cities")
         _, fields = self._parse(raw)
@@ -695,7 +826,7 @@ class TestBuildCommandGetTables:
         assert 5 not in fields
 
     def test_include_schema(self) -> None:
-        from data_connect_hub.flight import _build_command_get_tables
+        from data_connect_hub._flight import _build_command_get_tables
 
         raw = _build_command_get_tables(include_schema=True)
         _, fields = self._parse(raw)
@@ -703,7 +834,7 @@ class TestBuildCommandGetTables:
         assert fields[5] == 1
 
     def test_both_args(self) -> None:
-        from data_connect_hub.flight import _build_command_get_tables
+        from data_connect_hub._flight import _build_command_get_tables
 
         raw = _build_command_get_tables(table_name_filter_pattern="test%", include_schema=True)
         _, fields = self._parse(raw)
@@ -711,7 +842,7 @@ class TestBuildCommandGetTables:
         assert fields[5] == 1
 
     def test_unicode_filter(self) -> None:
-        from data_connect_hub.flight import _build_command_get_tables
+        from data_connect_hub._flight import _build_command_get_tables
 
         raw = _build_command_get_tables(table_name_filter_pattern="tést")
         _, fields = self._parse(raw)

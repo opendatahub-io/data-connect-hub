@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Only connector implementations should emit this error.
 #[derive(Error, Debug)]
 pub enum ConnectorError {
     #[error("SQL error: {0}")]
@@ -14,8 +15,11 @@ pub enum ConnectorError {
     ConfigError(String),
     #[error("IO error: {0}")]
     IOError(String),
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
 }
 
+/// Only meta store implementations should emit this error.
 #[derive(Error, Debug)]
 pub enum MetaStoreError {
     #[error("Connection error: {0}")]
@@ -40,6 +44,7 @@ pub enum MetaStoreError {
     UnprocessableEntity(String),
 }
 
+/// Only secret store implementations should emit this error.
 #[derive(Error, Debug, Clone)]
 pub enum SecretStoreError {
     #[error("Secret not found: {0}")]
@@ -52,4 +57,11 @@ pub enum SecretStoreError {
     CannotDeleteSecret(String),
     #[error("Cannot set secret labels: {0}")]
     CannotSetSecretLabels(String),
+}
+
+/// Errors pertainint to data connection types.
+#[derive(Error, Debug)]
+pub enum DataConnectionTypeError {
+    #[error("Required field {0} is missing")]
+    MissingRequiredField(String),
 }

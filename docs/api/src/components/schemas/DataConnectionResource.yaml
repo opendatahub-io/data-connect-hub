@@ -1,0 +1,9 @@
+type: object
+required: [metadata, resource, status]
+properties:
+  metadata:
+    $ref: "ResourceMetadata.yaml"
+  resource:
+    $ref: "DataConnection.yaml"
+  status:
+    $ref: "DataConnectionStatus.yaml"

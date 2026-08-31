@@ -33,9 +33,12 @@ pub enum DataFormat {
 }
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DataConnectionState {
-    /// The data connection can be used either for ingestion or for secret consumption
+    /// The data connection is ready to be used for ingestion or for secret consumption
     #[serde(rename = "ready")]
     Ready,
+    /// The data connection is not ready to be used for ingestion but can be used for secret consumption
+    #[serde(rename = "ingestion_not_ready")]
+    IngestionNotReady,
     /// The data connection points to a secret that is not valid or missing.
     #[serde(rename = "not_ready")]
     NotReady,
@@ -56,18 +59,12 @@ pub enum PhaseState {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct PhaseCondition {
-    pub state: PhaseState,
-    pub message: String,
-    pub timestamp: String,
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct DataConnectionStatus {
     pub state: DataConnectionState,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    #[serde(default)]
-    pub phases: Vec<PhaseCondition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
 }
 
 impl Default for DataConnectionStatus {
@@ -75,7 +72,7 @@ impl Default for DataConnectionStatus {
         Self {
             state: DataConnectionState::NotReady,
             message: None,
-            phases: vec![],
+            updated_at: None,
         }
     }
 }
@@ -134,7 +131,7 @@ mod tests {
             status: DataConnectionStatus {
                 state: DataConnectionState::NotReady,
                 message: None,
-                phases: vec![],
+                updated_at: None,
             },
         }
     }
@@ -171,9 +168,7 @@ mod tests {
                 "properties": { "key": "value" }
             },
             "status": {
-                "state": "not_ready",
-                "message": null,
-                "phases": []
+                "state": "not_ready"
             }
         });
 
@@ -214,7 +209,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: None,
-            phases: vec![],
+            updated_at: None,
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["state"], "not_ready");
@@ -226,7 +221,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("All checks passed".to_string()),
-            phases: vec![],
+            updated_at: None,
         };
         let json = serde_json::to_value(&status).unwrap();
         assert_eq!(json["state"], "ready");
@@ -238,7 +233,7 @@ mod tests {
         let status = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: Some("ready".to_string()),
-            phases: vec![],
+            updated_at: None,
         };
         let json = serde_json::to_string(&status).unwrap();
         let deserialized: DataConnectionStatus = serde_json::from_str(&json).unwrap();
@@ -272,17 +267,17 @@ mod tests {
         let a = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
-            phases: vec![],
+            updated_at: None,
         };
         let b = DataConnectionStatus {
             state: DataConnectionState::Ready,
             message: Some("ok".to_string()),
-            phases: vec![],
+            updated_at: None,
         };
         let c = DataConnectionStatus {
             state: DataConnectionState::NotReady,
             message: Some("ok".to_string()),
-            phases: vec![],
+            updated_at: None,
         };
         assert_eq!(a, b);
         assert_ne!(a, c);

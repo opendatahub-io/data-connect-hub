@@ -6,21 +6,25 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
+use commons::api::connector::{DataReader, QueryOutput, TableInfo};
+use commons::api::connector::{Query, QueryOptions};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{QueryOptions, TabularState};
-use commons::api::tabular::{QueryOutput, TableInfo, TabularReader};
 
 use futures::StreamExt;
 
-use commons::api::tabular::FlightConnector;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::FlightConnector;
+use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
 use sqlx::postgres::PgRow;
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
+use std::time::Duration;
+use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
+const KEY_URI: &str = "URI";
 
 fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     if let sqlx::Error::Database(ref db_err) = e
@@ -30,28 +34,30 @@ fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     }
     ConnectorError::SQLError(e.to_string())
 }
-use std::time::Duration;
 
 pub struct PgConnector {
     pools: Cache<String, PgPool>,
+    config: ConnectorConfig,
 }
 
+const PROVIDER: &str = "postgres";
+
 impl PgConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             pools: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 }
-
 #[async_trait::async_trait]
 impl FlightConnector for PgConnector {
     fn provider(&self) -> String {
-        Provider::Postgres.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -61,21 +67,24 @@ impl FlightConnector for PgConnector {
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = match &data_connection.resource.admin {
-            Some(Admin::Secret { name: _, secret }) => Some(secret.clone()),
-            _ => None,
-        }
-        .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL credentials are required".to_string()))?;
+        credentials_resolver: &dyn CredentialsResolver,
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
+        info!("Creating Postgres reader");
 
-        let url = credentials
-            .get("url")
-            .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+        let connection_timeout = self.config.connection_timeout();
+        let cache_key = data_connection.metadata.id.clone();
 
         let pool = self
             .pools
-            .try_get_with(url.clone(), async {
-                PgPool::connect(url.as_str())
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+                let url = credentials
+                    .get(KEY_URI)
+                    .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+
+                sqlx::pool::PoolOptions::<sqlx::Postgres>::new()
+                    .acquire_timeout(connection_timeout)
+                    .connect(url.as_str())
                     .await
                     .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))
             })
@@ -93,12 +102,12 @@ pub struct PgReader {
 impl PgReader {}
 
 #[async_trait::async_trait]
-impl TabularReader for PgReader {
+impl DataReader for PgReader {
     fn provider(&self) -> String {
-        Provider::Postgres.as_str().to_string()
+        PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let statement = self.pool.prepare(query).await.map_err(map_sqlx_error)?;
 
         let fields: Vec<Field> = statement
@@ -107,16 +116,13 @@ impl TabularReader for PgReader {
             .map(|col| Field::new(col.name(), pg_type_to_arrow(col.type_info().name()), true))
             .collect();
 
-        Ok(Arc::new(TabularState::new(
-            query.to_owned(),
-            Arc::new(Schema::new(fields)),
-        )))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
-        let schema = state.schema.clone();
-        let query = state.query.clone();
+        let schema = query.schema.clone();
+        let query = query.query.clone();
         let batch_size = options.batch_size;
 
         let stream = async_stream::try_stream! {
@@ -151,7 +157,11 @@ impl TabularReader for PgReader {
         Ok(Box::pin(stream))
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        sqlx::query("SELECT 1")
+            .execute(&self.pool)
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("PostgreSQL connection check failed".to_string()))?;
         Ok(())
     }
 
@@ -486,7 +496,12 @@ mod tests {
 
     #[test]
     fn test_pg_connector_new() {
-        let connector = PgConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = PgConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "postgres");
     }
 

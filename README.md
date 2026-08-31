@@ -140,6 +140,13 @@ enabled = false
 
 [metrics]
 enabled = false
+
+[connectors.default]
+connection_timeout_secs = 10
+
+# Per-connector overrides (optional, inherits from [connectors.default]):
+# [connectors.postgres]
+# connection_timeout_secs = 30
 ```
 
 #### 3. Start a service

@@ -215,13 +215,13 @@ impl MetaStore for PgMetaStore {
                 id: Uuid::new_v4().to_string(),
                 tenant_id: Some(tenant_id.to_string()),
                 created_at: now.clone(),
-                updated_at: now,
+                updated_at: now.clone(),
             },
             resource: data_connection.clone(),
             status: DataConnectionStatus {
                 state: DataConnectionState::NotReady,
                 message: None,
-                phases: vec![],
+                updated_at: Some(now.clone()),
             },
         };
 
@@ -321,6 +321,76 @@ impl MetaStore for PgMetaStore {
         tx.commit().await.map_err(|e| {
             error!("failed to commit transaction: {e}");
             MetaStoreError::Query("failed to update data connection".to_string())
+        })?;
+
+        Ok(resource)
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        tenant_id: &str,
+        uid: &str,
+        update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to update data connection status".to_string())
+        })?;
+
+        let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE")
+            .bind(uid)
+            .bind(tenant_id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("data connection '{uid}' not found"))
+                },
+                e => {
+                    error!("failed to get data connection '{uid}' for status update: {e}");
+                    MetaStoreError::Query("failed to update data connection status".to_string())
+                },
+            })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read data connection column: {e}");
+            MetaStoreError::Query("failed to read data connection".to_string())
+        })?;
+        let existing: DataConnectionResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize data connection: {e}");
+            MetaStoreError::Deserialization("failed to deserialize data connection".to_string())
+        })?;
+
+        let status = update_fn(existing.status)?;
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = DataConnectionResource {
+            metadata: ResourceMetadata {
+                updated_at: now,
+                ..existing.metadata
+            },
+            resource: existing.resource,
+            status,
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize data connection: {e}");
+            MetaStoreError::Serialization("failed to serialize data connection".to_string())
+        })?;
+
+        sqlx::query("UPDATE data_connections SET data = $1 WHERE data->'metadata'->>'id' = $2 AND data->'metadata'->>'tenant_id' = $3")
+            .bind(&json_value)
+            .bind(uid)
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                error!("failed to update data connection status '{uid}': {e}");
+                MetaStoreError::Query("failed to update data connection status".to_string())
+            })?;
+
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to update data connection status".to_string())
         })?;
 
         Ok(resource)

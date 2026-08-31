@@ -70,7 +70,7 @@ class RestClient:
 
     def __init__(
         self,
-        base_url: str,
+        url: str,
         token: str,
         tenant_id: str,
         *,
@@ -91,7 +91,7 @@ class RestClient:
                 " Please provide either a static token or a token_provider callable, not both."
             )
 
-        self._base_url = base_url.rstrip("/")
+        self._base_url = url.rstrip("/")
         self._token = token
         self._token_cache: TokenCache | None = TokenCache(token_provider) if token_provider else None
         self._tenant_id = tenant_id

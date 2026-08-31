@@ -1,0 +1,16 @@
+type: object
+description: >
+  RFC 7396 JSON Merge Patch for a DataConnectionType. Supply only
+  the fields you want to change.
+properties:
+  name:
+    type: string
+  provider:
+    type: string
+  description:
+    type: string
+    nullable: true
+  credentials_fields:
+    type: array
+    items:
+      $ref: "Field.yaml"

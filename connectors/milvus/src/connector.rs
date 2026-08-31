@@ -7,10 +7,11 @@ use arrow::array::{
 };
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connection_types::Provider;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
+use commons::api::connector::CredentialsResolver;
+use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
 use milvus::v2::prelude::{
     ClientV2, ConnectConfig, FieldData, GetRequest, Ids, QueryRequest, QueryResponse, SearchRequest, SearchResponse,
     SearchVectors,
@@ -27,51 +28,22 @@ const DEFAULT_PORT: &str = "19530";
 
 pub struct MilvusConnector {
     clients: Cache<String, ClientV2>,
+    config: ConnectorConfig,
 }
 
 impl MilvusConnector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             clients: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
-}
 
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "Milvus credentials are required".to_string(),
-        )),
-    }
-}
-
-fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
-    ConnectorError::ConnectionError(format!("Milvus error: {e}"))
-}
-
-#[async_trait::async_trait]
-impl FlightConnector for MilvusConnector {
-    fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
-    }
-
-    fn description(&self) -> String {
-        "Milvus vector database connector".to_string()
-    }
-
-    async fn get_reader(
-        &self,
-        data_connection: &DataConnectionResource,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
-
+    fn make_config(&self, credentials: &HashMap<String, String>) -> Result<ConnectConfig, ConnectorError> {
         let host = credentials
             .get(KEY_HOST)
             .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_HOST is required".to_string()))?
@@ -83,18 +55,47 @@ impl FlightConnector for MilvusConnector {
         let token = credentials.get(KEY_TOKEN).cloned();
         let database = credentials.get(KEY_DATABASE).cloned();
 
+        let connection_timeout = self.config.connection_timeout();
+
+        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
+        if let Some(ref token) = token {
+            config = config.token(token);
+        }
+        if let Some(ref db) = database {
+            config = config.database(db);
+        }
+        Ok(config)
+    }
+}
+
+fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
+    ConnectorError::ConnectionError(format!("Milvus error: {e}"))
+}
+const PROVIDER: &str = "milvus";
+#[async_trait::async_trait]
+impl FlightConnector for MilvusConnector {
+    fn provider(&self) -> String {
+        PROVIDER.to_string()
+    }
+
+    fn description(&self) -> String {
+        "Milvus vector database connector".to_string()
+    }
+
+    async fn get_reader(
+        &self,
+        data_connection: &DataConnectionResource,
+        credentials_resolver: &dyn CredentialsResolver,
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let cache_key = data_connection.metadata.id.clone();
+
         let client = self
             .clients
             .try_get_with(cache_key, async {
-                let mut config = ConnectConfig::new().uri(&uri);
-                if let Some(ref token) = token {
-                    config = config.token(token);
-                }
-                if let Some(ref db) = database {
-                    config = config.database(db);
-                }
-                ClientV2::new(&config).await.map_err(map_milvus_error)
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+                ClientV2::new(&self.make_config(&credentials)?)
+                    .await
+                    .map_err(map_milvus_error)
             })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Milvus client: {e}")))?;
@@ -108,12 +109,12 @@ pub struct MilvusReader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for MilvusReader {
+impl DataReader for MilvusReader {
     fn provider(&self) -> String {
-        Provider::Milvus.as_str().to_string()
+        PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let mut request = MilvusRequestInput::parse(query)?;
 
         if let MilvusOperation::Query = request.operation() {
@@ -128,13 +129,13 @@ impl TabularReader for MilvusReader {
 
         let field_data = normalize_field_order(&request, field_data);
         let schema = schema_from_field_data(&field_data);
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let request = MilvusRequestInput::parse(&state.query)?;
+    async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let request = MilvusRequestInput::parse(&query.query)?;
         let batch_size = options.batch_size;
-        let schema = state.schema.clone();
+        let schema = query.schema.clone();
 
         match request.operation() {
             MilvusOperation::Query => self.read_query_paginated(request, schema, batch_size),
@@ -161,7 +162,19 @@ impl TabularReader for MilvusReader {
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        use milvus::v2::request::utility::CheckHealthRequest;
+        let req = CheckHealthRequest::builder()
+            .build()
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build health check request: {e}")))?;
+        let resp = self
+            .client
+            .check_health(req)
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Milvus health check failed: {e}")))?;
+        if !resp.is_healthy() {
+            return Err(ConnectorError::ConnectionError("Milvus reported unhealthy".to_string()));
+        }
         Ok(())
     }
 }
@@ -469,61 +482,13 @@ mod tests {
 
     #[test]
     fn test_milvus_connector_provider() {
-        let connector = MilvusConnector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = MilvusConnector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "milvus");
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-milvus".to_string(),
-                data_connection_type_id: "milvus-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-milvus".to_string(),
-                    secret: Arc::new(HashMap::from([
-                        (KEY_HOST.to_string(), "localhost".to_string()),
-                        (KEY_PORT.to_string(), "19530".to_string()),
-                        (KEY_TOKEN.to_string(), "root:milvus".to_string()),
-                        (KEY_DATABASE.to_string(), "default".to_string()),
-                    ])),
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_HOST).unwrap(), "localhost");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let conn = DataConnectionResource {
-            metadata: commons::api::ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: commons::api::connections::DataConnection {
-                name: "test-milvus".to_string(),
-                data_connection_type_id: "milvus-type".to_string(),
-                format: commons::api::connections::DataFormat::Tabular,
-                admin: None,
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        };
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
     }
 
     #[test]

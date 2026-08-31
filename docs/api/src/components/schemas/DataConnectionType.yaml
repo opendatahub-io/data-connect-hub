@@ -1,0 +1,16 @@
+type: object
+required: [name, provider, credentials_fields]
+properties:
+  name:
+    type: string
+    example: PostgreSQL
+  provider:
+    type: string
+    example: postgres
+  description:
+    type: string
+    nullable: true
+  credentials_fields:
+    type: array
+    items:
+      $ref: "Field.yaml"

@@ -26,6 +26,7 @@ json-patch = { workspace = true }
 kube-utils = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
+chrono = { workspace = true }
 
 
 [dev-dependencies]

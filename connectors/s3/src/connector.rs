@@ -3,13 +3,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::format::{self, FileFormat};
-use arrow::datatypes::Schema;
-use commons::api::connection_types::Provider;
-use commons::api::connections::{Admin, DataConnectionResource};
+use arrow::array::BinaryArray;
+use arrow::datatypes::{DataType, Field, Schema};
+use arrow::record_batch::RecordBatch;
+use commons::api::connections::DataConnectionResource;
+use commons::api::connector::{BinaryQuery, CredentialsResolver};
+use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput, TableInfo};
 use commons::api::errors::ConnectorError;
-use commons::api::tabular::{FlightConnector, QueryOptions, QueryOutput, TableInfo, TabularReader, TabularState};
+use commons::utils::config::ConnectorConfig;
+use futures::TryStreamExt;
 use moka::future::Cache;
-use opendal::{EntryMode, Operator, Reader, services::S3};
+use opendal::{EntryMode, Operator, Reader, layers::TimeoutLayer, services::S3};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
@@ -19,16 +23,18 @@ const KEY_ENDPOINT: &str = "AWS_S3_ENDPOINT";
 
 pub struct S3Connector {
     operators: Cache<String, Operator>,
+    config: ConnectorConfig,
 }
 
 impl S3Connector {
-    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64) -> Self {
+    pub fn new(cache_ttl: Duration, cache_idle: Duration, cache_max_capacity: u64, config: ConnectorConfig) -> Self {
         Self {
             operators: Cache::builder()
                 .time_to_live(cache_ttl)
                 .time_to_idle(cache_idle)
                 .max_capacity(cache_max_capacity)
                 .build(),
+            config,
         }
     }
 
@@ -37,18 +43,10 @@ impl S3Connector {
     }
 }
 
-fn extract_credentials(
-    data_connection: &DataConnectionResource,
-) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
-    match &data_connection.resource.admin {
-        Some(Admin::Secret { name: _, secret }) => Ok(secret.clone()),
-        _ => Err(ConnectorError::ConnectionError(
-            "S3 credentials are required".to_string(),
-        )),
-    }
-}
-
-fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, ConnectorError> {
+fn build_operator(
+    credentials: &HashMap<String, String>,
+    connection_timeout: Duration,
+) -> Result<Operator, ConnectorError> {
     let bucket = credentials
         .get(KEY_BUCKET)
         .ok_or_else(|| ConnectorError::ConfigError(format!("{KEY_BUCKET} is required")))?;
@@ -76,13 +74,18 @@ fn build_operator(credentials: &HashMap<String, String>) -> Result<Operator, Con
         builder = builder.endpoint(endpoint);
     }
 
-    Operator::new(builder).map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))
+    let op = Operator::new(builder)
+        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))?
+        .layer(TimeoutLayer::new().with_timeout(connection_timeout));
+    Ok(op)
 }
+
+const PROVIDER: &str = "s3";
 
 #[async_trait::async_trait]
 impl FlightConnector for S3Connector {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
     fn description(&self) -> String {
@@ -92,22 +95,33 @@ impl FlightConnector for S3Connector {
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
-    ) -> Result<Arc<dyn TabularReader>, ConnectorError> {
-        let credentials = extract_credentials(data_connection)?;
+        credentials_resolver: &dyn CredentialsResolver,
+    ) -> Result<Arc<dyn DataReader>, ConnectorError> {
+        let connection_timeout = self.config.connection_timeout();
+        let cache_key = data_connection.metadata.id.clone();
+
         let operator = self
             .operators
-            .try_get_with_by_ref(&data_connection.metadata.id, async { build_operator(&credentials) })
+            .try_get_with(cache_key, async {
+                let credentials = credentials_resolver.resolve(data_connection).await?;
+                build_operator(&credentials, connection_timeout)
+            })
             .await
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get S3 operator: {e}")))?;
 
         let format_hint = data_connection.resource.properties.get("format").cloned();
-        Ok(Arc::new(S3Reader { operator, format_hint }))
+        Ok(Arc::new(S3Reader {
+            operator,
+            format_hint,
+            config: self.config,
+        }))
     }
 }
 
 pub struct S3Reader {
     operator: Operator,
     format_hint: Option<String>,
+    config: ConnectorConfig,
 }
 
 impl S3Reader {
@@ -118,7 +132,8 @@ impl S3Reader {
     async fn make_reader(&self, path: &str) -> Result<Reader, ConnectorError> {
         let reader = self
             .operator
-            .reader(path)
+            .reader_with(path)
+            .chunk(self.config.chunk_size)
             .await
             .map_err(|e| ConnectorError::IOError(format!("Failed to create S3 reader for '{path}': {e}")))?;
         Ok(reader)
@@ -126,12 +141,12 @@ impl S3Reader {
 }
 
 #[async_trait::async_trait]
-impl TabularReader for S3Reader {
+impl DataReader for S3Reader {
     fn provider(&self) -> String {
-        Provider::S3.as_str().to_string()
+        PROVIDER.to_string()
     }
 
-    async fn schema(&self, query: &str) -> Result<Arc<TabularState>, ConnectorError> {
+    async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let format = self.detect_format(query)?;
         let reader = self.make_reader(query).await?;
 
@@ -141,31 +156,68 @@ impl TabularReader for S3Reader {
             FileFormat::JsonLines => format::read_jsonl_schema(reader).await?,
         };
 
-        Ok(Arc::new(TabularState::new(query.to_owned(), Arc::new(schema))))
+        Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
-    async fn read(&self, state: Arc<TabularState>, options: &QueryOptions) -> QueryOutput {
-        let format = self.detect_format(&state.query)?;
+    async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
+        let format = self.detect_format(&view.query)?;
         let batch_size = options.batch_size;
 
         match format {
             FileFormat::Parquet => {
-                let reader = self.make_reader(&state.query).await?;
+                let reader = self.make_reader(&view.query).await?;
                 format::read_parquet_batches(reader, batch_size).await
             },
             FileFormat::Csv => {
-                let reader = self.make_reader(&state.query).await?;
-                format::read_csv_batches(reader, &state.schema, batch_size).await
+                let reader = self.make_reader(&view.query).await?;
+                format::read_csv_batches(reader, &view.schema, batch_size).await
             },
             FileFormat::JsonLines => {
-                let reader = self.make_reader(&state.query).await?;
-                format::read_jsonl_batches(reader, &state.schema, batch_size).await
+                let reader = self.make_reader(&view.query).await?;
+                format::read_jsonl_batches(reader, &view.schema, batch_size).await
             },
         }
     }
 
-    async fn test_connection(&self) -> Result<(), ConnectorError> {
+    async fn can_read_binary(&self, query: Arc<BinaryQuery>) -> Result<(), ConnectorError> {
+        self.operator
+            .stat(&query.path)
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("Cannot read '{}': {e}", query.path)))?;
         Ok(())
+    }
+
+    async fn read_binary(&self, query: Arc<BinaryQuery>) -> QueryOutput {
+        let reader = self.make_reader(&query.path).await?;
+        let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Binary, false)]));
+
+        let mut buf_stream = reader
+            .into_stream(..)
+            .await
+            .map_err(|e| ConnectorError::IOError(format!("Failed to open stream for '{}': {e}", query.path)))?;
+
+        let stream = async_stream::try_stream! {
+            while let Some(buf) = buf_stream
+                .try_next()
+                .await
+                .map_err(|e| ConnectorError::IOError(format!("Stream read error: {e}")))?
+            {
+                let chunk = buf.to_bytes();
+                let array = BinaryArray::from_vec(vec![&chunk]);
+                let batch = RecordBatch::try_new(schema.clone(), vec![Arc::new(array)])
+                    .map_err(|e| ConnectorError::IOError(format!("Failed to create batch: {e}")))?;
+                yield batch;
+            }
+        };
+
+        Ok(Box::pin(stream))
+    }
+
+    async fn check_connection(&self) -> Result<(), ConnectorError> {
+        self.operator
+            .check()
+            .await
+            .map_err(|_| ConnectorError::ConnectionError("Failed to check S3 connection".to_string()))
     }
 
     async fn list_tables(
@@ -253,8 +305,7 @@ fn sql_like_match(value: &str, pattern: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use commons::api::ResourceMetadata;
-    use commons::api::connections::{DataConnection, DataFormat};
+    use arrow::array::Array;
 
     fn make_credentials() -> Arc<HashMap<String, String>> {
         Arc::new(HashMap::from([
@@ -268,38 +319,21 @@ mod tests {
         ]))
     }
 
-    fn make_connection(credentials: Arc<HashMap<String, String>>) -> DataConnectionResource {
-        DataConnectionResource {
-            metadata: ResourceMetadata {
-                id: "conn-1".to_string(),
-                tenant_id: Some("tenant-1".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: DataConnection {
-                name: "test-s3".to_string(),
-                data_connection_type_id: "s3-type".to_string(),
-                format: DataFormat::Tabular,
-                admin: Some(Admin::Secret {
-                    name: "test-s3".to_string(),
-                    secret: credentials,
-                }),
-                properties: HashMap::new(),
-            },
-            status: Default::default(),
-        }
-    }
-
     #[test]
     fn test_s3_connector_provider() {
-        let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 100);
+        let connector = S3Connector::new(
+            Duration::from_secs(300),
+            Duration::from_secs(60),
+            100,
+            ConnectorConfig::default(),
+        );
         assert_eq!(connector.provider(), "s3");
     }
 
     #[test]
     fn test_build_operator_success() {
         let creds = make_credentials();
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -309,7 +343,7 @@ mod tests {
             (KEY_ACCESS_KEY_ID.to_string(), "key".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_BUCKET));
     }
@@ -320,7 +354,7 @@ mod tests {
             (KEY_BUCKET.to_string(), "bucket".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_ACCESS_KEY_ID));
     }
@@ -329,42 +363,16 @@ mod tests {
     fn test_build_operator_with_endpoint() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
         creds.insert(KEY_ENDPOINT.to_string(), "http://minio:9000".to_string());
-        let result = build_operator(&creds);
+        let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_extract_credentials_success() {
-        let creds = make_credentials();
-        let conn = make_connection(creds.clone());
-        let result = extract_credentials(&conn);
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap().get(KEY_BUCKET).unwrap(), "test-bucket");
-    }
-
-    #[test]
-    fn test_extract_credentials_missing() {
-        let mut conn = make_connection(make_credentials());
-        conn.resource.admin = None;
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_extract_credentials_secret_ref() {
-        let mut conn = make_connection(make_credentials());
-        conn.resource.admin = Some(Admin::SecretRef {
-            secret_ref: "some-ref".to_string(),
-        });
-        let result = extract_credentials(&conn);
-        assert!(result.is_err());
     }
 
     #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: None,
+            config: ConnectorConfig::default(),
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
         assert_eq!(reader.detect_format("data/file.csv").unwrap(), FileFormat::Csv);
@@ -375,14 +383,16 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format_with_hint() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("parquet".to_string()),
+            config: ConnectorConfig::default(),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
         let reader = S3Reader {
-            operator: build_operator(&make_credentials()).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
             format_hint: Some("jsonl".to_string()),
+            config: ConnectorConfig::default(),
         };
         assert_eq!(
             reader.detect_format("data/no-extension").unwrap(),
@@ -414,5 +424,57 @@ mod tests {
     fn test_sql_like_combined() {
         assert!(!sql_like_match("data/cities.parquet", "%/_.parquet"));
         assert!(sql_like_match("data/x.parquet", "%/_.parquet"));
+    }
+
+    #[tokio::test]
+    async fn test_can_read_binary_exists() {
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        op.write("data/model.bin", vec![1u8, 2, 3]).await.unwrap();
+        let reader = S3Reader {
+            operator: op,
+            format_hint: None,
+            config: ConnectorConfig::default(),
+        };
+        let query = Arc::new(BinaryQuery::new("data/model.bin".to_string()));
+        assert!(reader.can_read_binary(query).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_can_read_binary_not_found() {
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        let reader = S3Reader {
+            operator: op,
+            format_hint: None,
+            config: ConnectorConfig::default(),
+        };
+        let query = Arc::new(BinaryQuery::new("does/not/exist.bin".to_string()));
+        assert!(reader.can_read_binary(query).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_read_binary_streams_data() {
+        let data = b"hello binary world".to_vec();
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        op.write("test.bin", data.clone()).await.unwrap();
+        let reader = S3Reader {
+            operator: op,
+            format_hint: None,
+            config: ConnectorConfig::default(),
+        };
+        let query = Arc::new(BinaryQuery::new("test.bin".to_string()));
+        let stream = reader.read_binary(query).await.unwrap();
+
+        let batches: Vec<_> = stream.try_collect().await.unwrap();
+        assert!(!batches.is_empty());
+
+        let mut result = Vec::new();
+        for batch in &batches {
+            assert_eq!(batch.num_columns(), 1);
+            let col = batch.column(0).as_any().downcast_ref::<BinaryArray>().unwrap();
+            for i in 0..col.len() {
+                result.extend_from_slice(col.value(i));
+            }
+        }
+        assert_eq!(result, data);
     }
 }

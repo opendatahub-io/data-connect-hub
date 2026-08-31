@@ -1,24 +1,25 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, Float64Array, Int32Array, StringArray};
+use arrow::array::{Array, BinaryArray, Float64Array, Int32Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
+use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connection_types::Secret;
 use commons::api::connections::{Admin, DataConnection};
-use commons::api::connections::{DataConnectionResource, DataFormat};
+use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
-use flight_service::flight::service::TabularDataService;
+use flight_service::flight::service::DataIngestionService;
 
 mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
 use opendal::{Operator, services::Memory};
+use prost::Message;
 use s3_connector::S3Connector;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -76,6 +77,15 @@ impl MetaStore for S3TestMetaStore {
         _tenant_id: &str,
         _uid: &str,
         _update_fn: Arc<dyn Fn(DataConnection) -> Result<DataConnection, MetaStoreError> + Send + Sync>,
+    ) -> Result<DataConnectionResource, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn update_data_connection_status(
+        &self,
+        _tenant_id: &str,
+        _uid: &str,
+        _update_fn: Arc<dyn Fn(DataConnectionStatus) -> Result<DataConnectionStatus, MetaStoreError> + Send + Sync>,
     ) -> Result<DataConnectionResource, MetaStoreError> {
         unimplemented!()
     }
@@ -211,7 +221,12 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
-    let connector = S3Connector::new(Duration::from_secs(300), Duration::from_secs(60), 10);
+    let connector = S3Connector::new(
+        Duration::from_secs(300),
+        Duration::from_secs(60),
+        10,
+        Default::default(),
+    );
     connector.insert_operator("s3-conn-1", operator).await;
 
     let connectors_registry = ConnectorsRegistry::new().with_connector(Arc::new(connector));
@@ -224,7 +239,7 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
         annotations: Arc::new(HashMap::new()),
     }]);
 
-    let service = TabularDataService::new(
+    let service = DataIngestionService::new(
         Arc::new(connectors_registry),
         Arc::new(meta_store),
         Arc::new(secret_store),
@@ -312,4 +327,43 @@ async fn test_flight_s3_read_csv() {
 
     let names = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(names.value(0), "alice");
+}
+
+#[tokio::test]
+async fn test_flight_s3_binary_download() {
+    let binary_data = b"binary model data for testing".to_vec();
+    let op = setup_memory_operator("models/model.bin", binary_data.clone()).await;
+
+    let url = start_flight_server(
+        S3TestMetaStore {
+            format: DataFormat::Binary,
+        },
+        op,
+    )
+    .await;
+
+    let channel = Channel::from_shared(url).unwrap().connect().await.unwrap();
+    let mut client = arrow_flight::FlightClient::new(channel);
+    client.add_header(X_DATA_CONNECTION_ID, "s3-conn-1").unwrap();
+    client.add_header(X_TENANT_ID, "default").unwrap();
+
+    let download_cmd = arrow_flight::sql::Any {
+        type_url: "dataconnethub.opendatahub.io/download".to_string(),
+        value: prost::bytes::Bytes::from("models/model.bin"),
+    };
+    let descriptor = FlightDescriptor::new_cmd(download_cmd.encode_to_vec());
+    let flight_info = client.get_flight_info(descriptor).await.unwrap();
+
+    let ticket = flight_info.endpoint[0].ticket.clone().unwrap();
+    let stream = client.do_get(ticket).await.unwrap();
+    let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+
+    let mut result = Vec::new();
+    for batch in &batches {
+        let col = batch.column(0).as_any().downcast_ref::<BinaryArray>().unwrap();
+        for i in 0..col.len() {
+            result.extend_from_slice(col.value(i));
+        }
+    }
+    assert_eq!(result, binary_data);
 }

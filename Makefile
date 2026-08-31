@@ -183,6 +183,52 @@ sdk-build: sdk-venv
 sdk-all: sdk-lint sdk-typecheck sdk-test
 
 # -------------------------------------------------------------------
+# OpenAPI docs
+# -------------------------------------------------------------------
+
+generate-openapi-docs:
+	@if command -v redocly >/dev/null 2>&1; then \
+		$(MAKE) _generate-openapi-docs-native; \
+	elif [ -n "$(CONTAINER_ENGINE)" ]; then \
+		$(MAKE) _generate-openapi-docs-container; \
+	else \
+		echo "redocly not found and container runtime not available."; \
+		exit 1; \
+	fi
+
+_generate-openapi-docs-native:
+	@echo "1. Bundling external spec to openapi.yaml (with x-internal removed)..."
+	redocly bundle external@latest --output docs/api/openapi.yaml --remove-unused-components
+	@echo "2. Bundling external spec to openapi.json (with x-internal removed)..."
+	redocly bundle external@latest --ext json --output docs/api/openapi.json
+	@echo "3. Bundling internal spec to openapi-internal.yaml..."
+	redocly bundle internal@latest --output docs/api/openapi-internal.yaml --remove-unused-components
+	@echo "4. Bundling internal spec to openapi-internal.json..."
+	redocly bundle internal@latest --ext json --output docs/api/openapi-internal.json
+	@echo "5. Building public HTML from external spec..."
+	redocly build-docs docs/api/openapi.json --output=docs/api/index-public.html
+	@echo "6. Building private HTML from internal spec..."
+	redocly build-docs docs/api/openapi-internal.json --output=docs/api/index-private.html
+	@echo "7. Copying public HTML to index.html..."
+	cp docs/api/index-public.html docs/api/index.html
+
+_generate-openapi-docs-container:
+	@echo "Generating OpenAPI docs using $(CONTAINER_ENGINE)..."
+	"$(CONTAINER_ENGINE)" run --rm \
+		--pull=newer \
+		-v "$$PWD:/spec:Z" \
+		--entrypoint sh \
+		docker.io/redocly/cli -c ' \
+			echo "1. Bundling external spec to openapi.yaml (with x-internal removed)..." && redocly bundle external@latest --output docs/api/openapi.yaml --remove-unused-components && \
+			echo "2. Bundling external spec to openapi.json (with x-internal removed)..." && redocly bundle external@latest --ext json --output docs/api/openapi.json && \
+			echo "3. Bundling internal spec to openapi-internal.yaml (with x-internal removed)..." && redocly bundle internal@latest --output docs/api/openapi-internal.yaml --remove-unused-components && \
+			echo "4. Bundling internal spec to openapi-internal.json (with x-internal removed)..." && redocly bundle internal@latest --ext json --output docs/api/openapi-internal.json && \
+			echo "5. Building public HTML from external spec..." && redocly build-docs docs/api/openapi.json --output=docs/api/index-public.html && \
+			echo "6. Building private HTML from internal spec..." && redocly build-docs docs/api/openapi-internal.json --output=docs/api/index-private.html && \
+			echo "7. Copying public HTML to index.html..." && cp docs/api/index-public.html docs/api/index.html \
+		'
+
+# -------------------------------------------------------------------
 # Dev Setup
 # -------------------------------------------------------------------
 

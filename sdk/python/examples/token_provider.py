@@ -9,11 +9,11 @@ Usage:
 
 Requires:
     - Execution inside a Kubernetes Pod (reads the in-cluster SA token)
-    - A running DCH stack (rest-service + flight-service)
+    - A running DCH gateway
     - pip install httpx  (already a dependency of the SDK)
 
 Set environment variables to override defaults:
-    DCH_REST_URL, DCH_FLIGHT_URL, DCH_TENANT_ID,
+    DCH_HOST, DCH_TENANT_ID,
     K8S_NAMESPACE, K8S_SERVICE_ACCOUNT, K8S_SA_ISSUER,
     K8S_API, K8S_CA_CERT
 """
@@ -55,8 +55,7 @@ def get_k8s_token() -> str:
 
 
 client = DataConnectClient(
-    rest_url=os.getenv("DCH_REST_URL", "http://localhost:8080"),
-    flight_url=os.getenv("DCH_FLIGHT_URL", "grpc://localhost:50051"),
+    endpoint=os.getenv("DCH_HOST", "localhost:8443"),
     token_provider=get_k8s_token,
     tenant_id=os.getenv("DCH_TENANT_ID", "default"),
 )
