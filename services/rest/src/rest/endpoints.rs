@@ -9,6 +9,7 @@ use crate::utils::default_secret_labels;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
+use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::secret::Secret;
