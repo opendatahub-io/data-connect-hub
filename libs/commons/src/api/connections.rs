@@ -1,7 +1,6 @@
 use crate::api::ResourceMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
@@ -12,7 +11,7 @@ pub enum Admin {
 
     Secret {
         name: String,
-        secret: Arc<HashMap<String, String>>,
+        secret: HashMap<String, String>,
     },
 }
 
@@ -31,6 +30,26 @@ pub enum DataFormat {
     #[serde(rename = "binary")]
     Binary,
 }
+
+impl std::fmt::Display for DataFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DataFormat::Tabular => write!(f, "tabular"),
+            DataFormat::Binary => write!(f, "binary"),
+        }
+    }
+}
+
+impl DataFormat {
+    pub fn from_string(s: &str) -> Result<DataFormat, String> {
+        match s {
+            "tabular" => Ok(DataFormat::Tabular),
+            "binary" => Ok(DataFormat::Binary),
+            _ => Err(format!("invalid data format: {}", s)),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DataConnectionState {
     /// The data connection is ready to be used for ingestion or for secret consumption

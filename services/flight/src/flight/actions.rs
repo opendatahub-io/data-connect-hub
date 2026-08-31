@@ -22,21 +22,18 @@ const ACTION_CHECK_DATA_CONNECTION: &str = "CheckDataConnection";
 const ACTION_CHECK_CREDENTIALS: &str = "CheckCredentials";
 
 struct InlineCredsResolver {
-    secret: Arc<HashMap<String, String>>,
+    secret: HashMap<String, String>,
 }
 
 impl InlineCredsResolver {
-    pub fn new(secret: Arc<HashMap<String, String>>) -> Self {
+    pub fn new(secret: HashMap<String, String>) -> Self {
         Self { secret }
     }
 }
 
 #[async_trait::async_trait]
 impl CredentialsResolver for InlineCredsResolver {
-    async fn resolve(
-        &self,
-        _connection: &DataConnectionResource,
-    ) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
+    async fn resolve(&self, _connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
         Ok(self.secret.clone())
     }
 }
@@ -86,12 +83,11 @@ impl DataIngestionService {
             .remove("data_connection_type_id")
             .ok_or(Status::invalid_argument("data_connection_type_id is required"))?;
 
-        let credentials: Arc<HashMap<String, String>> = Arc::new(
-            keys.into_iter()
-                .filter(|(k, _)| k.starts_with("secret."))
-                .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
-                .collect(),
-        );
+        let credentials: HashMap<String, String> = keys
+            .into_iter()
+            .filter(|(k, _)| k.starts_with("secret."))
+            .map(|(k, v)| (k.strip_prefix("secret.").unwrap().to_string(), v))
+            .collect();
 
         let (data_connection_type, connector) = self.get_connector_by_type_id(tenant_id, &dct_id).await?;
 

@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::api::ResourceList;
-use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Secret};
+use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus};
 use crate::api::connections::DataConnectionStatus;
 use crate::api::connections::{DataConnection, DataConnectionResource};
 use crate::api::errors::{MetaStoreError, SecretStoreError};
+use crate::api::secret::Secret;
 
 /// Persistent store for data connection and data connection type metadata.
 #[async_trait::async_trait]
@@ -92,7 +93,7 @@ pub trait MetaStore {
 #[async_trait::async_trait]
 pub trait SecretStore {
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError>;
-    async fn create_secret(&self, secret: &Secret) -> Result<(), SecretStoreError>;
+    async fn create_secret(&self, secret: &Secret, overwrite: bool) -> Result<(), SecretStoreError>;
     async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError>;
     async fn set_secret_labels(
         &self,

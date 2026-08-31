@@ -626,10 +626,7 @@ impl FlightSqlService for DataIngestionService {
 
 #[async_trait::async_trait]
 impl CredentialsResolver for DataIngestionService {
-    async fn resolve(
-        &self,
-        connection: &DataConnectionResource,
-    ) -> Result<Arc<HashMap<String, String>>, ConnectorError> {
+    async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
         match (&connection.metadata.tenant_id, &connection.resource.admin) {
             (Some(tenant_id), Some(Admin::SecretRef { secret_ref })) => {
                 let secret = self

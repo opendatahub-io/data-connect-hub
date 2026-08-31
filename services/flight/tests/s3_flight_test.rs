@@ -6,10 +6,10 @@ use arrow::record_batch::RecordBatch;
 use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
-use commons::api::connection_types::Secret;
 use commons::api::connections::{Admin, DataConnection};
 use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
+use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
@@ -234,9 +234,9 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
     let secret_store = InMemorySecretStore::new(vec![Secret {
         name: "s3_creds".to_string(),
         namespace: "default".to_string(),
-        properties: Arc::new(test_credentials()),
-        labels: Arc::new(HashMap::new()),
-        annotations: Arc::new(HashMap::new()),
+        properties: test_credentials(),
+        labels: None,
+        annotations: None,
     }]);
 
     let service = DataIngestionService::new(

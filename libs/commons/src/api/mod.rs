@@ -3,6 +3,7 @@ pub mod connections;
 pub mod connector;
 pub mod creds;
 pub mod errors;
+pub mod secret;
 pub mod storage;
 
 pub const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";
