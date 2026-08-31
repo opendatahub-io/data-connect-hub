@@ -16,11 +16,7 @@ pip install "sdk/python[flight]"
 
 ## Quick Start
 
-The client takes a single gateway `endpoint` — a host or `host:port`, no scheme
-required — and derives both the REST (`https://`) and Flight SQL
-(`grpc+tls://`) URLs from it.
-Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control
-certificate verification.
+The client takes a single gateway `endpoint` — a host or `host:port`, no scheme required — and derives both the REST (`https://`) and Flight SQL (`grpc+tls://`) URLs from it. Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control certificate verification.
 
 ```python
 from data_connect_hub import CredentialsRef, DataConnectClient
@@ -59,14 +55,11 @@ df = table.to_pandas()
 
 ## API Reference
 
-The REST API is the source of truth for every model below. See the OpenAPI spec at
-[`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) (rendered:
-[`docs/api/index.html`](../../docs/api/index.html)) for the full request/response schemas.
+The REST API is the source of truth for every model below. See the OpenAPI spec at [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) for the full request/response schemas; [`docs/api/index.html`](../../docs/api/index.html) is the same spec rendered with Redoc (open it locally — GitHub shows the HTML source rather than rendering it).
 
 ### Connection Types (REST)
 
-Connection types describe a category of data source (e.g. PostgreSQL). They define
-the provider backend and the credential fields required to connect.
+Connection types describe a category of data source (e.g. PostgreSQL). They define the provider backend and the credential fields required to connect.
 
 ```python
 client.list_connection_types() -> list[ConnectionType]
@@ -80,14 +73,16 @@ client.delete_connection_type(type_id) -> None
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique identifier — this is the value you pass as the `type_id` argument to `get_connection_type` / `update_connection_type` / `delete_connection_type`, and as `connection_type_id` to `create_connection` |
+| `id` | `str` | Unique identifier |
 | `name` | `str` | Display name |
 | `provider` | `str` | Backend driver (e.g. `"postgres"`) |
 | `description` | `str \| None` | Optional description |
 | `tenant_id` | `str` | Owning namespace |
 | `created_at` | `datetime \| None` | Creation timestamp |
 | `updated_at` | `datetime \| None` | Last update timestamp |
-| `credentials_fields` | `list[CredentialField]` | Schema of credential fields required to connect |
+| `credentials_fields` | `list[CredentialField]` | Credential fields required to connect |
+
+Pass `id` as the `type_id` argument to `get_connection_type`, `update_connection_type`, and `delete_connection_type` — and as `connection_type_id` to `create_connection`.
 
 #### `CredentialField`
 
@@ -99,36 +94,24 @@ Describes a single input field in the connection credential form.
 | `label` | `str` | Human-readable label |
 | `description` | `str \| None` | Optional help text |
 | `required` | `bool` | Whether the field must be provided |
-| `type` | `str` | Rendering hint for the credential form — see [Field types](#field-types) below |
+| `type` | `str` | Rendering hint for the form (see below) |
 | `enum_values` | `list[EnumValue] \| None` | Allowed values when `type` is `"enum"` |
 | `default_value` | `str \| None` | Optional default value |
 
 `EnumValue` has two fields: `value` (the stored string) and `label` (the display string).
 
-##### Field types
-
-`type` is a free-form string that tells a UI how to render the input. The server does
-**not** validate or interpret it — the only server-side check on credentials is that
-every field with `required=True` is present in the submitted secret. See the `Field`
-schema in [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) for the authoritative
-definition.
+**`type` values:**
 
 | Value | Meaning |
 |---|---|
-| `"string"` | Free-text single-line input. Used by all of the connection types shipped in [`config/connection-types/`](../../config/connection-types/). |
-| `"enum"` | Pick one of `enum_values`. Set `enum_values` when you use this. |
+| `"string"` | Free-text single-line input |
+| `"enum"` | One of `enum_values` |
 
-Because the value is not constrained, a connection type you create yourself may use
-any other string (e.g. `"password"` to hint that a client should mask the input);
-clients that do not recognize it should fall back to treating it as `"string"`.
-
-Whatever the `type`, the value the user supplies is stored verbatim as a key in the
-connection's Kubernetes secret, under the field's `name`.
+`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every connection type shipped in [`config/connection-types/`](../../config/connection-types/) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml).
 
 ### Connection Management (REST)
 
-A connection pairs a connection type with the actual credentials (stored in a Kubernetes
-secret) and tracks the live status of the data source.
+A connection pairs a connection type with the actual credentials (stored in a Kubernetes secret) and tracks the live status of the data source.
 
 ```python
 client.list_connections() -> list[DataConnection]
@@ -142,48 +125,35 @@ client.delete_connection(connection_id) -> None
 
 | Field | Type | Description |
 |---|---|---|
-| `id` | `str` | Unique identifier — this is the value you pass as the `connection_id` argument to `get_connection` / `update_connection` / `delete_connection` and to the Flight SQL methods |
+| `id` | `str` | Unique identifier |
 | `name` | `str` | Display name |
 | `data_connection_type_id` | `str` | `id` of the associated `ConnectionType` |
-| `format` | `"tabular" \| "binary"` | Data format of the source — see [Data formats](#data-formats) below |
+| `format` | `"tabular" \| "binary"` | Data format of the source (see below) |
 | `tenant_id` | `str` | Owning namespace |
 | `created_at` | `datetime` | Creation timestamp |
 | `updated_at` | `datetime` | Last update timestamp |
 | `admin` | `AdminSecretRef \| AdminSecret \| None` | Credential reference or inline credentials |
-| `properties` | `dict[str, str]` | Additional driver-specific properties (values masked in repr) |
+| `properties` | `dict[str, str]` | Driver-specific properties (values masked in repr) |
 | `status` | `DataConnectionStatus` | Live connection health |
 
-##### Data formats
+Pass `id` as the `connection_id` argument to `get_connection`, `update_connection`, `delete_connection`, and the Flight SQL methods.
 
-`format` tells the server how the source is read; it is fixed per connection and
-determines which read path is available.
+**`format` values:**
 
-| Value | Meaning |
-|---|---|
-| `"tabular"` | The source is queried with SQL and returns rows. Use the [Flight SQL methods](#tabular-data-queries-flight-sql) (`read`, `read_pandas`, `read_batches`, `get_tables`). Supported by the `postgres`, `sqlite`, `elasticsearch`, `milvus`, `neo4j`, `uri`, and `s3` providers. |
-| `"binary"` | The source serves opaque objects/blobs addressed by path rather than queried with SQL — e.g. an object in an S3 bucket or a file behind an HTTP endpoint. Supported by the `s3` and `uri` providers only. |
+| Value | Meaning | Providers |
+|---|---|---|
+| `"tabular"` | Queried with SQL, returns rows | `postgres`, `sqlite`, `elasticsearch`, `milvus`, `neo4j`, `uri`, `s3` |
+| `"binary"` | Opaque objects addressed by path | `s3`, `uri` |
 
-Binary connections are created, listed, and deleted through the same REST methods as
-tabular ones. Reading their contents uses a separate Flight download path that **this
-SDK does not wrap yet** — there is no `client.download(...)`. Until it is added, read
-binary sources with `pyarrow.flight` directly; see
-[`hack/py-tools/samples/binary_download.py`](../../hack/py-tools/samples/binary_download.py)
-for a worked example.
+Tabular connections are read with the [Flight SQL methods](#tabular-data-queries-flight-sql). Binary connections are managed through the same REST methods as tabular ones, but reading their contents uses a separate Flight download path that **this SDK does not wrap yet** — there is no `client.download(...)`. Until it is added, use `pyarrow.flight` directly; see [`hack/py-tools/samples/binary_download.py`](../../hack/py-tools/samples/binary_download.py).
+
+You normally set `format` once, at `create_connection`, but it is not immutable: `update_connection(connection_id, data_format=...)` changes it, and the server accepts the new value without checking it against the provider or re-evaluating `status`. So switching a `postgres` connection to `binary` succeeds, leaves `status` reporting `ready`, and fails only when you try to read.
 
 **`admin` types:**
 
-- `AdminSecretRef(secret_ref="my-secret")` — the **name** of an existing Kubernetes
-  secret. The server looks it up in the **tenant namespace** — the namespace given by
-  the connection's `tenant_id` (the `tenant_id` you passed to `DataConnectClient`).
-  Cross-namespace references are not supported, so this is a bare secret name, not a
-  `namespace/name` pair. If the secret is missing or unreadable, the connection's
-  `status.state` becomes `"not_ready"`.
-- `AdminSecret(name="...", secret={"key": "value"})` — inline credentials. The server
-  creates a Kubernetes secret with this `name` in the tenant namespace, then stores the
-  connection with `admin` rewritten to `AdminSecretRef(secret_ref=name)` — so reads of
-  the connection always return the `AdminSecretRef` form. Secret values are masked in
-  `repr`. The keys of `secret` must cover every `CredentialField` on the connection type
-  that has `required=True`.
+`AdminSecretRef(secret_ref="my-secret")` — the **name** of an existing Kubernetes secret. The server looks it up in the tenant namespace, i.e. the namespace named by the connection's `tenant_id` (the `tenant_id` you passed to `DataConnectClient`). This is a bare secret name, not a `namespace/name` pair; cross-namespace references are not supported. If the secret is missing or unreadable, `status.state` becomes `"not_ready"`.
+
+`AdminSecret(name="...", secret={"key": "value"})` — inline credentials. The server creates a Kubernetes secret with this `name` in the tenant namespace, then stores the connection with `admin` rewritten to `AdminSecretRef(secret_ref=name)`, so subsequent reads always return the `AdminSecretRef` form. The keys of `secret` must cover every `CredentialField` on the connection type that has `required=True`. Values are masked in `repr`.
 
 **`DataConnectionStatus`:**
 
@@ -203,22 +173,16 @@ client.get_tables(connection_id) -> pyarrow.Table         # table metadata
 client.server_info() -> dict                              # server metadata
 ```
 
-`read_batches` returns a generator that streams results instead of buffering
-the full result set in memory.  The underlying cursor and connection are
-closed automatically when the generator is exhausted or garbage-collected:
+`read_batches` returns a generator that streams results instead of buffering the full result set in memory. The underlying cursor and connection are closed automatically when the generator is exhausted or garbage-collected:
 
 ```python
 for batch in client.read_batches("SELECT * FROM prompts", "conn-uuid"):
     process(batch)
 ```
 
-A server-side failure surfaced mid-stream raises `DCHQueryError`.  Automatic
-token refresh applies when the stream is opened; an authentication failure
-that occurs after the stream is open is not retried.
+A server-side failure surfaced mid-stream raises `DCHQueryError`. Automatic token refresh applies when the stream is opened; an authentication failure that occurs after the stream is open is not retried.
 
-These require the `flight` extra. On a REST-only install the client still
-imports and all REST calls work; the first Flight call raises `DCHConfigError`
-telling you to install `data-connect-hub[flight]`.
+These require the `flight` extra. On a REST-only install the client still imports and all REST calls work; the first Flight call raises `DCHConfigError` telling you to install `data-connect-hub[flight]`.
 
 ## Requirements
 
