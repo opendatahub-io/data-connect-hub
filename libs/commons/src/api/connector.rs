@@ -12,10 +12,7 @@ pub type QueryOutput = Result<OutputStream, ConnectorError>;
 
 #[async_trait::async_trait]
 pub trait CredentialsResolver: Send + Sync {
-    async fn resolve(
-        &self,
-        connection: &DataConnectionResource,
-    ) -> Result<Arc<HashMap<String, String>>, ConnectorError>;
+    async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError>;
 }
 
 pub struct Query {

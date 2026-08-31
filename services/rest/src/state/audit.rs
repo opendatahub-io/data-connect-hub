@@ -209,10 +209,11 @@ mod tests {
     use commons::api::ResourceList;
     use commons::api::ResourceMetadata;
     use commons::api::connection_types::{
-        DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Field, Secret,
+        DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Field,
     };
     use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus, DataFormat};
     use commons::api::errors::{MetaStoreError, SecretStoreError};
+    use commons::api::secret::Secret;
     use std::collections::HashMap;
     use std::sync::RwLock;
 
@@ -338,7 +339,7 @@ mod tests {
                 .clone()
                 .ok_or_else(|| SecretStoreError::SecretNotFound("not found".into()))
         }
-        async fn create_secret(&self, _: &Secret) -> Result<(), SecretStoreError> {
+        async fn create_secret(&self, _: &Secret, _: bool) -> Result<(), SecretStoreError> {
             unimplemented!()
         }
         async fn delete_secret(&self, _: &str, _: &str) -> Result<(), SecretStoreError> {
@@ -409,9 +410,9 @@ mod tests {
         Secret {
             name: "creds".to_string(),
             namespace: "tenant".to_string(),
-            properties: Arc::new(keys.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()),
-            labels: Arc::new(HashMap::new()),
-            annotations: Arc::new(HashMap::new()),
+            properties: keys.into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect(),
+            labels: None,
+            annotations: None,
         }
     }
 

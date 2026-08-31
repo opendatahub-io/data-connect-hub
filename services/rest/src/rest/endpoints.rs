@@ -5,11 +5,14 @@ use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_connection_type;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
+use crate::utils::default_secret_labels;
 use crate::utils::transform_data_connection;
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
+use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
+use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
@@ -97,12 +100,9 @@ pub async fn create_connection(
             .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
 
         let secret = &mut secret.clone();
-        secret.labels = Arc::new(HashMap::from([(
-            "dataconnecthub.opendatahub.io/attached".to_string(),
-            "true".to_string(),
-        )]));
+        secret.labels = Some(default_secret_labels());
 
-        service.secret_store.create_secret(secret).await?;
+        service.secret_store.create_secret(secret, false).await?;
     }
 
     let connection_res = service
@@ -299,6 +299,56 @@ pub async fn test_credentials(
     Ok(HttpResponse::NoContent().finish())
 }
 
+pub async fn export_connection(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    parts: web::Path<(String, String)>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("export_connection: for tenant {:?}", ctx.tenant_id);
+    let (id, secret_name) = parts.into_inner();
+
+    let connection = service
+        .meta_store
+        .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+
+    let mut props = HashMap::new();
+
+    if let Some(Admin::SecretRef { secret_ref }) = &connection.resource.admin {
+        // Export the credentials into the new secret
+        let existing_secret = service.secret_store.get_secret(&ctx.tenant_id, secret_ref).await?;
+        for (key, value) in existing_secret.properties.iter() {
+            props.insert(key.to_string(), value.to_string());
+        }
+    }
+
+    props.insert("data_connection.id".to_string(), connection.metadata.id.to_string());
+    props.insert(
+        "data_connection_type.id".to_string(),
+        connection.resource.data_connection_type_id.clone(),
+    );
+    props.insert("data_connection.name".to_string(), connection.resource.name.clone());
+    props.insert(
+        "data_connection.format".to_string(),
+        connection.resource.format.to_string(),
+    );
+    for (key, value) in connection.resource.properties.iter() {
+        props.insert(format!("data_connection.properties.{}", key), value.to_string());
+    }
+
+    let secret = Secret {
+        name: secret_name,
+        namespace: ctx.tenant_id.clone(),
+        properties: props,
+        labels: Some(default_secret_labels()),
+        annotations: None,
+    };
+
+    service.secret_store.create_secret(&secret, true).await?;
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
@@ -308,13 +358,15 @@ mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
-    use commons::api::connection_types::Secret;
+    use commons::api::connections::Admin;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
     use commons::api::errors::SecretStoreError;
+    use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
     use commons::api::storage::SecretStore;
     use std::collections::HashMap;
+    use std::sync::RwLock;
 
     use super::*;
     use crate::rest::errors::json_config;
@@ -351,8 +403,13 @@ mod tests {
                         name: "my-pg".to_string(),
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
-                        admin: None,
-                        properties: std::collections::HashMap::new(),
+                        admin: Some(Admin::SecretRef {
+                            secret_ref: "my-pg-creds".to_string(),
+                        }),
+                        properties: HashMap::from([
+                            ("host".to_string(), "localhost".to_string()),
+                            ("port".to_string(), "5432".to_string()),
+                        ]),
                     },
                     status: Default::default(),
                 })
@@ -587,15 +644,45 @@ mod tests {
         }
     }
 
-    struct StubSecretStore;
+    struct StubSecretStore {
+        secrets: RwLock<HashMap<String, Secret>>,
+    }
+
+    impl StubSecretStore {
+        fn new() -> Self {
+            let mut secrets = HashMap::new();
+            secrets.insert(
+                "test-tenant/my-pg-creds".to_string(),
+                Secret {
+                    name: "my-pg-creds".to_string(),
+                    namespace: "test-tenant".to_string(),
+                    properties: HashMap::from([
+                        ("username".to_string(), "pg_user".to_string()),
+                        ("password".to_string(), "pg_pass".to_string()),
+                    ]),
+                    labels: None,
+                    annotations: None,
+                },
+            );
+            Self {
+                secrets: RwLock::new(secrets),
+            }
+        }
+    }
 
     #[async_trait::async_trait]
     impl SecretStore for StubSecretStore {
-        async fn get_secret(&self, _n: &str, _k: &str) -> Result<Secret, SecretStoreError> {
-            unimplemented!()
+        async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError> {
+            let secrets = self.secrets.read().unwrap();
+            secrets
+                .get(&format!("{namespace}/{name}"))
+                .cloned()
+                .ok_or(SecretStoreError::SecretNotFound(format!("{namespace}/{name}")))
         }
-        async fn create_secret(&self, _s: &Secret) -> Result<(), SecretStoreError> {
-            unimplemented!()
+        async fn create_secret(&self, secret: &Secret, _overwrite: bool) -> Result<(), SecretStoreError> {
+            let mut secrets = self.secrets.write().unwrap();
+            secrets.insert(format!("{}/{}", secret.namespace, secret.name), secret.clone());
+            Ok(())
         }
         async fn delete_secret(&self, _n: &str, _k: &str) -> Result<(), SecretStoreError> {
             unimplemented!()
@@ -613,7 +700,7 @@ mod tests {
     fn test_service() -> web::Data<ApiService> {
         web::Data::new(ApiService::new(
             Arc::new(StubMetaStore),
-            Arc::new(StubSecretStore),
+            Arc::new(StubSecretStore::new()),
             FlightClient::new("http://localhost:50051".to_string()),
         ))
     }
@@ -633,6 +720,10 @@ mod tests {
                 .route("/connection-types/{id}", web::patch().to(patch_connection_type))
                 .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                 .route("/ingestion/{id}", web::get().to(get_ingestion_data))
+                .route(
+                    "/connections/{id}/exports/secrets/{secret_name}",
+                    web::put().to(export_connection),
+                )
                 .default_service(web::route().to(not_found)),
         );
     }
@@ -1114,5 +1205,85 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "invalid_json");
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_includes_connection_fields() {
+        let svc = test_service();
+        let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let secret_store = svc.secret_store.clone();
+        let secret = secret_store
+            .get_secret("test-tenant", "exported-secret")
+            .await
+            .expect("exported secret should exist");
+
+        assert_eq!(secret.properties["data_connection.id"], "conn-1");
+        assert_eq!(secret.properties["data_connection.name"], "my-pg");
+        assert_eq!(secret.properties["data_connection_type.id"], "ct-1");
+        assert_eq!(secret.properties["data_connection.format"], "tabular");
+        assert_eq!(secret.properties["data_connection.properties.host"], "localhost");
+        assert_eq!(secret.properties["data_connection.properties.port"], "5432");
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_includes_credentials() {
+        let svc = test_service();
+        let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        test::call_service(&app, req).await;
+
+        let secret = svc
+            .secret_store
+            .get_secret("test-tenant", "exported-secret")
+            .await
+            .expect("exported secret should exist");
+
+        assert_eq!(secret.properties["username"], "pg_user");
+        assert_eq!(secret.properties["password"], "pg_pass");
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_not_found() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri("/api/v1/data/connections/nonexistent/exports/secrets/exported-secret")
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_cross_tenant() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .insert_header(("x-tenant-id", "other-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
     }
 }

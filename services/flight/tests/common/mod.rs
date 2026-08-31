@@ -1,5 +1,5 @@
-use commons::api::connection_types::Secret;
 use commons::api::errors::SecretStoreError;
+use commons::api::secret::Secret;
 use commons::api::storage::SecretStore;
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -32,7 +32,7 @@ impl SecretStore for InMemorySecretStore {
             )))
     }
 
-    async fn create_secret(&self, secret: &Secret) -> Result<(), SecretStoreError> {
+    async fn create_secret(&self, secret: &Secret, _overwrite: bool) -> Result<(), SecretStoreError> {
         let mut secrets = self.secrets.write().unwrap();
         secrets.insert(format!("{}/{}", secret.namespace, secret.name), secret.clone());
         Ok(())

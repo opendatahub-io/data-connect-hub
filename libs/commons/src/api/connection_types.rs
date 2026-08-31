@@ -2,7 +2,6 @@ use crate::api::ResourceMetadata;
 use crate::api::errors::DataConnectionTypeError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct EnumValue {
@@ -23,26 +22,6 @@ pub struct Field {
     pub enum_values: Option<Vec<EnumValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct Secret {
-    pub name: String,
-    pub namespace: String,
-    pub properties: Arc<HashMap<String, String>>,
-    pub labels: Arc<HashMap<String, String>>,
-    pub annotations: Arc<HashMap<String, String>>,
-}
-
-impl std::fmt::Debug for Secret {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Secret")
-            .field("name", &self.name)
-            .field("namespace", &self.namespace)
-            .field("properties", &"[REDACTED]")
-            .field("labels", &self.labels)
-            .finish()
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
