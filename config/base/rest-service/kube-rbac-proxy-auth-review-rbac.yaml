@@ -18,7 +18,7 @@ subjects:
   # This namespace follows the controller default.
   # For standalone installs in a different namespace, patch this subject namespace.
   - kind: ServiceAccount
-    name: data-connect-hub-sa
+    name: rest-service-sa
     namespace: opendatahub
 roleRef:
   apiGroup: rbac.authorization.k8s.io

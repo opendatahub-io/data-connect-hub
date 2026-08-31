@@ -583,7 +583,7 @@ Conditions: `Ready`, `ProvisioningSucceeded`, `Degraded`,
 | Deployment | `dch-flight-service` | Arrow Flight gRPC on port 8443 |
 | Service | `dch-rest-service` | ClusterIP, port 8443 |
 | Service | `dch-flight-service` | ClusterIP, port 8443 |
-| ServiceAccount | `dch-data-connect-hub-sa` | For rest-service |
+| ServiceAccount | `dch-rest-service-sa` | For rest-service |
 | ServiceAccount | `dch-flight-service-sa` | For flight-service |
 | ConfigMap | `dch-rest-service-config` | Server config (config.toml) |
 | ConfigMap | `dch-flight-service-config` | Server config (config.toml) |

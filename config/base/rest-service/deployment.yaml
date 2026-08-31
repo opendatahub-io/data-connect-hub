@@ -16,7 +16,7 @@ spec:
         app.kubernetes.io/name: rest-service
         app.kubernetes.io/part-of: data-connect-hub
     spec:
-      serviceAccountName: data-connect-hub-sa
+      serviceAccountName: rest-service-sa
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true

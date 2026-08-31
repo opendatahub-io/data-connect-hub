@@ -57,11 +57,11 @@ replacements:
     - subjects.[name=flight-service-sa].name
 - source:
     kind: ServiceAccount
-    name: data-connect-hub-sa
+    name: rest-service-sa
     fieldPath: metadata.name
   targets:
   - select:
       kind: ClusterRoleBinding
       name: kube-rbac-proxy-auth-review
     fieldPaths:
-    - subjects.[name=data-connect-hub-sa].name
+    - subjects.[name=rest-service-sa].name
