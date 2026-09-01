@@ -12,7 +12,7 @@
 
 set -euo pipefail
 
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-dch}"
+NAMESPACE=""
 APP_NAME="e2e-uri-server"
 
 usage() {

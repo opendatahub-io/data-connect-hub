@@ -756,8 +756,25 @@ resources need to be touched):
    the shared default one. HAProxy refuses to negotiate ALPN on routes
    using the cluster's shared default certificate (to avoid connection
    coalescing across unrelated hostnames), so a Route relying on the
-   default cert will still fail step 1 alone. Reuse the cluster's existing
-   trusted wildcard cert so client trust is unaffected:
+   default cert will still fail step 1 alone.
+
+   Check first — the Route may already carry a route-specific certificate,
+   in which case ALPN already works and you can **skip this step**. On
+   `*.openshiftapps.com` clusters (e.g. ROSA) the apps domain is served
+   with a per-domain certificate, so the Route usually already has one; on
+   self-managed OpenShift the Route falls back to the shared default
+   (self-signed) certificate and this step is required. This is not
+   ROSA-specific — it depends only on whether the Route has its own cert:
+
+   ```console
+   oc get route data-science-gateway -n openshift-ingress \
+     -o jsonpath='{.spec.tls.certificate}' | head -c 1
+   # Non-empty output = a route-specific cert is already set; skip to the
+   # DestinationRule note below. Empty = continue.
+   ```
+
+   If empty, reuse the cluster's existing trusted wildcard cert so client
+   trust is unaffected:
 
    ```console
    oc get secret <default-ingress-cert-secret> -n openshift-ingress \

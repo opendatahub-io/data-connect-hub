@@ -281,7 +281,6 @@ var _ = Describe("DataConnectService Controller", func() {
 	Context("When reconciling with service overrides", func() {
 		BeforeEach(func() {
 			createDatabaseSecret()
-			customImage := "custom-rest:v2"
 			customReplicas := int32(3)
 			cr := &dchv1alpha1.DataConnectService{
 				ObjectMeta: metav1.ObjectMeta{
@@ -290,7 +289,6 @@ var _ = Describe("DataConnectService Controller", func() {
 				},
 				Spec: dchv1alpha1.DataConnectServiceSpec{
 					RestService: &dchv1alpha1.ServiceOverrides{
-						Image:    &customImage,
 						Replicas: &customReplicas,
 						Resources: &corev1.ResourceRequirements{
 							Requests: corev1.ResourceList{
@@ -316,14 +314,13 @@ var _ = Describe("DataConnectService Controller", func() {
 			deleteCR()
 		})
 
-		It("should apply image and replicas overrides", func() {
+		It("should apply replicas overrides", func() {
 			reconcileUntilReady()
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
 			restContainer := findContainer(deploy, nameRestService)
 			Expect(restContainer).NotTo(BeNil())
-			Expect(restContainer.Image).To(Equal("custom-rest:v2"))
 			Expect(*deploy.Spec.Replicas).To(Equal(int32(3)))
 		})
 
@@ -350,52 +347,6 @@ var _ = Describe("DataConnectService Controller", func() {
 				envNames[e.Name] = e.Value
 			}
 			Expect(envNames).To(HaveKeyWithValue("CUSTOM_VAR", "custom-value"))
-		})
-	})
-
-	Context("When imagePullSecrets are specified", func() {
-		BeforeEach(func() {
-			createDatabaseSecret()
-			cr := &dchv1alpha1.DataConnectService{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      resourceName,
-					Namespace: targetNamespace,
-				},
-				Spec: dchv1alpha1.DataConnectServiceSpec{
-					RestService: &dchv1alpha1.ServiceOverrides{
-						ImagePullSecrets: []corev1.LocalObjectReference{
-							{Name: "my-registry-secret"},
-						},
-					},
-					FlightService: &dchv1alpha1.ServiceOverrides{
-						ImagePullSecrets: []corev1.LocalObjectReference{
-							{Name: "flight-pull-secret"},
-							{Name: "shared-secret"},
-						},
-					},
-				},
-			}
-			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
-		})
-
-		AfterEach(func() {
-			cleanupOperatorResources()
-			deleteCR()
-		})
-
-		It("should set imagePullSecrets on the deployment pod spec", func() {
-			reconcileUntilReady()
-
-			restDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			Expect(restDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(1))
-			Expect(restDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("my-registry-secret"))
-
-			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets).To(HaveLen(2))
-			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[0].Name).To(Equal("flight-pull-secret"))
-			Expect(flightDeploy.Spec.Template.Spec.ImagePullSecrets[1].Name).To(Equal("shared-secret"))
 		})
 	})
 

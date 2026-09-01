@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 # Seed Elasticsearch with e2e test data via a Kubernetes pod.
 #
-# Usage:
-#   e2e/scripts/seed-elasticsearch-data.sh -e https://elasticsearch-master:9200 -n <namespace> -p <password>
+# Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
-# Environment overrides (command-line flags take precedence):
-#   DCH_ES_URI              Elasticsearch endpoint   (required)
-#   DCH_ES_PASSWORD         elastic user password    (optional)
-#   DCH_SERVICE_NAMESPACE   Namespace for seed pod   (default: dch)
+# Usage:
+#   e2e/scripts/seed-elasticsearch-data.sh -e <es-uri> -n <namespace> -p <password>
 
 set -euo pipefail
 
-ENDPOINT="${DCH_ES_URI:-}"
-PASSWORD="${DCH_ES_PASSWORD:-}"
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-dch}"
+ENDPOINT=""
+PASSWORD=""
+NAMESPACE=""
 INDEX="dch_e2e_cities"
 
 usage() {
@@ -31,7 +28,7 @@ while getopts "e:n:p:h" opt; do
     esac
 done
 
-[[ -n "$ENDPOINT" ]] || { echo "error: Elasticsearch URI is required (-e or DCH_ES_URI)" >&2; exit 1; }
+[[ -n "$ENDPOINT" ]] || { echo "error: Elasticsearch URI is required (-e)" >&2; exit 1; }
 
 POD_NAME="e2e-es-seed"
 
