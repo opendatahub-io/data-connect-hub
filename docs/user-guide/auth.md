@@ -4,7 +4,7 @@
 
 The Flight service authenticates requests via Kubernetes TokenReview and authorizes access via SubjectAccessReview (SAR). Auth is disabled by default and must be enabled in the service configuration.
 
-The REST service does not yet have authentication — all endpoints are publicly accessible. Auth support for REST is planned.
+The REST service is protected by kube-rbac-proxy. Its health endpoint bypasses that service-level authentication for Kubernetes probes.
 
 ## 2. Configuration
 
@@ -112,7 +112,7 @@ To grant a user access to a tenant's data, an admin must:
 ## 5. Auth Flow
 
 1. Client sends a request with `Authorization: Bearer <token>` and `X-Tenant-Id: <namespace>` headers.
-2. **Path check**: Health check requests (`/grpc.health.v1.Health/*`) bypass auth entirely. All other gRPC methods require authentication.
+2. **Path check**: Health check requests (`/grpc.health.v1.Health/*`) bypass Flight service authentication. All other gRPC methods require authentication.
 3. **Authentication (TokenReview)**: The bearer token is validated against the Kubernetes API server. If valid, the API server returns the user's identity (username and groups).
 4. **Authorization (SubjectAccessReview)**: The system checks whether the authenticated user has `get` permission on the `data-connections` resource (API group `dataconnecthub.opendatahub.io`) in the namespace specified by `X-Tenant-Id`.
 5. **If authorized**: The request is forwarded to the backend with `X-Remote-User` and `X-Remote-Groups` headers injected, carrying the authenticated identity for downstream use.
@@ -126,7 +126,7 @@ To grant a user access to a tenant's data, an admin must:
 | Invalid or expired token | `UNAUTHENTICATED` |
 | Missing or empty `X-Tenant-Id` header | `PERMISSION_DENIED` — "missing x-tenant-id" |
 | User lacks RBAC in the target namespace | `PERMISSION_DENIED` — "access denied for data-connections in namespace \<ns\>" |
-| Health check endpoint | No auth required |
+| Health check endpoint | No Flight service auth required |
 
 ## 7. Caching
 
@@ -134,6 +134,6 @@ Authentication and authorization results are cached using in-memory Moka caches 
 
 ## 8. Known Limitations
 
-- **REST service has no auth.** All REST endpoints are publicly accessible.
+- **Platform Gateway authentication is separate.** RHOAI and ODH platform Gateways can require a bearer token before forwarding health requests to DCH, even though DCH service-level health checks are anonymous.
 - **Single verb.** The Flight service checks only the `get` verb for all operations, regardless of the gRPC method called.
 - **Audience configuration must match cluster tokens.** TokenReview audiences are configurable through `auth.token_review_audiences` (default: `https://kubernetes.default.svc`), and a mismatch will cause authentication failures.

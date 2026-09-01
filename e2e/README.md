@@ -44,3 +44,6 @@ See `env.example` for all available settings. Required fields:
 |----------|-------------|
 | `DCH_SERVICE_NAMESPACE` | Namespace where DCH services run |
 | `DCH_GATEWAY_ENDPOINT` | Gateway host or host:port serving REST and Flight (e.g. `dch.apps.example.com`) |
+
+Set `DCH_GATEWAY_AUTH_REQUIRED=true` when the endpoint is an authenticated RHOAI or ODH platform Gateway. Leave it
+`false` for direct service and port-forward testing, where health checks remain anonymous.

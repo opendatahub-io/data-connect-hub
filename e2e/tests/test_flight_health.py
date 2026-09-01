@@ -75,12 +75,20 @@ def _build_channel(gateway_endpoint: str, insecure: bool, ca_cert: str | None) -
 
 
 class TestFlightHealth:
-    def test_health_check_serving(self, gateway_endpoint: str, insecure: bool, ca_cert: str | None) -> None:
+    def test_health_check_serving(
+        self,
+        gateway_endpoint: str,
+        insecure: bool,
+        ca_cert: str | None,
+        gateway_auth_required: bool,
+        auth_token: str,
+    ) -> None:
         channel = _build_channel(gateway_endpoint, insecure, ca_cert)
         stub = health_pb2_grpc.HealthStub(channel)
+        metadata = (("authorization", f"Bearer {auth_token}"),) if gateway_auth_required else None
 
         try:
-            response = stub.Check(health_pb2.HealthCheckRequest(service=""), timeout=10)
+            response = stub.Check(health_pb2.HealthCheckRequest(service=""), metadata=metadata, timeout=10)
         except grpc.RpcError as exc:
             if exc.code() == grpc.StatusCode.UNIMPLEMENTED:
                 pytest.fail(
