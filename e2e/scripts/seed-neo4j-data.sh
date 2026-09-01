@@ -6,23 +6,19 @@
 # read-only. On Community Edition GRANT ROLE is not supported — the user
 # will have full access and a warning is printed.
 #
-# Usage:
-#   e2e/scripts/seed-neo4j-data.sh -u bolt://neo4j:7687 -n <namespace>
+# Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
-# Environment overrides (command-line flags take precedence):
-#   NEO4J_URI                   Neo4j Bolt URI            (required)
-#   NEO4J_ADMIN_PASSWORD        Admin password            (default: testpassword)
-#   NEO4J_USERNAME              Read-only user to create  (default: dch_reader)
-#   NEO4J_PASSWORD              Read-only user password   (default: dch_readonly)
-#   DCH_SERVICE_NAMESPACE       Namespace for seed pod    (default: neo4j)
+# Usage:
+#   e2e/scripts/seed-neo4j-data.sh -u <neo4j-bolt-uri> -n <namespace> \
+#       [-a admin-password] [--user name] [--pass password]
 
 set -euo pipefail
 
-NEO4J_URI="${NEO4J_URI:-}"
-ADMIN_PASS="${NEO4J_ADMIN_PASSWORD:-testpassword}"
-READONLY_USER="${NEO4J_USERNAME:-dch_reader}"
-READONLY_PASS="${NEO4J_PASSWORD:-dch_readonly}"
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-neo4j}"
+NEO4J_URI=""
+NAMESPACE=""
+ADMIN_PASS=""
+READONLY_USER="dch_reader"
+READONLY_PASS=""
 
 usage() {
     echo "Usage: $0 -u <neo4j-bolt-uri> [-n namespace] [-a admin-password] [--user name] [--pass password]"
@@ -41,7 +37,9 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-[[ -n "$NEO4J_URI" ]] || { echo "error: Neo4j URI is required (-u or NEO4J_URI)" >&2; exit 1; }
+[[ -n "$NEO4J_URI" ]] || { echo "error: Neo4j URI is required (-u)" >&2; exit 1; }
+[[ -n "$ADMIN_PASS" ]] || { echo "error: Neo4j admin password is required (-a)" >&2; exit 1; }
+[[ -n "$READONLY_PASS" ]] || { echo "error: Neo4j read-only password is required (--pass)" >&2; exit 1; }
 
 POD_NAME="e2e-neo4j-seed"
 

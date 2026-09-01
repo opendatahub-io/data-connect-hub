@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 # Seed a Milvus collection with e2e test data via a Kubernetes pod.
 #
-# Usage:
-#   e2e/scripts/seed-milvus-data.sh -e http://milvus:19530 -n <namespace>
+# Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
-# Environment overrides (command-line flags take precedence):
-#   DCH_MILVUS_URI          Milvus REST endpoint     (required)
-#   DCH_MILVUS_TOKEN        Auth token               (optional)
-#   DCH_SERVICE_NAMESPACE   Namespace for seed pod   (default: dch)
+# Usage:
+#   e2e/scripts/seed-milvus-data.sh -e <milvus-uri> -n <namespace> [-t token]
 
 set -euo pipefail
 
-ENDPOINT="${DCH_MILVUS_URI:-}"
-TOKEN="${DCH_MILVUS_TOKEN:-}"
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-dch}"
+ENDPOINT=""
+TOKEN=""
+NAMESPACE=""
 COLLECTION="dch_e2e_prompts"
 
 usage() {
@@ -31,7 +28,7 @@ while getopts "e:n:t:h" opt; do
     esac
 done
 
-[[ -n "$ENDPOINT" ]] || { echo "error: Milvus URI is required (-e or DCH_MILVUS_URI)" >&2; exit 1; }
+[[ -n "$ENDPOINT" ]] || { echo "error: Milvus URI is required (-e)" >&2; exit 1; }
 
 POD_NAME="e2e-milvus-seed"
 

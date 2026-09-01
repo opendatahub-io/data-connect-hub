@@ -295,8 +295,16 @@ seed_pg_data() {
 seed_s3_data() {
     [[ "$E2E_S3_ENABLED" == "true" ]] || return 0
     [[ "${DCH_S3_SEED_DATASET:-}" == "true" ]] || return 0
+    # Require a digest-pinned MinIO client image (see CWE-494 in PR review).
+    local mc_image="${DCH_MINIO_MC_IMAGE:-}"
+    [[ -n "$mc_image" ]] || {
+        echo "ERROR: set DCH_MINIO_MC_IMAGE to a digest-pinned image (e.g. minio/mc@sha256:<digest>) in $CONFIG_FILE" >&2
+        exit 1
+    }
     bash "$(dirname "$0")/scripts/seed-s3-data.sh" \
-        -e "$AWS_S3_ENDPOINT" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET"
+        -e "$AWS_S3_ENDPOINT" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET" \
+        -A "$AWS_ACCESS_KEY_ID" -S "$AWS_SECRET_ACCESS_KEY" \
+        -i "$mc_image"
 }
 
 seed_milvus_data() {
@@ -308,11 +316,15 @@ seed_milvus_data() {
 
 seed_neo4j_data() {
     [[ "$E2E_NEO4J_ENABLED" == "true" ]] || return 0
-    local -a args=(-u "$DCH_TENANT_NEO4J_URI" -n "$DCH_TENANT_ID")
-    [[ -n "$DCH_TENANT_NEO4J_ADMIN_PASSWORD" ]] && args+=(-a "$DCH_TENANT_NEO4J_ADMIN_PASSWORD")
-    [[ -n "$DCH_TENANT_NEO4J_USERNAME" ]] && args+=(--user "$DCH_TENANT_NEO4J_USERNAME")
-    [[ -n "$DCH_TENANT_NEO4J_PASSWORD" ]] && args+=(--pass "$DCH_TENANT_NEO4J_PASSWORD")
-    bash "$(dirname "$0")/scripts/seed-neo4j-data.sh" "${args[@]}"
+    [[ -n "$DCH_TENANT_NEO4J_ADMIN_PASSWORD" ]] || {
+        echo "ERROR: set DCH_TENANT_NEO4J_ADMIN_PASSWORD in $CONFIG_FILE to seed Neo4j" >&2
+        exit 1
+    }
+    bash "$(dirname "$0")/scripts/seed-neo4j-data.sh" \
+        -u "$DCH_TENANT_NEO4J_URI" -n "$DCH_TENANT_ID" \
+        -a "$DCH_TENANT_NEO4J_ADMIN_PASSWORD" \
+        --user "$DCH_TENANT_NEO4J_USERNAME" \
+        --pass "$DCH_TENANT_NEO4J_PASSWORD"
 }
 
 seed_es_data() {

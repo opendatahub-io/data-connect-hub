@@ -1,45 +1,40 @@
 #!/usr/bin/env bash
 # Seed S3/MinIO with e2e test data (CSV, Parquet, JSONL) via a Kubernetes pod.
 #
-# Usage:
-#   e2e/scripts/seed-s3-data.sh -e <s3-endpoint> -n <namespace>
+# Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
-# Environment overrides (command-line flags take precedence):
-#   AWS_S3_ENDPOINT         S3 endpoint URL          (required)
-#   AWS_ACCESS_KEY_ID       access key               (required)
-#   AWS_SECRET_ACCESS_KEY   secret key               (required)
-#   AWS_S3_BUCKET           bucket name              (default: ai-eng-canada)
-#   DCH_SERVICE_NAMESPACE   namespace for seed pod   (default: dch)
-#   DCH_MINIO_MC_IMAGE      MinIO client image       (default: minio/mc:latest)
-#   DCH_S3_CSV_OBJECT_KEY       CSV object key       (default: datasets/dch-test-prompts.csv)
-#   DCH_S3_PARQUET_OBJECT_KEY   Parquet object key   (default: datasets/dch-test-prompts.parquet)
-#   DCH_S3_JSONL_OBJECT_KEY     JSONL object key     (default: datasets/dch-test-prompts.jsonl)
+# Usage:
+#   e2e/scripts/seed-s3-data.sh -e <s3-endpoint> -n <namespace> [-b bucket]
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-ENDPOINT="${AWS_S3_ENDPOINT:-}"
-ACCESS_KEY="${AWS_ACCESS_KEY_ID:-}"
-SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-}"
-BUCKET="${AWS_S3_BUCKET:-ai-eng-canada}"
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-dch}"
-MC_IMAGE="${DCH_MINIO_MC_IMAGE:-minio/mc:latest}"
-CSV_KEY="${DCH_S3_CSV_OBJECT_KEY:-datasets/dch-test-prompts.csv}"
-PARQUET_KEY="${DCH_S3_PARQUET_OBJECT_KEY:-datasets/dch-test-prompts.parquet}"
-JSONL_KEY="${DCH_S3_JSONL_OBJECT_KEY:-datasets/dch-test-prompts.jsonl}"
-BINARY_KEY="${DCH_S3_BINARY_OBJECT_KEY:-datasets/dch-test-binary.bin}"
+ENDPOINT=""
+# Credentials are supplied by run-e2e.sh via -A/-S; both are validated below.
+ACCESS_KEY=""
+SECRET_KEY=""
+BUCKET="ai-eng-canada"
+NAMESPACE=""
+# Image is mandated by run-e2e.sh and must be digest-pinned (see run-e2e.sh).
+MC_IMAGE=""
+CSV_KEY="datasets/dch-test-prompts.csv"
+PARQUET_KEY="datasets/dch-test-prompts.parquet"
+JSONL_KEY="datasets/dch-test-prompts.jsonl"
+BINARY_KEY="datasets/dch-test-binary.bin"
 
 usage() {
     echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-i mc-image]"
     exit 1
 }
 
-while getopts "e:n:b:i:h" opt; do
+while getopts "e:n:b:A:S:i:h" opt; do
     case $opt in
         e) ENDPOINT="$OPTARG" ;;
         n) NAMESPACE="$OPTARG" ;;
         b) BUCKET="$OPTARG" ;;
+        A) ACCESS_KEY="$OPTARG" ;;
+        S) SECRET_KEY="$OPTARG" ;;
         i) MC_IMAGE="$OPTARG" ;;
         h) usage ;;
         *) usage ;;
@@ -47,8 +42,13 @@ while getopts "e:n:b:i:h" opt; do
 done
 
 [[ -n "$ENDPOINT" ]] || { echo "error: S3 endpoint is required (-e or AWS_S3_ENDPOINT)" >&2; exit 1; }
-[[ -n "$ACCESS_KEY" ]] || { echo "error: AWS_ACCESS_KEY_ID is required" >&2; exit 1; }
-[[ -n "$SECRET_KEY" ]] || { echo "error: AWS_SECRET_ACCESS_KEY is required" >&2; exit 1; }
+[[ -n "$ACCESS_KEY" ]] || { echo "error: AWS access key is required (-A)" >&2; exit 1; }
+[[ -n "$SECRET_KEY" ]] || { echo "error: AWS secret key is required (-S)" >&2; exit 1; }
+[[ -n "$MC_IMAGE" ]] || { echo "error: MinIO client image is required (-i <minio/mc@sha256:...>)" >&2; exit 1; }
+case "$MC_IMAGE" in
+    *@sha256:*) ;;
+    *) echo "error: MinIO client image must be digest-pinned (e.g. -i minio/mc@sha256:<digest>): '$MC_IMAGE'" >&2; exit 1 ;;
+esac
 command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "error: python3 not found (needed for parquet generation)" >&2; exit 1; }
 

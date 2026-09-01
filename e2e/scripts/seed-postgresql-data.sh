@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 # Seed PostgreSQL with e2e test data via a Kubernetes pod.
 #
-# Usage:
-#   e2e/scripts/seed-pg-data.sh -u <pg-url> -n <namespace>
+# Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
-# Environment overrides (command-line flags take precedence):
-#   PG_INTERNAL_URL         PostgreSQL connection URL (required)
-#   DCH_SERVICE_NAMESPACE   Namespace for seed pod   (default: dch)
-#   DCH_POSTGRES_IMAGE      PostgreSQL client image   (default: docker.io/library/postgres:16)
+# Usage:
+#   e2e/scripts/seed-pg-data.sh -u <pg-url> -n <namespace> [-i pg-image]
 
 set -euo pipefail
 
-PG_URL="${PG_INTERNAL_URL:-}"
-NAMESPACE="${DCH_SERVICE_NAMESPACE:-dch}"
-PG_IMAGE="${DCH_POSTGRES_IMAGE:-docker.io/library/postgres:16}"
+PG_URL=""
+NAMESPACE=""
+PG_IMAGE=""
 
 usage() {
     echo "Usage: $0 -u <pg-url> -n <namespace> [-i pg-image]"
@@ -30,7 +27,7 @@ while getopts "u:n:i:h" opt; do
     esac
 done
 
-[[ -n "$PG_URL" ]] || { echo "error: PostgreSQL URL is required (-u or PG_INTERNAL_URL)" >&2; exit 1; }
+[[ -n "$PG_URL" ]] || { echo "error: PostgreSQL URL is required (-u)" >&2; exit 1; }
 
 POD_NAME="e2e-pg-seed"
 
