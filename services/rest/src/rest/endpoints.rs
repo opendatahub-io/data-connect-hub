@@ -343,7 +343,7 @@ pub async fn export_connection(
     // Export the credentials into the new secret
     let existing_secret = service
         .secret_store
-        .get_secret(&ctx.tenant_id, connection.resource.secret_ref.name.as_str())
+        .get_secret(&ctx.tenant_id, connection.resource.credentials_ref.secret.as_str())
         .await?;
     for (key, value) in existing_secret.properties.iter() {
         props.insert(key.to_string(), value.to_string());
@@ -385,9 +385,9 @@ mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
+    use commons::api::connections::CredentialsRef;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
-    use commons::api::connections::SecretRef;
     use commons::api::errors::SecretStoreError;
     use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
@@ -430,8 +430,8 @@ mod tests {
                         name: "my-pg".to_string(),
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
-                        secret_ref: SecretRef {
-                            name: "my-pg-creds".to_string(),
+                        credentials_ref: CredentialsRef {
+                            secret: "my-pg-creds".to_string(),
                         },
                         properties: HashMap::from([
                             ("host".to_string(), "localhost".to_string()),
@@ -483,7 +483,7 @@ mod tests {
                     name: "my-pg".to_string(),
                     data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
-                    secret_ref: SecretRef::default(),
+                    credentials_ref: CredentialsRef::default(),
                     properties: std::collections::HashMap::new(),
                 };
                 let updated = update_fn(existing)?;
@@ -842,8 +842,8 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "ct-1",
                 "format": "tabular",
-                "secret_ref": {
-                    "name": "my-pg-creds"
+                "credentials_ref": {
+                    "secret": "my-pg-creds"
                 },
                 "properties": {}
             }))
@@ -874,8 +874,8 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "nonexistent-type-id",
                 "format": "tabular",
-                "secret_ref": {
-                    "name": "my-pg-creds"
+                "credentials_ref": {
+                    "secret": "my-pg-creds"
                 },
                 "properties": {}
             }))
@@ -1078,9 +1078,6 @@ mod tests {
                 "name": "PostgreSQL",
                 "provider": "postgres",
                 "description": "PostgreSQL database connection",
-                "admin": {
-                    "secret_ref": "my-pg-creds"
-                },
                 "credentials_fields": []
             }))
             .to_request();

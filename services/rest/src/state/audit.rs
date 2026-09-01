@@ -1,5 +1,5 @@
 use commons::api::connection_types::DataConnectionTypeStatus;
-use commons::api::connections::SecretRef;
+use commons::api::connections::CredentialsRef;
 
 use commons::api::connections::DataConnectionResource;
 use commons::api::storage::MetaStore;
@@ -58,7 +58,7 @@ pub async fn audit_data_connection(
 
     let keys = {
         let secret = secret_store
-            .get_secret(tenant_id, data_connection.resource.secret_ref.name.as_str())
+            .get_secret(tenant_id, data_connection.resource.credentials_ref.secret.as_str())
             .await
             .map_err(|_| ValidationError::InvalidSecret);
         if let Ok(secret) = secret {
@@ -359,14 +359,14 @@ mod tests {
         }
     }
 
-    fn make_connection(admin: SecretRef) -> DataConnectionResource {
+    fn make_connection(admin: CredentialsRef) -> DataConnectionResource {
         DataConnectionResource {
             metadata: make_metadata("conn-1"),
             resource: DataConnection {
                 name: "test".to_string(),
                 data_connection_type_id: "pg".to_string(),
                 format: DataFormat::Tabular,
-                secret_ref: admin,
+                credentials_ref: admin,
                 properties: HashMap::new(),
             },
             status: DataConnectionStatus {
@@ -426,8 +426,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_secret_not_found() {
-        let conn = make_connection(SecretRef {
-            name: "missing-secret".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "missing-secret".to_string(),
         });
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
@@ -439,8 +439,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_credentials_schema_check_fails() {
-        let conn = make_connection(SecretRef {
-            name: "creds".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "creds".to_string(),
         });
         let dct = make_dct(vec!["HOST", "PORT"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
@@ -454,8 +454,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_flight_check_fails() {
-        let conn = make_connection(SecretRef {
-            name: "creds".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "creds".to_string(),
         });
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
@@ -469,8 +469,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_secret_not_found_sets_not_ready_status() {
-        let conn = make_connection(SecretRef {
-            name: "missing-secret".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "missing-secret".to_string(),
         });
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
@@ -486,8 +486,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_credentials_check_fails_sets_not_ready_status() {
-        let conn = make_connection(SecretRef {
-            name: "creds".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "creds".to_string(),
         });
         let dct = make_dct(vec!["HOST", "PORT"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
@@ -505,8 +505,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_flight_check_fails_sets_ingestion_not_ready_status() {
-        let conn = make_connection(SecretRef {
-            name: "creds".to_string(),
+        let conn = make_connection(CredentialsRef {
+            secret: "creds".to_string(),
         });
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));

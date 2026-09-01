@@ -5,11 +5,11 @@ use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
 use commons::api::ResourceMetadata;
+use commons::api::connections::CredentialsRef;
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::connections::SecretRef;
 use commons::api::connector::CredentialsResolver;
 use commons::api::errors::ConnectorError;
 use std::collections::HashMap;
@@ -112,7 +112,7 @@ impl DataIngestionService {
                         name: "test".to_string(),
                         data_connection_type_id: dct_id.clone(),
                         format: DataFormat::Tabular,
-                        secret_ref: SecretRef::default(),
+                        credentials_ref: CredentialsRef::default(),
                         properties: HashMap::new(),
                     },
                     status: DataConnectionStatus::default(),

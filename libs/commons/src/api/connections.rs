@@ -3,13 +3,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
-pub struct SecretRef {
-    pub name: String,
+pub struct CredentialsRef {
+    pub secret: String,
 }
 
-impl Default for SecretRef {
+impl Default for CredentialsRef {
     fn default() -> Self {
-        Self { name: "".to_string() }
+        Self { secret: "".to_string() }
     }
 }
 
@@ -91,7 +91,7 @@ pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
     pub format: DataFormat,
-    pub secret_ref: SecretRef,
+    pub credentials_ref: CredentialsRef,
     pub properties: HashMap<String, String>,
 }
 
@@ -109,7 +109,7 @@ impl std::fmt::Debug for DataConnection {
             .field("name", &self.name)
             .field("data_connection_type_id", &self.data_connection_type_id)
             .field("format", &self.format)
-            .field("admin", &self.secret_ref)
+            .field("admin", &self.credentials_ref)
             .field("properties", &self.properties)
             .finish()
     }
@@ -131,8 +131,8 @@ mod tests {
                 name: "test-conn".to_string(),
                 data_connection_type_id: "postgres".to_string(),
                 format: DataFormat::Tabular,
-                secret_ref: SecretRef {
-                    name: "secret/test-conn".to_string(),
+                credentials_ref: CredentialsRef {
+                    secret: "secret/test-conn".to_string(),
                 },
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
@@ -146,12 +146,12 @@ mod tests {
 
     #[test]
     fn test_admin_serialize_deserialize() {
-        let admin = SecretRef {
-            name: "secret/test".to_string(),
+        let admin = CredentialsRef {
+            secret: "secret/test".to_string(),
         };
         let json = serde_json::to_string(&admin).unwrap();
-        let deserialized: SecretRef = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.name, admin.name);
+        let deserialized: CredentialsRef = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.secret, admin.secret);
     }
 
     #[test]
@@ -167,7 +167,7 @@ mod tests {
                 "name": "test-conn",
                 "data_connection_type_id": "postgres",
                 "format": "tabular",
-                "secret_ref": { "name": "secret/test-conn" },
+                "credentials_ref": { "secret": "secret/test-conn" },
                 "properties": { "key": "value" }
             },
             "status": {
@@ -182,7 +182,7 @@ mod tests {
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, DataFormat::Tabular);
-        assert_eq!(res.resource.secret_ref.name, "secret/test-conn".to_string());
+        assert_eq!(res.resource.credentials_ref.secret, "secret/test-conn".to_string());
 
         assert_eq!(res.resource.properties["key"], "value");
 
@@ -196,7 +196,10 @@ mod tests {
         let cloned = res.clone();
 
         assert_eq!(cloned.metadata.id, res.metadata.id);
-        assert_eq!(cloned.resource.secret_ref.name, res.resource.secret_ref.name);
+        assert_eq!(
+            cloned.resource.credentials_ref.secret,
+            res.resource.credentials_ref.secret
+        );
         assert_eq!(cloned.resource.properties, res.resource.properties);
     }
 
@@ -300,8 +303,8 @@ mod tests {
                 "name": "old-conn",
                 "data_connection_type_id": "postgres",
                 "format": "tabular",
-                "secret_ref": {
-                    "name": "secret/test-conn"
+                "credentials_ref": {
+                    "secret": "secret/test-conn"
                 },
                 "properties": {}
             }

@@ -9,11 +9,11 @@ from urllib.parse import urlparse
 from ._rest import RestClient
 from .exceptions import DCHConfigError
 from .models import (
-    Admin,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     CredentialField,
+    CredentialsRef,
     DataConnection,
     DataFormat,
     UpdateConnectionRequest,
@@ -203,14 +203,14 @@ class DataConnectClient:
         name: str,
         connection_type_id: str,
         data_format: DataFormat,
-        admin: Admin | None = None,
+        credentials_ref: CredentialsRef,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
         req = CreateConnectionRequest(
             name=name,
             data_connection_type_id=connection_type_id,
             format=data_format,
-            admin=admin,
+            credentials_ref=credentials_ref,
             properties=properties or {},
         )
         return self._rest.create_connection(req)
@@ -222,16 +222,16 @@ class DataConnectClient:
         name: str | None = None,
         connection_type_id: str | None = None,
         data_format: DataFormat | None = None,
-        admin: Admin | None = None,
+        credentials_ref: CredentialsRef | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
-        if all(v is None for v in (name, connection_type_id, data_format, admin, properties)):
+        if all(v is None for v in (name, connection_type_id, data_format, credentials_ref, properties)):
             raise DCHConfigError("at least one field must be provided for update")
         req = UpdateConnectionRequest(
             name=name,
             data_connection_type_id=connection_type_id,
             format=data_format,
-            admin=admin,
+            credentials_ref=credentials_ref,
             properties=properties,
         )
         return self._rest.update_connection(connection_id, req)

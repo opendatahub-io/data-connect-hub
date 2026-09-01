@@ -11,7 +11,7 @@ use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::connections::{DataConnection, SecretRef};
+use commons::api::connections::{CredentialsRef, DataConnection};
 use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
@@ -54,8 +54,8 @@ impl MetaStore for TestMetaStore {
                 name: "test-db".to_string(),
                 data_connection_type_id: "sqlite".to_string(),
                 format: DataFormat::Tabular,
-                secret_ref: SecretRef {
-                    name: "sqlite_creds".to_string(),
+                credentials_ref: CredentialsRef {
+                    secret: "sqlite_creds".to_string(),
                 },
                 properties: HashMap::new(),
             },

@@ -25,8 +25,8 @@ class _MaskProperties:
                 yield name, value
 
 
-class AdminSecretRef(BaseModel):
-    secret_ref: str
+class CredentialsRef(BaseModel):
+    secret: str
 
 
 class AdminSecret(BaseModel):
@@ -36,9 +36,6 @@ class AdminSecret(BaseModel):
     def __repr_args__(self) -> Any:
         yield "name", self.name
         yield "secret", {k: "***" for k in self.secret}
-
-
-Admin = AdminSecretRef | AdminSecret
 
 
 class DataConnectionStatus(BaseModel):
@@ -57,7 +54,7 @@ class DataConnection(_MaskProperties, BaseModel):
     tenant_id: str = ""
     created_at: datetime
     updated_at: datetime
-    admin: Admin | None = None
+    credentials_ref: CredentialsRef
     properties: dict[str, str] = Field(default_factory=dict)
     status: DataConnectionStatus = Field(default_factory=DataConnectionStatus)
 
@@ -76,7 +73,7 @@ class CreateConnectionRequest(_MaskProperties, BaseModel):
     name: str
     data_connection_type_id: str
     format: DataFormat
-    admin: Admin | None = None
+    credentials_ref: CredentialsRef
     properties: dict[str, str] = Field(default_factory=dict)
 
 
@@ -84,7 +81,7 @@ class UpdateConnectionRequest(_MaskProperties, BaseModel):
     name: str | None = None
     data_connection_type_id: str | None = None
     format: DataFormat | None = None
-    admin: Admin | None = None
+    credentials_ref: CredentialsRef | None = None
     properties: dict[str, str] | None = None
 
 
