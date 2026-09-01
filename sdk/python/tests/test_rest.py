@@ -729,3 +729,25 @@ class TestTokenProvider:
         client = _make_client(transport)
         with pytest.raises(DCHAuthenticationError):
             client.list_connections()
+
+
+class TestCodeRabbitFixes:
+    def test_unwrap_list_rejects_null_items(self) -> None:
+        """Null items value raises DCHResponseError, not TypeError."""
+        transport = _make_transport(body={"items": None})
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError, match="must be a list"):
+            client.list_connections()
+
+    def test_unwrap_list_rejects_string_items(self) -> None:
+        transport = _make_transport(body={"items": "not a list"})
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError, match="must be a list"):
+            client.list_connections()
+
+    def test_validate_catches_typeerror_from_malformed_envelope(self) -> None:
+        """Malformed resource envelope raises DCHResponseError, not TypeError."""
+        transport = _make_transport(body={"metadata": None, "resource": {}})
+        client = _make_client(transport)
+        with pytest.raises(DCHResponseError, match=r"malformed.*payload"):
+            client.get_connection("conn-id")

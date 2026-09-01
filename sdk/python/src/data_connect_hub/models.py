@@ -38,6 +38,7 @@ class DataConnectionStatus(BaseModel):
     state: DataConnectionState = "not_ready"
     message: str | None = None
     updated_at: datetime | None = None
+    phases: list[dict[str, Any]] = Field(default_factory=list, deprecated=True)  # Deprecated: not sent by server
 
 
 class DataConnection(_MaskProperties, BaseModel):

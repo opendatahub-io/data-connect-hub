@@ -47,7 +47,11 @@ def _unwrap_list(data: Any) -> list[Any]:
     if isinstance(data, list):
         return data
     if isinstance(data, dict) and "items" in data:
-        items: list[Any] = data["items"]
+        items = data["items"]
+        if not isinstance(items, list):
+            raise DCHResponseError(
+                f'Unexpected response format: {{"items"}} must be a list, got {type(items).__name__}'
+            )
         return items
     raise DCHResponseError(
         f'Unexpected response format: expected list or {{"items": [...]}}, got {type(data).__name__}'
@@ -60,6 +64,8 @@ def _validate(model: type[_M], data: Any) -> _M:
         return model.model_validate(data)
     except ValidationError as exc:
         raise DCHResponseError(f"Server returned an unexpected {model.__name__} payload: {exc}") from exc
+    except TypeError as exc:
+        raise DCHResponseError(f"Server returned malformed {model.__name__} payload: {exc}") from exc
 
 
 def _segment(value: str, *, name: str) -> str:
