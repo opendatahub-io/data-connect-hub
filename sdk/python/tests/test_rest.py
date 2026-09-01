@@ -446,9 +446,7 @@ class TestRetry:
         transport = httpx.MockTransport(handler)
         client = _make_client(transport, max_retries=3, backoff_base=0.0)
         from data_connect_hub.exceptions import DCHServerError
-        from data_connect_hub.models import CreateConnectionRequest
-
-        from data_connect_hub.models import CredentialsRef
+        from data_connect_hub.models import CreateConnectionRequest, CredentialsRef
 
         req = CreateConnectionRequest(
             name="c",

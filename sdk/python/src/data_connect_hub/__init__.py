@@ -34,11 +34,11 @@ from .models import (
 
 __all__ = [
     "AdminSecret",
-    "CredentialsRef",
     "ConnectionType",
     "CreateConnectionRequest",
     "CreateConnectionTypeRequest",
     "CredentialField",
+    "CredentialsRef",
     "DCHAuthenticationError",
     "DCHConfigError",
     "DCHConnectionError",

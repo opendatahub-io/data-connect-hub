@@ -87,7 +87,7 @@ async fn create_connection_with_creds(
     ctx: web::ReqData<ApiContext>,
     dc_creds: DataConnectionWithCreds,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("create_connection_wth_creds: for tenant {:?}", ctx.tenant_id);
+    info!("create_connection_with_creds: for tenant {:?}", ctx.tenant_id);
     let tenant_id = ctx.tenant_id.clone();
     let meta_store = service.meta_store.clone();
     let secret_store = service.secret_store.clone();
