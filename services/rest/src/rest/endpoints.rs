@@ -16,12 +16,13 @@ use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
-use serde_json::Value;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
 
+use crate::rest::CreateConnectionRequest;
 use crate::rest::DataConnectionWithCreds;
 
 #[derive(Clone)]
@@ -83,14 +84,12 @@ pub async fn get_connection(
 }
 
 async fn create_connection_with_creds(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    tenant_id: String,
     dc_creds: DataConnectionWithCreds,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("create_connection_with_creds: for tenant {:?}", ctx.tenant_id);
-    let tenant_id = ctx.tenant_id.clone();
-    let meta_store = service.meta_store.clone();
-    let secret_store = service.secret_store.clone();
+    info!("create_connection_with_creds: for tenant {:?}", tenant_id);
 
     let dct = meta_store
         .get_data_connection_type(&tenant_id, &dc_creds.data_connection_type_id)
@@ -129,25 +128,24 @@ async fn create_connection_with_creds(
 pub async fn create_connection(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
-    body: web::Json<Value>,
+    body: web::Json<CreateConnectionRequest>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    let connection: Result<DataConnection, serde_json::Error> = serde_json::from_value(body.clone());
-
-    if connection.is_err() {
-        let connection = serde_json::from_value(body.into_inner())
-            .map_err(|e| ValidationError::DeserializationError(e.to_string()))?;
-        return create_connection_with_creds(service, ctx, connection).await;
-    }
-
-    let connection = connection.unwrap();
-
-    info!("create_connection: for tenant {:?}", ctx.tenant_id);
-    let tenant_id = ctx.tenant_id.clone();
     let meta_store = service.meta_store.clone();
+    let secret_store = service.secret_store.clone();
+    let tenant_id = ctx.tenant_id.clone();
 
-    let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
+    match body.into_inner() {
+        CreateConnectionRequest::DataConnectionWithInlineCreds(dc_creds) => {
+            create_connection_with_creds(meta_store, secret_store, tenant_id, dc_creds).await
+        },
+        CreateConnectionRequest::DataConnectionWithSecretRef(connection) => {
+            info!("create_connection: for tenant {:?}", tenant_id);
 
-    Ok(HttpResponse::Created().json(connection_res))
+            let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
+
+            Ok(HttpResponse::Created().json(connection_res))
+        },
+    }
 }
 
 pub async fn list_connection_types(
@@ -647,11 +645,30 @@ mod tests {
             >,
         ) -> Result<commons::api::connection_types::DataConnectionTypeResource, commons::api::errors::MetaStoreError>
         {
-            let dct = self.get_data_connection_type("test-tenant", uid).await?;
-            let status = update_fn(dct.status)?;
+            let (metadata, resource, current_status) =
+                if let Ok(dct) = self.get_data_connection_type("test-tenant", uid).await {
+                    (dct.metadata, dct.resource, dct.status)
+                } else {
+                    (
+                        commons::api::ResourceMetadata {
+                            id: uid.to_string(),
+                            tenant_id: Some("test-tenant".to_string()),
+                            created_at: "2026-01-01T00:00:00Z".to_string(),
+                            updated_at: "2026-01-01T00:00:00Z".to_string(),
+                        },
+                        DataConnectionType {
+                            name: String::new(),
+                            provider: String::new(),
+                            description: None,
+                            credentials_fields: vec![],
+                        },
+                        Default::default(),
+                    )
+                };
+            let status = update_fn(current_status)?;
             Ok(DataConnectionTypeResource {
-                metadata: dct.metadata,
-                resource: dct.resource,
+                metadata,
+                resource,
                 status,
             })
         }

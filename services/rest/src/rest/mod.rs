@@ -36,3 +36,10 @@ impl DataConnectionWithCreds {
         }
     }
 }
+
+#[derive(Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+pub(crate) enum CreateConnectionRequest {
+    DataConnectionWithSecretRef(DataConnection),
+    DataConnectionWithInlineCreds(DataConnectionWithCreds),
+}
