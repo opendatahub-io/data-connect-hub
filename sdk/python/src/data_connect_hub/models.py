@@ -29,15 +29,6 @@ class CredentialsRef(BaseModel):
     secret: str
 
 
-class AdminSecret(BaseModel):
-    name: str
-    secret: dict[str, str]
-
-    def __repr_args__(self) -> Any:
-        yield "name", self.name
-        yield "secret", {k: "***" for k in self.secret}
-
-
 class DataConnectionStatus(BaseModel):
     state: DataConnectionState = "not_ready"
     message: str | None = None

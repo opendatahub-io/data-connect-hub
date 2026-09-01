@@ -19,7 +19,7 @@ pub struct DataConnectionWithCreds {
     pub name: String,
     pub data_connection_type_id: String,
     pub format: DataFormat,
-    pub admin: InlineCreds,
+    pub credentials: InlineCreds,
     pub properties: HashMap<String, String>,
 }
 
@@ -30,7 +30,7 @@ impl DataConnectionWithCreds {
             data_connection_type_id: self.data_connection_type_id.clone(),
             format: self.format.clone(),
             credentials_ref: CredentialsRef {
-                secret: self.admin.secret.clone(),
+                secret: self.credentials.secret.clone(),
             },
             properties: self.properties.clone(),
         }

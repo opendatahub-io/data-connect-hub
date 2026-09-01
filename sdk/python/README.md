@@ -23,7 +23,7 @@ Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control
 certificate verification.
 
 ```python
-from data_connect_hub import AdminSecretRef, DataConnectClient
+from data_connect_hub import CredentialsRef, DataConnectClient
 
 client = DataConnectClient(
     endpoint="dch.example.com:8443",
@@ -49,7 +49,7 @@ conn = client.create_connection(
     name="my-db",
     connection_type_id="dct-a1b2c3d4",
     data_format="tabular",  # DataFormat: "tabular" | "binary"
-    admin=AdminSecretRef(secret_ref="secret/my-db"),
+    credentials_ref=CredentialsRef(secret="secret/my-db"),
 )
 
 # Query data via Flight SQL

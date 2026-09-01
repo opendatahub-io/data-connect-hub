@@ -97,15 +97,15 @@ async fn create_connection_with_creds(
         .await?;
 
     dct.resource
-        .check_credentials_schema(&dc_creds.admin.properties)
+        .check_credentials_schema(&dc_creds.credentials.properties)
         .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
 
     let data_connection = dc_creds.to_data_connection();
 
     let secret_obj = Secret {
-        name: dc_creds.admin.secret.clone(),
+        name: dc_creds.credentials.secret.clone(),
         namespace: tenant_id.to_string(),
-        properties: dc_creds.admin.properties.clone(),
+        properties: dc_creds.credentials.properties.clone(),
         labels: Some(default_secret_labels()),
         annotations: Some(HashMap::new()),
     };

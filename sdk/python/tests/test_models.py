@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from data_connect_hub.models import (
-    AdminSecret,
     ConnectionType,
     CreateConnectionRequest,
     CredentialsRef,
@@ -94,36 +93,6 @@ class TestAdmin:
         dumped = creds.model_dump()
         restored = CredentialsRef.model_validate(dumped)
         assert restored == creds
-
-    def test_secret_round_trip(self) -> None:
-        admin = AdminSecret(name="my-secret", secret={"username": "admin", "password": "s3cret"})
-        dumped = admin.model_dump()
-        restored = AdminSecret.model_validate(dumped)
-        assert restored == admin
-        assert restored.name == "my-secret"
-        assert restored.secret == {"username": "admin", "password": "s3cret"}
-
-    def test_admin_secret_repr_masks_values(self) -> None:
-        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
-        text = repr(admin)
-        assert "s3cret" not in text
-        assert "root" not in text
-        assert "***" in text
-        assert "user" in text
-        assert "password" in text
-        assert "pg-creds" in text
-
-    def test_admin_secret_str_masks_values(self) -> None:
-        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
-        text = str(admin)
-        assert "s3cret" not in text
-        assert "root" not in text
-        assert "***" in text
-
-    def test_admin_secret_in_create_request(self) -> None:
-        admin = AdminSecret(name="pg-creds", secret={"user": "root", "pass": "pw"})
-        assert admin.name == "pg-creds"
-        assert admin.secret == {"user": "root", "pass": "pw"}
 
 
 class TestDataConnectionRepr:

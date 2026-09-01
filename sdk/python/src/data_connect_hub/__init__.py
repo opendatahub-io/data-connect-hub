@@ -17,7 +17,6 @@ from .exceptions import (
     DCHValidationError,
 )
 from .models import (
-    AdminSecret,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
@@ -33,7 +32,6 @@ from .models import (
 )
 
 __all__ = [
-    "AdminSecret",
     "ConnectionType",
     "CreateConnectionRequest",
     "CreateConnectionTypeRequest",
