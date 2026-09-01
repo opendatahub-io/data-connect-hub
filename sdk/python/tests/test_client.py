@@ -45,10 +45,13 @@ class TestConnectionsDelegation:
         client = DataConnectClient("localhost")
         client._rest.create_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
 
+        from data_connect_hub.models import CredentialsRef
+
         result = client.create_connection(
             name="test-conn",
             connection_type_id="postgres",
             data_format="tabular",
+            credentials_ref=CredentialsRef(secret="secret/test-conn"),
         )
         assert result.id == "123"
 
@@ -71,18 +74,18 @@ class TestEmptyUpdateGuards:
         with pytest.raises(DCHConfigError, match="at least one field"):
             client.update_connection_type("ct-1")
 
-    def test_update_connection_with_admin(self) -> None:
+    def test_update_connection_with_credentials_ref(self) -> None:
         from data_connect_hub.models import DataConnection
 
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         client = DataConnectClient("localhost")
         client._rest.update_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
 
-        from data_connect_hub.models import AdminSecretRef
+        from data_connect_hub.models import CredentialsRef
 
-        client.update_connection("123", admin=AdminSecretRef(secret_ref="secret/new"))
+        client.update_connection("123", credentials_ref=CredentialsRef(secret="secret/new"))
         req = client._rest.update_connection.call_args[0][1]
-        assert req.admin == AdminSecretRef(secret_ref="secret/new")
+        assert req.credentials_ref == CredentialsRef(secret="secret/new")
 
 
 class TestFlightDelegation:

@@ -17,13 +17,11 @@ from .exceptions import (
     DCHValidationError,
 )
 from .models import (
-    Admin,
-    AdminSecret,
-    AdminSecretRef,
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
     CredentialField,
+    CredentialsRef,
     DataConnection,
     DataConnectionState,
     DataConnectionStatus,
@@ -34,13 +32,11 @@ from .models import (
 )
 
 __all__ = [
-    "Admin",
-    "AdminSecret",
-    "AdminSecretRef",
     "ConnectionType",
     "CreateConnectionRequest",
     "CreateConnectionTypeRequest",
     "CredentialField",
+    "CredentialsRef",
     "DCHAuthenticationError",
     "DCHConfigError",
     "DCHConnectionError",

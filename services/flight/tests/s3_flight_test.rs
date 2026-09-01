@@ -6,7 +6,7 @@ use arrow::record_batch::RecordBatch;
 use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connection_types::DataConnectionTypeResource;
-use commons::api::connections::{Admin, DataConnection};
+use commons::api::connections::{CredentialsRef, DataConnection};
 use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
@@ -55,9 +55,9 @@ impl MetaStore for S3TestMetaStore {
                 name: "test-s3".to_string(),
                 data_connection_type_id: "s3-type".to_string(),
                 format: self.format.clone(),
-                admin: Some(Admin::SecretRef {
-                    secret_ref: "s3_creds".to_string(),
-                }),
+                credentials_ref: CredentialsRef {
+                    secret: "s3_creds".to_string(),
+                },
                 properties: HashMap::new(),
             },
             status: Default::default(),

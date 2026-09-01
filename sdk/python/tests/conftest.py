@@ -12,7 +12,7 @@ SAMPLE_CONNECTION_JSON = {
     "data_connection_type_id": "postgres",
     "format": "tabular",
     "tenant_id": "tenant-1",
-    "admin": {"secret_ref": "secret/test-conn"},
+    "credentials_ref": {"secret": "secret/test-conn"},
     "created_at": "2026-01-01T00:00:00Z",
     "updated_at": "2026-01-01T00:00:00Z",
     "properties": {"key": "value"},
@@ -29,7 +29,7 @@ SAMPLE_CONNECTION_WRAPPED_JSON = {
         "name": "test-conn",
         "data_connection_type_id": "postgres",
         "format": "tabular",
-        "admin": {"secret_ref": "secret/test-conn"},
+        "credentials_ref": {"secret": "secret/test-conn"},
         "properties": {"key": "value"},
     },
     "status": {

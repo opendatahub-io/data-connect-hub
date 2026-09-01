@@ -5,10 +5,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from data_connect_hub.models import (
-    AdminSecret,
-    AdminSecretRef,
     ConnectionType,
     CreateConnectionRequest,
+    CredentialsRef,
     DataConnection,
     DataConnectionStatus,
     EnumValue,
@@ -32,7 +31,7 @@ class TestDataConnection:
         assert conn.data_connection_type_id == "postgres"
         assert conn.format == "tabular"
         assert conn.tenant_id == "tenant-1"
-        assert conn.admin == AdminSecretRef(secret_ref="secret/test-conn")
+        assert conn.credentials_ref == CredentialsRef(secret="secret/test-conn")
         assert conn.created_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert conn.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert conn.properties == {"key": "value"}
@@ -45,7 +44,7 @@ class TestDataConnection:
         assert conn.data_connection_type_id == "postgres"
         assert conn.format == "tabular"
         assert conn.tenant_id == "tenant-1"
-        assert conn.admin == AdminSecretRef(secret_ref="secret/test-conn")
+        assert conn.credentials_ref == CredentialsRef(secret="secret/test-conn")
         assert conn.created_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert conn.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert conn.properties == {"key": "value"}
@@ -89,44 +88,11 @@ class TestDataConnection:
 
 
 class TestAdmin:
-    def test_secret_ref_round_trip(self) -> None:
-        admin = AdminSecretRef(secret_ref="secret/my-conn")
-        dumped = admin.model_dump()
-        restored = AdminSecretRef.model_validate(dumped)
-        assert restored == admin
-
-    def test_secret_round_trip(self) -> None:
-        admin = AdminSecret(name="my-secret", secret={"username": "admin", "password": "s3cret"})
-        dumped = admin.model_dump()
-        restored = AdminSecret.model_validate(dumped)
-        assert restored == admin
-        assert restored.name == "my-secret"
-        assert restored.secret == {"username": "admin", "password": "s3cret"}
-
-    def test_admin_secret_repr_masks_values(self) -> None:
-        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
-        text = repr(admin)
-        assert "s3cret" not in text
-        assert "root" not in text
-        assert "***" in text
-        assert "user" in text
-        assert "password" in text
-        assert "pg-creds" in text
-
-    def test_admin_secret_str_masks_values(self) -> None:
-        admin = AdminSecret(name="pg-creds", secret={"user": "root", "password": "s3cret"})
-        text = str(admin)
-        assert "s3cret" not in text
-        assert "root" not in text
-        assert "***" in text
-
-    def test_secret_variant_in_connection(self) -> None:
-        data = dict(SAMPLE_CONNECTION_JSON)
-        data["admin"] = {"name": "pg-creds", "secret": {"user": "root", "pass": "pw"}}
-        conn = DataConnection.model_validate(data)
-        assert isinstance(conn.admin, AdminSecret)
-        assert conn.admin.name == "pg-creds"
-        assert conn.admin.secret == {"user": "root", "pass": "pw"}
+    def test_credentials_ref_round_trip(self) -> None:
+        creds = CredentialsRef(secret="secret/my-conn")
+        dumped = creds.model_dump()
+        restored = CredentialsRef.model_validate(dumped)
+        assert restored == creds
 
 
 class TestDataConnectionRepr:
@@ -137,14 +103,10 @@ class TestDataConnectionRepr:
         assert "***" in text
         assert "key" in text
 
-    def test_repr_masks_admin_secret(self) -> None:
-        data = dict(SAMPLE_CONNECTION_JSON)
-        data["admin"] = {"name": "pg-creds", "secret": {"user": "root", "pass": "pw"}}
-        conn = DataConnection.model_validate(data)
+    def test_repr_credentials_ref_present(self) -> None:
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         text = repr(conn)
-        assert "pw" not in text
-        assert "root" not in text
-        assert "***" in text
+        assert "credentials_ref" in text
 
     def test_repr_empty_properties_not_masked(self) -> None:
         data = dict(SAMPLE_CONNECTION_JSON)
@@ -155,22 +117,24 @@ class TestDataConnectionRepr:
 
 
 class TestCreateConnectionRequest:
-    def test_dump_excludes_none(self) -> None:
+    def test_dump_includes_credentials_ref(self) -> None:
         req = CreateConnectionRequest(
             name="conn",
             data_connection_type_id="postgres",
             format="tabular",
+            credentials_ref=CredentialsRef(secret="secret/test"),
         )
         dumped = req.model_dump(exclude_none=True)
         assert dumped["data_connection_type_id"] == "postgres"
         assert dumped["properties"] == {}
-        assert "admin" not in dumped
+        assert dumped["credentials_ref"] == {"secret": "secret/test"}
 
     def test_repr_masks_properties(self) -> None:
         req = CreateConnectionRequest(
             name="conn",
             data_connection_type_id="postgres",
             format="tabular",
+            credentials_ref=CredentialsRef(secret="secret/test"),
             properties={"host": "db.internal", "password": "secret123"},
         )
         text = repr(req)

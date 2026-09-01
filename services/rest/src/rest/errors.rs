@@ -29,6 +29,8 @@ pub enum EndpointError {
 #[allow(unused)]
 #[derive(Error, Debug)]
 pub enum ValidationError {
+    #[error("Deserialization error: {0}")]
+    DeserializationError(String),
     #[error("Invalid tenant ID")]
     InvalidTenantId,
     #[error("Invalid data connection type")]
@@ -181,6 +183,11 @@ impl From<EndpointError> for RestErrorResponse {
 impl From<ValidationError> for RestErrorResponse {
     fn from(err: ValidationError) -> Self {
         match err {
+            ValidationError::DeserializationError(error) => RestErrorResponse {
+                code: "deserialization_error".to_string(),
+                message: error,
+                status: 400,
+            },
             ValidationError::InvalidTenantId => RestErrorResponse {
                 code: "invalid_tenant_id".to_string(),
                 message: "Invalid tenant ID".to_string(),

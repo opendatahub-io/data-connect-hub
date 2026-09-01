@@ -1,25 +1,29 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
+
 use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_connection_type;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
-use crate::utils::transform_data_connection;
+
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
-use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
+
+use crate::rest::CreateConnectionRequest;
+use crate::rest::DataConnectionWithCreds;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -79,47 +83,67 @@ pub async fn get_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
-pub async fn create_connection(
-    service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
-    connection: web::Json<DataConnection>,
+async fn create_connection_with_creds(
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    tenant_id: String,
+    dc_creds: DataConnectionWithCreds,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("create_connection: for tenant {:?}", ctx.tenant_id);
-    let tenant_id = ctx.tenant_id.clone();
+    info!("create_connection_with_creds: for tenant {:?}", tenant_id);
 
-    let (connection, secret) = transform_data_connection(&tenant_id, &connection).await;
+    let dct = meta_store
+        .get_data_connection_type(&tenant_id, &dc_creds.data_connection_type_id)
+        .await?;
 
-    if let Some(secret) = &secret {
-        let dct = service
-            .meta_store
-            .get_data_connection_type(ctx.tenant_id.as_str(), &connection.data_connection_type_id)
-            .await?;
+    dct.resource
+        .check_credentials_schema(&dc_creds.credentials.properties)
+        .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
 
-        dct.resource
-            .check_credentials_schema(&secret.properties)
-            .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+    let data_connection = dc_creds.to_data_connection();
 
-        let secret = &mut secret.clone();
-        secret.labels = Some(default_secret_labels());
+    let secret_obj = Secret {
+        name: dc_creds.credentials.secret.clone(),
+        namespace: tenant_id.to_string(),
+        properties: dc_creds.credentials.properties.clone(),
+        labels: Some(default_secret_labels()),
+        annotations: Some(HashMap::new()),
+    };
 
-        service.secret_store.create_secret(secret, false).await?;
-    }
+    secret_store.create_secret(&secret_obj, false).await?;
 
-    let connection_res = service
-        .meta_store
-        .create_data_connection(ctx.tenant_id.as_str(), &connection)
-        .await;
+    let connection_res = meta_store.create_data_connection(&tenant_id, &data_connection).await;
 
     match connection_res {
         Ok(connection_res) => Ok(HttpResponse::Created().json(connection_res)),
         Err(e) => {
-            if let Some(secret) = secret {
-                let res = service.secret_store.delete_secret(&tenant_id, &secret.name).await;
-                if let Err(e) = res {
-                    error!("Failed to delete secret: {:?}", e);
-                }
+            let res = secret_store.delete_secret(&tenant_id, &secret_obj.name).await;
+            if let Err(e) = res {
+                error!("Failed to delete secret: {:?}", e);
             }
             Err(e.into())
+        },
+    }
+}
+
+pub async fn create_connection(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    body: web::Json<CreateConnectionRequest>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    let meta_store = service.meta_store.clone();
+    let secret_store = service.secret_store.clone();
+    let tenant_id = ctx.tenant_id.clone();
+
+    match body.into_inner() {
+        CreateConnectionRequest::DataConnectionWithInlineCreds(dc_creds) => {
+            create_connection_with_creds(meta_store, secret_store, tenant_id, dc_creds).await
+        },
+        CreateConnectionRequest::DataConnectionWithSecretRef(connection) => {
+            info!("create_connection: for tenant {:?}", tenant_id);
+
+            let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
+
+            Ok(HttpResponse::Created().json(connection_res))
         },
     }
 }
@@ -314,12 +338,13 @@ pub async fn export_connection(
 
     let mut props = HashMap::new();
 
-    if let Some(Admin::SecretRef { secret_ref }) = &connection.resource.admin {
-        // Export the credentials into the new secret
-        let existing_secret = service.secret_store.get_secret(&ctx.tenant_id, secret_ref).await?;
-        for (key, value) in existing_secret.properties.iter() {
-            props.insert(key.to_string(), value.to_string());
-        }
+    // Export the credentials into the new secret
+    let existing_secret = service
+        .secret_store
+        .get_secret(&ctx.tenant_id, connection.resource.credentials_ref.secret.as_str())
+        .await?;
+    for (key, value) in existing_secret.properties.iter() {
+        props.insert(key.to_string(), value.to_string());
     }
 
     props.insert("data_connection.id".to_string(), connection.metadata.id.to_string());
@@ -358,7 +383,7 @@ mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
-    use commons::api::connections::Admin;
+    use commons::api::connections::CredentialsRef;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
     use commons::api::errors::SecretStoreError;
@@ -403,9 +428,9 @@ mod tests {
                         name: "my-pg".to_string(),
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
-                        admin: Some(Admin::SecretRef {
-                            secret_ref: "my-pg-creds".to_string(),
-                        }),
+                        credentials_ref: CredentialsRef {
+                            secret: "my-pg-creds".to_string(),
+                        },
                         properties: HashMap::from([
                             ("host".to_string(), "localhost".to_string()),
                             ("port".to_string(), "5432".to_string()),
@@ -456,7 +481,7 @@ mod tests {
                     name: "my-pg".to_string(),
                     data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
-                    admin: None,
+                    credentials_ref: CredentialsRef::default(),
                     properties: std::collections::HashMap::new(),
                 };
                 let updated = update_fn(existing)?;
@@ -620,11 +645,30 @@ mod tests {
             >,
         ) -> Result<commons::api::connection_types::DataConnectionTypeResource, commons::api::errors::MetaStoreError>
         {
-            let dct = self.get_data_connection_type("test-tenant", uid).await?;
-            let status = update_fn(dct.status)?;
+            let (metadata, resource, current_status) =
+                if let Ok(dct) = self.get_data_connection_type("test-tenant", uid).await {
+                    (dct.metadata, dct.resource, dct.status)
+                } else {
+                    (
+                        commons::api::ResourceMetadata {
+                            id: uid.to_string(),
+                            tenant_id: Some("test-tenant".to_string()),
+                            created_at: "2026-01-01T00:00:00Z".to_string(),
+                            updated_at: "2026-01-01T00:00:00Z".to_string(),
+                        },
+                        DataConnectionType {
+                            name: String::new(),
+                            provider: String::new(),
+                            description: None,
+                            credentials_fields: vec![],
+                        },
+                        Default::default(),
+                    )
+                };
+            let status = update_fn(current_status)?;
             Ok(DataConnectionTypeResource {
-                metadata: dct.metadata,
-                resource: dct.resource,
+                metadata,
+                resource,
                 status,
             })
         }
@@ -815,6 +859,9 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "ct-1",
                 "format": "tabular",
+                "credentials_ref": {
+                    "secret": "my-pg-creds"
+                },
                 "properties": {}
             }))
             .to_request();
@@ -844,6 +891,9 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "nonexistent-type-id",
                 "format": "tabular",
+                "credentials_ref": {
+                    "secret": "my-pg-creds"
+                },
                 "properties": {}
             }))
             .to_request();

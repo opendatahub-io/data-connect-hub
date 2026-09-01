@@ -13,7 +13,7 @@ Set environment variables to override defaults:
 import os
 import sys
 
-from data_connect_hub import AdminSecretRef, DataConnectClient
+from data_connect_hub import CredentialsRef, DataConnectClient
 from data_connect_hub.exceptions import DCHHTTPError
 
 client = DataConnectClient(
@@ -41,7 +41,7 @@ try:
         name="example-postgres",
         connection_type_id=connection_type_id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref="my-db-creds"),
+        credentials_ref=CredentialsRef(secret="my-db-creds"),
         properties={"host": "localhost", "port": "5432", "dbname": "mydb"},
     )
     print(f"\nCreated connection: {new_conn.id}")

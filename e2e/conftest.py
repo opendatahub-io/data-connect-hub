@@ -21,7 +21,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from data_connect_hub import AdminSecretRef, DataConnectClient
+from data_connect_hub import CredentialsRef, DataConnectClient
 from data_connect_hub.client import _build_urls
 
 # ---------------------------------------------------------------------------
@@ -239,14 +239,14 @@ def create_connection(rest_client: DataConnectClient):
         name: str | None = None,
         connection_type_id: str,
         data_format: str = "tabular",
-        admin=None,
+        credentials_ref=None,
         properties: dict[str, str] | None = None,
     ):
         conn = rest_client.create_connection(
             name=name or _unique_name("e2e-conn"),
             connection_type_id=connection_type_id,
             data_format=data_format,
-            admin=admin,
+            credentials_ref=credentials_ref,
             properties=properties,
         )
         created_ids.append(conn.id)
@@ -319,7 +319,7 @@ def pg_flight_connection(
         name=_unique_name("e2e-pg-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=pg_secret),
+        credentials_ref=CredentialsRef(secret=pg_secret),
         properties={},
     )
 
@@ -353,7 +353,7 @@ def s3_flight_connection(
         name=_unique_name("e2e-s3-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=s3_secret),
+        credentials_ref=CredentialsRef(secret=s3_secret),
         properties={},
     )
 
@@ -387,7 +387,7 @@ def milvus_flight_connection(
         name=_unique_name("e2e-milvus-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=milvus_secret),
+        credentials_ref=CredentialsRef(secret=milvus_secret),
         properties={},
     )
 
@@ -421,7 +421,7 @@ def es_flight_connection(
         name=_unique_name("e2e-es-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=es_secret),
+        credentials_ref=CredentialsRef(secret=es_secret),
         properties={},
     )
 
@@ -454,7 +454,7 @@ def es_apikey_flight_connection(
         name=_unique_name("e2e-es-apikey-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=es_apikey_secret),
+        credentials_ref=CredentialsRef(secret=es_apikey_secret),
         properties={},
     )
 
@@ -488,7 +488,7 @@ def neo4j_flight_connection(
         name=_unique_name("e2e-neo4j-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=neo4j_secret),
+        credentials_ref=CredentialsRef(secret=neo4j_secret),
         properties={},
     )
 
@@ -522,7 +522,7 @@ def uri_flight_connection(
         name=_unique_name("e2e-uri-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
-        admin=AdminSecretRef(secret_ref=uri_secret),
+        credentials_ref=CredentialsRef(secret=uri_secret),
         properties={},
     )
 

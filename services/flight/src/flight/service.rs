@@ -15,7 +15,7 @@ use arrow_flight::{
     },
 };
 use commons::api::connection_types::DataConnectionTypeResource;
-use commons::api::connections::{Admin, DataConnectionResource};
+use commons::api::connections::{CredentialsRef, DataConnectionResource};
 use commons::api::connector::BinaryQuery;
 use commons::api::connector::{CredentialsResolver, FlightConnector, QueryOptions};
 use commons::api::errors::ConnectorError;
@@ -627,16 +627,15 @@ impl FlightSqlService for DataIngestionService {
 #[async_trait::async_trait]
 impl CredentialsResolver for DataIngestionService {
     async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
-        match (&connection.metadata.tenant_id, &connection.resource.admin) {
-            (Some(tenant_id), Some(Admin::SecretRef { secret_ref })) => {
+        match (&connection.metadata.tenant_id, &connection.resource.credentials_ref) {
+            (Some(tenant_id), CredentialsRef { secret }) => {
                 let secret = self
                     .secret_store
-                    .get_secret(tenant_id, secret_ref)
+                    .get_secret(tenant_id, secret)
                     .await
                     .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
                 Ok(secret.properties.clone())
             },
-            (_, Some(Admin::Secret { name: _, secret })) => Ok(secret.clone()),
             _ => Err(ConnectorError::ConnectionError("No credentials found".to_string())),
         }
     }

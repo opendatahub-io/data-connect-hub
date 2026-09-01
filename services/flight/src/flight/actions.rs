@@ -5,6 +5,7 @@ use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
 use commons::api::ResourceMetadata;
+use commons::api::connections::CredentialsRef;
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionStatus;
@@ -111,7 +112,7 @@ impl DataIngestionService {
                         name: "test".to_string(),
                         data_connection_type_id: dct_id.clone(),
                         format: DataFormat::Tabular,
-                        admin: None,
+                        credentials_ref: CredentialsRef::default(),
                         properties: HashMap::new(),
                     },
                     status: DataConnectionStatus::default(),

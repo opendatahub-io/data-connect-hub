@@ -11,7 +11,7 @@ use commons::api::connections::DataConnectionResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::connections::{Admin, DataConnection};
+use commons::api::connections::{CredentialsRef, DataConnection};
 use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
@@ -27,7 +27,6 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tonic::transport::{Channel, Server};
-
 struct TestMetaStore;
 
 #[async_trait::async_trait]
@@ -55,9 +54,9 @@ impl MetaStore for TestMetaStore {
                 name: "test-db".to_string(),
                 data_connection_type_id: "sqlite".to_string(),
                 format: DataFormat::Tabular,
-                admin: Some(Admin::SecretRef {
-                    secret_ref: "sqlite_creds".to_string(),
-                }),
+                credentials_ref: CredentialsRef {
+                    secret: "sqlite_creds".to_string(),
+                },
                 properties: HashMap::new(),
             },
             status: DataConnectionStatus {

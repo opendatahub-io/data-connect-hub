@@ -121,10 +121,13 @@ class TestCreateConnection:
 
         transport = httpx.MockTransport(handler)
         client = _make_client(transport)
+        from data_connect_hub.models import CredentialsRef
+
         req = CreateConnectionRequest(
             name="new-conn",
             data_connection_type_id="postgres",
             format="tabular",
+            credentials_ref=CredentialsRef(secret="secret/test-conn"),
         )
         result = client.create_connection(req)
         assert result.id == "123"
@@ -358,9 +361,9 @@ class TestWrappedResourceFormat:
         result = client.get_connection("123")
         assert result.id == "123"
         assert result.data_connection_type_id == "postgres"
-        from data_connect_hub.models import AdminSecretRef
+        from data_connect_hub.models import CredentialsRef
 
-        assert result.admin == AdminSecretRef(secret_ref="secret/test-conn")
+        assert result.credentials_ref == CredentialsRef(secret="secret/test-conn")
 
     def test_get_connection_type_wrapped(self) -> None:
         transport = _make_transport(
@@ -443,12 +446,13 @@ class TestRetry:
         transport = httpx.MockTransport(handler)
         client = _make_client(transport, max_retries=3, backoff_base=0.0)
         from data_connect_hub.exceptions import DCHServerError
-        from data_connect_hub.models import CreateConnectionRequest
+        from data_connect_hub.models import CreateConnectionRequest, CredentialsRef
 
         req = CreateConnectionRequest(
             name="c",
             data_connection_type_id="pg",
             format="tabular",
+            credentials_ref=CredentialsRef(secret="secret/test"),
         )
         with pytest.raises(DCHServerError):
             client.create_connection(req)

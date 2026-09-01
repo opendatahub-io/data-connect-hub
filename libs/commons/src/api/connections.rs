@@ -2,27 +2,17 @@ use crate::api::ResourceMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(untagged, deny_unknown_fields)]
-pub enum Admin {
-    SecretRef {
-        secret_ref: String,
-    },
-
-    Secret {
-        name: String,
-        secret: HashMap<String, String>,
-    },
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct CredentialsRef {
+    pub secret: String,
 }
 
-impl std::fmt::Debug for Admin {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Admin::SecretRef { secret_ref } => f.debug_struct("SecretRef").field("secret_ref", &secret_ref).finish(),
-            Admin::Secret { .. } => f.debug_struct("Secret").field("secret", &"[REDACTED]").finish(),
-        }
+impl Default for CredentialsRef {
+    fn default() -> Self {
+        Self { secret: "".to_string() }
     }
 }
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum DataFormat {
     #[serde(rename = "tabular")]
@@ -96,13 +86,12 @@ impl Default for DataConnectionStatus {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
     pub format: DataFormat,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub admin: Option<Admin>,
+    pub credentials_ref: CredentialsRef,
     pub properties: HashMap<String, String>,
 }
 
@@ -112,18 +101,6 @@ pub struct DataConnectionResource {
     pub resource: DataConnection,
     #[serde(default)]
     pub status: DataConnectionStatus,
-}
-
-impl std::fmt::Debug for DataConnection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DataConnection")
-            .field("name", &self.name)
-            .field("data_connection_type_id", &self.data_connection_type_id)
-            .field("format", &self.format)
-            .field("admin", &self.admin)
-            .field("properties", &self.properties)
-            .finish()
-    }
 }
 
 #[cfg(test)]
@@ -142,9 +119,9 @@ mod tests {
                 name: "test-conn".to_string(),
                 data_connection_type_id: "postgres".to_string(),
                 format: DataFormat::Tabular,
-                admin: Some(Admin::SecretRef {
-                    secret_ref: "secret/test-conn".to_string(),
-                }),
+                credentials_ref: CredentialsRef {
+                    secret: "secret/test-conn".to_string(),
+                },
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
             status: DataConnectionStatus {
@@ -152,21 +129,6 @@ mod tests {
                 message: None,
                 updated_at: None,
             },
-        }
-    }
-
-    #[test]
-    fn test_admin_serialize_deserialize() {
-        let admin = Admin::SecretRef {
-            secret_ref: "secret/test".to_string(),
-        };
-        let json = serde_json::to_string(&admin).unwrap();
-        let deserialized: Admin = serde_json::from_str(&json).unwrap();
-        match (&deserialized, &admin) {
-            (Admin::SecretRef { secret_ref: a }, Admin::SecretRef { secret_ref: b }) => {
-                assert_eq!(a, b);
-            },
-            _ => panic!("expected SecretRef variant"),
         }
     }
 
@@ -183,7 +145,7 @@ mod tests {
                 "name": "test-conn",
                 "data_connection_type_id": "postgres",
                 "format": "tabular",
-                "admin": { "secret_ref": "secret/test-conn" },
+                "credentials_ref": { "secret": "secret/test-conn" },
                 "properties": { "key": "value" }
             },
             "status": {
@@ -198,10 +160,8 @@ mod tests {
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, DataFormat::Tabular);
-        match &res.resource.admin {
-            Some(Admin::SecretRef { secret_ref }) => assert_eq!(secret_ref, &"secret/test-conn".to_string()),
-            _ => panic!("expected SecretRef variant"),
-        }
+        assert_eq!(res.resource.credentials_ref.secret, "secret/test-conn".to_string());
+
         assert_eq!(res.resource.properties["key"], "value");
 
         let round_tripped = serde_json::to_value(&res).unwrap();
@@ -214,12 +174,10 @@ mod tests {
         let cloned = res.clone();
 
         assert_eq!(cloned.metadata.id, res.metadata.id);
-        match (&cloned.resource.admin, &res.resource.admin) {
-            (Some(Admin::SecretRef { secret_ref: a }), Some(Admin::SecretRef { secret_ref: b })) => {
-                assert_eq!(a, b);
-            },
-            _ => panic!("expected SecretRef variant"),
-        }
+        assert_eq!(
+            cloned.resource.credentials_ref.secret,
+            res.resource.credentials_ref.secret
+        );
         assert_eq!(cloned.resource.properties, res.resource.properties);
     }
 
@@ -323,6 +281,9 @@ mod tests {
                 "name": "old-conn",
                 "data_connection_type_id": "postgres",
                 "format": "tabular",
+                "credentials_ref": {
+                    "secret": "secret/test-conn"
+                },
                 "properties": {}
             }
         });

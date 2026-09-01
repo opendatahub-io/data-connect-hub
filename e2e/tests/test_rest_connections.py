@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from data_connect_hub import AdminSecretRef, DataConnectClient, DCHNotFoundError
+from data_connect_hub import CredentialsRef, DataConnectClient, DCHNotFoundError
 
 
 @pytest.fixture()
@@ -24,7 +24,7 @@ class TestRestConnection:
         conn = create_connection(
             name="e2e-my-pg",
             connection_type_id=pg_connection_type.id,
-            admin=AdminSecretRef(secret_ref="e2e-ns/e2e-secret"),
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
             properties={"database": "testdb"},
         )
 
@@ -45,7 +45,7 @@ class TestRestConnection:
         conn = create_connection(
             name="e2e-delete-pg",
             connection_type_id=pg_connection_type.id,
-            admin=AdminSecretRef(secret_ref="e2e-ns/e2e-secret"),
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
         )
         rest_client.delete_connection(conn.id)
 
@@ -71,7 +71,7 @@ class TestRestConnection:
         conn = create_connection(
             name="e2e-update-pg",
             connection_type_id=pg_connection_type.id,
-            admin=AdminSecretRef(secret_ref="e2e-ns/e2e-secret"),
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
             properties={"database": "testdb"},
         )
         updated = rest_client.update_connection(conn.id, name="e2e-updated-pg")
