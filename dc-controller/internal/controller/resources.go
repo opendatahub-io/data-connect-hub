@@ -467,12 +467,12 @@ func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Contex
 	key := client.ObjectKey{Name: nameDatabaseConfig, Namespace: namespace}
 	if err := r.Get(ctx, key, secret); err != nil {
 		if apierrors.IsNotFound(err) {
-			return fmt.Errorf("secret %q not found in namespace %q — create it with keys DATABASE_URL and secret-config.toml", nameDatabaseConfig, namespace)
+			return fmt.Errorf("secret %q not found in namespace %q — it must contain a secret-config.toml key", nameDatabaseConfig, namespace)
 		}
 		return fmt.Errorf("reading secret %s: %w", nameDatabaseConfig, err)
 	}
 
-	for _, k := range []string{"DATABASE_URL", "secret-config.toml"} {
+	for _, k := range []string{"secret-config.toml"} {
 		value, ok := secret.Data[k]
 		if !ok || strings.TrimSpace(string(value)) == "" {
 			return fmt.Errorf("secret %q is missing or has empty required key %q", nameDatabaseConfig, k)

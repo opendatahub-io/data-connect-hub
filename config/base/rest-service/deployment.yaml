@@ -125,6 +125,3 @@ spec:
         - name: db-secret
           secret:
             secretName: dch-database-config
-            items:
-              - key: secret-config.toml
-                path: secret-config.toml

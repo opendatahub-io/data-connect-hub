@@ -208,7 +208,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseSecretMissing",
-				"Secret 'dch-database-config' with keys DATABASE_URL and secret-config.toml is required")
+				"Secret 'dch-database-config' with key secret-config.toml is required")
 		})
 	}
 
