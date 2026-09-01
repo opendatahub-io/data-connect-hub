@@ -80,37 +80,31 @@ impl PgMetaStore {
     }
 }
 
-// deserialize_connection_types deserializes each stored connection type JSON blob
-// independently, returning the successfully parsed resources. A blob that fails to
+// deserialize_connection_type deserializes a single stored connection type JSON blob,
+// returning the parsed resource or None if it is malformed. A blob that fails to
 // deserialize is logged and skipped so a single malformed row does not abort the
 // whole listing.
-fn deserialize_connection_types(
-    values: Vec<serde_json::Value>,
-    global_tenant_id: &str,
-) -> Vec<DataConnectionTypeResource> {
-    let mut items = Vec::new();
-    for value in values {
-        match serde_json::from_value::<DataConnectionTypeResource>(value.clone()) {
-            Ok(mut dct) => {
-                if let Some(tenant) = dct.metadata.tenant_id.clone()
-                    && tenant == global_tenant_id
-                {
-                    // Discard the tenant field for global connection types
-                    dct.metadata.tenant_id = None;
-                }
-                items.push(dct);
-            },
-            Err(e) => {
-                let id = value
-                    .get("metadata")
-                    .and_then(|m| m.get("id"))
-                    .and_then(|id| id.as_str())
-                    .unwrap_or("unknown");
-                error!("failed to deserialize connection type {id}: {e}");
-            },
-        }
+fn deserialize_connection_type(value: serde_json::Value, global_tenant_id: &str) -> Option<DataConnectionTypeResource> {
+    match serde_json::from_value::<DataConnectionTypeResource>(value.clone()) {
+        Ok(mut dct) => {
+            if let Some(tenant) = dct.metadata.tenant_id.clone()
+                && tenant == global_tenant_id
+            {
+                // Discard the tenant field for global connection types
+                dct.metadata.tenant_id = None;
+            }
+            Some(dct)
+        },
+        Err(e) => {
+            let id = value
+                .get("metadata")
+                .and_then(|m| m.get("id"))
+                .and_then(|id| id.as_str())
+                .unwrap_or("unknown");
+            error!("failed to deserialize connection type {id}: {e}");
+            None
+        },
     }
-    items
 }
 
 #[async_trait::async_trait]
@@ -448,17 +442,19 @@ impl MetaStore for PgMetaStore {
                 MetaStoreError::Query("failed to list connection types".to_string())
             })?;
 
-        let values: Vec<serde_json::Value> = rows
+        let items: Vec<DataConnectionTypeResource> = rows
             .iter()
-            .map(|row| {
-                row.try_get("data").map_err(|e| {
-                    error!("failed to read connection type column: {e}");
-                    MetaStoreError::Query("failed to read connection type".to_string())
-                })
+            .filter_map(|row| {
+                let value: serde_json::Value = match row.try_get("data") {
+                    Ok(value) => value,
+                    Err(e) => {
+                        error!("failed to read connection type column: {e}");
+                        return None;
+                    },
+                };
+                deserialize_connection_type(value, &self.global_tenant_id)
             })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let items = deserialize_connection_types(values, &self.global_tenant_id);
+            .collect();
 
         Ok(ResourceList {
             total_count: items.len(),
@@ -751,18 +747,16 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_connection_types_all_valid() {
-        let values = vec![
-            valid_connection_type_json("a", None),
-            valid_connection_type_json("b", None),
-        ];
-        let items = deserialize_connection_types(values, "global");
-        assert_eq!(items.len(), 2);
+    fn test_deserialize_connection_type_valid() {
+        let a = deserialize_connection_type(valid_connection_type_json("a", None), "global");
+        let b = deserialize_connection_type(valid_connection_type_json("b", None), "global");
+        assert!(a.is_some());
+        assert!(b.is_some());
     }
 
     #[test]
-    fn test_deserialize_connection_types_skips_invalid() {
-        // Second blob is missing the required `resource.name` field.
+    fn test_deserialize_connection_type_skips_invalid() {
+        // Blob is missing the required `resource.name` field.
         let invalid = serde_json::json!({
             "metadata": {
                 "id": "bad-1",
@@ -774,21 +768,17 @@ mod tests {
                 "credentials_fields": [],
             },
         });
-        let values = vec![valid_connection_type_json("good-1", None), invalid];
-        let items = deserialize_connection_types(values, "global");
-        assert_eq!(items.len(), 1);
-        assert_eq!(items[0].metadata.id, "good-1");
+        assert!(deserialize_connection_type(invalid, "global").is_none());
+
+        let good = deserialize_connection_type(valid_connection_type_json("good-1", None), "global");
+        assert_eq!(good.unwrap().metadata.id, "good-1");
     }
 
     #[test]
-    fn test_deserialize_connection_types_scrubs_global_tenant() {
-        let values = vec![
-            valid_connection_type_json("g", Some("global")),
-            valid_connection_type_json("t", Some("tenant-a")),
-        ];
-        let items = deserialize_connection_types(values, "global");
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].metadata.tenant_id, None);
-        assert_eq!(items[1].metadata.tenant_id, Some("tenant-a".to_string()));
+    fn test_deserialize_connection_type_scrubs_global_tenant() {
+        let global = deserialize_connection_type(valid_connection_type_json("g", Some("global")), "global");
+        let tenant = deserialize_connection_type(valid_connection_type_json("t", Some("tenant-a")), "global");
+        assert_eq!(global.unwrap().metadata.tenant_id, None);
+        assert_eq!(tenant.unwrap().metadata.tenant_id, Some("tenant-a".to_string()));
     }
 }
