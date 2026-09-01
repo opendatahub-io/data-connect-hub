@@ -359,14 +359,14 @@ mod tests {
         }
     }
 
-    fn make_connection(admin: CredentialsRef) -> DataConnectionResource {
+    fn make_connection(creds: CredentialsRef) -> DataConnectionResource {
         DataConnectionResource {
             metadata: make_metadata("conn-1"),
             resource: DataConnection {
                 name: "test".to_string(),
                 data_connection_type_id: "pg".to_string(),
                 format: DataFormat::Tabular,
-                credentials_ref: admin,
+                credentials_ref: creds,
                 properties: HashMap::new(),
             },
             status: DataConnectionStatus {

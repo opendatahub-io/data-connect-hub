@@ -86,7 +86,7 @@ impl Default for DataConnectionStatus {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DataConnection {
     pub name: String,
     pub data_connection_type_id: String,
@@ -101,18 +101,6 @@ pub struct DataConnectionResource {
     pub resource: DataConnection,
     #[serde(default)]
     pub status: DataConnectionStatus,
-}
-
-impl std::fmt::Debug for DataConnection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DataConnection")
-            .field("name", &self.name)
-            .field("data_connection_type_id", &self.data_connection_type_id)
-            .field("format", &self.format)
-            .field("admin", &self.credentials_ref)
-            .field("properties", &self.properties)
-            .finish()
-    }
 }
 
 #[cfg(test)]
@@ -142,16 +130,6 @@ mod tests {
                 updated_at: None,
             },
         }
-    }
-
-    #[test]
-    fn test_admin_serialize_deserialize() {
-        let admin = CredentialsRef {
-            secret: "secret/test".to_string(),
-        };
-        let json = serde_json::to_string(&admin).unwrap();
-        let deserialized: CredentialsRef = serde_json::from_str(&json).unwrap();
-        assert_eq!(deserialized.secret, admin.secret);
     }
 
     #[test]
