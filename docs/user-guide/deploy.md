@@ -483,7 +483,10 @@ isn't authorized for still fails with `PERMISSION_DENIED`.
 ### Test through the gateway
 
 Get the gateway's external route and test the API with a bearer token.
-All API calls (except `/health`) require the `X-Tenant-Id` header set
+The platform Gateway requires the bearer token for health checks too. DCH
+health endpoints bypass service-level authentication so Kubernetes probes and
+direct port-forward checks remain anonymous, but that bypass happens after the
+Gateway. All API calls except health also require the `X-Tenant-Id` header set
 to the target namespace:
 
 ```console
