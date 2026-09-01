@@ -2,9 +2,9 @@ pub mod endpoints;
 pub mod errors;
 pub mod middleware;
 
-use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataFormat;
+use commons::api::connections::SecretRef;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -29,9 +29,9 @@ impl DataConnectionWithCreds {
             name: self.name.clone(),
             data_connection_type_id: self.data_connection_type_id.clone(),
             format: self.format.clone(),
-            admin: Some(Admin::SecretRef {
-                secret_ref: self.admin.secret.clone(),
-            }),
+            secret_ref: SecretRef {
+                name: self.admin.secret.clone(),
+            },
             properties: self.properties.clone(),
         }
     }

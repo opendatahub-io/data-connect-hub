@@ -10,13 +10,13 @@ use crate::utils::default_secret_labels;
 
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
-use commons::api::connections::Admin;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
@@ -82,16 +82,15 @@ pub async fn get_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
-pub async fn create_connection_with_creds(
+async fn create_connection_with_creds(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
-    connection: web::Json<DataConnectionWithCreds>,
+    dc_creds: DataConnectionWithCreds,
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("create_connection_wth_creds: for tenant {:?}", ctx.tenant_id);
     let tenant_id = ctx.tenant_id.clone();
     let meta_store = service.meta_store.clone();
     let secret_store = service.secret_store.clone();
-    let dc_creds = connection.into_inner();
 
     let dct = meta_store
         .get_data_connection_type(&tenant_id, &dc_creds.data_connection_type_id)
@@ -130,8 +129,18 @@ pub async fn create_connection_with_creds(
 pub async fn create_connection(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
-    connection: web::Json<DataConnection>,
+    body: web::Json<Value>,
 ) -> Result<HttpResponse, RestErrorResponse> {
+    let connection: Result<DataConnection, serde_json::Error> = serde_json::from_value(body.clone());
+
+    if connection.is_err() {
+        let connection = serde_json::from_value(body.into_inner())
+            .map_err(|e| ValidationError::DeserializationError(e.to_string()))?;
+        return create_connection_with_creds(service, ctx, connection).await;
+    }
+
+    let connection = connection.unwrap();
+
     info!("create_connection: for tenant {:?}", ctx.tenant_id);
     let tenant_id = ctx.tenant_id.clone();
     let meta_store = service.meta_store.clone();
@@ -331,12 +340,13 @@ pub async fn export_connection(
 
     let mut props = HashMap::new();
 
-    if let Some(Admin::SecretRef { secret_ref }) = &connection.resource.admin {
-        // Export the credentials into the new secret
-        let existing_secret = service.secret_store.get_secret(&ctx.tenant_id, secret_ref).await?;
-        for (key, value) in existing_secret.properties.iter() {
-            props.insert(key.to_string(), value.to_string());
-        }
+    // Export the credentials into the new secret
+    let existing_secret = service
+        .secret_store
+        .get_secret(&ctx.tenant_id, connection.resource.secret_ref.name.as_str())
+        .await?;
+    for (key, value) in existing_secret.properties.iter() {
+        props.insert(key.to_string(), value.to_string());
     }
 
     props.insert("data_connection.id".to_string(), connection.metadata.id.to_string());
@@ -375,9 +385,9 @@ mod tests {
     use actix_web::{App, middleware, test, web};
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
-    use commons::api::connections::Admin;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
+    use commons::api::connections::SecretRef;
     use commons::api::errors::SecretStoreError;
     use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
@@ -420,9 +430,9 @@ mod tests {
                         name: "my-pg".to_string(),
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
-                        admin: Some(Admin::SecretRef {
-                            secret_ref: "my-pg-creds".to_string(),
-                        }),
+                        secret_ref: SecretRef {
+                            name: "my-pg-creds".to_string(),
+                        },
                         properties: HashMap::from([
                             ("host".to_string(), "localhost".to_string()),
                             ("port".to_string(), "5432".to_string()),
@@ -473,7 +483,7 @@ mod tests {
                     name: "my-pg".to_string(),
                     data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
-                    admin: None,
+                    secret_ref: SecretRef::default(),
                     properties: std::collections::HashMap::new(),
                 };
                 let updated = update_fn(existing)?;
@@ -832,6 +842,9 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "ct-1",
                 "format": "tabular",
+                "secret_ref": {
+                    "name": "my-pg-creds"
+                },
                 "properties": {}
             }))
             .to_request();
@@ -861,6 +874,9 @@ mod tests {
                 "name": "my-pg",
                 "data_connection_type_id": "nonexistent-type-id",
                 "format": "tabular",
+                "secret_ref": {
+                    "name": "my-pg-creds"
+                },
                 "properties": {}
             }))
             .to_request();
@@ -1062,6 +1078,9 @@ mod tests {
                 "name": "PostgreSQL",
                 "provider": "postgres",
                 "description": "PostgreSQL database connection",
+                "admin": {
+                    "secret_ref": "my-pg-creds"
+                },
                 "credentials_fields": []
             }))
             .to_request();
