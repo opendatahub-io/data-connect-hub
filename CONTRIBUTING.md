@@ -102,6 +102,20 @@ git rebase --signoff --exec 'git commit --amend --no-edit -S' main
 git push --force-with-lease
 ```
 
+## Python SDK Development
+
+A virtual environment at `sdk/python/.venv` is created automatically on first run.
+If `VIRTUAL_ENV` is already set (e.g. a manually activated venv), the Makefile uses the system Python directly.
+
+```bash
+make sdk-install     # install in editable mode with dev deps
+make sdk-test        # run tests with coverage
+make sdk-lint        # ruff check + format check
+make sdk-fmt         # auto-format
+make sdk-typecheck   # run mypy strict type checking
+make sdk-all         # lint + typecheck + test
+```
+
 ## Pull Request Process
 
 1. Fork the repository and create a feature branch from `main`
