@@ -1,6 +1,3 @@
-use commons::api::connections::Admin;
-use commons::api::connections::DataConnection;
-use commons::api::secret::Secret;
 use commons::utils::config::GlobalConnectionTypes;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
@@ -32,32 +29,6 @@ pub struct ServerConfig {
     pub global_connection_types: GlobalConnectionTypes,
     #[serde(rename = "flight-service")]
     pub flight_service: FlightService,
-}
-
-pub async fn transform_data_connection(
-    tenant_id: &str,
-    data_connection: &DataConnection,
-) -> (DataConnection, Option<Secret>) {
-    let mut data_connection = data_connection.clone();
-
-    match &data_connection.admin {
-        Some(Admin::Secret { name, secret }) => {
-            let properties = secret.clone();
-
-            let secret_obj = Secret {
-                name: name.to_string(),
-                namespace: tenant_id.to_string(),
-                properties: properties.clone(),
-                labels: Some(default_secret_labels()),
-                annotations: Some(HashMap::new()),
-            };
-            data_connection.admin = Some(Admin::SecretRef {
-                secret_ref: name.to_string(),
-            });
-            (data_connection, Some(secret_obj))
-        },
-        _ => (data_connection, None),
-    }
 }
 
 pub fn default_secret_labels() -> HashMap<String, String> {

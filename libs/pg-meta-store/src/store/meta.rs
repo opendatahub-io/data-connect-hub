@@ -1,7 +1,6 @@
 use chrono::Utc;
 use commons::api::ResourceMetadata;
 use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus};
-use commons::api::connections::Admin;
 use commons::api::connections::{DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus};
 use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
@@ -79,15 +78,6 @@ impl PgMetaStore {
             })?;
         Ok(())
     }
-
-    async fn can_store(data_connection: &DataConnection) -> Result<(), MetaStoreError> {
-        if let Some(Admin::Secret { .. }) = &data_connection.admin {
-            return Err(MetaStoreError::Validation(
-                "A plain secret cannot be stored in the database, use a secret reference instead".to_string(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[async_trait::async_trait]
@@ -154,8 +144,6 @@ impl MetaStore for PgMetaStore {
         tenant_id: &str,
         data_connection: &DataConnection,
     ) -> Result<DataConnectionResource, MetaStoreError> {
-        Self::can_store(data_connection).await?;
-
         let mut tx = self.pool.begin().await.map_err(|e| {
             error!("failed to begin transaction: {e}");
             MetaStoreError::Query("failed to create data connection".to_string())
@@ -238,8 +226,6 @@ impl MetaStore for PgMetaStore {
         })?;
 
         let data_connection = update_fn(existing.resource)?;
-
-        Self::can_store(&data_connection).await?;
 
         Self::validate_connection_type(
             &mut *tx,

@@ -636,7 +636,6 @@ impl CredentialsResolver for DataIngestionService {
                     .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
                 Ok(secret.properties.clone())
             },
-            (_, Some(Admin::Secret { name: _, secret })) => Ok(secret.clone()),
             _ => Err(ConnectorError::ConnectionError("No credentials found".to_string())),
         }
     }

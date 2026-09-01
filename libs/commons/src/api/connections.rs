@@ -5,21 +5,13 @@ use std::collections::HashMap;
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(untagged, deny_unknown_fields)]
 pub enum Admin {
-    SecretRef {
-        secret_ref: String,
-    },
-
-    Secret {
-        name: String,
-        secret: HashMap<String, String>,
-    },
+    SecretRef { secret_ref: String },
 }
 
 impl std::fmt::Debug for Admin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Admin::SecretRef { secret_ref } => f.debug_struct("SecretRef").field("secret_ref", &secret_ref).finish(),
-            Admin::Secret { .. } => f.debug_struct("Secret").field("secret", &"[REDACTED]").finish(),
         }
     }
 }
@@ -166,7 +158,6 @@ mod tests {
             (Admin::SecretRef { secret_ref: a }, Admin::SecretRef { secret_ref: b }) => {
                 assert_eq!(a, b);
             },
-            _ => panic!("expected SecretRef variant"),
         }
     }
 

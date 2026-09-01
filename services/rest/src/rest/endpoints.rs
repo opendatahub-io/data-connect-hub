@@ -1,12 +1,13 @@
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
+
 use crate::clients::flight::FlightClient;
 use crate::state::audit::audit_connection_type;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
-use crate::utils::transform_data_connection;
+
 use actix_web::{HttpResponse, web};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::Admin;
@@ -20,6 +21,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
+
+use crate::rest::DataConnectionWithCreds;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -79,6 +82,51 @@ pub async fn get_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
+pub async fn create_connection_with_creds(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    connection: web::Json<DataConnectionWithCreds>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("create_connection_wth_creds: for tenant {:?}", ctx.tenant_id);
+    let tenant_id = ctx.tenant_id.clone();
+    let meta_store = service.meta_store.clone();
+    let secret_store = service.secret_store.clone();
+    let dc_creds = connection.into_inner();
+
+    let dct = meta_store
+        .get_data_connection_type(&tenant_id, &dc_creds.data_connection_type_id)
+        .await?;
+
+    dct.resource
+        .check_credentials_schema(&dc_creds.admin.properties)
+        .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+
+    let data_connection = dc_creds.to_data_connection();
+
+    let secret_obj = Secret {
+        name: dc_creds.admin.secret.clone(),
+        namespace: tenant_id.to_string(),
+        properties: dc_creds.admin.properties.clone(),
+        labels: Some(default_secret_labels()),
+        annotations: Some(HashMap::new()),
+    };
+
+    secret_store.create_secret(&secret_obj, false).await?;
+
+    let connection_res = meta_store.create_data_connection(&tenant_id, &data_connection).await;
+
+    match connection_res {
+        Ok(connection_res) => Ok(HttpResponse::Created().json(connection_res)),
+        Err(e) => {
+            let res = secret_store.delete_secret(&tenant_id, &secret_obj.name).await;
+            if let Err(e) = res {
+                error!("Failed to delete secret: {:?}", e);
+            }
+            Err(e.into())
+        },
+    }
+}
+
 pub async fn create_connection(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
@@ -86,42 +134,11 @@ pub async fn create_connection(
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("create_connection: for tenant {:?}", ctx.tenant_id);
     let tenant_id = ctx.tenant_id.clone();
+    let meta_store = service.meta_store.clone();
 
-    let (connection, secret) = transform_data_connection(&tenant_id, &connection).await;
+    let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
 
-    if let Some(secret) = &secret {
-        let dct = service
-            .meta_store
-            .get_data_connection_type(ctx.tenant_id.as_str(), &connection.data_connection_type_id)
-            .await?;
-
-        dct.resource
-            .check_credentials_schema(&secret.properties)
-            .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
-
-        let secret = &mut secret.clone();
-        secret.labels = Some(default_secret_labels());
-
-        service.secret_store.create_secret(secret, false).await?;
-    }
-
-    let connection_res = service
-        .meta_store
-        .create_data_connection(ctx.tenant_id.as_str(), &connection)
-        .await;
-
-    match connection_res {
-        Ok(connection_res) => Ok(HttpResponse::Created().json(connection_res)),
-        Err(e) => {
-            if let Some(secret) = secret {
-                let res = service.secret_store.delete_secret(&tenant_id, &secret.name).await;
-                if let Err(e) = res {
-                    error!("Failed to delete secret: {:?}", e);
-                }
-            }
-            Err(e.into())
-        },
-    }
+    Ok(HttpResponse::Created().json(connection_res))
 }
 
 pub async fn list_connection_types(
