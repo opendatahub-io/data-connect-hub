@@ -55,7 +55,7 @@ df = table.to_pandas()
 
 ## API Reference
 
-The REST API is the source of truth for every model below. See the OpenAPI spec at [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml) for the full request/response schemas; [`docs/api/index.html`](../../docs/api/index.html) is the same spec rendered with Redoc (open it locally — GitHub shows the HTML source rather than rendering it).
+The REST API is the source of truth for every model below. See the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/) for the full request/response schemas.
 
 ### Connection Types (REST)
 
@@ -107,7 +107,7 @@ Describes a single input field in the connection credential form.
 | `"string"` | Free-text single-line input |
 | `"enum"` | One of `enum_values` |
 
-`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every connection type shipped in [`config/connection-types/`](../../config/connection-types/) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in [`docs/api/openapi.yaml`](../../docs/api/openapi.yaml).
+`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every connection type shipped in [`config/connection-types/`](../../config/connection-types/) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
 
 ### Connection Management (REST)
 
