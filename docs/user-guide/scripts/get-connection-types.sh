@@ -1,16 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
-INFRA_NAMESPACE="${1:-dch-infra-example}"
-TENANT_NAMESPACE="${1:-dch-infra-example}"
+. ./common-vars.sh
 
-GATEWAY_NS="${2:-${DCH_GATEWAY_NS:-openshift-ingress}}"
-
-GW_HOST="dch-gateway-data-science-gateway-class.${GATEWAY_NS}.svc"
 POD_NAME="dch-test-runner"
-API_PATH="/api/v1/data/connection-types"
-BASE_URL="https://${GW_HOST}"
-SA_NAME="${SA_NAME:-dch-test-user}"
+API_PATH="/api/v1alpha1/data/connection-types"
 
 echo "  Creating test runner pod..."
 oc get pod "$POD_NAME" -n "$INFRA_NAMESPACE" &>/dev/null || \
@@ -24,8 +18,6 @@ oc wait --for=condition=Ready pod/"$POD_NAME" -n "$INFRA_NAMESPACE" --timeout=60
 
 . ./get-token.sh
 
-echo "  CMD: curl -sk -H 'Authorization: Bearer <token>' -H 'x-tenant-id: $TENANT_NAMESPACE' ${BASE_URL}${API_PATH}"
-
-oc exec "$POD_NAME" -n "$INFRA_NAMESPACE" -- curl -sk \
+oc exec "$POD_NAME" -n "$INFRA_NAMESPACE" -- curl -k \
     -H "Authorization: Bearer $user_token" -H "x-tenant-id: $TENANT_NAMESPACE" \
-    "${BASE_URL}${API_PATH}" | jq . 
+    "${GW_URL}${API_PATH}" 
