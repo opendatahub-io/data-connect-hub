@@ -18,6 +18,9 @@ oc wait --for=condition=Ready pod/"$POD_NAME" -n "$INFRA_NAMESPACE" --timeout=60
 
 . ./get-token.sh
 
+echo oc exec "$POD_NAME" -n "$INFRA_NAMESPACE" -- curl -k \
+    -H "Authorization: Bearer <user_token>" -H "x-tenant-id: $TENANT_NAMESPACE" \
+    "${GW_URL}${API_PATH}"
 oc exec "$POD_NAME" -n "$INFRA_NAMESPACE" -- curl -k \
     -H "Authorization: Bearer $user_token" -H "x-tenant-id: $TENANT_NAMESPACE" \
     "${GW_URL}${API_PATH}" | jq .

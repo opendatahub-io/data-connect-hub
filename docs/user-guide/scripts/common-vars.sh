@@ -10,5 +10,5 @@ export FLIGHT_LOCAL_PORT=15051
 export DCH_S3_SECRET_NAME="s3-test-creds"
 
 export SA_NAME="${SA_NAME:-dch-test-user}"
-export GW_HOST=data-science-gateway-data-science-gateway-class.openshift-ingress.svc.cluster.local
+export GW_HOST=`oc get route data-science-gateway -n openshift-ingress -o jsonpath='{.spec.host}'`
 export GW_URL="https://${GW_HOST}"
