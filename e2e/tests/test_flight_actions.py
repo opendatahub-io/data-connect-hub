@@ -43,10 +43,18 @@ def _connection_headers(dch_client: DataConnectClient, connection_id: str) -> fl
     return flight.FlightCallOptions(headers=headers)
 
 
-def _credentials_body(dct_id: str, secret_uri: str) -> bytes:
-    keys = pa.array(["data_connection_type_id", "secret.URI"], type=pa.utf8())
-    values = pa.array([dct_id, secret_uri], type=pa.utf8())
-    batch = pa.RecordBatch.from_arrays([keys, values], names=["key", "value"])
+def _credentials_body(dct_id: str, secret_uri: str, ca_cert: str | None = None) -> bytes:
+    # Only emit the CA key when a certificate is supplied, so a plain
+    # "URI only" body still exercises the no-SSL / require path.
+    keys = ["data_connection_type_id", "secret.URI"]
+    values = [dct_id, secret_uri]
+    if ca_cert:
+        keys.append("secret.CA_CERT")
+        values.append(ca_cert)
+    batch = pa.RecordBatch.from_arrays(
+        [pa.array(keys, type=pa.utf8()), pa.array(values, type=pa.utf8())],
+        names=["key", "value"],
+    )
 
     sink = pa.BufferOutputStream()
     writer = pa.ipc.new_stream(sink, batch.schema)
@@ -146,10 +154,20 @@ class TestFlightActions:
         if not pg_url:
             pytest.skip("DCH_TENANT_PG_URL not set (raw PG URL needed)")
 
+        # When SSL is enabled with verification (sslmode=verify-ca), load the
+        # tenant CA certificate so the postgres connector can verify the server
+        # certificate. DCH_TENANT_PG_CA_CERT holds the local file path emitted
+        # by __dch_generate_e2e_env; it may be empty for require/prefer modes.
+        ca_cert = ""
+        ca_cert_path = os.environ.get("DCH_TENANT_PG_CA_CERT")
+        if ca_cert_path and os.path.exists(ca_cert_path):
+            with open(ca_cert_path, encoding="utf-8") as f:
+                ca_cert = f.read()
+
         conn = rest_client.get_connection(pg_flight_connection)
         dct_id = conn.data_connection_type_id
 
-        body = _credentials_body(dct_id, pg_url)
+        body = _credentials_body(dct_id, pg_url, ca_cert)
 
         client = _flight_connect(dch_client)
         # No x-data-connection-id: CheckCredentials resolves by connection

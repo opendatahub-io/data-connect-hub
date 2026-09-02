@@ -18,13 +18,15 @@ use commons::api::connector::FlightConnector;
 use commons::utils::config::ConnectorConfig;
 use moka::future::Cache;
 use sqlx::Acquire;
-use sqlx::postgres::PgRow;
+use sqlx::postgres::{PgConnectOptions, PgRow};
 use sqlx::{Column, Executor, PgPool, Row, Statement, TypeInfo};
+use std::str::FromStr;
 use std::time::Duration;
 use tracing::info;
 
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
 const KEY_URI: &str = "URI";
+const KEY_CA_CERT: &str = "CA_CERT";
 
 fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     if let sqlx::Error::Database(ref db_err) = e
@@ -82,11 +84,18 @@ impl FlightConnector for PgConnector {
                     .get(KEY_URI)
                     .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
 
+                let mut options = PgConnectOptions::from_str(url.as_str())
+                    .map_err(|e| ConnectorError::ConnectionError(format!("invalid PostgreSQL URL: {e}")))?;
+
+                if let Some(ca_cert) = credentials.get(KEY_CA_CERT) {
+                    options = options.ssl_root_cert_from_pem(ca_cert.as_bytes().to_vec());
+                }
+
                 sqlx::pool::PoolOptions::<sqlx::Postgres>::new()
                     .acquire_timeout(connection_timeout)
-                    .connect(url.as_str())
+                    .connect_with(options)
                     .await
-                    .map_err(|_| ConnectorError::ConnectionError("Unable to connect to PostgreSQL".to_string()))
+                    .map_err(|e| ConnectorError::ConnectionError(format!("unable to connect to PostgreSQL: {e}")))
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;

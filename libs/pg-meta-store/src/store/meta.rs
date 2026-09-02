@@ -5,9 +5,12 @@ use commons::api::connections::{DataConnection, DataConnectionResource, DataConn
 use commons::api::errors::MetaStoreError;
 use commons::api::storage::MetaStore;
 use serde::Deserialize;
+use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
+use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
-use tracing::error;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use commons::api::ResourceList;
@@ -22,6 +25,8 @@ pub struct PgMetaStore {
     global_tenant_id: String,
 }
 
+const SECRETS_CA_CERT_PATH: &str = "/secrets/postgresql-ca.crt";
+
 fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
     if let sqlx::Error::Database(ref db_err) = e
         && db_err.code().as_deref() == Some("23505")
@@ -34,7 +39,30 @@ fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
 
 impl PgMetaStore {
     pub async fn new(config: DatabaseConfig, global_tenant_id: String) -> Result<Self, MetaStoreError> {
-        let pool = PgPool::connect(&config.url).await.map_err(|e| {
+        let mut options = PgConnectOptions::from_str(&config.url).map_err(|e| {
+            error!("invalid database URL: {e}");
+            MetaStoreError::Connection("invalid database URL".to_string())
+        })?;
+
+        let has_root_cert = std::env::var("PGSSLROOTCERT").is_ok()
+            || url::Url::parse(&config.url).is_ok_and(|u| {
+                u.query_pairs()
+                    .any(|(k, _)| matches!(k.as_ref(), "sslrootcert" | "ssl-root-cert" | "ssl-ca"))
+            });
+
+        if matches!(options.get_ssl_mode(), PgSslMode::VerifyCa | PgSslMode::VerifyFull) && !has_root_cert {
+            if Path::new(SECRETS_CA_CERT_PATH).exists() {
+                info!("auto-detected CA certificate at {SECRETS_CA_CERT_PATH}");
+                options = options.ssl_root_cert(SECRETS_CA_CERT_PATH);
+            } else {
+                warn!(
+                    "sslmode requires CA verification but no certificate found at {SECRETS_CA_CERT_PATH}; \
+                     add a postgresql-ca.crt key to the dch-database-config secret"
+                );
+            }
+        }
+
+        let pool = PgPool::connect_with(options).await.map_err(|e| {
             error!("failed to connect to database: {e}");
             MetaStoreError::Connection("failed to connect to the metadata database".to_string())
         })?;

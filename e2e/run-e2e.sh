@@ -54,6 +54,7 @@ DCH_TOKEN_AUDIENCE="${DCH_TOKEN_AUDIENCE:-}"
 : "${DCH_POSTGRES_IMAGE:?DCH_POSTGRES_IMAGE is required (set it in $CONFIG_FILE)}"
 
 DCH_TENANT_PG_URL="${DCH_TENANT_PG_URL:-}"
+DCH_TENANT_PG_CA_CERT="${DCH_TENANT_PG_CA_CERT:-}"
 DCH_TENANT_MILVUS_HOST="${DCH_TENANT_MILVUS_HOST:-}"
 DCH_TENANT_MILVUS_PORT="${DCH_TENANT_MILVUS_PORT:-19530}"
 DCH_TENANT_ES_URI="${DCH_TENANT_ES_URI:-}"
@@ -112,9 +113,19 @@ setup_pg_secret() {
     E2E_PG_ENABLED="false"
     if [[ -n "$DCH_TENANT_PG_URL" ]]; then
         PG_INTERNAL_URL="$DCH_TENANT_PG_URL"
+        local -a args=(--from-literal="URI=${PG_INTERNAL_URL}")
+
+        if [[ -n "$DCH_TENANT_PG_CA_CERT" ]]; then
+            [[ -f "$DCH_TENANT_PG_CA_CERT" ]] || {
+                echo "ERROR: CA cert file not found: $DCH_TENANT_PG_CA_CERT" >&2
+                exit 1
+            }
+            args+=(--from-file="CA_CERT=${DCH_TENANT_PG_CA_CERT}")
+        fi
+
         kubectl create secret generic "$PG_SECRET" \
             -n "$DCH_TENANT_ID" \
-            --from-literal="URI=${PG_INTERNAL_URL}" \
+            "${args[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         E2E_PG_ENABLED="true"
     fi
@@ -288,8 +299,14 @@ setup_flight_secret_rbac() {
 
 seed_pg_data() {
     [[ "$E2E_PG_ENABLED" == "true" ]] || return 0
-    bash "$(dirname "$0")/scripts/seed-postgresql-data.sh" \
-        -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" -i "$DCH_POSTGRES_IMAGE"
+    if [[ -n "${DCH_TENANT_PG_CA_CERT:-}" ]]; then
+        bash "$(dirname "$0")/scripts/seed-postgresql-data.sh" \
+            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" -i "$DCH_POSTGRES_IMAGE" \
+            -c "$DCH_TENANT_PG_CA_CERT"
+    else
+        bash "$(dirname "$0")/scripts/seed-postgresql-data.sh" \
+            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" -i "$DCH_POSTGRES_IMAGE"
+    fi
 }
 
 seed_s3_data() {
