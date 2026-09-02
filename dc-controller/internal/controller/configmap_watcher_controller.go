@@ -65,6 +65,13 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 		return ctrl.Result{}, err
 	}
+	deleting, err := dataConnectServiceDeleting(ctx, r.Client, cm.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if deleting {
+		return ctrl.Result{}, nil
+	}
 
 	alreadySynced := cm.Annotations[annotationDCHSynced] == valueSyncedTrue
 
