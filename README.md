@@ -14,12 +14,20 @@ data-connect-hub/
 │   ├── flight/                Arrow Flight gRPC service (binary)
 │   └── rest/                  HTTP REST service (binary)
 ├── connectors/
+│   ├── elasticsearch/         Elasticsearch data reader (library)
+│   ├── milvus/                Milvus data reader (library)
+│   ├── neo4j/                 Neo4j data reader (library)
 │   ├── postgres/              PostgreSQL data reader (library)
-│   └── sqlite/                SQLite data reader (library)
+│   ├── s3/                    S3 data reader (library)
+│   ├── sqlite/                SQLite data reader (library)
+│   └── uri/                   URI data reader (library)
 ├── libs/
 │   ├── commons/               Shared types and traits
 │   ├── pg-meta-store/         PostgreSQL metadata store
 │   └── kube-utils/            Kubernetes utility helpers
+├── dc-controller/             Go-based ODH operator controller
+├── sdk/
+│   └── python/                Python SDK (REST client)
 ├── config/                    Kustomize deployment configs
 ├── hack/                      Scripts and Python tooling
 ├── docs/                      Documentation and proposals
@@ -188,19 +196,24 @@ grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 
 ## REST API
 
-| Method | Path                                        | Description                  |
-| ------ | ------------------------------------------- | ---------------------------- |
-| GET    | `/health`                                   | Health check                 |
-| GET    | `/api/v1alpha1/data/connections`            | List all connections         |
-| POST   | `/api/v1alpha1/data/connections`            | Create a connection          |
-| GET    | `/api/v1alpha1/data/connections/{id}`       | Get a connection             |
-| PATCH  | `/api/v1alpha1/data/connections/{id}`       | Update a connection          |
-| DELETE | `/api/v1alpha1/data/connections/{id}`       | Delete a connection          |
-| GET    | `/api/v1alpha1/data/connection-types`       | List all connection types    |
-| POST   | `/api/v1alpha1/data/connection-types`       | Create a connection type     |
-| GET    | `/api/v1alpha1/data/connection-types/{id}`  | Get a connection type        |
-| PATCH  | `/api/v1alpha1/data/connection-types/{id}`  | Update a connection type     |
-| DELETE | `/api/v1alpha1/data/connection-types/{id}`  | Delete a connection type     |
+| Method | Path                                                              | Description                                    |
+| ------ | ----------------------------------------------------------------- | ---------------------------------------------- |
+| GET    | `/health`                                                         | Health check                                   |
+| GET    | `/api/v1alpha1/data/connections`                                  | List all connections                           |
+| POST   | `/api/v1alpha1/data/connections`                                  | Create a connection                            |
+| GET    | `/api/v1alpha1/data/connections/{id}`                             | Get a connection                               |
+| PATCH  | `/api/v1alpha1/data/connections/{id}`                             | Update a connection                            |
+| DELETE | `/api/v1alpha1/data/connections/{id}`                             | Delete a connection                            |
+| GET    | `/api/v1alpha1/data/connections/{id}/binary`                      | Get ingestion data (not implemented)           |
+| POST   | `/api/v1alpha1/data/connections/{id}/readiness`                   | Audit an existing connection                   |
+| PUT    | `/api/v1alpha1/data/connections/{id}/exports/secrets/{secret_name}` | Export connection credentials to a K8s secret |
+| GET    | `/api/v1alpha1/data/connection-types`                             | List all connection types                      |
+| POST   | `/api/v1alpha1/data/connection-types`                             | Create a connection type                       |
+| GET    | `/api/v1alpha1/data/connection-types/{id}`                        | Get a connection type                          |
+| PATCH  | `/api/v1alpha1/data/connection-types/{id}`                        | Update a connection type                       |
+| DELETE | `/api/v1alpha1/data/connection-types/{id}`                        | Delete a connection type                       |
+| POST   | `/api/v1alpha1/data/test/credentials`                             | Test credentials without persisting            |
+| POST   | `/api/v1alpha1/audit/data-connection-types`                       | Audit all connection types via flight service  |
 
 ## Container Images
 
@@ -231,7 +244,7 @@ Run `make help` for the full list. Key targets:
 | `check`               | `cargo check --workspace`                          |
 | `clean`               | `cargo clean`                                      |
 | `test`                | Run all tests                                      |
-| `test-unit`           | Unit tests (commons, postgres-connector, pg-meta-store, rest) |
+| `test-unit`           | Unit tests (commons, connectors, kube-utils, pg-meta-store, rest) |
 | `test-integration`    | Integration tests (flight-service)                 |
 | `lint`                | Clippy + rustfmt check                             |
 | `fmt`                 | Format all crates                                  |
@@ -243,7 +256,15 @@ Run `make help` for the full list. Key targets:
 | `container-all`       | Build all container images                         |
 | `container-run-flight`| Run flight-service container (host network)        |
 | `container-run-rest`  | Run rest-service container (host network)          |
+| `generate-openapi-docs` | Bundle and build OpenAPI docs (needs redocly or container) |
 | `setup-hooks`         | Install git pre-commit hooks                       |
+| `sdk-install`         | Install SDK in editable mode with dev deps         |
+| `sdk-test`            | Run SDK unit tests with coverage                   |
+| `sdk-lint`            | Lint and format-check SDK                          |
+| `sdk-fmt`             | Format SDK code                                    |
+| `sdk-typecheck`       | Run mypy on SDK                                    |
+| `sdk-build`           | Build SDK distribution                             |
+| `sdk-all`             | Lint + typecheck + test SDK                        |
 | `oc-setup-flight`     | Apply OpenShift build config for flight-service    |
 | `oc-setup-rest`       | Apply OpenShift build config for rest-service      |
 | `oc-setup-all`        | Apply OpenShift build configs for all services     |

@@ -105,19 +105,31 @@ services/rest (binary, HTTP :8080)
 
 ## REST API Routes
 
-All data routes are under `/api/v1alpha1/data`:
-
 - `GET /health` — health check
+
+Connections (`/api/v1alpha1/data/connections`):
+
 - `GET /api/v1alpha1/data/connections` — list connections
 - `POST /api/v1alpha1/data/connections` — create connection
 - `GET /api/v1alpha1/data/connections/{id}` — get connection
 - `PATCH /api/v1alpha1/data/connections/{id}` — update connection
 - `DELETE /api/v1alpha1/data/connections/{id}` — delete connection
+- `GET /api/v1alpha1/data/connections/{id}/binary` — **not implemented (501)**
+- `POST /api/v1alpha1/data/connections/{id}/readiness` — audit an existing connection via flight service
+- `PUT /api/v1alpha1/data/connections/{id}/exports/secrets/{secret_name}` — export connection credentials to a K8s secret
+
+Connection types (`/api/v1alpha1/data/connection-types`):
+
 - `GET /api/v1alpha1/data/connection-types` — list connection types
 - `POST /api/v1alpha1/data/connection-types` — create connection type
 - `GET /api/v1alpha1/data/connection-types/{id}` — get connection type
 - `PATCH /api/v1alpha1/data/connection-types/{id}` — update connection type
 - `DELETE /api/v1alpha1/data/connection-types/{id}` — delete connection type
+
+Other:
+
+- `POST /api/v1alpha1/data/test/credentials` — test credentials without persisting
+- `POST /api/v1alpha1/audit/data-connection-types` — trigger flight-service audit of all connection types
 
 ## Container Builds
 
