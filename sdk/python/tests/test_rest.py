@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 import pytest
 
-from data_connect_hub._rest import RestClient
+from data_connect_hub._rest import _DEFAULT_API_BASE, RestClient
 from data_connect_hub.exceptions import (
     DCHAuthenticationError,
     DCHConfigError,
@@ -35,6 +35,11 @@ from .conftest import (
 )
 
 
+def _api_path(path: str) -> str:
+    """Construct a full API path from a relative endpoint path."""
+    return f"{_DEFAULT_API_BASE}{path}"
+
+
 def _make_transport(
     status: int = 200,
     body: Any = None,
@@ -58,7 +63,7 @@ def _make_transport(
 
 def _make_client(
     transport: httpx.MockTransport,
-    api_base: str = "/api/v1alpha1/data",
+    api_base: str = _DEFAULT_API_BASE,
     *,
     max_retries: int = 3,
     backoff_base: float = 0.0,
@@ -82,7 +87,7 @@ class TestListConnections:
         transport = _make_transport(
             body=[SAMPLE_CONNECTION_JSON],
             assert_method="GET",
-            assert_path="/api/v1alpha1/data/connections",
+            assert_path=_api_path("/connections"),
         )
         client = _make_client(transport)
         result = client.list_connections()
@@ -102,7 +107,7 @@ class TestGetConnection:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_JSON,
             assert_method="GET",
-            assert_path="/api/v1alpha1/data/connections/123",
+            assert_path=_api_path("/connections/123"),
         )
         client = _make_client(transport)
         result = client.get_connection("123")
@@ -114,7 +119,7 @@ class TestCreateConnection:
     def test_sends_post(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "POST"
-            assert request.url.path == "/api/v1alpha1/data/connections"
+            assert request.url.path == _api_path("/connections")
             body = json.loads(request.content)
             assert body["name"] == "new-conn"
             assert body["data_connection_type_id"] == "postgres"
@@ -139,7 +144,7 @@ class TestUpdateConnection:
     def test_sends_patch(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "PATCH"
-            assert request.url.path == "/api/v1alpha1/data/connections/123"
+            assert request.url.path == _api_path("/connections/123")
             body = json.loads(request.content)
             assert body == {"name": "updated"}
             return httpx.Response(200, json=SAMPLE_CONNECTION_JSON)
@@ -154,7 +159,7 @@ class TestDeleteConnection:
     def test_sends_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",
-            assert_path="/api/v1alpha1/data/connections/123",
+            assert_path=_api_path("/connections/123"),
         )
         client = _make_client(transport)
         client.delete_connection("123")
@@ -165,7 +170,7 @@ class TestConnectionTypes:
         transport = _make_transport(
             body=[SAMPLE_CONNECTION_TYPE_JSON],
             assert_method="GET",
-            assert_path="/api/v1alpha1/data/connection-types",
+            assert_path=_api_path("/connection-types"),
         )
         client = _make_client(transport)
         result = client.list_connection_types()
@@ -175,7 +180,7 @@ class TestConnectionTypes:
     def test_get(self) -> None:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_TYPE_JSON,
-            assert_path="/api/v1alpha1/data/connection-types/ct-1",
+            assert_path=_api_path("/connection-types/ct-1"),
         )
         client = _make_client(transport)
         result = client.get_connection_type("ct-1")
@@ -184,7 +189,7 @@ class TestConnectionTypes:
     def test_create(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "POST"
-            assert request.url.path == "/api/v1alpha1/data/connection-types"
+            assert request.url.path == _api_path("/connection-types")
             body = json.loads(request.content)
             assert body["name"] == "mysql"
             assert body["provider"] == "mysql"
@@ -200,7 +205,7 @@ class TestConnectionTypes:
     def test_update(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             assert request.method == "PATCH"
-            assert request.url.path == "/api/v1alpha1/data/connection-types/ct-1"
+            assert request.url.path == _api_path("/connection-types/ct-1")
             body = json.loads(request.content)
             assert body == {"name": "renamed"}
             return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
@@ -213,7 +218,7 @@ class TestConnectionTypes:
     def test_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",
-            assert_path="/api/v1alpha1/data/connection-types/ct-1",
+            assert_path=_api_path("/connection-types/ct-1"),
         )
         client = _make_client(transport)
         client.delete_connection_type("ct-1")
@@ -394,11 +399,11 @@ class TestPathSegmentEncoding:
     @pytest.mark.parametrize(
         ("connection_id", "expected_path"),
         [
-            ("../../../../evil", "/api/v1alpha1/data/connections/..%2F..%2F..%2F..%2Fevil"),
-            ("abc?force=true", "/api/v1alpha1/data/connections/abc%3Fforce%3Dtrue"),
-            ("a/b", "/api/v1alpha1/data/connections/a%2Fb"),
-            ("id with space", "/api/v1alpha1/data/connections/id%20with%20space"),
-            ("a#frag", "/api/v1alpha1/data/connections/a%23frag"),
+            ("../../../../evil", _api_path("/connections/..%2F..%2F..%2F..%2Fevil")),
+            ("abc?force=true", _api_path("/connections/abc%3Fforce%3Dtrue")),
+            ("a/b", _api_path("/connections/a%2Fb")),
+            ("id with space", _api_path("/connections/id%20with%20space")),
+            ("a#frag", _api_path("/connections/a%23frag")),
         ],
     )
     def test_connection_id_is_encoded(self, connection_id: str, expected_path: str) -> None:
@@ -421,12 +426,12 @@ class TestPathSegmentEncoding:
 
         client = _make_client(httpx.MockTransport(handler))
         client.delete_connection_type("../connections/123")
-        assert seen == ["/api/v1alpha1/data/connection-types/..%2Fconnections%2F123"]
+        assert seen == [_api_path("/connection-types/..%2Fconnections%2F123")]
 
     def test_ordinary_id_is_unchanged(self) -> None:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_JSON,
-            assert_path="/api/v1alpha1/data/connections/550e8400-e29b-41d4-a716-446655440000",
+            assert_path=_api_path("/connections/550e8400-e29b-41d4-a716-446655440000"),
         )
         client = _make_client(transport)
         client.get_connection("550e8400-e29b-41d4-a716-446655440000")
@@ -475,7 +480,7 @@ class TestWrappedResourceFormat:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_WRAPPED_JSON,
             assert_method="GET",
-            assert_path="/api/v1alpha1/data/connections/123",
+            assert_path=_api_path("/connections/123"),
         )
         client = _make_client(transport)
         result = client.get_connection("123")
@@ -489,7 +494,7 @@ class TestWrappedResourceFormat:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
             assert_method="GET",
-            assert_path="/api/v1alpha1/data/connection-types/ct-1",
+            assert_path=_api_path("/connection-types/ct-1"),
         )
         client = _make_client(transport)
         result = client.get_connection_type("ct-1")
