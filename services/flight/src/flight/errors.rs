@@ -40,15 +40,15 @@ pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
         ConnectorError::NoDataError => Status::not_found("no data found"),
         e @ ConnectorError::ConnectionError(_) => {
             tracing::error!(error = %e, "connector connection failed");
-            Status::unavailable("data source connection failed")
+            Status::unavailable(format!("data source connection failed: {}", e.message()))
         },
         e @ ConnectorError::SQLError(_) => {
             tracing::error!(error = %e, "connector SQL error");
-            Status::internal("query execution failed")
+            Status::internal(format!("query execution failed: {}", e.message()))
         },
         e @ ConnectorError::ConfigError(_) => {
             tracing::error!(error = %e, "connector config error");
-            Status::internal("connector configuration error")
+            Status::internal(format!("connector configuration error: {}", e.message()))
         },
         e @ ConnectorError::IOError(_) => {
             tracing::error!(error = %e, "connector IO error");

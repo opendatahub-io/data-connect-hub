@@ -86,10 +86,10 @@ impl FlightConnector for PgConnector {
                     .acquire_timeout(connection_timeout)
                     .connect(url.as_str())
                     .await
-                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to PostgreSQL".to_string()))
+                    .map_err(|_| ConnectorError::ConnectionError("Unable to connect to PostgreSQL".to_string()))
             })
             .await
-            .map_err(|_| ConnectorError::ConnectionError("Failed to get PostgreSQL reader".to_string()))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         Ok(Arc::new(PgReader { pool }))
     }

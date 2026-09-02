@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 /// Only connector implementations should emit this error.
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Clone)]
 pub enum ConnectorError {
     #[error("SQL error: {0}")]
     SQLError(String),
@@ -17,6 +17,20 @@ pub enum ConnectorError {
     IOError(String),
     #[error("Unsupported operation: {0}")]
     UnsupportedOperation(String),
+}
+
+impl ConnectorError {
+    pub fn message(&self) -> &str {
+        match self {
+            Self::SQLError(m)
+            | Self::ConnectionError(m)
+            | Self::InvalidRequest(m)
+            | Self::ConfigError(m)
+            | Self::IOError(m)
+            | Self::UnsupportedOperation(m) => m,
+            Self::NoDataError => "no data returned",
+        }
+    }
 }
 
 /// Only meta store implementations should emit this error.

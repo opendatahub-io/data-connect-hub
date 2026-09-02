@@ -204,7 +204,10 @@ pub async fn create_connection_type(
     ctx: web::ReqData<ApiContext>,
     connection_type: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("create_connection_type: for tenant {:?}", ctx.tenant_id);
+    info!(
+        "create_connection_type: {} from provider {} (tenant {})",
+        connection_type.name, connection_type.provider, ctx.tenant_id,
+    );
 
     let connection_type = service
         .meta_store

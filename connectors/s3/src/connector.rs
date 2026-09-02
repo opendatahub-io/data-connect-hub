@@ -107,7 +107,7 @@ impl FlightConnector for S3Connector {
                 build_operator(&credentials, connection_timeout)
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get S3 operator: {e}")))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         let format_hint = data_connection.resource.properties.get("format").cloned();
         Ok(Arc::new(S3Reader {

@@ -83,7 +83,7 @@ impl From<ConnectorError> for RestErrorResponse {
                 tracing::error!("{err}");
                 "data source I/O error".to_string()
             },
-            _ => err.to_string(),
+            _ => err.message().to_string(),
         };
         RestErrorResponse {
             code: code.to_string(),
