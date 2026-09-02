@@ -394,8 +394,13 @@ mod tests {
     use std::sync::RwLock;
 
     use super::*;
+    use crate::rest::API_VERSION;
     use crate::rest::errors::json_config;
     use crate::rest::middleware::validate_headers;
+
+    fn api_path(path: &str) -> String {
+        format!("/api/{API_VERSION}/data{path}")
+    }
 
     struct StubMetaStore;
 
@@ -751,7 +756,7 @@ mod tests {
 
     fn test_app_config(cfg: &mut web::ServiceConfig) {
         cfg.service(
-            web::scope("/api/v1/data")
+            web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
@@ -802,7 +807,7 @@ mod tests {
     async fn test_list_connections() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connections")
+            .uri(&api_path("/connections"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -817,7 +822,7 @@ mod tests {
     async fn test_get_connection() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -832,7 +837,7 @@ mod tests {
     async fn test_get_connection_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connections/nonexistent")
+            .uri(&api_path("/connections/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -852,7 +857,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::post()
-            .uri("/api/v1/data/connections")
+            .uri(&api_path("/connections"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_json(serde_json::json!({
@@ -884,7 +889,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::post()
-            .uri("/api/v1/data/connections")
+            .uri(&api_path("/connections"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_json(serde_json::json!({
@@ -914,7 +919,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"name": "renamed-pg"}))
             .to_request();
@@ -937,7 +942,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"properties": {"host": "localhost"}}))
             .to_request();
@@ -958,7 +963,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connections/nonexistent")
+            .uri(&api_path("/connections/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"name": "x"}))
             .to_request();
@@ -979,7 +984,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"data_connection_type_id": "nonexistent-type-id"}))
             .to_request();
@@ -994,7 +999,7 @@ mod tests {
     async fn test_delete_connection() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1006,7 +1011,7 @@ mod tests {
     async fn test_delete_connection_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connections/nonexistent")
+            .uri(&api_path("/connections/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1020,7 +1025,7 @@ mod tests {
     async fn test_get_connection_cross_tenant() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "other-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1032,7 +1037,7 @@ mod tests {
     async fn test_delete_connection_cross_tenant() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connections/conn-1")
+            .uri(&api_path("/connections/conn-1"))
             .insert_header(("x-tenant-id", "other-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1044,7 +1049,7 @@ mod tests {
     async fn test_delete_connection_type_cross_tenant() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connection-types/ct-1")
+            .uri(&api_path("/connection-types/ct-1"))
             .insert_header(("x-tenant-id", "other-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1055,7 +1060,7 @@ mod tests {
     #[actix_web::test]
     async fn test_missing_tenant_header() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
-        let req = test::TestRequest::get().uri("/api/v1/data/connections").to_request();
+        let req = test::TestRequest::get().uri(&api_path("/connections")).to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 400);
@@ -1067,7 +1072,7 @@ mod tests {
     async fn test_list_connection_types() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connection-types")
+            .uri(&api_path("/connection-types"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1088,7 +1093,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::post()
-            .uri("/api/v1/data/connection-types")
+            .uri(&api_path("/connection-types"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_json(serde_json::json!({
@@ -1112,7 +1117,7 @@ mod tests {
     async fn test_get_connection_type() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connection-types/ct-1")
+            .uri(&api_path("/connection-types/ct-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1128,7 +1133,7 @@ mod tests {
     async fn test_get_connection_type_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connection-types/nonexistent")
+            .uri(&api_path("/connection-types/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1142,7 +1147,7 @@ mod tests {
     async fn test_get_connection_type_cross_tenant() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/connection-types/ct-1")
+            .uri(&api_path("/connection-types/ct-1"))
             .insert_header(("x-tenant-id", "other-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1154,7 +1159,7 @@ mod tests {
     async fn test_get_ingestion_data_unimplemented() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
-            .uri("/api/v1/data/ingestion/some-id")
+            .uri(&api_path("/ingestion/some-id"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1175,7 +1180,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connection-types/ct-1")
+            .uri(&api_path("/connection-types/ct-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"name": "MySQL"}))
             .to_request();
@@ -1198,7 +1203,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::patch()
-            .uri("/api/v1/data/connection-types/nonexistent")
+            .uri(&api_path("/connection-types/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .set_json(serde_json::json!({"name": "x"}))
             .to_request();
@@ -1213,7 +1218,7 @@ mod tests {
     async fn test_delete_connection_type() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connection-types/ct-1")
+            .uri(&api_path("/connection-types/ct-1"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1225,7 +1230,7 @@ mod tests {
     async fn test_delete_connection_type_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::delete()
-            .uri("/api/v1/data/connection-types/nonexistent")
+            .uri(&api_path("/connection-types/nonexistent"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1245,7 +1250,7 @@ mod tests {
         )
         .await;
         let req = test::TestRequest::post()
-            .uri("/api/v1/data/connections")
+            .uri(&api_path("/connections"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_payload("not json")
@@ -1261,7 +1266,7 @@ mod tests {
     async fn test_export_connection() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::put()
-            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1274,7 +1279,7 @@ mod tests {
         let svc = test_service();
         let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
         let req = test::TestRequest::put()
-            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         test::call_service(&app, req).await;
@@ -1298,7 +1303,7 @@ mod tests {
         let svc = test_service();
         let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
         let req = test::TestRequest::put()
-            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         test::call_service(&app, req).await;
@@ -1317,7 +1322,7 @@ mod tests {
     async fn test_export_connection_not_found() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::put()
-            .uri("/api/v1/data/connections/nonexistent/exports/secrets/exported-secret")
+            .uri(&api_path("/connections/nonexistent/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
@@ -1329,7 +1334,7 @@ mod tests {
     async fn test_export_connection_cross_tenant() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::put()
-            .uri("/api/v1/data/connections/conn-1/exports/secrets/exported-secret")
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "other-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;

@@ -29,7 +29,7 @@ spec:
             - --secure-listen-address=0.0.0.0:8443
             - --upstream=http://127.0.0.1:8080
             - --config-file=/etc/kube-rbac-proxy/config-file.yaml
-            - --ignore-paths=/api/v1/data/health
+            - --ignore-paths=/health
             - --tls-cert-file=/etc/tls/private/tls.crt
             - --tls-private-key-file=/etc/tls/private/tls.key
             - --logtostderr=true
@@ -57,14 +57,14 @@ spec:
               readOnly: true
           readinessProbe:
             httpGet:
-              path: /api/v1/data/health
+              path: /health
               port: https
               scheme: HTTPS
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/v1/data/health
+              path: /health
               port: https
               scheme: HTTPS
             initialDelaySeconds: 5
@@ -102,13 +102,13 @@ spec:
               readOnly: true
           readinessProbe:
             httpGet:
-              path: /api/v1/data/health
+              path: /health
               port: 8080
             initialDelaySeconds: 3
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /api/v1/data/health
+              path: /health
               port: 8080
             initialDelaySeconds: 5
             periodSeconds: 15

@@ -9,7 +9,7 @@ data:
   config-file.yaml: |
     authorization:
       endpoints:
-        - path: /api/v1/data/connections/*/readiness
+        - path: /api/v1alpha1/data/connections/*/readiness
           mappings:
             - methods: [post]
               resources:
@@ -21,7 +21,7 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: create
-        - path: /api/v1/data/connections/*
+        - path: /api/v1alpha1/data/connections/*
           mappings:
             - methods: [get, post, patch, delete]
               resources:
@@ -33,7 +33,7 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: "{{.FromMethod}}"
-        - path: /api/v1/data/connections
+        - path: /api/v1alpha1/data/connections
           mappings:
             - methods: [get, post]
               resources:
@@ -45,7 +45,7 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: "{{.FromMethod}}"
-        - path: /api/v1/data/connection-types/*
+        - path: /api/v1alpha1/data/connection-types/*
           mappings:
             - methods: [get, post, patch, delete]
               resources:
@@ -57,7 +57,7 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
                     verb: "{{.FromMethod}}"
-        - path: /api/v1/data/connection-types
+        - path: /api/v1alpha1/data/connection-types
           mappings:
             - methods: [get, post]
               resources:
@@ -69,7 +69,7 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
                     verb: "{{.FromMethod}}"
-        - path: /api/v1/data/test/credentials
+        - path: /api/v1alpha1/data/test/credentials
           mappings:
             - methods: [post]
               resources:

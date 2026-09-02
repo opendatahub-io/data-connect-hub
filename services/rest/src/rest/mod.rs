@@ -2,6 +2,8 @@ pub mod endpoints;
 pub mod errors;
 pub mod middleware;
 
+pub const API_VERSION: &str = "v1alpha1";
+
 use commons::api::connections::CredentialsRef;
 use commons::api::connections::DataConnection;
 use commons::api::connections::DataFormat;

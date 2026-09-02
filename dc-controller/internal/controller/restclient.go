@@ -171,7 +171,7 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 		return fmt.Errorf("marshaling connection type: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1/data/connection-types", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1alpha1/data/connection-types", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -203,7 +203,7 @@ func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tena
 		return nil, ErrServiceUnavailable
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/v1/data/connection-types", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/v1alpha1/data/connection-types", nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -242,7 +242,7 @@ func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantI
 		return fmt.Errorf("marshaling connection: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1/data/connections", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1alpha1/data/connections", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}

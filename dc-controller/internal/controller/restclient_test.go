@@ -54,7 +54,7 @@ func testConnectionType() ConnectionType {
 func TestCreateConnectionType(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/data/connection-types", r.URL.Path)
+		assert.Equal(t, "/api/v1alpha1/data/connection-types", r.URL.Path)
 		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
 		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
 
@@ -102,7 +102,7 @@ func TestConnectionRefused(t *testing.T) {
 func TestListConnectionTypes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodGet, r.Method)
-		assert.Equal(t, "/api/v1/data/connection-types", r.URL.Path)
+		assert.Equal(t, "/api/v1alpha1/data/connection-types", r.URL.Path)
 		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
 
 		w.Header().Set("Content-Type", "application/json")
@@ -139,7 +139,7 @@ func TestListConnectionTypesServiceUnavailable(t *testing.T) {
 func TestCreateConnection(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, http.MethodPost, r.Method)
-		assert.Equal(t, "/api/v1/data/connections", r.URL.Path)
+		assert.Equal(t, "/api/v1alpha1/data/connections", r.URL.Path)
 		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
 
 		var body Connection

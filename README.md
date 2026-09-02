@@ -163,10 +163,10 @@ cargo run -p flight-service -- --config .local/flight-config.toml
 
 ```sh
 # REST service
-curl http://localhost:8080/api/v1/data/health
+curl http://localhost:8080/health
 # {"service":"rest-service"}
 
-curl http://localhost:8080/api/v1/data/connections
+curl http://localhost:8080/api/v1alpha1/data/connections
 # []
 ```
 
@@ -184,19 +184,19 @@ grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 
 ## REST API
 
-| Method | Path                                | Description                  |
-| ------ | ----------------------------------- | ---------------------------- |
-| GET    | `/api/v1/data/health`               | Health check                 |
-| GET    | `/api/v1/data/connections`          | List all connections         |
-| POST   | `/api/v1/data/connections`          | Create a connection          |
-| GET    | `/api/v1/data/connections/{id}`     | Get a connection             |
-| PATCH  | `/api/v1/data/connections/{id}`     | Update a connection          |
-| DELETE | `/api/v1/data/connections/{id}`     | Delete a connection          |
-| GET    | `/api/v1/data/connection-types`     | List all connection types    |
-| POST   | `/api/v1/data/connection-types`     | Create a connection type     |
-| GET    | `/api/v1/data/connection-types/{id}`| Get a connection type        |
-| PATCH  | `/api/v1/data/connection-types/{id}`| Update a connection type     |
-| DELETE | `/api/v1/data/connection-types/{id}`| Delete a connection type     |
+| Method | Path                                        | Description                  |
+| ------ | ------------------------------------------- | ---------------------------- |
+| GET    | `/health`                                   | Health check                 |
+| GET    | `/api/v1alpha1/data/connections`            | List all connections         |
+| POST   | `/api/v1alpha1/data/connections`            | Create a connection          |
+| GET    | `/api/v1alpha1/data/connections/{id}`       | Get a connection             |
+| PATCH  | `/api/v1alpha1/data/connections/{id}`       | Update a connection          |
+| DELETE | `/api/v1alpha1/data/connections/{id}`       | Delete a connection          |
+| GET    | `/api/v1alpha1/data/connection-types`       | List all connection types    |
+| POST   | `/api/v1alpha1/data/connection-types`       | Create a connection type     |
+| GET    | `/api/v1alpha1/data/connection-types/{id}`  | Get a connection type        |
+| PATCH  | `/api/v1alpha1/data/connection-types/{id}`  | Update a connection type     |
+| DELETE | `/api/v1alpha1/data/connection-types/{id}`  | Delete a connection type     |
 
 ## Container Images
 

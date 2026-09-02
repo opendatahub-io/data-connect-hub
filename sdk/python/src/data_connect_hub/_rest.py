@@ -22,7 +22,7 @@ from .models import (
     UpdateConnectionTypeRequest,
 )
 
-_DEFAULT_API_BASE = "/api/v1/data"
+_DEFAULT_API_BASE = "/api/v1alpha1/data"
 _CONNECTIONS_ENDPOINT = "/connections"
 _CONNECTION_TYPES_ENDPOINT = "/connection-types"
 _RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})

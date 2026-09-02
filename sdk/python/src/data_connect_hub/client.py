@@ -94,7 +94,7 @@ class DataConnectClient:
     tenant_id : str
         Tenant identifier sent via ``x-tenant-id`` header.
     api_base : str
-        API path prefix (default ``/api/v1/data``).
+        API path prefix (default ``/api/v1alpha1/data``).
     rest_timeout : float
         HTTP request timeout in seconds (default 30.0).
     ca_cert : str, optional
@@ -118,7 +118,7 @@ class DataConnectClient:
         tenant_id: str = "",
         *,
         token_provider: Callable[[], str] | None = None,
-        api_base: str = "/api/v1/data",
+        api_base: str = "/api/v1alpha1/data",
         rest_timeout: float = 30.0,
         ca_cert: str | None = None,
         insecure: bool = False,

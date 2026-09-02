@@ -418,7 +418,7 @@ section below.
 ```console
 # REST health check (direct, bypasses auth)
 oc exec deploy/dch-rest-service -c rest-service -n $NS -- \
-  curl -s http://localhost:8080/api/v1/data/health
+  curl -s http://localhost:8080/health
 ```
 
 Expected output:
@@ -501,7 +501,7 @@ echo "Gateway: https://$GATEWAY_URL"
 ```console
 # Health check through gateway
 curl -sk -H "Authorization: Bearer $TOKEN" \
-  "https://$GATEWAY_URL/api/v1/data/health"
+  "https://$GATEWAY_URL/health"
 ```
 
 Expected output:
@@ -513,7 +513,7 @@ Expected output:
 ```console
 # List connection types (global types visible to all tenants)
 curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
-  "https://$GATEWAY_URL/api/v1/data/connection-types"
+  "https://$GATEWAY_URL/api/v1alpha1/data/connection-types"
 ```
 
 Expected output (the seeded global connection types — exact count varies
@@ -526,7 +526,7 @@ by release):
 ```console
 # List connections
 curl -sk -H "Authorization: Bearer $TOKEN" -H "X-Tenant-Id: $NS" \
-  "https://$GATEWAY_URL/api/v1/data/connections"
+  "https://$GATEWAY_URL/api/v1alpha1/data/connections"
 ```
 
 Expected output:
@@ -812,7 +812,7 @@ authorization. Requests without it return `400 Bad Request`.
 # Correct usage — include X-Tenant-Id set to the target namespace
 curl -H "Authorization: Bearer $TOKEN" \
      -H "X-Tenant-Id: $NS" \
-     https://<gateway>/api/v1/data/connection-types
+     https://<gateway>/api/v1alpha1/data/connection-types
 ```
 
 The `/health` endpoint is not proxied and does not require this header.

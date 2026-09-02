@@ -334,7 +334,7 @@ class TestBuildUrls:
 
     def test_path_raises(self) -> None:
         with pytest.raises(DCHConfigError, match="must not contain a path"):
-            _build_urls("gateway.example.com:8443/api/v1/data")
+            _build_urls("gateway.example.com:8443/api/v1alpha1/data")
 
     def test_credentials_raise_without_echoing_url(self) -> None:
         with pytest.raises(DCHConfigError, match="must not contain credentials") as excinfo:

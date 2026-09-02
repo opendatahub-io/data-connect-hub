@@ -8,6 +8,7 @@ use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
 use anyhow::Result;
+use crate::rest::API_VERSION;
 use commons::api::storage::MetaStore;
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
@@ -40,13 +41,13 @@ struct CommandLineArgs {
 }
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
-    cfg.route("/api/v1/data/health", web::get().to(health))
+    cfg.route("/health", web::get().to(health))
         .route(
-            "/api/v1/audit/data-connection-types",
+            &format!("/api/{API_VERSION}/audit/data-connection-types"),
             web::post().to(audit_connection_types),
         )
         .service(
-            web::scope("/api/v1/data")
+            web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types", web::post().to(create_connection_type))

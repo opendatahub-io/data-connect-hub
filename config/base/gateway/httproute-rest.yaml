@@ -12,16 +12,16 @@ spec:
     - matches:
         - path:
             type: Exact
-            value: /api/v1/data/health
+            value: /health
         - path:
             type: PathPrefix
-            value: /api/v1/data/connections
+            value: /api/v1alpha1/data/connections
         - path:
             type: PathPrefix
-            value: /api/v1/data/connection-types
+            value: /api/v1alpha1/data/connection-types
         - path:
             type: PathPrefix
-            value: /api/v1/data/test
+            value: /api/v1alpha1/data/test
       backendRefs:
         - name: rest-service
           port: 8443
