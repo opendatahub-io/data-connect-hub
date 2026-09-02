@@ -5,7 +5,8 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - [x] Prerequisites
   - [x] CLI tools
   - [x] Namespaces
-  - [x] Gateway 
+  - [x] Gateway
+    - [ ] Patching Gateway [TBD]
   - [x] Postgres Db
 - [x] Install DCH Operator
 - [x] Install `DataConnectService`

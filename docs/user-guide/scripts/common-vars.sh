@@ -1,12 +1,14 @@
 #!/bin/bash
 
-INFRA_NAMESPACE="dch-infra-example"
-TENANT_NAMESPACE="dch-example"
-TENANT_ID="dch-example"
-REST_LOCAL_PORT=18080
-REST_API_BASE="http://localhost:${REST_LOCAL_PORT}/api/v1/data"
+export INFRA_NAMESPACE="dch-infra-example"
+export TENANT_NAMESPACE="dch-example"
+export TENANT_ID="dch-example"
+export REST_LOCAL_PORT=18080
+export REST_API_BASE="http://localhost:${REST_LOCAL_PORT}/api/v1alpha1/data"
 
-FLIGHT_LOCAL_PORT=15051
-DCH_S3_SECRET_NAME="s3-test-creds"
+export FLIGHT_LOCAL_PORT=15051
+export DCH_S3_SECRET_NAME="s3-test-creds"
 
-SA_NAME="${SA_NAME:-dch-test-user}"
+export SA_NAME="${SA_NAME:-dch-test-user}"
+export GW_HOST=data-science-gateway-data-science-gateway-class.openshift-ingress.svc.cluster.local
+export GW_URL="https://${GW_HOST}"
