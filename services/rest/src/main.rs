@@ -3,12 +3,12 @@ use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
 use crate::clients::flight::FlightClient;
+use crate::rest::API_VERSION;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
 use crate::utils::ServerConfig;
 use anyhow::Result;
-use crate::rest::API_VERSION;
 use commons::api::storage::MetaStore;
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
