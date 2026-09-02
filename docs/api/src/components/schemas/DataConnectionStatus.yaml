@@ -7,8 +7,7 @@ properties:
     type: string
     nullable: true
     description: Optional human-readable status message
-  phases:
-    type: array
-    items:
-      $ref: "PhaseCondition.yaml"
-    description: Detailed phase conditions for this connection
+  updated_at:
+    type: string
+    nullable: true
+    description: Timestamp of the last status update

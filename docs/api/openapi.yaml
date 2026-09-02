@@ -18,6 +18,8 @@ tags:
     description: Test operations
 paths:
   /health:
+    servers:
+      - url: /
     get:
       operationId: health
       summary: Health check
@@ -387,41 +389,8 @@ components:
       type: string
       enum:
         - ready
+        - ingestion_not_ready
         - not_ready
-    PhaseState:
-      description: |
-        Phase state. Most variants are bare strings. The `secret_valid` variant carries a detail message and is serialized as an object `{"secret_valid": "<message>"}`.
-      oneOf:
-        - type: string
-          enum:
-            - secret_ready
-            - secret_not_found
-            - ingestion_ready
-            - ingestion_not_ready
-        - type: object
-          required:
-            - secret_valid
-          properties:
-            secret_valid:
-              type: string
-              description: Detail message for the secret-valid state
-          additionalProperties: false
-    PhaseCondition:
-      type: object
-      required:
-        - state
-        - message
-        - timestamp
-      properties:
-        state:
-          $ref: '#/components/schemas/PhaseState'
-        message:
-          type: string
-          description: Human-readable phase description
-        timestamp:
-          type: string
-          format: date-time
-          description: When this phase was last evaluated
     DataConnectionStatus:
       type: object
       required:
@@ -433,11 +402,10 @@ components:
           type: string
           nullable: true
           description: Optional human-readable status message
-        phases:
-          type: array
-          items:
-            $ref: '#/components/schemas/PhaseCondition'
-          description: Detailed phase conditions for this connection
+        updated_at:
+          type: string
+          nullable: true
+          description: Timestamp of the last status update
     DataConnectionResource:
       type: object
       required:

@@ -14,6 +14,8 @@ security:
 
 paths:
   /health:
+    servers:
+      - url: /
     get:
       operationId: health
       summary: Health check
