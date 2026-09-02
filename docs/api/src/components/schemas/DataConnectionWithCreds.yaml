@@ -1,7 +1,8 @@
 type: object
 description: >
-  Data connection with a reference to an existing credentials secret.
-required: [name, data_connection_type_id, format, credentials_ref, properties]
+  Data connection with inline credentials. The server creates a Kubernetes
+  secret from the provided credentials and stores a reference to it.
+required: [name, data_connection_type_id, format, credentials, properties]
 properties:
   name:
     type: string
@@ -12,8 +13,8 @@ properties:
     example: 550e8400-e29b-41d4-a716-446655440000
   format:
     $ref: "DataFormat.yaml"
-  credentials_ref:
-    $ref: "CredentialsRef.yaml"
+  credentials:
+    $ref: "InlineCreds.yaml"
   properties:
     type: object
     additionalProperties:

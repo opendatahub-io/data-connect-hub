@@ -2,6 +2,10 @@
 
 Data Connect Hub (DCH) is a middleware service that provides a single integration point for ingesting data from multiple heterogeneous data sources. Rather than each consuming service maintaining its own client library stacks for S3, HDFS, NFS, relational databases, and others, DCH centralises connection metadata management and exposes data through two purpose-built APIs.
 
+## API docs
+
+https://opendatahub-io.github.io/data-connect-hub/
+
 ## Workspace Layout
 
 ```

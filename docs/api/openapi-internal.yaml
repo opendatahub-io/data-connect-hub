@@ -14,6 +14,8 @@ tags:
     description: Data connection management
   - name: connection-types
     description: Connection type definitions
+  - name: test
+    description: Test operations
 paths:
   /health:
     get:
@@ -49,12 +51,16 @@ paths:
       summary: Create a connection
       tags:
         - connections
+      description: |
+        Accepts two payload variants (untagged union): use `credentials_ref` to reference an existing secret, or `credentials` to supply inline credentials (the server creates the secret automatically).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/DataConnection'
+              oneOf:
+                - $ref: '#/components/schemas/DataConnection'
+                - $ref: '#/components/schemas/DataConnectionWithCreds'
       responses:
         '201':
           description: Connection created
@@ -90,6 +96,8 @@ paths:
     patch:
       operationId: patchConnection
       summary: Update a connection
+      description: |
+        Partially updates a connection using JSON Merge Patch (RFC 7396). Supply only the fields you want to change; omitted fields are left unchanged.
       tags:
         - connections
       requestBody:
@@ -123,6 +131,69 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+  /connections/{id}/exports/secrets/{secret_name}:
+    parameters:
+      - $ref: '#/components/parameters/resourceId'
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Name of the Kubernetes secret to create or overwrite
+    put:
+      operationId: exportConnection
+      summary: Export a connection to a Kubernetes secret
+      description: |
+        Flattens the connection metadata, properties, and credentials into a single Kubernetes secret with dot-notation keys (e.g. `data_connection.name`, `data_connection.properties.host`). If the secret already exists it is overwritten.
+      tags:
+        - connections
+      responses:
+        '204':
+          description: Secret created or updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /connections/{id}/readiness:
+    parameters:
+      - $ref: '#/components/parameters/resourceId'
+    post:
+      operationId: checkConnectionReadiness
+      summary: Check connection readiness
+      description: |
+        Validates that the connection's credentials secret exists, matches the connection type schema, and that the data source is reachable. Updates the connection status accordingly.
+      tags:
+        - connections
+      responses:
+        '204':
+          description: Connection is ready
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+  /test/credentials:
+    post:
+      operationId: testCredentials
+      summary: Test credentials against a data source
+      description: |
+        Tests the provided credentials by attempting to connect to the data source without creating any resources.
+      tags:
+        - test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TestCredentials'
+      responses:
+        '204':
+          description: Credentials are valid
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
   /connection-types:
     get:
       operationId: listConnectionTypes
@@ -184,6 +255,8 @@ paths:
     patch:
       operationId: patchConnectionType
       summary: Update a connection type
+      description: |
+        Partially updates a connection type using JSON Merge Patch (RFC 7396). Supply only the fields you want to change; omitted fields are left unchanged.
       tags:
         - connection-types
       requestBody:
@@ -215,6 +288,23 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '404':
           $ref: '#/components/responses/NotFound'
+  /audit/data-connection-types:
+    servers:
+      - url: /api/v1alpha1
+    post:
+      operationId: auditConnectionTypes
+      summary: Audit all connection types
+      description: |
+        Queries the Flight service for supported connectors and updates the status of all connection types accordingly. This endpoint does not require the x-tenant-id header.
+      x-internal: true
+      tags:
+        - connection-types
+      security: []
+      responses:
+        '202':
+          description: Audit started
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
 components:
   securitySchemes:
     tenantHeader:
@@ -267,40 +357,26 @@ components:
       enum:
         - tabular
         - binary
-    Admin:
-      description: |
-        Credentials reference. Exactly one of secret_ref or (name + secret) must be provided.
-      oneOf:
-        - type: object
-          required:
-            - secret_ref
-          properties:
-            secret_ref:
-              type: string
-              description: Reference to an existing secret
-              example: secret/my-conn
-          additionalProperties: false
-        - type: object
-          required:
-            - name
-            - secret
-          properties:
-            name:
-              type: string
-              description: Name for the secret to create
-              example: my-conn-secret
-            secret:
-              type: object
-              additionalProperties:
-                type: string
-              description: Inline secret key-value pairs
-          additionalProperties: false
+    CredentialsRef:
+      type: object
+      description: Reference to an existing Kubernetes secret containing credentials.
+      required:
+        - secret
+      properties:
+        secret:
+          type: string
+          description: Name of the Kubernetes secret
+          example: my-db-creds
+      additionalProperties: false
     DataConnection:
       type: object
+      description: |
+        Data connection with a reference to an existing credentials secret.
       required:
         - name
         - data_connection_type_id
         - format
+        - credentials_ref
         - properties
       properties:
         name:
@@ -312,8 +388,8 @@ components:
           example: 550e8400-e29b-41d4-a716-446655440000
         format:
           $ref: '#/components/schemas/DataFormat'
-        admin:
-          $ref: '#/components/schemas/Admin'
+        credentials_ref:
+          $ref: '#/components/schemas/CredentialsRef'
         properties:
           type: object
           additionalProperties:
@@ -416,6 +492,55 @@ components:
           type: string
           description: Human-readable error description
           example: Data connection 'abc' not found for tenant 't1'
+    InlineCreds:
+      type: object
+      description: Inline credentials — the secret name and its key-value properties.
+      required:
+        - secret
+        - properties
+      properties:
+        secret:
+          type: string
+          description: Name for the Kubernetes secret to create
+          example: my-db-creds
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          description: Credential key-value pairs to store in the secret
+          example:
+            username: pg_user
+            password: pg_pass
+      additionalProperties: false
+    DataConnectionWithCreds:
+      type: object
+      description: |
+        Data connection with inline credentials. The server creates a Kubernetes secret from the provided credentials and stores a reference to it.
+      required:
+        - name
+        - data_connection_type_id
+        - format
+        - credentials
+        - properties
+      properties:
+        name:
+          type: string
+          example: my-postgres
+        data_connection_type_id:
+          type: string
+          description: References a connection type id
+          example: 550e8400-e29b-41d4-a716-446655440000
+        format:
+          $ref: '#/components/schemas/DataFormat'
+        credentials:
+          $ref: '#/components/schemas/InlineCreds'
+        properties:
+          type: object
+          additionalProperties:
+            type: string
+          example:
+            host: localhost
+            port: '5432'
     DataConnectionMergePatch:
       type: object
       description: |
@@ -427,12 +552,32 @@ components:
           type: string
         format:
           $ref: '#/components/schemas/DataFormat'
-        admin:
-          $ref: '#/components/schemas/Admin'
+        credentials_ref:
+          $ref: '#/components/schemas/CredentialsRef'
         properties:
           type: object
           additionalProperties:
             type: string
+    TestCredentials:
+      type: object
+      description: Credentials to test against a data source without creating any resources.
+      required:
+        - data_connection_type_id
+        - secret
+      properties:
+        data_connection_type_id:
+          type: string
+          description: Connection type id to test against
+          example: 550e8400-e29b-41d4-a716-446655440000
+        secret:
+          type: object
+          additionalProperties:
+            type: string
+          description: Credential key-value pairs to test
+          example:
+            username: pg_user
+            password: pg_pass
+            host: db.example.com
     EnumValue:
       type: object
       required:

@@ -1,0 +1,17 @@
+type: object
+description: Inline credentials — the secret name and its key-value properties.
+required: [secret, properties]
+properties:
+  secret:
+    type: string
+    description: Name for the Kubernetes secret to create
+    example: my-db-creds
+  properties:
+    type: object
+    additionalProperties:
+      type: string
+    description: Credential key-value pairs to store in the secret
+    example:
+      username: pg_user
+      password: pg_pass
+additionalProperties: false

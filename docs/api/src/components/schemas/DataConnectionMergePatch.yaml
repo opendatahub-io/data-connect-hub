@@ -9,8 +9,8 @@ properties:
     type: string
   format:
     $ref: "DataFormat.yaml"
-  admin:
-    $ref: "Admin.yaml"
+  credentials_ref:
+    $ref: "CredentialsRef.yaml"
   properties:
     type: object
     additionalProperties:

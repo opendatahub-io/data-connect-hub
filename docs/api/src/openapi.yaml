@@ -46,12 +46,19 @@ paths:
       operationId: createConnection
       summary: Create a connection
       tags: [connections]
+      description: >
+        Accepts two payload variants (untagged union):
+        use `credentials_ref` to reference an existing secret,
+        or `credentials` to supply inline credentials (the server
+        creates the secret automatically).
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: "components/schemas/DataConnection.yaml"
+              oneOf:
+                - $ref: "components/schemas/DataConnection.yaml"
+                - $ref: "components/schemas/DataConnectionWithCreds.yaml"
       responses:
         "201":
           description: Connection created
@@ -87,6 +94,9 @@ paths:
     patch:
       operationId: patchConnection
       summary: Update a connection
+      description: >
+        Partially updates a connection using JSON Merge Patch (RFC 7396).
+        Supply only the fields you want to change; omitted fields are left unchanged.
       tags: [connections]
       requestBody:
         required: true
@@ -118,6 +128,75 @@ paths:
           $ref: "components/responses/BadRequest.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
+
+  /connections/{id}/exports/secrets/{secret_name}:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+      - name: secret_name
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Name of the Kubernetes secret to create or overwrite
+    put:
+      operationId: exportConnection
+      summary: Export a connection to a Kubernetes secret
+      description: >
+        Flattens the connection metadata, properties, and credentials into
+        a single Kubernetes secret with dot-notation keys
+        (e.g. `data_connection.name`, `data_connection.properties.host`).
+        If the secret already exists it is overwritten.
+      tags: [connections]
+      responses:
+        "204":
+          description: Secret created or updated
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+
+  /connections/{id}/readiness:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    post:
+      operationId: checkConnectionReadiness
+      summary: Check connection readiness
+      description: >
+        Validates that the connection's credentials secret exists,
+        matches the connection type schema, and that the data source
+        is reachable. Updates the connection status accordingly.
+      tags: [connections]
+      responses:
+        "204":
+          description: Connection is ready
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+        "422":
+          $ref: "components/responses/UnprocessableEntity.yaml"
+
+  /test/credentials:
+    post:
+      operationId: testCredentials
+      summary: Test credentials against a data source
+      description: >
+        Tests the provided credentials by attempting to connect to
+        the data source without creating any resources.
+      tags: [test]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "components/schemas/TestCredentials.yaml"
+      responses:
+        "204":
+          description: Credentials are valid
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "422":
+          $ref: "components/responses/UnprocessableEntity.yaml"
 
   /connection-types:
     get:
@@ -178,6 +257,9 @@ paths:
     patch:
       operationId: patchConnectionType
       summary: Update a connection type
+      description: >
+        Partially updates a connection type using JSON Merge Patch (RFC 7396).
+        Supply only the fields you want to change; omitted fields are left unchanged.
       tags: [connection-types]
       requestBody:
         required: true
@@ -208,6 +290,25 @@ paths:
         "404":
           $ref: "components/responses/NotFound.yaml"
 
+  /audit/data-connection-types:
+    servers:
+      - url: /api/v1alpha1
+    post:
+      operationId: auditConnectionTypes
+      summary: Audit all connection types
+      description: >
+        Queries the Flight service for supported connectors and updates
+        the status of all connection types accordingly.
+        This endpoint does not require the x-tenant-id header.
+      x-internal: true
+      tags: [connection-types]
+      security: []
+      responses:
+        "202":
+          description: Audit started
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+
 components:
   securitySchemes:
     tenantHeader:
@@ -230,3 +331,5 @@ tags:
     description: Data connection management
   - name: connection-types
     description: Connection type definitions
+  - name: test
+    description: Test operations
