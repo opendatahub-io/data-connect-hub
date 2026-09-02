@@ -10,7 +10,7 @@
   },
   "servers": [
     {
-      "url": "/api/v1/data"
+      "url": "/api/v1alpha1/data"
     }
   ],
   "security": [
