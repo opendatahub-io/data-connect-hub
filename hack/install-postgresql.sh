@@ -35,7 +35,10 @@ RELEASE="postgresql"
 CHART_VERSION=""
 
 USERNAME="testuser"
-PASSWORD="testpassword"
+# NOTE: no default password. The operator MUST supply -p, otherwise the
+# script exits. A well-known default (e.g. "testpassword") would be a
+# hard-coded credential (CWE-798) an attacker could use to log in.
+PASSWORD=""
 DATABASE="testdb"
 
 IMAGE="docker.io/library/postgres:16"
@@ -59,7 +62,7 @@ Options:
   -r RELEASE          release name                (default: postgresql)
   -v VERSION          chart version (ignored)
   -u USERNAME         database user               (default: testuser)
-  -p PASSWORD         user password               (default: testpassword)
+  -p PASSWORD         user password               (required)
   -d DATABASE         database name               (default: testdb)
   -i IMAGE            postgres image              (default: docker.io/library/postgres:16)
   -t TIMEOUT          rollout timeout             (default: 300s)
@@ -184,6 +187,11 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+if [[ -z "${PASSWORD:-}" ]]; then
+    echo "error: password is required; supply it with -p" >&2
+    usage
+fi
 
 # ---------------------------------------------------------------------------
 # Prerequisites

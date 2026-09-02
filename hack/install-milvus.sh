@@ -5,32 +5,39 @@
 #   hack/setup-milvus.sh                          # defaults: namespace=milvus, release=milvus
 #   hack/setup-milvus.sh -n dch -r my-milvus      # custom namespace and release name
 #
-# Environment overrides (command-line flags take precedence):
-#   MILVUS_NAMESPACE        target namespace         (default: milvus)
-#   MILVUS_HELM_RELEASE     Helm release name        (default: milvus)
-#   MILVUS_CHART_VERSION    Helm chart version       (default: 5.0.25, Milvus 2.6.x)
-#   MILVUS_WAIT_TIMEOUT     kubectl wait timeout     (default: 300s)
-
+# Options:
+#   -n NAMESPACE     target namespace         (default: milvus)
+#   -r RELEASE       Helm release name        (default: milvus)
+#   -v VERSION       Helm chart version       (default: 5.0.25, Milvus 2.6.x)
+#   -t TIMEOUT      kubectl wait timeout     (default: 300s)
+#   -h, --help      show this help
+#
 set -euo pipefail
 
-NAMESPACE="${MILVUS_NAMESPACE:-milvus}"
-RELEASE="${MILVUS_HELM_RELEASE:-milvus}"
-CHART_VERSION="${MILVUS_CHART_VERSION:-5.0.25}"
-TIMEOUT="${MILVUS_WAIT_TIMEOUT:-300s}"
+NAMESPACE="milvus"
+RELEASE="milvus"
+CHART_VERSION="5.0.25"
+TIMEOUT="300s"
+
+require_arg() {
+    if [[ $# -lt 2 || -z "${2:-}" ]]; then
+        echo "error: $1 requires an argument" >&2
+        exit 1
+    fi
+}
 
 usage() {
     echo "Usage: $0 [-n namespace] [-r release] [-v chart-version] [-t timeout]"
-    exit 1
 }
 
-while getopts "n:r:v:t:h" opt; do
-    case $opt in
-        n) NAMESPACE="$OPTARG" ;;
-        r) RELEASE="$OPTARG" ;;
-        v) CHART_VERSION="$OPTARG" ;;
-        t) TIMEOUT="$OPTARG" ;;
-        h) usage ;;
-        *) usage ;;
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -n)            require_arg "$@"; NAMESPACE="$2"; shift 2 ;;
+        -r)            require_arg "$@"; RELEASE="$2"; shift 2 ;;
+        -v)            require_arg "$@"; CHART_VERSION="$2"; shift 2 ;;
+        -t)            require_arg "$@"; TIMEOUT="$2"; shift 2 ;;
+        -h|--help)     usage; exit 0 ;;
+        *)             echo "error: unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
 
