@@ -9,9 +9,9 @@ import (
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
-func dataConnectServiceDeleting(ctx context.Context, reader client.Reader, namespace string) (bool, error) {
+func dataConnectServiceDeleting(ctx context.Context, reader client.Reader) (bool, error) {
 	var list dchv1alpha1.DataConnectServiceList
-	if err := reader.List(ctx, &list, client.InNamespace(namespace)); err != nil {
+	if err := reader.List(ctx, &list); err != nil {
 		if apierrors.IsNotFound(err) {
 			return false, nil
 		}

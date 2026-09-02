@@ -65,7 +65,7 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		}
 		return ctrl.Result{}, err
 	}
-	deleting, err := dataConnectServiceDeleting(ctx, r.Client, cm.Namespace)
+	deleting, err := dataConnectServiceDeleting(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

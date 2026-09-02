@@ -59,7 +59,7 @@ func (r *SecretWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 		return ctrl.Result{}, err
 	}
-	deleting, err := dataConnectServiceDeleting(ctx, r.Client, secret.Namespace)
+	deleting, err := dataConnectServiceDeleting(ctx, r.Client)
 	if err != nil {
 		return ctrl.Result{}, err
 	}

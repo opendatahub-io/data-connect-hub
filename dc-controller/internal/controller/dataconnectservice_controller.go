@@ -180,7 +180,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !cr.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&cr, finalizerName) {
 			log.Info("running finalizer for DataConnectService")
-			r.clearSyncedAnnotations(ctx, cr.Namespace)
+			r.clearSyncedAnnotations(ctx)
 			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
@@ -491,11 +491,11 @@ func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context
 // clearSyncedAnnotations removes the dataconnecthub synced annotation from
 // connection-type ConfigMaps and connection Secrets so they get re-promoted
 // on a future install.
-func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Context, namespace string) {
+func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Context) {
 	log := logf.FromContext(ctx)
 
 	var cmList corev1.ConfigMapList
-	if err := r.List(ctx, &cmList, client.InNamespace(namespace), client.HasLabels{labelODHConnectionType}); err != nil {
+	if err := r.List(ctx, &cmList, client.HasLabels{labelODHConnectionType}); err != nil {
 		log.Error(err, "failed to list connection-type ConfigMaps for cleanup")
 	} else {
 		for i := range cmList.Items {
@@ -504,14 +504,14 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 				patch := client.MergeFrom(cm.DeepCopy())
 				delete(cm.Annotations, annotationDCHSynced)
 				if err := r.Patch(ctx, cm, patch); err != nil {
-					log.Error(err, "failed to clear synced annotation", "configmap", cm.Name)
+					log.Error(err, "failed to clear synced annotation", "configmap", cm.Name, "namespace", cm.Namespace)
 				}
 			}
 		}
 	}
 
 	var secretList corev1.SecretList
-	if err := r.List(ctx, &secretList, client.InNamespace(namespace), client.HasLabels{labelODHDashboard}); err != nil {
+	if err := r.List(ctx, &secretList, client.HasLabels{labelODHDashboard}); err != nil {
 		log.Error(err, "failed to list connection Secrets for cleanup")
 	} else {
 		for i := range secretList.Items {
@@ -520,7 +520,7 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 				patch := client.MergeFrom(s.DeepCopy())
 				delete(s.Annotations, annotationDCHSynced)
 				if err := r.Patch(ctx, s, patch); err != nil {
-					log.Error(err, "failed to clear synced annotation", "secret", s.Name)
+					log.Error(err, "failed to clear synced annotation", "secret", s.Name, "namespace", s.Namespace)
 				}
 			}
 		}
