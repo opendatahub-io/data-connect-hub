@@ -394,11 +394,11 @@ class TestPathSegmentEncoding:
     @pytest.mark.parametrize(
         ("connection_id", "expected_path"),
         [
-            ("../../../../evil", "/api/v1/data/connections/..%2F..%2F..%2F..%2Fevil"),
-            ("abc?force=true", "/api/v1/data/connections/abc%3Fforce%3Dtrue"),
-            ("a/b", "/api/v1/data/connections/a%2Fb"),
-            ("id with space", "/api/v1/data/connections/id%20with%20space"),
-            ("a#frag", "/api/v1/data/connections/a%23frag"),
+            ("../../../../evil", "/api/v1alpha1/data/connections/..%2F..%2F..%2F..%2Fevil"),
+            ("abc?force=true", "/api/v1alpha1/data/connections/abc%3Fforce%3Dtrue"),
+            ("a/b", "/api/v1alpha1/data/connections/a%2Fb"),
+            ("id with space", "/api/v1alpha1/data/connections/id%20with%20space"),
+            ("a#frag", "/api/v1alpha1/data/connections/a%23frag"),
         ],
     )
     def test_connection_id_is_encoded(self, connection_id: str, expected_path: str) -> None:
@@ -421,12 +421,12 @@ class TestPathSegmentEncoding:
 
         client = _make_client(httpx.MockTransport(handler))
         client.delete_connection_type("../connections/123")
-        assert seen == ["/api/v1/data/connection-types/..%2Fconnections%2F123"]
+        assert seen == ["/api/v1alpha1/data/connection-types/..%2Fconnections%2F123"]
 
     def test_ordinary_id_is_unchanged(self) -> None:
         transport = _make_transport(
             body=SAMPLE_CONNECTION_JSON,
-            assert_path="/api/v1/data/connections/550e8400-e29b-41d4-a716-446655440000",
+            assert_path="/api/v1alpha1/data/connections/550e8400-e29b-41d4-a716-446655440000",
         )
         client = _make_client(transport)
         client.get_connection("550e8400-e29b-41d4-a716-446655440000")
