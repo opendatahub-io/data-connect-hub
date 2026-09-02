@@ -51,7 +51,7 @@ echo "  Pod: $flight_pod"
 
 echo "  Port-forwarding $flight_pod:50051 -> localhost:$FLIGHT_LOCAL_PORT..."
 lsof -ti :$FLIGHT_LOCAL_PORT 2>/dev/null | xargs kill 2>/dev/null || true
-oc port-forward "pod/$flight_pod" -n "$INFRA_NAMESPACE" "$FLIGHT_LOCAL_PORT:50051" &>/dev/null &
+oc port-forward "pod/$flight_pod" -n "$INFRA_NAMESPACE" "$FLIGHT_LOCAL_PORT:8443" &>/dev/null &
 pff_pid=$!
 sleep 2
 

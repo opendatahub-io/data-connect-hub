@@ -22,7 +22,7 @@ CT_DATA='{
 "name":"test-postgres-1",
 "provider":"postgres",
 "credentials_fields":[
-  {"name":"url",
+  {"name":"URI",
    "label":"URL",
    "type":"string",
    "required":true

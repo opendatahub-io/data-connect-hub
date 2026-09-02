@@ -21,8 +21,8 @@ metadata:
   name: dch-database-config
 stringData:
   DATABASE_URL: "$URI"
-  url: "$URI"
+  URI: "$URI"
   secret-config.toml: |
     [database]
-    url = "$URI"
+    URI = "$URI"
 EOF
