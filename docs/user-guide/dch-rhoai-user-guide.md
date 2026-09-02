@@ -23,12 +23,9 @@ The purpose of this document is to provide **end-users** steps to install, confi
 - [x] Get Data
 - [ ] Auto Migrate Existing RHAI Connections and Connection Types
 - [ ] S3 Connection
-- [ ] Python SDK
-- [ ] Trouble Shooting
-- [ ] TODOs
-  - [ ] Keep Postgres db in `dch-example`
-  - [ ] Delete `dch-infra-example` namespace 
-  - [ ] Use `dch-tenant1` `dch-infra-tenant1` 
+- [x] REST API
+- [x] Python SDK
+- [x] Trouble Shooting
 
 ## Prerequisites
 - You have an OpenShift cluster on version `4.20` or higher.
@@ -455,8 +452,10 @@ The following steps show how to configure and test an S3 connection:
       }
     }
   ```
-- 
-### Verify Python SDK
+
+### REST API
+REST API document can be found [REST API](https://opendatahub-io.github.io/data-connect-hub/)
+### Python SDK
 Python SDK installation and examples can be found [Python SDK](https://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python).
 
 ## Trouble Shooting
