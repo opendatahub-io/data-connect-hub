@@ -126,8 +126,8 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(captured.Name).To(Equal("My S3 Connection"))
 		Expect(captured.DataConnectionTypeID).To(Equal("type-uuid-123"))
 		Expect(captured.Format).To(Equal("tabular"))
-		Expect(captured.Admin).NotTo(BeNil())
-		Expect(captured.Admin.SecretRef).To(Equal(secretName))
+		Expect(captured.CredentialsRef).NotTo(BeNil())
+		Expect(captured.CredentialsRef.Secret).To(Equal(secretName))
 
 		Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
 		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))

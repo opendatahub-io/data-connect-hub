@@ -146,7 +146,7 @@ func TestCreateConnection(t *testing.T) {
 		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
 		assert.Equal(t, "my-conn", body.Name)
 		assert.Equal(t, "type-id", body.DataConnectionTypeID)
-		assert.Equal(t, "my-secret", body.Admin.SecretRef)
+		assert.Equal(t, "my-secret", body.CredentialsRef.Secret)
 
 		w.WriteHeader(http.StatusCreated)
 	}))
@@ -157,7 +157,7 @@ func TestCreateConnection(t *testing.T) {
 		Name:                 "my-conn",
 		DataConnectionTypeID: "type-id",
 		Format:               "tabular",
-		Admin:                &ConnectionAdmin{SecretRef: "my-secret"},
+		CredentialsRef:       &CredentialsRef{Secret: "my-secret"},
 		Properties:           map[string]string{},
 	})
 	assert.NoError(t, err)

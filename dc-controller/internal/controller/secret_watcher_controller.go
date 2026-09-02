@@ -95,7 +95,7 @@ func (r *SecretWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		Name:                 displayName,
 		DataConnectionTypeID: typeID,
 		Format:               "tabular",
-		Admin:                &ConnectionAdmin{SecretRef: secret.Name},
+		CredentialsRef:       &CredentialsRef{Secret: secret.Name},
 		Properties:           map[string]string{},
 	}
 

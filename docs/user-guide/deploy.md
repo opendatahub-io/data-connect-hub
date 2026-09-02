@@ -415,6 +415,9 @@ section below.
 
 ## Verify services
 
+The health endpoint is top-level at `/health`. It is not under the
+`/api/v1alpha1/data` API prefix, so `/api/v1/data/health` returns `path_not_found`.
+
 ```console
 # REST health check (direct, bypasses auth)
 oc exec deploy/dch-rest-service -c rest-service -n $NS -- \
@@ -439,46 +442,8 @@ NAME                                  READY   STATUS    RESTARTS   AGE
 dch-flight-service-59d944f8f9-xxxxx   1/1     Running   0          6m
 ```
 
-Pod readiness only confirms the gRPC server is listening — it doesn't
-exercise auth or the Flight protocol itself. Verify with a real client,
-in-cluster via port-forward:
-
-```console
-oc port-forward -n $NS svc/dch-flight-service 8443:8443 &
-
-pip install -e 'sdk/python[flight]'   # from the repo root, one-time
-
-python3 - <<PYEOF
-from data_connect_hub import DataConnectClient
-
-# The SDK takes one endpoint (host:port, no scheme) and derives both the
-# REST and Flight URLs from it. Here the endpoint points straight at the
-# port-forwarded flight-service, so only Flight calls work -- a REST call on
-# this client would hit port 8443 and fail. Use the gateway endpoint (below)
-# for both.
-client = DataConnectClient(
-    endpoint="127.0.0.1:8443",
-    token="$(oc whoami -t)",
-    tenant_id="$NS",
-    insecure=True,  # skip cert verification -- 127.0.0.1 won't match the service's cert SAN
-)
-print(client.server_info())
-PYEOF
-```
-
-Expected output:
-
-```
-{'vendor_name': 'Data Connect Hub', 'vendor_version': '0.1.0', 'vendor_arrow_version': '1.3',
- 'driver_name': 'ADBC Flight SQL Driver - Go', 'driver_version': 'v1.12.0', ...,
- 'supported_connectors': ['sqlite', 'milvus', 'neo4j', 'postgres', 'elasticsearch', 's3']}
-```
-
-`insecure=True` here only skips certificate verification for the
-port-forwarded connection — it does not disable flight-service's own
-TLS listener or its TokenReview/SAR auth layer. A missing or invalid
-`token` still fails with `UNAUTHENTICATED`, and a `tenant_id` the token
-isn't authorized for still fails with `PERMISSION_DENIED`.
+Pod readiness only confirms the gRPC server is listening. The gateway
+verification below exercises the Flight protocol and authentication.
 
 ### Test through the gateway
 
@@ -537,7 +502,10 @@ Expected output:
 
 ```console
 # REST and Flight through the gateway -- one endpoint covers both
-python3 - <<PYEOF
+uv venv sdk/python/.venv   # from the repo root, one-time
+uv pip install --python sdk/python/.venv/bin/python -e 'sdk/python[flight]'
+
+sdk/python/.venv/bin/python3 - <<PYEOF
 from data_connect_hub import DataConnectClient
 
 client = DataConnectClient(
@@ -552,8 +520,8 @@ PYEOF
 ```
 
 Expected output: the connection-type list returned by the
-[REST check](#verify-services) above, followed by the same `server_info()`
-dict as the direct port-forward check — one client, both protocols.
+[REST check](#verify-services) above, followed by the `server_info()`
+response — one client, both protocols through the gateway.
 
 If Flight fails instead with an ALPN handshake error (e.g. `missing
 selected ALPN property`), HTTP/2 is not being negotiated at the cluster

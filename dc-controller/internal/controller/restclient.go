@@ -86,13 +86,13 @@ type Connection struct {
 	Name                 string            `json:"name"`
 	DataConnectionTypeID string            `json:"data_connection_type_id"`
 	Format               string            `json:"format"`
-	Admin                *ConnectionAdmin  `json:"admin,omitempty"`
+	CredentialsRef       *CredentialsRef   `json:"credentials_ref"`
 	Properties           map[string]string `json:"properties"`
 }
 
-// ConnectionAdmin holds a reference to a Kubernetes Secret.
-type ConnectionAdmin struct {
-	SecretRef string `json:"secret_ref"`
+// CredentialsRef holds a reference to a Kubernetes Secret.
+type CredentialsRef struct {
+	Secret string `json:"secret"`
 }
 
 // ResourceMetadata mirrors the Rust ResourceMetadata JSON structure.
