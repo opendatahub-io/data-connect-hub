@@ -84,7 +84,7 @@ jobs:
           source .sdk-core-wheel-venv/bin/activate
           wheel="$(realpath sdk/python/dist/*.whl)"
           python -m pip install "$wheel"
-          python -c "from data_connect_hub import DataConnectClient; client = DataConnectClient('example.com'); client.close()"
+          python -c "import data_connect_hub; from importlib.metadata import version; assert data_connect_hub.__version__ == version('data-connect-hub'); print(f'Installed SDK version: {data_connect_hub.__version__}'); client = data_connect_hub.DataConnectClient('example.com'); client.close()"
 
       - name: Install and smoke-test Flight wheel
         run: |
@@ -92,4 +92,4 @@ jobs:
           source .sdk-flight-wheel-venv/bin/activate
           wheel="$(realpath sdk/python/dist/*.whl)"
           python -m pip install "${wheel}[flight]"
-          python -c "from data_connect_hub import DataConnectClient; client = DataConnectClient('example.com'); client._require_flight(); client.close()"
+          python -c "import data_connect_hub; from importlib.metadata import version; assert data_connect_hub.__version__ == version('data-connect-hub'); print(f'Installed SDK version: {data_connect_hub.__version__}'); client = data_connect_hub.DataConnectClient('example.com'); client._require_flight(); client.close()"

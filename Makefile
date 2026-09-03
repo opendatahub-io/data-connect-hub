@@ -178,6 +178,7 @@ sdk-typecheck: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)mypy src/
 
 sdk-build: sdk-venv
+	rm -rf $(PYTHON_SDK_DIR)/dist
 	$(SDK_PYTHON) -m build --outdir $(PYTHON_SDK_DIR)/dist $(PYTHON_SDK_DIR)
 
 sdk-package-check: sdk-build
