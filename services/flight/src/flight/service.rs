@@ -33,7 +33,7 @@ const METHOD_GET_FLIGHT_INFO: &str = "arrow.flight.protocol.FlightService/GetFli
 const METHOD_DO_GET: &str = "arrow.flight.protocol.FlightService/DoGet";
 const OPERATION_SQL_INFO: &str = "sql_info";
 const OPERATION_STATEMENT: &str = "statement";
-const OPERATION_STATEMENT_FALLBACK: &str = "statement_fallback";
+const OPERATION_BINARY: &str = "binary";
 const STATUS_OK: &str = "OK";
 
 const OPERATION_TABLES: &str = "tables";
@@ -603,7 +603,7 @@ impl FlightSqlService for DataIngestionService {
             Err(e) => grpc_status_label(e),
         };
 
-        metrics::observe_rpc(METHOD_DO_GET, OPERATION_STATEMENT, status, started.elapsed());
+        metrics::observe_rpc(METHOD_GET_FLIGHT_INFO, OPERATION_BINARY, status, started.elapsed());
         result
     }
 
@@ -619,7 +619,7 @@ impl FlightSqlService for DataIngestionService {
             Err(e) => grpc_status_label(e),
         };
 
-        metrics::observe_rpc(METHOD_DO_GET, OPERATION_STATEMENT_FALLBACK, status, started.elapsed());
+        metrics::observe_rpc(METHOD_DO_GET, OPERATION_BINARY, status, started.elapsed());
         result
     }
 }
