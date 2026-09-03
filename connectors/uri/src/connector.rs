@@ -156,7 +156,7 @@ impl FlightConnector for UriConnector {
                 build_client(&credentials, connection_timeout)
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get URI client: {e}")))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         Ok(Arc::new(UriReader {
             client,

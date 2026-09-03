@@ -67,10 +67,10 @@ impl FlightConnector for SqliteConnector {
                     .acquire_timeout(connection_timeout)
                     .connect(url.as_str())
                     .await
-                    .map_err(|_| ConnectorError::ConnectionError("Failed to connect to SQLite".to_string()))
+                    .map_err(|e| ConnectorError::ConnectionError(format!("unable to connect to SQLite: {e}")))
             })
             .await
-            .map_err(|_| ConnectorError::ConnectionError("Failed to get SQLite reader".to_string()))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         Ok(Arc::new(SqliteReader { pool }))
     }

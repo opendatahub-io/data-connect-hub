@@ -69,7 +69,7 @@ impl MilvusConnector {
 }
 
 fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
-    ConnectorError::ConnectionError(format!("Milvus error: {e}"))
+    ConnectorError::ConnectionError(e.to_string())
 }
 const PROVIDER: &str = "milvus";
 #[async_trait::async_trait]
@@ -98,7 +98,7 @@ impl FlightConnector for MilvusConnector {
                     .map_err(map_milvus_error)
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Milvus client: {e}")))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         Ok(Arc::new(MilvusReader { client }))
     }

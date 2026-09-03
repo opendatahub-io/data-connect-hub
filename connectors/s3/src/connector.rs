@@ -217,7 +217,7 @@ impl DataReader for S3Reader {
         self.operator
             .check()
             .await
-            .map_err(|_| ConnectorError::ConnectionError("Failed to check S3 connection".to_string()))
+            .map_err(|e| ConnectorError::ConnectionError(format!("S3 connection check failed: {e}")))
     }
 
     async fn list_tables(

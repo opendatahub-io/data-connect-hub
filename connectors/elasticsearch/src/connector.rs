@@ -152,7 +152,7 @@ impl FlightConnector for ElasticsearchConnector {
                 build_client(&credentials, connection_timeout)
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Elasticsearch client: {e}")))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         let default_index = data_connection.resource.properties.get("index").cloned();
 

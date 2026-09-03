@@ -41,10 +41,10 @@ impl SecretStore for KubeSecretStore {
         self.cache
             .try_get_with(key, async move {
                 let api: Api<K8sSecret> = Api::namespaced(client, &ns);
-                let k8s_secret = api
-                    .get(&n)
-                    .await
-                    .map_err(|_| SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string()))?;
+                let k8s_secret = api.get(&n).await.map_err(|e| {
+                    error!("failed to get secret {ns}/{n}: {e}");
+                    SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string())
+                })?;
                 let properties = extract_properties(&k8s_secret);
                 Ok(Secret {
                     name: n,
@@ -114,9 +114,10 @@ impl SecretStore for KubeSecretStore {
 
     async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError> {
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
-        api.delete(name, &DeleteParams::default())
-            .await
-            .map_err(|_| SecretStoreError::SecretNotFound(format!("{namespace}/{name}")))?;
+        api.delete(name, &DeleteParams::default()).await.map_err(|e| {
+            error!("failed to delete secret {namespace}/{name}: {e}");
+            SecretStoreError::SecretNotFound(format!("{namespace}/{name}"))
+        })?;
 
         let key = format!("{namespace}/{name}");
         self.cache.invalidate(&key).await;
@@ -138,7 +139,10 @@ impl SecretStore for KubeSecretStore {
         });
         api.patch(name, &PatchParams::default(), &Patch::Merge(&patch))
             .await
-            .map_err(|_| SecretStoreError::SecretNotFound(format!("{namespace}/{name}")))?;
+            .map_err(|e| {
+                error!("failed to set labels on secret {namespace}/{name}: {e}");
+                SecretStoreError::SecretNotFound(format!("{namespace}/{name}"))
+            })?;
 
         Ok(())
     }

@@ -103,7 +103,7 @@ impl FlightConnector for Neo4jConnector {
                 build_graph(&credentials, connection_timeout).await
             })
             .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to get Neo4j client: {e}")))?;
+            .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
 
         Ok(Arc::new(Neo4jReader { graph }))
     }
@@ -215,7 +215,7 @@ fn map_neo4j_error(e: neo4rs::Error) -> ConnectorError {
     {
         return ConnectorError::InvalidRequest("Data source is read-only".to_string());
     }
-    ConnectorError::ConnectionError("Neo4j connection error".to_string())
+    ConnectorError::SQLError(e.to_string())
 }
 
 fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[neo4rs::Row]) -> Result<RecordBatch, ConnectorError> {
