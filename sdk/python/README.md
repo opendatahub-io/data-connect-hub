@@ -234,7 +234,7 @@ Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol e
 
 ## Releases
 
-The package version is maintained in `src/data_connect_hub/_version.py`. Before creating a release tag, set it to the matching PEP 440 version and run `make sdk-package-check`. The release tag must be `v` followed by that same version, for example `v0.1.0`.
+The package version is maintained in `src/data_connect_hub/_version.py`. Before creating a release tag, set it to the matching PEP 440 version, run `make sdk-install`, and then run `make sdk-package-check`. The release tag must be `v` followed by that same version, for example `v0.1.0`.
 
 ## Contributing
 
