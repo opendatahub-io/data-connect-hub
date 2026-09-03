@@ -22,7 +22,7 @@ endif
 	container-run-flight container-run-rest \
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
-	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-all \
+	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -178,9 +178,12 @@ sdk-typecheck: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)mypy src/
 
 sdk-build: sdk-venv
-	$(SDK_PYTHON) -m build $(PYTHON_SDK_DIR)
+	$(SDK_PYTHON) -m build --outdir $(PYTHON_SDK_DIR)/dist $(PYTHON_SDK_DIR)
 
-sdk-all: sdk-lint sdk-typecheck sdk-test
+sdk-package-check: sdk-build
+	$(SDK_PYTHON) -m twine check $(PYTHON_SDK_DIR)/dist/*
+
+sdk-all: sdk-lint sdk-typecheck sdk-test sdk-package-check
 
 # -------------------------------------------------------------------
 # OpenAPI docs
@@ -289,5 +292,6 @@ help:
 	@echo "  sdk-lint             lint and format-check SDK"
 	@echo "  sdk-fmt              format SDK code"
 	@echo "  sdk-typecheck        run mypy on SDK"
-	@echo "  sdk-build            build SDK distribution"
-	@echo "  sdk-all              lint + typecheck + test SDK"
+	@echo "  sdk-build            build SDK wheel and source distribution"
+	@echo "  sdk-package-check    build and validate SDK distribution metadata"
+	@echo "  sdk-all              lint + typecheck + test + package check SDK"

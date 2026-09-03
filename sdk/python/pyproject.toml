@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68.0"]
+requires = ["setuptools>=77.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,12 +7,14 @@ name = "data-connect-hub"
 dynamic = ["version"]
 description = "Python SDK for the Data Connect Hub service"
 readme = "README.md"
-license = {text = "Apache-2.0"}
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
+keywords = ["data", "data-connect-hub", "data-connectivity", "flight-sql", "opendatahub"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -32,15 +34,20 @@ flight = [
     "protobuf>=6.33.5",
 ]
 dev = [
+    "build>=1.2",
+    "numpy<2.5", # NumPy 2.5 stubs require Python 3.12 syntax; the SDK type-checks against Python 3.11.
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.5",
+    "twine>=5.0",
     "mypy>=1.10",
 ]
 
 [project.urls]
 Homepage = "https://github.com/opendatahub-io/data-connect-hub"
 Repository = "https://github.com/opendatahub-io/data-connect-hub"
+Documentation = "https://opendatahub-io.github.io/data-connect-hub/"
+Issues = "https://github.com/opendatahub-io/data-connect-hub/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

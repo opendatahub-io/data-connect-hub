@@ -56,3 +56,40 @@ jobs:
           name: coverage-report
           path: sdk/python/htmlcov/
           retention-days: 14
+
+  package:
+    name: Package (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install package tools
+        run: python -m pip install --upgrade build twine
+
+      - name: Build and validate distribution
+        run: make sdk-package-check VIRTUAL_ENV=1
+
+      - name: Install and smoke-test core wheel
+        run: |
+          python -m venv .sdk-core-wheel-venv
+          source .sdk-core-wheel-venv/bin/activate
+          wheel="$(realpath sdk/python/dist/*.whl)"
+          python -m pip install "$wheel"
+          python -c "from data_connect_hub import DataConnectClient; client = DataConnectClient('example.com'); client.close()"
+
+      - name: Install and smoke-test Flight wheel
+        run: |
+          python -m venv .sdk-flight-wheel-venv
+          source .sdk-flight-wheel-venv/bin/activate
+          wheel="$(realpath sdk/python/dist/*.whl)"
+          python -m pip install "${wheel}[flight]"
+          python -c "from data_connect_hub import DataConnectClient; client = DataConnectClient('example.com'); client._require_flight(); client.close()"

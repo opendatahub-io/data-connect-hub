@@ -1,0 +1,41 @@
+name: Release Python SDK
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify release version
+        run: |
+          version="$(python -c "import re; from pathlib import Path; match = re.search(r'^__version__ = \"([^\"]+)\"$', Path('sdk/python/src/data_connect_hub/_version.py').read_text(), re.MULTILINE); print(match.group(1))")"
+          test "$GITHUB_REF_NAME" = "v$version" || {
+            echo "Release tag $GITHUB_REF_NAME does not match SDK version $version"
+            exit 1
+          }
+
+      - name: Build and validate distribution
+        run: |
+          python -m venv .sdk-release-venv
+          source .sdk-release-venv/bin/activate
+          python -m pip install --upgrade build twine
+          make sdk-package-check
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Add PyPI trusted publishing here after the PyPI project is configured.
+        run: gh release create "$GITHUB_REF_NAME" sdk/python/dist/* --generate-notes
