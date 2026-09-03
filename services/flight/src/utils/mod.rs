@@ -116,6 +116,7 @@ impl TlsConfig {
 }
 
 #[derive(Debug, Deserialize, Default)]
+#[allow(dead_code)]
 pub struct ConnectorsConfig {
     #[serde(default)]
     pub default: ConnectorConfig,
@@ -136,24 +137,31 @@ pub struct ConnectorsConfig {
 }
 
 impl ConnectorsConfig {
+    #[cfg(feature = "postgres")]
     pub fn postgres(&self) -> ConnectorConfig {
         self.default.merge(self.postgres)
     }
+    #[cfg(feature = "sqlite")]
     pub fn sqlite(&self) -> ConnectorConfig {
         self.default.merge(self.sqlite)
     }
+    #[cfg(feature = "elasticsearch")]
     pub fn elasticsearch(&self) -> ConnectorConfig {
         self.default.merge(self.elasticsearch)
     }
+    #[cfg(feature = "neo4j")]
     pub fn neo4j(&self) -> ConnectorConfig {
         self.default.merge(self.neo4j)
     }
+    #[cfg(feature = "milvus")]
     pub fn milvus(&self) -> ConnectorConfig {
         self.default.merge(self.milvus)
     }
+    #[cfg(feature = "s3")]
     pub fn s3(&self) -> ConnectorConfig {
         self.default.merge(self.s3)
     }
+    #[cfg(feature = "uri")]
     pub fn uri(&self) -> ConnectorConfig {
         self.default.merge(self.uri)
     }

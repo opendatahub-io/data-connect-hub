@@ -14,14 +14,24 @@ path = "src/lib.rs"
 name = "flight-service"
 path = "src/main.rs"
 
+[features]
+default = ["postgres", "sqlite", "s3", "milvus", "elasticsearch", "neo4j", "uri"]
+postgres = ["dep:postgres-connector"]
+sqlite = ["dep:sqlite-connector"]
+s3 = ["dep:s3-connector"]
+milvus = ["dep:milvus-connector"]
+elasticsearch = ["dep:elasticsearch-connector"]
+neo4j = ["dep:neo4j-connector"]
+uri = ["dep:uri-connector"]
+
 [dependencies]
-postgres-connector = { workspace = true }
-sqlite-connector = { workspace = true }
-s3-connector = { workspace = true }
-milvus-connector = { workspace = true }
-elasticsearch-connector = { workspace = true }
-neo4j-connector = { workspace = true }
-uri-connector = { workspace = true }
+postgres-connector = { workspace = true, optional = true }
+sqlite-connector = { workspace = true, optional = true }
+s3-connector = { workspace = true, optional = true }
+milvus-connector = { workspace = true, optional = true }
+elasticsearch-connector = { workspace = true, optional = true }
+neo4j-connector = { workspace = true, optional = true }
+uri-connector = { workspace = true, optional = true }
 async-trait = { workspace = true }
 commons = { workspace = true }
 pg-meta-store = { workspace = true }
