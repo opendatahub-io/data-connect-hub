@@ -3,42 +3,7 @@
 Kubernetes operator for deploying and managing Data Connect Hub services
 (rest-service, flight-service) on OpenShift / RHOAI clusters.
 
-## Deployment
-
-See [`docs/user-guide/deploy.md`](../docs/user-guide/deploy.md) for full
-deployment instructions (Helm and Kustomize).
-
-Quick start:
-
-```console
-cd dc-controller
-
-helm install dc-controller charts/ \
-  --namespace dc-controller-system --create-namespace
-```
-
-## Custom Resource
-
-The `DataConnectService` CR is namespace-scoped. After installing the
-operator, create the CR in the namespace where you want the services deployed:
-
-```yaml
-apiVersion: dataconnecthub.opendatahub.io/v1alpha1
-kind: DataConnectService
-metadata:
-  name: default-dataconnectservice
-  namespace: opendatahub
-spec:
-  restService: {}
-  flightService: {}
-```
-
-The controller requires a `dch-database-config` Secret in the same
-namespace as the CR. Provision PostgreSQL (e.g., via CloudNativePG on
-OpenShift or an external service) and create the secret before creating
-the CR. See [deploy.md](../docs/user-guide/deploy.md) for full instructions.
-
-### Status
+## Custom Resource Status
 
 The CR follows the ODH PlatformObject contract:
 
