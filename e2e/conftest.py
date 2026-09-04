@@ -6,6 +6,7 @@ by setup.sh into .env and loaded at the top of this file.
     DCH_GATEWAY_ENDPOINT   Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
     DCH_AUTH_TOKEN         Bearer token
+    DCH_GATEWAY_AUTH_REQUIRED  Authenticate health checks at the platform Gateway
     DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
     DCH_PG_SECRET          K8s secret name for PG    (set by setup.sh, enables query tests)
@@ -20,7 +21,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from data_connect_hub import CredentialsRef, DataConnectClient
 from data_connect_hub.client import _build_urls
 
@@ -92,6 +92,11 @@ def ca_cert() -> str | None:
 @pytest.fixture(scope="session")
 def insecure() -> bool:
     return os.environ.get("DCH_INSECURE", "false").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture(scope="session")
+def gateway_auth_required() -> bool:
+    return os.environ.get("DCH_GATEWAY_AUTH_REQUIRED", "false").lower() in ("true", "1", "yes")
 
 
 @pytest.fixture(scope="session")
