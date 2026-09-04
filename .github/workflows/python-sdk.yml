@@ -25,6 +25,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # setuptools-scm derives the version from tags, so the editable install
+          # needs the full history and all tags.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
@@ -66,6 +70,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # A shallow clone has no tags and a commit distance of 1, so
+          # setuptools-scm would build a version that is never published.
+          fetch-depth: 0
 
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5

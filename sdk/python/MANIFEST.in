@@ -1,0 +1,7 @@
+# Controls sdist (.tar.gz) contents only; the wheel is unaffected.
+#
+# setuptools-scm installs a file-finder that replaces setuptools' default sdist
+# file set with "everything git tracks under sdk/python". That silently pulled
+# examples/ (including quickstart.ipynb) into the sdist, which was never shipped
+# before the setuptools-scm migration. They are documentation, not runtime code.
+prune examples

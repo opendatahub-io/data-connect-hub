@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=77.0", "wheel"]
+requires = ["setuptools>=77.0", "setuptools-scm>=8", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -55,8 +55,15 @@ where = ["src"]
 [tool.setuptools.package-data]
 data_connect_hub = ["py.typed"]
 
-[tool.setuptools.dynamic]
-version = {attr = "data_connect_hub._version.__version__"}
+[tool.setuptools_scm]
+root = "../.."
+version_scheme = "guess-next-dev"
+local_scheme = "no-local-version"
+tag_regex = "^v(?P<version>.*)$"
+# No fallback_version on purpose. setuptools-scm also uses it as the
+# guess-next-dev base when the repo has no tags yet, so setting it would move
+# untagged builds below the 0.1.devN series already on TestPyPI. A tree with no
+# .git must fail loudly rather than publish a version that sorts wrong.
 
 [tool.ruff]
 target-version = "py311"
