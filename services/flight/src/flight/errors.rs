@@ -54,6 +54,7 @@ pub(crate) fn map_connector_error(e: ConnectorError) -> Status {
             tracing::error!(error = %e, "connector IO error");
             Status::internal("data source IO error")
         },
+        ConnectorError::NotFound(msg) => Status::not_found(msg),
         e @ ConnectorError::UnsupportedOperation(_) => {
             tracing::error!(error = %e, "connector unsupported operation");
             Status::unimplemented("unsupported operation")

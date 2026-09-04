@@ -17,3 +17,5 @@ data:
     [flight-service]
     address = "flight-service"
     port = 8443
+    ca-cert = "/etc/tls/flight/ca.crt"
+    sa-token-file = "/var/run/secrets/kubernetes.io/serviceaccount/token"

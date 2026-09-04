@@ -31,39 +31,43 @@ pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, t
 
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
-    async fn get_supported_connectors(&self, token: Option<&str>) -> Result<Vec<SupportedConnector>, tonic::Status>;
-    async fn check_data_connection(
-        &self,
-        tenant_id: &str,
-        connection_id: &str,
-        token: Option<&str>,
-    ) -> Result<(), tonic::Status>;
-    async fn test_credentials(
-        &self,
-        tenant_id: &str,
-        creds: &TestCredentials,
-        token: Option<&str>,
-    ) -> Result<(), tonic::Status>;
+    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status>;
+    async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
+    async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
     async fn download_binary(
         &self,
         tenant_id: &str,
         connection_id: &str,
         path: &str,
-        token: Option<&str>,
     ) -> Result<BinaryStream, tonic::Status>;
 }
 
 pub struct FlightClient {
     endpoint: String,
+    tls_ca_cert: Option<tonic::transport::Certificate>,
+    sa_token_file: Option<String>,
     client: OnceCell<FlightServiceClient<Channel>>,
 }
 
 impl FlightClient {
-    pub fn new(endpoint: String) -> Self {
+    pub fn new(endpoint: String, ca_cert_pem: Option<Vec<u8>>, sa_token_file: Option<String>) -> Self {
         Self {
             endpoint,
+            tls_ca_cert: ca_cert_pem.map(tonic::transport::Certificate::from_pem),
+            sa_token_file,
             client: OnceCell::new(),
         }
+    }
+
+    async fn read_sa_token(&self) -> Result<String, tonic::Status> {
+        let path = self
+            .sa_token_file
+            .as_deref()
+            .ok_or_else(|| tonic::Status::internal("no sa-token-file configured for flight-service auth"))?;
+        let token = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("failed to read SA token from {path}: {e}")))?;
+        Ok(format!("Bearer {}", token.trim()))
     }
 
     fn attach_header(
@@ -73,17 +77,25 @@ impl FlightClient {
     ) -> Result<(), tonic::Status> {
         metadata.insert(
             header,
-            MetadataValue::try_from(value).map_err(|_| tonic::Status::invalid_argument("invalid token"))?,
+            MetadataValue::try_from(value).map_err(|_| tonic::Status::invalid_argument("invalid header value"))?,
         );
-
         Ok(())
     }
 
     async fn client(&self) -> Result<FlightServiceClient<Channel>, tonic::Status> {
         self.client
             .get_or_try_init(|| async {
-                let channel = Channel::from_shared(self.endpoint.clone())
-                    .map_err(|e| tonic::Status::internal(format!("invalid flight endpoint: {e}")))?
+                let mut endpoint = Channel::from_shared(self.endpoint.clone())
+                    .map_err(|e| tonic::Status::internal(format!("invalid flight endpoint: {e}")))?;
+
+                if let Some(ca_cert) = &self.tls_ca_cert {
+                    let tls_config = tonic::transport::ClientTlsConfig::new().ca_certificate(ca_cert.clone());
+                    endpoint = endpoint
+                        .tls_config(tls_config)
+                        .map_err(|e| tonic::Status::internal(format!("invalid TLS config: {e}")))?;
+                }
+
+                let channel = endpoint
                     .connect()
                     .await
                     .map_err(|e| tonic::Status::unavailable(format!("failed to connect to flight service: {e}")))?;
@@ -96,13 +108,11 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
-    async fn get_supported_connectors(&self, token: Option<&str>) -> Result<Vec<SupportedConnector>, tonic::Status> {
+    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new("GetSupportedConnectors", ""));
-
-        if let Some(token) = token {
-            Self::attach_header(request.metadata_mut(), AUTHORIZATION, token)?;
-        }
+        let sa_token = self.read_sa_token().await?;
+        Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
         let result = stream
@@ -143,19 +153,12 @@ impl FlightDataClient for FlightClient {
             .collect())
     }
 
-    async fn check_data_connection(
-        &self,
-        tenant_id: &str,
-        connection_id: &str,
-        token: Option<&str>,
-    ) -> Result<(), tonic::Status> {
+    async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new(ACTION_CHECK_DATA_CONNECTION, ""));
+        let sa_token = self.read_sa_token().await?;
         let metadata = request.metadata_mut();
-
-        if let Some(token) = token {
-            Self::attach_header(metadata, AUTHORIZATION, token)?;
-        }
+        Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
         Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 
@@ -164,12 +167,7 @@ impl FlightDataClient for FlightClient {
         Ok(())
     }
 
-    async fn test_credentials(
-        &self,
-        tenant_id: &str,
-        creds: &TestCredentials,
-        token: Option<&str>,
-    ) -> Result<(), tonic::Status> {
+    async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status> {
         let mut keys = vec!["data_connection_type_id".to_string()];
         let mut values = vec![creds.data_connection_type_id.clone()];
         for (k, v) in &creds.secret {
@@ -197,10 +195,8 @@ impl FlightDataClient for FlightClient {
 
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new(ACTION_CHECK_CREDENTIALS, buf));
-
-        if let Some(token) = token {
-            Self::attach_header(request.metadata_mut(), AUTHORIZATION, token)?;
-        }
+        let sa_token = self.read_sa_token().await?;
+        Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
         Self::attach_header(request.metadata_mut(), X_TENANT_ID, tenant_id)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
@@ -213,9 +209,9 @@ impl FlightDataClient for FlightClient {
         tenant_id: &str,
         connection_id: &str,
         path: &str,
-        token: Option<&str>,
     ) -> Result<BinaryStream, tonic::Status> {
         let mut client = self.client().await?;
+        let sa_token = self.read_sa_token().await?;
 
         let any = arrow_flight::sql::Any {
             type_url: DOWNLOAD_TYPE_URL.to_string(),
@@ -226,10 +222,7 @@ impl FlightDataClient for FlightClient {
 
         let mut request = tonic::Request::new(descriptor);
         let metadata = request.metadata_mut();
-
-        if let Some(token) = token {
-            Self::attach_header(metadata, AUTHORIZATION, token)?;
-        }
+        Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
         Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 
@@ -244,10 +237,7 @@ impl FlightDataClient for FlightClient {
 
         let mut request = tonic::Request::new(ticket);
         let metadata = request.metadata_mut();
-
-        if let Some(token) = token {
-            Self::attach_header(metadata, AUTHORIZATION, token)?;
-        }
+        Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
         Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 

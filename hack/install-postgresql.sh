@@ -472,14 +472,14 @@ EOF
             - |
               set -eu
 
-              POSTGRES_UID="\$(id -u postgres)"
-              POSTGRES_GID="\$(id -g postgres)"
-
               cp /etc/tls/readonly/server.crt /etc/tls/certs/server.crt
               cp /etc/tls/readonly/server.key /etc/tls/certs/server.key
 
-              chown "\${POSTGRES_UID}:\${POSTGRES_GID}" \
-                /etc/tls/certs/server.key
+              # Best-effort chown: succeeds on kind (root) so the
+              # postgres user can read the key; silently skipped on
+              # OpenShift where restricted-v2 runs as non-root.
+              chown "\$(id -u postgres):\$(id -g postgres)" \
+                /etc/tls/certs/server.key 2>/dev/null || true
 
               chmod 644 /etc/tls/certs/server.crt
               chmod 600 /etc/tls/certs/server.key

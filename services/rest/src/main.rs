@@ -160,6 +160,10 @@ fn log_config_source(config_file: &str, source: &str, required: bool) {
 
 #[actix_web::main]
 async fn main() -> Result<()> {
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .expect("Failed to install rustls CryptoProvider");
+
     let args = CommandLineArgs::parse();
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
 
@@ -178,7 +182,27 @@ async fn main() -> Result<()> {
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
-    let flight_client = Arc::new(FlightClient::new(config.flight_service.endpoint()));
+
+    let ca_cert_pem = match &config.flight_service.ca_cert {
+        Some(path) => {
+            tracing::info!(path, "Loading CA certificate for flight service TLS");
+            Some(tokio::fs::read(path).await?)
+        },
+        None => {
+            if config.flight_service.sa_token_file.is_some() {
+                tracing::warn!(
+                    "sa-token-file is configured but ca-cert is not; \
+                     the bearer token will be sent over plaintext HTTP"
+                );
+            }
+            None
+        },
+    };
+    let flight_client = Arc::new(FlightClient::new(
+        config.flight_service.endpoint(),
+        ca_cert_pem,
+        config.flight_service.sa_token_file.clone(),
+    ));
 
     let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), flight_client));
 

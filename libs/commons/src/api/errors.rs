@@ -15,6 +15,8 @@ pub enum ConnectorError {
     ConfigError(String),
     #[error("IO error: {0}")]
     IOError(String),
+    #[error("Not found: {0}")]
+    NotFound(String),
     #[error("Unsupported operation: {0}")]
     UnsupportedOperation(String),
 }
@@ -27,6 +29,7 @@ impl ConnectorError {
             | Self::InvalidRequest(m)
             | Self::ConfigError(m)
             | Self::IOError(m)
+            | Self::NotFound(m)
             | Self::UnsupportedOperation(m) => m,
             Self::NoDataError => "no data returned",
         }

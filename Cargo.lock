@@ -4347,6 +4347,7 @@ dependencies = [
  "kube-utils",
  "pg-meta-store",
  "prost 0.14.4",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
