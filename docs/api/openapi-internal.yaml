@@ -175,6 +175,50 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+  /connections/{id}/binary:
+    parameters:
+      - $ref: '#/components/parameters/resourceId'
+    get:
+      operationId: downloadBinary
+      summary: Download binary data from a connection
+      description: |
+        Streams binary data (files, objects) from a data connection. The file path is connector-specific: for S3 it is an object key within the configured bucket, for URI connectors it is a relative URL path joined to the base URI. Only connectors that support binary reads (currently S3 and URI) will return data; all others respond with 501.
+      tags:
+        - connections
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: File path or object key to download
+          example: models/model.bin
+      responses:
+        '200':
+          description: Binary data stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Suggests a filename for the download
+              example: attachment; filename="model.bin"
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '501':
+          $ref: '#/components/responses/NotImplemented'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /test/credentials:
     post:
       operationId: testCredentials
@@ -705,3 +749,30 @@ components:
           example:
             code: not_found
             message: Data connection 'abc' not found for tenant 't1'
+    Unauthorized:
+      description: Invalid or missing authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unauthenticated
+            message: invalid or missing bearer token
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: forbidden
+            message: permission denied
+    NotImplemented:
+      description: Operation not supported by this connector
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unsupported_operation
+            message: this operation is not supported for this connector

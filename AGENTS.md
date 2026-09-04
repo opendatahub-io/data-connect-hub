@@ -114,7 +114,7 @@ Connections (`/api/v1alpha1/data/connections`):
 - `GET /api/v1alpha1/data/connections/{id}` — get connection
 - `PATCH /api/v1alpha1/data/connections/{id}` — update connection
 - `DELETE /api/v1alpha1/data/connections/{id}` — delete connection
-- `GET /api/v1alpha1/data/connections/{id}/binary` — **not implemented (501)**
+- `GET /api/v1alpha1/data/connections/{id}/binary?path=<path>` — download binary data (S3, URI connectors)
 - `POST /api/v1alpha1/data/connections/{id}/readiness` — audit an existing connection via flight service
 - `PUT /api/v1alpha1/data/connections/{id}/exports/secrets/{secret_name}` — export connection credentials to a K8s secret
 

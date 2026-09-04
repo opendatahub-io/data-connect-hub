@@ -204,7 +204,7 @@ grpcurl -plaintext localhost:50051 grpc.health.v1.Health/Check
 | GET    | `/api/v1alpha1/data/connections/{id}`                             | Get a connection                               |
 | PATCH  | `/api/v1alpha1/data/connections/{id}`                             | Update a connection                            |
 | DELETE | `/api/v1alpha1/data/connections/{id}`                             | Delete a connection                            |
-| GET    | `/api/v1alpha1/data/connections/{id}/binary`                      | Get ingestion data (not implemented)           |
+| GET    | `/api/v1alpha1/data/connections/{id}/binary?path=<path>`          | Download binary data (S3, URI connectors)      |
 | POST   | `/api/v1alpha1/data/connections/{id}/readiness`                   | Audit an existing connection                   |
 | PUT    | `/api/v1alpha1/data/connections/{id}/exports/secrets/{secret_name}` | Export connection credentials to a K8s secret |
 | GET    | `/api/v1alpha1/data/connection-types`                             | List all connection types                      |

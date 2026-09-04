@@ -1,0 +1,8 @@
+description: Invalid or missing authentication token
+content:
+  application/json:
+    schema:
+      $ref: "../schemas/ErrorResponse.yaml"
+    example:
+      code: unauthenticated
+      message: "invalid or missing bearer token"

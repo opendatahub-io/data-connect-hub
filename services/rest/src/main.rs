@@ -64,7 +64,7 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                     web::put().to(export_connection),
                 )
                 .route("/connections/{id}/readiness", web::post().to(check_existent_connection))
-                .route("/connections/{id}/binary", web::get().to(get_ingestion_data))
+                .route("/connections/{id}/binary", web::get().to(get_binary_data))
                 .route("/test/credentials", web::post().to(test_credentials)),
         )
         .default_service(web::route().to(not_found));
@@ -178,7 +178,7 @@ async fn main() -> Result<()> {
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
-    let flight_client = FlightClient::new(config.flight_service.endpoint());
+    let flight_client = Arc::new(FlightClient::new(config.flight_service.endpoint()));
 
     let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), flight_client));
 

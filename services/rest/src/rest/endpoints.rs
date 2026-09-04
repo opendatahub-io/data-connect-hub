@@ -2,20 +2,23 @@ use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 
-use crate::clients::flight::FlightClient;
+use crate::clients::flight::FlightDataClient;
+use crate::state::audit::AuditContext;
 use crate::state::audit::audit_connection_type;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
 
 use actix_web::{HttpResponse, web};
+use arrow::array::{Array, AsArray};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
-use serde::Serialize;
+use futures::StreamExt;
+use serde::{Deserialize, Serialize};
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -28,6 +31,7 @@ use crate::rest::DataConnectionWithCreds;
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
+    pub authorization: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -38,14 +42,14 @@ struct HealthResponse {
 pub struct ApiService {
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
-    flight_client: FlightClient,
+    flight_client: Arc<dyn FlightDataClient>,
 }
 
 impl ApiService {
     pub fn new(
         meta_store: Arc<dyn MetaStore + Send + Sync>,
         secret_store: Arc<dyn SecretStore + Send + Sync>,
-        flight_client: FlightClient,
+        flight_client: Arc<dyn FlightDataClient>,
     ) -> Self {
         Self {
             meta_store,
@@ -214,7 +218,13 @@ pub async fn create_connection_type(
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
         .await?;
 
-    audit_connection_type(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
+    audit_connection_type(
+        service.flight_client.as_ref(),
+        &service.meta_store,
+        connection_type.clone(),
+        ctx.authorization.as_deref(),
+    )
+    .await?;
 
     Ok(HttpResponse::Created().json(connection_type))
 }
@@ -241,7 +251,13 @@ pub async fn patch_connection_type(
         .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
         .await?;
 
-    audit_connection_type(&service.flight_client, &service.meta_store, connection_type.clone()).await?;
+    audit_connection_type(
+        service.flight_client.as_ref(),
+        &service.meta_store,
+        connection_type.clone(),
+        ctx.authorization.as_deref(),
+    )
+    .await?;
 
     Ok(HttpResponse::Ok().json(connection_type))
 }
@@ -272,17 +288,53 @@ pub async fn delete_connection_type(
     Ok(HttpResponse::NoContent().finish())
 }
 
-pub async fn get_ingestion_data(
-    _service: web::Data<ApiService>,
-    _ctx: web::ReqData<ApiContext>,
-    _id: web::Path<String>,
+#[derive(Deserialize)]
+pub struct BinaryDownloadQuery {
+    pub path: String,
+}
+
+pub async fn get_binary_data(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    id: web::Path<String>,
+    query: web::Query<BinaryDownloadQuery>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    Err(EndpointError::Unimplemented.into())
+    info!("get_binary_data: binary download for tenant {:?}", ctx.tenant_id);
+
+    let batch_stream = service
+        .flight_client
+        .download_binary(&ctx.tenant_id, &id, &query.path, ctx.authorization.as_deref())
+        .await?;
+
+    let body_stream = batch_stream.map(|result| match result {
+        Ok(batch) => {
+            let array = batch
+                .column_by_name("data")
+                .ok_or_else(|| actix_web::error::ErrorInternalServerError("missing 'data' column in response"))?;
+            let binary_array = array.as_binary::<i32>();
+            let mut data = Vec::new();
+            for i in 0..binary_array.len() {
+                data.extend_from_slice(binary_array.value(i));
+            }
+            Ok(web::Bytes::from(data))
+        },
+        Err(e) => {
+            error!(error = %e, "error reading binary stream from flight service");
+            Err(actix_web::error::ErrorInternalServerError("binary stream read failed"))
+        },
+    });
+
+    let filename = query.path.rsplit('/').next().unwrap_or("download");
+
+    Ok(HttpResponse::Ok()
+        .content_type("application/octet-stream")
+        .insert_header(("Content-Disposition", format!("attachment; filename=\"{filename}\"")))
+        .streaming(body_stream))
 }
 
 pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
     info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), &service.flight_client).await?;
+    audit_data_connection_types(service.meta_store.clone(), service.flight_client.as_ref(), None).await?;
     Ok(HttpResponse::Accepted().finish())
 }
 
@@ -296,14 +348,13 @@ pub async fn check_existent_connection(
     let connection_id = id.into_inner();
     let tenant_id = ctx.tenant_id.clone();
 
-    audit_data_connection(
-        tenant_id.as_str(),
-        connection_id.as_str(),
-        service.meta_store.clone(),
-        service.secret_store.clone(),
-        &service.flight_client,
-    )
-    .await?;
+    let audit_ctx = AuditContext {
+        meta_store: service.meta_store.clone(),
+        secret_store: service.secret_store.clone(),
+        flight_client: service.flight_client.as_ref(),
+        token: ctx.authorization.as_deref(),
+    };
+    audit_data_connection(tenant_id.as_str(), connection_id.as_str(), &audit_ctx).await?;
 
     info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
@@ -318,7 +369,7 @@ pub async fn test_credentials(
 
     service
         .flight_client
-        .test_credentials(&ctx.tenant_id, &body)
+        .test_credentials(&ctx.tenant_id, &body, ctx.authorization.as_deref())
         .await
         .map_err(|e| ValidationError::ConnectionCheckFailed(e.message().to_string()))?;
 
@@ -383,22 +434,26 @@ pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
 
 #[cfg(test)]
 mod tests {
+    use crate::clients::flight::{BinaryStream, FlightDataClient, SupportedConnector};
     use actix_web::{App, middleware, test, web};
+    use arrow::array::BinaryArray;
+    use arrow::record_batch::RecordBatch;
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
     use commons::api::connections::CredentialsRef;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
+    use commons::api::creds::TestCredentials;
     use commons::api::errors::SecretStoreError;
     use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
     use commons::api::storage::SecretStore;
     use std::collections::HashMap;
-    use std::sync::RwLock;
+    use std::sync::{Mutex, RwLock};
 
     use super::*;
     use crate::rest::API_VERSION;
-    use crate::rest::errors::json_config;
+    use crate::rest::errors::{json_config, query_config};
     use crate::rest::middleware::validate_headers;
 
     fn api_path(path: &str) -> String {
@@ -749,11 +804,77 @@ mod tests {
         }
     }
 
+    struct StubFlightClient {
+        download_result: Mutex<Option<Result<Vec<RecordBatch>, tonic::Status>>>,
+    }
+
+    impl StubFlightClient {
+        fn unused() -> Self {
+            Self {
+                download_result: Mutex::new(None),
+            }
+        }
+
+        fn succeeding(batches: Vec<RecordBatch>) -> Self {
+            Self {
+                download_result: Mutex::new(Some(Ok(batches))),
+            }
+        }
+
+        fn failing(status: tonic::Status) -> Self {
+            Self {
+                download_result: Mutex::new(Some(Err(status))),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl FlightDataClient for StubFlightClient {
+        async fn get_supported_connectors(&self, _: Option<&str>) -> Result<Vec<SupportedConnector>, tonic::Status> {
+            Ok(vec![])
+        }
+        async fn check_data_connection(&self, _: &str, _: &str, _: Option<&str>) -> Result<(), tonic::Status> {
+            Ok(())
+        }
+        async fn test_credentials(&self, _: &str, _: &TestCredentials, _: Option<&str>) -> Result<(), tonic::Status> {
+            Ok(())
+        }
+        async fn download_binary(
+            &self,
+            _: &str,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+        ) -> Result<BinaryStream, tonic::Status> {
+            let result = self
+                .download_result
+                .lock()
+                .unwrap()
+                .take()
+                .expect("download_binary called but no result configured");
+            match result {
+                Ok(batches) => {
+                    let stream = futures::stream::iter(batches.into_iter().map(Ok));
+                    Ok(Box::pin(stream))
+                },
+                Err(status) => Err(status),
+            }
+        }
+    }
+
+    fn make_binary_batch(data: &[u8]) -> RecordBatch {
+        RecordBatch::try_from_iter(vec![("data", Arc::new(BinaryArray::from(vec![data])) as _)]).unwrap()
+    }
+
     fn test_service() -> web::Data<ApiService> {
+        test_service_with_flight(Arc::new(StubFlightClient::unused()))
+    }
+
+    fn test_service_with_flight(flight_client: Arc<dyn FlightDataClient>) -> web::Data<ApiService> {
         web::Data::new(ApiService::new(
             Arc::new(StubMetaStore),
             Arc::new(StubSecretStore::new()),
-            FlightClient::new("http://localhost:50051".to_string()),
+            flight_client,
         ))
     }
 
@@ -771,7 +892,7 @@ mod tests {
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
                 .route("/connection-types/{id}", web::patch().to(patch_connection_type))
                 .route("/connection-types/{id}", web::delete().to(delete_connection_type))
-                .route("/ingestion/{id}", web::get().to(get_ingestion_data))
+                .route("/connections/{id}/binary", web::get().to(get_binary_data))
                 .route(
                     "/connections/{id}/exports/secrets/{secret_name}",
                     web::put().to(export_connection),
@@ -1159,18 +1280,142 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_get_ingestion_data_unimplemented() {
-        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+    async fn test_get_binary_data_missing_path() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
         let req = test::TestRequest::get()
-            .uri(&api_path("/ingestion/some-id"))
+            .uri(&api_path("/connections/conn-1/binary"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_query");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_happy_path() {
+        let batch = make_binary_batch(b"hello world");
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::succeeding(vec![batch])));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=models/model.bin"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        assert_eq!(resp.headers().get("content-type").unwrap(), "application/octet-stream");
+        assert_eq!(
+            resp.headers().get("content-disposition").unwrap(),
+            "attachment; filename=\"model.bin\""
+        );
+        let body = test::read_body(resp).await;
+        assert_eq!(body.as_ref(), b"hello world");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_multiple_batches() {
+        let batches = vec![make_binary_batch(b"chunk1"), make_binary_batch(b"chunk2")];
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::succeeding(batches)));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=data/file.bin"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body = test::read_body(resp).await;
+        assert_eq!(body.as_ref(), b"chunk1chunk2");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_not_found() {
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::not_found(
+            "file not found",
+        ))));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=missing/file.bin"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
+        assert_eq!(body["message"], "file not found");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_unsupported_connector() {
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::unimplemented(
+            "binary reads are not supported for this connector",
+        ))));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
             .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 501);
         let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unimplemented");
-        assert_eq!(body["message"], "Unimplemented");
+        assert_eq!(body["code"], "unsupported_operation");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_flight_unavailable() {
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::unavailable(
+            "flight service unavailable",
+        ))));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 503);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "connection");
     }
 
     #[actix_web::test]

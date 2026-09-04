@@ -1,0 +1,8 @@
+description: Operation not supported by this connector
+content:
+  application/json:
+    schema:
+      $ref: "../schemas/ErrorResponse.yaml"
+    example:
+      code: unsupported_operation
+      message: "this operation is not supported for this connector"

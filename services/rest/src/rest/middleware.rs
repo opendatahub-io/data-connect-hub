@@ -42,7 +42,16 @@ pub async fn validate_headers(
         },
     };
 
-    req.extensions_mut().insert(ApiContext { tenant_id });
+    let authorization = req
+        .headers()
+        .get(actix_web::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+
+    req.extensions_mut().insert(ApiContext {
+        tenant_id,
+        authorization,
+    });
 
     next.call(req).await.map(ServiceResponse::map_into_left_body)
 }

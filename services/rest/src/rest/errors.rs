@@ -22,8 +22,6 @@ pub enum EndpointError {
     HeaderNotFound(String),
     #[error("Invalid header value: {0}")]
     InvalidHeaderValue(String),
-    #[error("Unimplemented")]
-    Unimplemented,
 }
 
 #[allow(unused)]
@@ -132,6 +130,25 @@ impl From<SecretStoreError> for RestErrorResponse {
     }
 }
 
+impl From<tonic::Status> for RestErrorResponse {
+    fn from(status: tonic::Status) -> Self {
+        let (code, http_status) = match status.code() {
+            tonic::Code::InvalidArgument => ("invalid_request", 400),
+            tonic::Code::Unauthenticated => ("unauthenticated", 401),
+            tonic::Code::PermissionDenied => ("forbidden", 403),
+            tonic::Code::NotFound => ("not_found", 404),
+            tonic::Code::Unavailable => ("connection", 503),
+            tonic::Code::Unimplemented => ("unsupported_operation", 501),
+            _ => ("flight_service_error", 500),
+        };
+        RestErrorResponse {
+            code: code.to_string(),
+            message: status.message().to_string(),
+            status: http_status,
+        }
+    }
+}
+
 fn extraction_error(code: &str, err: actix_web::Error) -> actix_web::Error {
     RestErrorResponse {
         code: code.to_string(),
@@ -170,11 +187,6 @@ impl From<EndpointError> for RestErrorResponse {
                 code: "invalid_header_value".to_string(),
                 message: format!("Header '{}' has an invalid value", header),
                 status: 400,
-            },
-            EndpointError::Unimplemented => RestErrorResponse {
-                code: "unimplemented".to_string(),
-                message: "Unimplemented".to_string(),
-                status: 501,
             },
         }
     }

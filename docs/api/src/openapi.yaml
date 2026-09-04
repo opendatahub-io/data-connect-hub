@@ -178,6 +178,55 @@ paths:
         "422":
           $ref: "components/responses/UnprocessableEntity.yaml"
 
+  /connections/{id}/binary:
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    get:
+      operationId: downloadBinary
+      summary: Download binary data from a connection
+      description: >
+        Streams binary data (files, objects) from a data connection.
+        The file path is connector-specific: for S3 it is an object key
+        within the configured bucket, for URI connectors it is a relative
+        URL path joined to the base URI.
+        Only connectors that support binary reads (currently S3 and URI)
+        will return data; all others respond with 501.
+      tags: [connections]
+      parameters:
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: File path or object key to download
+          example: models/model.bin
+      responses:
+        "200":
+          description: Binary data stream
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+          headers:
+            Content-Disposition:
+              schema:
+                type: string
+              description: Suggests a filename for the download
+              example: 'attachment; filename="model.bin"'
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+        "501":
+          $ref: "components/responses/NotImplemented.yaml"
+        "503":
+          $ref: "components/responses/ServiceUnavailable.yaml"
+
   /test/credentials:
     post:
       operationId: testCredentials
