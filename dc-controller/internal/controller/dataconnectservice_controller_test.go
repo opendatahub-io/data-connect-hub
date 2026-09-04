@@ -489,6 +489,8 @@ var _ = Describe("DataConnectService Controller", func() {
 			r := reconciler()
 			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 			Expect(err).NotTo(HaveOccurred())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + "kube-rbac-proxy-auth-review"}, &rbacv1.ClusterRole{})).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + "kube-rbac-proxy-auth-review"}, &rbacv1.ClusterRoleBinding{})).To(Succeed())
 
 			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
@@ -498,6 +500,10 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			err = k8sClient.Get(ctx, crKey, cr)
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: np + "kube-rbac-proxy-auth-review"}, &rbacv1.ClusterRole{})
+			Expect(errors.IsNotFound(err)).To(BeTrue())
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: np + "kube-rbac-proxy-auth-review"}, &rbacv1.ClusterRoleBinding{})
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})

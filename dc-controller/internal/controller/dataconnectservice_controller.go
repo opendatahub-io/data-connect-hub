@@ -27,6 +27,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -182,6 +183,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			log.Info("running finalizer for DataConnectService")
 			r.clearSyncedAnnotations(ctx)
 			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
+			r.deleteClusterScopedResources(ctx, cr.UID)
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
 		}
@@ -521,6 +523,38 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 				delete(s.Annotations, annotationDCHSynced)
 				if err := r.Patch(ctx, s, patch); err != nil {
 					log.Error(err, "failed to clear synced annotation", "secret", s.Name, "namespace", s.Namespace)
+				}
+			}
+		}
+	}
+}
+
+func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.Context, ownerUID types.UID) {
+	log := logf.FromContext(ctx)
+
+	var clusterRoles rbacv1.ClusterRoleList
+	if err := r.List(ctx, &clusterRoles, client.MatchingLabels{"dataconnecthub.opendatahub.io/managed-by": "dataconnectservice"}); err != nil {
+		log.Error(err, "Failed to list DCH ClusterRoles for cleanup")
+	} else {
+		for i := range clusterRoles.Items {
+			role := &clusterRoles.Items[i]
+			if isOwnedBy(role, ownerUID) {
+				if err := r.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "Failed to delete DCH ClusterRole", "name", role.Name)
+				}
+			}
+		}
+	}
+
+	var clusterRoleBindings rbacv1.ClusterRoleBindingList
+	if err := r.List(ctx, &clusterRoleBindings, client.MatchingLabels{"dataconnecthub.opendatahub.io/managed-by": "dataconnectservice"}); err != nil {
+		log.Error(err, "Failed to list DCH ClusterRoleBindings for cleanup")
+	} else {
+		for i := range clusterRoleBindings.Items {
+			binding := &clusterRoleBindings.Items[i]
+			if isOwnedBy(binding, ownerUID) {
+				if err := r.Delete(ctx, binding); err != nil && !apierrors.IsNotFound(err) {
+					log.Error(err, "Failed to delete DCH ClusterRoleBinding", "name", binding.Name)
 				}
 			}
 		}
