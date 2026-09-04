@@ -14,7 +14,7 @@ End-to-end tests for Data Connect Hub, driven by the Python SDK against a live d
 cd /path/to/data-connect-hub
 
 # 1. Find the gateway host. REST and Flight are served on the same
-#    host:port, so one value covers both (see docs/user-guide/deploy.md).
+#    host:port, so one value covers both.
 DCH_NS=dch   # namespace where DCH services run
 oc get route -n openshift-ingress data-science-gateway -o jsonpath='{.spec.host}'   # RHOAI
 # oc get route -n opendatahub odh-gateway -o jsonpath='{.spec.host}'                # ODH

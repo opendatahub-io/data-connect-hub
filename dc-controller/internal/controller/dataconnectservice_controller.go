@@ -586,7 +586,7 @@ func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Conte
 	message := "gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables " +
 		"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster " +
 		http2EnableAnnotation + "=true --overwrite. The Route also needs its own dedicated TLS certificate " +
-		"instead of the shared default one for ALPN to negotiate -- see docs/user-guide/deploy.md."
+		"instead of the shared default one for ALPN to negotiate."
 	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled", message)
 	r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", message)
 	r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "GatewayHTTP2Disabled", message)

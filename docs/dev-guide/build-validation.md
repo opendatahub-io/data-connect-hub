@@ -117,6 +117,3 @@ Note: if a Deployment's image tag didn't change (e.g. still `:latest`), a
 plain `oc apply -k` won't restart already-running Pods — follow with
 `oc rollout restart deployment/<name> -n <your-namespace>` to force a fresh
 pull and pick up the new build.
-
-See also: [`docs/user-guide/deploy.md`](../user-guide/deploy.md) for the
-full deploy flow this feeds into.
