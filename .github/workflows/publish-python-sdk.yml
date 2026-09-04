@@ -36,7 +36,7 @@ jobs:
         run: |
           # setuptools-scm derives the version from the tag, so a mismatch means
           # the tag is not a clean PEP 440 release tag (extra commits, wrong prefix).
-          version="${GITHUB_REF_NAME#v}"
+          version="$(python -c 'from packaging.version import Version; import sys; print(Version(sys.argv[1]))' "${GITHUB_REF_NAME#v}")"
           wheel="sdk/python/dist/data_connect_hub-${version}-py3-none-any.whl"
           test -f "$wheel" || {
             echo "Release tag $GITHUB_REF_NAME did not produce $wheel"

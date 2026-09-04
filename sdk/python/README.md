@@ -14,14 +14,16 @@ pip install sdk/python
 pip install "sdk/python[flight]"
 ```
 
-TestPyPI builds are PEP 440 development releases, so `--pre` is required and the
-dependencies must still be resolved from PyPI:
+TestPyPI builds are PEP 440 development releases, so `--pre` is required. Install
+the SDK without dependencies from TestPyPI, then install its dependencies from
+PyPI only:
 
 ```bash
-pip install --pre \
+pip install --pre --no-deps \
   --index-url https://test.pypi.org/simple/ \
-  --extra-index-url https://pypi.org/simple/ \
   data-connect-hub
+pip install --index-url https://pypi.org/simple/ \
+  "httpx>=0.27,<1" "pydantic>=2,<3"
 ```
 
 Installing from a GitHub source archive (`.../archive/main.tar.gz`) fails: archives
@@ -255,11 +257,11 @@ Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol e
 
 The package version is derived from Git history by `setuptools-scm` — there is no
 version file to bump. Building therefore requires a full clone with tags; a shallow
-clone or a tree without `.git` produces the wrong version or falls back to `0.0.0`.
+clone or a tree without usable package metadata fails to build.
 
 **TestPyPI (pre-release).** Run the *Publish Python SDK to TestPyPI* workflow manually
 from the Actions tab. The version is a development release derived from the distance
-since the last tag, for example `0.1.dev281` before the first tag exists and
+since the last tag, for example `0.1.devN` before the first tag exists and
 `0.1.1.dev12` after `v0.1.0`. Re-dispatching on an already-published commit produces
 the same version and fails on the duplicate upload; land a commit first.
 
