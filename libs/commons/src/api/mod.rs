@@ -9,6 +9,7 @@ pub mod storage;
 pub const X_DATA_CONNECTION_ID: &str = "x-data-connection-id";
 pub const X_TENANT_ID: &str = "x-tenant-id";
 pub const X_REMOTE_USER: &str = "x-remote-user";
+pub const AUTHORIZATION: &str = "authorization";
 pub const X_REMOTE_GROUPS: &str = "x-remote-groups";
 
 use serde::{Deserialize, Serialize};
