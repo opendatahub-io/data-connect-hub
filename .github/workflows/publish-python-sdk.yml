@@ -15,6 +15,9 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
+          # setuptools-scm derives the version from tags, so the full history
+          # and all tags must be present.
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Python
@@ -22,20 +25,25 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Verify release version
-        run: |
-          version="$(python -c "import re; from pathlib import Path; match = re.search(r'^__version__ = \"([^\"]+)\"$', Path('sdk/python/src/data_connect_hub/_version.py').read_text(), re.MULTILINE); print(match.group(1))")"
-          test "$GITHUB_REF_NAME" = "v$version" || {
-            echo "Release tag $GITHUB_REF_NAME does not match SDK version $version"
-            exit 1
-          }
-
       - name: Build and validate distribution
         run: |
           python -m venv .sdk-release-venv
           source .sdk-release-venv/bin/activate
           python -m pip install --upgrade build twine
           make sdk-package-check
+
+      - name: Verify release version
+        run: |
+          # setuptools-scm derives the version from the tag, so a mismatch means
+          # the tag is not a clean PEP 440 release tag (extra commits, wrong prefix).
+          version="$(python -c 'from packaging.version import Version; import sys; print(Version(sys.argv[1]))' "${GITHUB_REF_NAME#v}")"
+          wheel="sdk/python/dist/data_connect_hub-${version}-py3-none-any.whl"
+          test -f "$wheel" || {
+            echo "Release tag $GITHUB_REF_NAME did not produce $wheel"
+            echo "Built artifacts:"
+            ls -1 sdk/python/dist
+            exit 1
+          }
 
       - name: Create GitHub Release
         env:

@@ -4,7 +4,7 @@ Python client library for the [Data Connect Hub](https://github.com/opendatahub-
 
 ## Installation
 
-> **Note:** This package is not yet published to PyPI. Install from source for now.
+> **Note:** This package is not yet published to PyPI. Install from source, or from TestPyPI for a pre-release build.
 
 ```bash
 # REST only (default)
@@ -12,6 +12,27 @@ pip install sdk/python
 
 # REST + Flight SQL
 pip install "sdk/python[flight]"
+```
+
+TestPyPI builds are PEP 440 development releases, so `--pre` is required. Install
+the SDK without dependencies from TestPyPI, then install its dependencies from
+PyPI only:
+
+```bash
+pip install --pre --no-deps \
+  --index-url https://test.pypi.org/simple/ \
+  data-connect-hub
+pip install --index-url https://pypi.org/simple/ \
+  "httpx>=0.27,<1" "pydantic>=2,<3"
+```
+
+Installing from a GitHub source archive (`.../archive/main.tar.gz`) fails: archives
+carry no `.git` directory, so `setuptools-scm` cannot derive a version. This is
+deliberate — a silent fallback version would sort unpredictably against published
+releases. Install from Git instead:
+
+```bash
+pip install "git+https://github.com/opendatahub-io/data-connect-hub.git#subdirectory=sdk/python"
 ```
 
 ## Quick Start
@@ -234,7 +255,21 @@ Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol e
 
 ## Releases
 
-The package version is maintained in `src/data_connect_hub/_version.py`. Before creating a release tag, set it to the matching PEP 440 version, run `make sdk-install`, and then run `make sdk-package-check`. The release tag must be `v` followed by that same version, for example `v0.1.0`.
+The package version is derived from Git history by `setuptools-scm` — there is no
+version file to bump. Building therefore requires a full clone with tags; a shallow
+clone or a tree without usable package metadata fails to build.
+
+**TestPyPI (pre-release).** Run the *Publish Python SDK to TestPyPI* workflow manually
+from the Actions tab. The version is a development release derived from the distance
+since the last tag, for example `0.1.devN` before the first tag exists and
+`0.1.1.dev12` after `v0.1.0`. Re-dispatching on an already-published commit produces
+the same version and fails on the duplicate upload; land a commit first.
+
+**PyPI (tagged release).** Push a tag of `v` followed by the PEP 440 version, for
+example `v0.1.0`; the tag is what defines the published version. The *Release Python SDK*
+workflow builds the distribution, verifies it matches the tag, and creates the GitHub Release.
+
+Locally, `make sdk-package-check` builds and validates the distribution the same way CI does.
 
 ## Contributing
 
