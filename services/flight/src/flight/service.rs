@@ -505,6 +505,7 @@ impl FlightSqlService for DataIngestionService {
         query: CommandGetSqlInfo,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_GET_FLIGHT_INFO, OPERATION_SQL_INFO);
         let started = Instant::now();
         let result = self.handle_get_flight_info_sql_info(query, request);
         let status = match &result {
@@ -520,6 +521,7 @@ impl FlightSqlService for DataIngestionService {
         query: CommandGetSqlInfo,
         _request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_SQL_INFO);
         let started = Instant::now();
         let result = self.handle_do_get_sql_info(query);
         let status = match &result {
@@ -535,6 +537,7 @@ impl FlightSqlService for DataIngestionService {
         query: CommandGetTables,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_GET_FLIGHT_INFO, OPERATION_TABLES);
         let started = Instant::now();
         let result = self.handle_get_flight_info_tables(query, request).await;
         let status = match &result {
@@ -550,6 +553,7 @@ impl FlightSqlService for DataIngestionService {
         query: CommandGetTables,
         request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_TABLES);
         let started = Instant::now();
         let result = self.handle_do_get_tables(query, request).await;
         let status = match &result {
@@ -565,6 +569,7 @@ impl FlightSqlService for DataIngestionService {
         query: CommandStatementQuery,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_GET_FLIGHT_INFO, OPERATION_STATEMENT);
         let started = Instant::now();
         let result = self.handle_get_flight_info_statement(query, request).await;
         let status = match &result {
@@ -580,6 +585,7 @@ impl FlightSqlService for DataIngestionService {
         ticket: TicketStatementQuery,
         request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_STATEMENT);
         let started = Instant::now();
         let result = self.handle_do_get_statement(ticket, request).await;
         let status = match &result {
@@ -596,6 +602,7 @@ impl FlightSqlService for DataIngestionService {
         cmd: Command,
         request: Request<FlightDescriptor>,
     ) -> Result<Response<FlightInfo>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_GET_FLIGHT_INFO, OPERATION_BINARY);
         let started = Instant::now();
         let result = self.handle_get_flight_info_fallback(cmd, request).await;
         let status = match &result {
@@ -612,6 +619,7 @@ impl FlightSqlService for DataIngestionService {
         request: Request<Ticket>,
         message: arrow_flight::sql::Any,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
+        let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_BINARY);
         let started = Instant::now();
         let result = self.handle_do_get_fallback(request, message).await;
         let status = match &result {

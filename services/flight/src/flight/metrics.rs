@@ -1,13 +1,14 @@
 use actix_web::{App, HttpResponse, HttpServer, http::header, web};
-use metrics::{Unit, counter, describe_counter, describe_histogram, histogram};
+use metrics::{Unit, counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use std::net::SocketAddr;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tracing::{error, info};
 
-const FLIGHT_RPC_REQUESTS_TOTAL: &str = "dch_flight_rpc_requests_total";
-const FLIGHT_RPC_DURATION_SECONDS: &str = "dch_flight_rpc_duration_seconds";
+const FLIGHT_REQUESTS_TOTAL: &str = "dch_flight_requests_total";
+const FLIGHT_REQUEST_DURATION_SECONDS: &str = "dch_flight_request_duration_seconds";
+const FLIGHT_REQUESTS_ACTIVE: &str = "dch_flight_requests_active";
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 static METRICS_DESCRIBED: OnceLock<()> = OnceLock::new();
@@ -25,14 +26,19 @@ pub fn install_prometheus_recorder() -> anyhow::Result<()> {
     let _ = PROMETHEUS_HANDLE.set(handle);
     METRICS_DESCRIBED.get_or_init(|| {
         describe_counter!(
-            FLIGHT_RPC_REQUESTS_TOTAL,
+            FLIGHT_REQUESTS_TOTAL,
             Unit::Count,
-            "Total number of Flight RPC requests by method/operation/status"
+            "Total number of Flight requests by method/operation/status"
         );
         describe_histogram!(
-            FLIGHT_RPC_DURATION_SECONDS,
+            FLIGHT_REQUEST_DURATION_SECONDS,
             Unit::Seconds,
-            "Flight RPC handler duration in seconds by method/operation/status. For streaming RPCs, this measures setup time before stream consumption."
+            "Flight request handler duration in seconds by method/operation/status. For streaming RPCs, this measures setup time before stream consumption."
+        );
+        describe_gauge!(
+            FLIGHT_REQUESTS_ACTIVE,
+            Unit::Count,
+            "Number of Flight requests currently being processed by method/operation"
         );
     });
     Ok(())
@@ -45,7 +51,7 @@ pub fn observe_rpc(method: &'static str, operation: &'static str, status: &'stat
     }
 
     counter!(
-        FLIGHT_RPC_REQUESTS_TOTAL,
+        FLIGHT_REQUESTS_TOTAL,
         "method" => method,
         "operation" => operation,
         "status" => status
@@ -53,12 +59,34 @@ pub fn observe_rpc(method: &'static str, operation: &'static str, status: &'stat
     .increment(1);
 
     histogram!(
-        FLIGHT_RPC_DURATION_SECONDS,
+        FLIGHT_REQUEST_DURATION_SECONDS,
         "method" => method,
         "operation" => operation,
         "status" => status
     )
     .record(duration.as_secs_f64());
+}
+
+pub struct InFlightGuard {
+    method: &'static str,
+    operation: &'static str,
+}
+
+impl InFlightGuard {
+    pub fn new(method: &'static str, operation: &'static str) -> Self {
+        if PROMETHEUS_HANDLE.get().is_some() {
+            gauge!(FLIGHT_REQUESTS_ACTIVE, "method" => method, "operation" => operation).increment(1.0);
+        }
+        Self { method, operation }
+    }
+}
+
+impl Drop for InFlightGuard {
+    fn drop(&mut self) {
+        if PROMETHEUS_HANDLE.get().is_some() {
+            gauge!(FLIGHT_REQUESTS_ACTIVE, "method" => self.method, "operation" => self.operation).decrement(1.0);
+        }
+    }
 }
 
 fn render_prometheus() -> Option<String> {

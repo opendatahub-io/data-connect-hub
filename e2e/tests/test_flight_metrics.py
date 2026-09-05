@@ -47,11 +47,11 @@ def _metric_value(body: str, name: str, labels: dict[str, str]) -> float | None:
 
 class TestFlightMetrics:
     def test_requests_total_exists(self, metrics_body: str) -> None:
-        assert "dch_flight_rpc_requests_total" in metrics_body
+        assert "dch_flight_requests_total" in metrics_body
 
     def test_duration_metric_exists(self, metrics_body: str) -> None:
         assert any(
-            line.startswith("dch_flight_rpc_duration_seconds")
+            line.startswith("dch_flight_request_duration_seconds")
             for line in metrics_body.splitlines()
             if not line.startswith("#")
         )
@@ -59,7 +59,15 @@ class TestFlightMetrics:
     def test_get_flight_info_sql_info_ok(self, metrics_body: str) -> None:
         val = _metric_value(
             metrics_body,
-            "dch_flight_rpc_requests_total",
+            "dch_flight_requests_total",
             {"method": "arrow.flight.protocol.FlightService/GetFlightInfo", "operation": "sql_info", "status": "OK"},
         )
         assert val is not None and val > 0, f"GetFlightInfo/sql_info OK count should be > 0, got {val}"
+
+    def test_active_requests_metric_present(self, metrics_body: str) -> None:
+        # The in-flight gauge is only emitted as a sample while > 0, so check the
+        # metric family is registered via its TYPE line.
+        assert any(
+            line.startswith("# TYPE dch_flight_requests_active gauge")
+            for line in metrics_body.splitlines()
+        )
