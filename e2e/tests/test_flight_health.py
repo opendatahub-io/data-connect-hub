@@ -40,8 +40,11 @@ def _authority_from_server_cert(cert_pem: str) -> str | None:
         Path(cert_path).unlink(missing_ok=True)
 
     for entry_type, entry_value in decoded.get("subjectAltName", []):
-        if entry_type == "DNS":
+        if entry_type == "DNS" and not entry_value.startswith("*"):
             return entry_value
+    for entry_type, entry_value in decoded.get("subjectAltName", []):
+        if entry_type == "DNS" and entry_value.startswith("*."):
+            return "x-grpc-health" + entry_value[1:]
     return None
 
 
@@ -53,7 +56,6 @@ def _build_channel(gateway_endpoint: str, insecure: bool, ca_cert: str | None) -
     if ca_cert:
         root_certs = Path(ca_cert).read_bytes()
     elif insecure:
-        # Trust the presented cert directly for self-signed local setups.
         cert_pem = ssl.get_server_certificate((host, port))
         root_certs = cert_pem.encode("utf-8")
 
@@ -75,20 +77,12 @@ def _build_channel(gateway_endpoint: str, insecure: bool, ca_cert: str | None) -
 
 
 class TestFlightHealth:
-    def test_health_check_serving(
-        self,
-        gateway_endpoint: str,
-        insecure: bool,
-        ca_cert: str | None,
-        gateway_auth_required: bool,
-        auth_token: str,
-    ) -> None:
+    def test_health_check_serving(self, gateway_endpoint: str, insecure: bool, ca_cert: str | None) -> None:
         channel = _build_channel(gateway_endpoint, insecure, ca_cert)
         stub = health_pb2_grpc.HealthStub(channel)
-        metadata = (("authorization", f"Bearer {auth_token}"),) if gateway_auth_required else None
 
         try:
-            response = stub.Check(health_pb2.HealthCheckRequest(service=""), metadata=metadata, timeout=10)
+            response = stub.Check(health_pb2.HealthCheckRequest(service=""), timeout=10)
         except grpc.RpcError as exc:
             if exc.code() == grpc.StatusCode.UNIMPLEMENTED:
                 pytest.fail(

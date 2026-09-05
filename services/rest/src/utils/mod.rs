@@ -13,11 +13,16 @@ pub struct Server {
 pub struct FlightService {
     pub address: String,
     pub port: u16,
+    #[serde(rename = "ca-cert")]
+    pub ca_cert: Option<String>,
+    #[serde(rename = "sa-token-file")]
+    pub sa_token_file: Option<String>,
 }
 
 impl FlightService {
     pub fn endpoint(&self) -> String {
-        format!("http://{}:{}", self.address, self.port)
+        let scheme = if self.ca_cert.is_some() { "https" } else { "http" };
+        format!("{scheme}://{}:{}", self.address, self.port)
     }
 }
 
@@ -69,6 +74,8 @@ mod tests {
         assert_eq!(server_config.server.port, 8080);
         assert_eq!(server_config.flight_service.address, "127.0.0.1");
         assert_eq!(server_config.flight_service.port, 50051);
+        assert!(server_config.flight_service.ca_cert.is_none());
+        assert_eq!(server_config.flight_service.endpoint(), "http://127.0.0.1:50051");
     }
 
     #[test]

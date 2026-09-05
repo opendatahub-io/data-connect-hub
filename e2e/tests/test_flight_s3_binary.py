@@ -99,7 +99,7 @@ class TestFlightS3Binary:
             cmd.value = b"nonexistent/path/file.bin"
             descriptor = flight.FlightDescriptor.for_command(cmd.SerializeToString())
 
-            with pytest.raises(flight.FlightError):
+            with pytest.raises(pa.lib.ArrowKeyError):
                 client.get_flight_info(descriptor, opts)
         finally:
             client.close()

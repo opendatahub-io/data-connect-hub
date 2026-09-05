@@ -357,7 +357,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources)
+	setConfigMapFlightServiceAddress(resources, cr.Namespace)
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
 	if len(audiences) > 0 {

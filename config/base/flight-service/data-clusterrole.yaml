@@ -4,7 +4,7 @@ metadata:
   name: read
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types"]
+    resources: ["data-connections", "data-connection-types", "data-store"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -13,7 +13,7 @@ metadata:
   name: read-write
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types"]
+    resources: ["data-connections", "data-connection-types", "data-store"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -22,5 +22,5 @@ metadata:
   name: admin
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types"]
+    resources: ["data-connections", "data-connection-types", "data-store"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]

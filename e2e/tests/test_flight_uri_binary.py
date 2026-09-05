@@ -9,6 +9,7 @@ Skips automatically if URI is not configured.
 
 from __future__ import annotations
 
+import pyarrow as pa
 import pyarrow.flight as flight
 import pytest
 from google.protobuf.any_pb2 import Any as PbAny
@@ -65,7 +66,7 @@ class TestFlightUriBinary:
             cmd.value = b"nonexistent/path.bin"
             descriptor = flight.FlightDescriptor.for_command(cmd.SerializeToString())
 
-            with pytest.raises(flight.FlightError):
+            with pytest.raises(pa.lib.ArrowKeyError):
                 client.get_flight_info(descriptor, opts)
         finally:
             client.close()

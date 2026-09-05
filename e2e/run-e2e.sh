@@ -49,6 +49,7 @@ set +a
 : "${DCH_TENANT_ID:?DCH_TENANT_ID is required (set it in $CONFIG_FILE)}"
 : "${DCH_NO_ACCESS_NAMESPACE:?DCH_NO_ACCESS_NAMESPACE is required (set it in $CONFIG_FILE)}"
 : "${DCH_FLIGHT_SA:?DCH_FLIGHT_SA is required (set it in $CONFIG_FILE)}"
+: "${DCH_REST_SA:?DCH_REST_SA is required (set it in $CONFIG_FILE)}"
 DCH_TOKEN_AUDIENCE="${DCH_TOKEN_AUDIENCE:-}"
 : "${DCH_INSECURE:?DCH_INSECURE is required (set it in $CONFIG_FILE)}"
 : "${DCH_POSTGRES_IMAGE:?DCH_POSTGRES_IMAGE is required (set it in $CONFIG_FILE)}"
@@ -291,6 +292,12 @@ setup_flight_secret_rbac() {
         -n "$DCH_TENANT_ID" \
         --role=e2e-flight-secret-read \
         --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+    kubectl create rolebinding e2e-rest-secret-read-rb \
+        -n "$DCH_TENANT_ID" \
+        --role=e2e-flight-secret-read \
+        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 

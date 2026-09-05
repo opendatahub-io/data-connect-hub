@@ -5,7 +5,9 @@ resources:
   - deployment.yaml
   - service.yaml
   - configmap.yaml
+  - flight-ca-configmap.yaml
   - kube-rbac-proxy-configmap.yaml
   - kube-rbac-proxy-auth-review-rbac.yaml
+  - data-access-rbac.yaml
   - service_account.yaml
   - networkpolicy.yaml

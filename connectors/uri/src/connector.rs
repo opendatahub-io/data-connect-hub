@@ -268,6 +268,9 @@ impl DataReader for UriReader {
             .map_err(|e| ConnectorError::ConnectionError(format!("HTTP HEAD failed: {e}")))?;
 
         let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(ConnectorError::NotFound(format!("'{}' not found", query.path)));
+        }
         if !status.is_success() {
             return Err(ConnectorError::IOError(format!(
                 "Cannot read '{}': HTTP {status}",
@@ -290,6 +293,9 @@ impl DataReader for UriReader {
             .map_err(|e| ConnectorError::ConnectionError(format!("HTTP request failed: {e}")))?;
 
         let status = response.status();
+        if status == reqwest::StatusCode::NOT_FOUND {
+            return Err(ConnectorError::NotFound(format!("'{}' not found", query.path)));
+        }
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
             return Err(ConnectorError::ConnectionError(format!(

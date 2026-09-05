@@ -75,9 +75,21 @@ fn build_operator(
     }
 
     let op = Operator::new(builder)
-        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to create S3 operator: {e}")))?
+        .map_err(|e| {
+            tracing::error!(error = %e, "failed to create S3 operator");
+            ConnectorError::ConnectionError("failed to create S3 operator".to_string())
+        })?
         .layer(TimeoutLayer::new().with_timeout(connection_timeout));
     Ok(op)
+}
+
+fn map_opendal_error(e: opendal::Error, context: &str, path: &str) -> ConnectorError {
+    tracing::error!(path, error = %e, "{context}");
+    match e.kind() {
+        opendal::ErrorKind::NotFound => ConnectorError::NotFound(format!("'{path}' not found")),
+        opendal::ErrorKind::PermissionDenied => ConnectorError::ConnectionError(format!("access denied for '{path}'")),
+        _ => ConnectorError::IOError(format!("{context} '{path}'")),
+    }
 }
 
 const PROVIDER: &str = "s3";
@@ -135,7 +147,7 @@ impl S3Reader {
             .reader_with(path)
             .chunk(self.config.chunk_size)
             .await
-            .map_err(|e| ConnectorError::IOError(format!("Failed to create S3 reader for '{path}': {e}")))?;
+            .map_err(|e| map_opendal_error(e, "Failed to create S3 reader for", path))?;
         Ok(reader)
     }
 }
@@ -183,7 +195,7 @@ impl DataReader for S3Reader {
         self.operator
             .stat(&query.path)
             .await
-            .map_err(|e| ConnectorError::IOError(format!("Cannot read '{}': {e}", query.path)))?;
+            .map_err(|e| map_opendal_error(e, "Cannot read", &query.path))?;
         Ok(())
     }
 
@@ -194,13 +206,13 @@ impl DataReader for S3Reader {
         let mut buf_stream = reader
             .into_stream(..)
             .await
-            .map_err(|e| ConnectorError::IOError(format!("Failed to open stream for '{}': {e}", query.path)))?;
+            .map_err(|e| map_opendal_error(e, "Failed to open stream for", &query.path))?;
 
         let stream = async_stream::try_stream! {
             while let Some(buf) = buf_stream
                 .try_next()
                 .await
-                .map_err(|e| ConnectorError::IOError(format!("Stream read error: {e}")))?
+                .map_err(|e| map_opendal_error(e, "Stream read error for", &query.path))?
             {
                 let chunk = buf.to_bytes();
                 let array = BinaryArray::from_vec(vec![&chunk]);
@@ -214,10 +226,10 @@ impl DataReader for S3Reader {
     }
 
     async fn check_connection(&self) -> Result<(), ConnectorError> {
-        self.operator
-            .check()
-            .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("S3 connection check failed: {e}")))
+        self.operator.check().await.map_err(|e| {
+            tracing::error!(error = %e, "S3 connection check failed");
+            ConnectorError::ConnectionError("S3 connection check failed".to_string())
+        })
     }
 
     async fn list_tables(
@@ -225,12 +237,10 @@ impl DataReader for S3Reader {
         table_name_filter: Option<&str>,
         include_schema: bool,
     ) -> Result<Vec<TableInfo>, ConnectorError> {
-        let entries = self
-            .operator
-            .list_with("")
-            .recursive(true)
-            .await
-            .map_err(|e| ConnectorError::IOError(format!("Failed to list S3 objects: {e}")))?;
+        let entries = self.operator.list_with("").recursive(true).await.map_err(|e| {
+            tracing::error!(error = %e, "failed to list S3 objects");
+            ConnectorError::IOError("failed to list S3 objects".to_string())
+        })?;
 
         let paths: Vec<String> = entries
             .into_iter()
