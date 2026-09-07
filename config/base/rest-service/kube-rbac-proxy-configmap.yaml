@@ -9,6 +9,30 @@ data:
   config-file.yaml: |
     authorization:
       endpoints:
+        - path: /api/v1alpha1/data/connections/*/binary
+          mappings:
+            - methods: [get]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-store
+                    verb: get
+        - path: /api/v1alpha1/data/connections/*/exports/secrets/*
+          mappings:
+            - methods: [put]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: ""
+                    resource: secrets
+                    verb: create
         - path: /api/v1alpha1/data/connections/*/readiness
           mappings:
             - methods: [post]

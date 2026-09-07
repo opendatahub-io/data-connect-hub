@@ -60,7 +60,7 @@ rules:
   resources: [subjectaccessreviews]
   verbs: [create]
 - apiGroups: [dataconnecthub.opendatahub.io]
-  resources: [data-connections, data-connection-types]
+  resources: [data-connections, data-connection-types, data-store]
   verbs: [create, delete, get, list, patch, post, put, update, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

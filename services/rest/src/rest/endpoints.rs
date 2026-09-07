@@ -31,7 +31,6 @@ use crate::rest::DataConnectionWithCreds;
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
-    pub authorization: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -222,7 +221,6 @@ pub async fn create_connection_type(
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
-        ctx.authorization.as_deref(),
     )
     .await?;
 
@@ -255,7 +253,6 @@ pub async fn patch_connection_type(
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
-        ctx.authorization.as_deref(),
     )
     .await?;
 
@@ -303,7 +300,7 @@ pub async fn get_binary_data(
 
     let batch_stream = service
         .flight_client
-        .download_binary(&ctx.tenant_id, &id, &query.path, ctx.authorization.as_deref())
+        .download_binary(&ctx.tenant_id, &id, &query.path)
         .await?;
 
     let body_stream = batch_stream.map(|result| match result {
@@ -334,7 +331,7 @@ pub async fn get_binary_data(
 
 pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
     info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), service.flight_client.as_ref(), None).await?;
+    audit_data_connection_types(service.meta_store.clone(), service.flight_client.as_ref()).await?;
     Ok(HttpResponse::Accepted().finish())
 }
 
@@ -352,7 +349,6 @@ pub async fn check_existent_connection(
         meta_store: service.meta_store.clone(),
         secret_store: service.secret_store.clone(),
         flight_client: service.flight_client.as_ref(),
-        token: ctx.authorization.as_deref(),
     };
     audit_data_connection(tenant_id.as_str(), connection_id.as_str(), &audit_ctx).await?;
 
@@ -369,7 +365,7 @@ pub async fn test_credentials(
 
     service
         .flight_client
-        .test_credentials(&ctx.tenant_id, &body, ctx.authorization.as_deref())
+        .test_credentials(&ctx.tenant_id, &body)
         .await
         .map_err(|e| ValidationError::ConnectionCheckFailed(e.message().to_string()))?;
 
@@ -830,22 +826,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl FlightDataClient for StubFlightClient {
-        async fn get_supported_connectors(&self, _: Option<&str>) -> Result<Vec<SupportedConnector>, tonic::Status> {
+        async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
             Ok(vec![])
         }
-        async fn check_data_connection(&self, _: &str, _: &str, _: Option<&str>) -> Result<(), tonic::Status> {
+        async fn check_data_connection(&self, _: &str, _: &str) -> Result<(), tonic::Status> {
             Ok(())
         }
-        async fn test_credentials(&self, _: &str, _: &TestCredentials, _: Option<&str>) -> Result<(), tonic::Status> {
+        async fn test_credentials(&self, _: &str, _: &TestCredentials) -> Result<(), tonic::Status> {
             Ok(())
         }
-        async fn download_binary(
-            &self,
-            _: &str,
-            _: &str,
-            _: &str,
-            _: Option<&str>,
-        ) -> Result<BinaryStream, tonic::Status> {
+        async fn download_binary(&self, _: &str, _: &str, _: &str) -> Result<BinaryStream, tonic::Status> {
             let result = self
                 .download_result
                 .lock()

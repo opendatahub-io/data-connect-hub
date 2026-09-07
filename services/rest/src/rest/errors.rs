@@ -74,6 +74,7 @@ impl From<ConnectorError> for RestErrorResponse {
             ConnectorError::ConnectionError(_) => ("connection", 503),
             ConnectorError::SQLError(_) => ("sql_error", 400),
             ConnectorError::IOError(_) => ("io_error", 500),
+            ConnectorError::NotFound(_) => ("not_found", 404),
             ConnectorError::UnsupportedOperation(_) => ("unsupported_operation", 501),
         };
         let message = match &err {

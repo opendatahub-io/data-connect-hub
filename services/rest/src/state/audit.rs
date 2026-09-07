@@ -21,7 +21,6 @@ pub struct AuditContext<'a> {
     pub meta_store: Arc<dyn MetaStore + Send + Sync>,
     pub secret_store: Arc<dyn SecretStore + Send + Sync>,
     pub flight_client: &'a dyn FlightDataClient,
-    pub token: Option<&'a str>,
 }
 
 async fn set_data_connection_status(
@@ -99,10 +98,7 @@ pub async fn audit_data_connection(
     }
 
     let connection_id = data_connection.metadata.id.clone();
-    let result = ctx
-        .flight_client
-        .check_data_connection(tenant_id, &connection_id, ctx.token)
-        .await;
+    let result = ctx.flight_client.check_data_connection(tenant_id, &connection_id).await;
 
     match result {
         Ok(_) => {
@@ -134,9 +130,8 @@ pub async fn audit_data_connection(
 pub async fn audit_data_connection_types(
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     flight_client: &dyn FlightDataClient,
-    token: Option<&str>,
 ) -> Result<(), ValidationError> {
-    let supported = flight_client.get_supported_connectors(token).await.map_err(|e| {
+    let supported = flight_client.get_supported_connectors().await.map_err(|e| {
         tracing::error!(error = %e, "failed to get supported connectors from flight service");
         ValidationError::FlightServiceError(e.to_string())
     })?;
@@ -186,9 +181,8 @@ pub(crate) async fn audit_connection_type(
     flight_client: &dyn FlightDataClient,
     meta_store: &Arc<dyn MetaStore + Send + Sync>,
     connection_type: DataConnectionTypeResource,
-    token: Option<&str>,
 ) -> Result<(), ValidationError> {
-    let connectors = flight_client.get_supported_connectors(token).await;
+    let connectors = flight_client.get_supported_connectors().await;
 
     if let Ok(connectors) = connectors {
         let names: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
@@ -427,7 +421,7 @@ mod tests {
     use crate::clients::flight::FlightClient;
 
     fn flight_client() -> FlightClient {
-        FlightClient::new("http://127.0.0.1:1".to_string())
+        FlightClient::new("http://127.0.0.1:1".to_string(), None, None)
     }
 
     fn audit_ctx(
@@ -439,7 +433,6 @@ mod tests {
             meta_store: meta,
             secret_store: secrets,
             flight_client: fc,
-            token: None,
         }
     }
 
