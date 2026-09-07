@@ -50,9 +50,11 @@ case "$MC_IMAGE" in
     *) echo "error: MinIO client image must be digest-pinned (e.g. -i minio/mc@sha256:<digest>): '$MC_IMAGE'" >&2; exit 1 ;;
 esac
 command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
-command -v python3 >/dev/null || { echo "error: python3 not found (needed for parquet generation)" >&2; exit 1; }
 
-PARQUET_B64=$(python3 -c "
+PYTHON="${PYTHON:-python3}"
+"$PYTHON" -c "import pyarrow" 2>/dev/null || { echo "error: pyarrow not found; set PYTHON to a venv python that has pyarrow" >&2; exit 1; }
+
+PARQUET_B64=$("$PYTHON" -c "
 import base64, io
 import pyarrow as pa, pyarrow.parquet as pq
 table = pa.table({

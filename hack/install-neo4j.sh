@@ -138,8 +138,12 @@ else
         --set neo4j.password="$PASSWORD" \
         --set neo4j.edition=community \
         --set volumes.data.mode=defaultStorageClass \
-        --set neo4j.resources.requests.memory=2Gi \
-        --set neo4j.resources.requests.cpu=500m \
+        --set neo4j.resources.cpu=500m \
+        --set neo4j.resources.memory=2Gi \
+        --set "config.server\.memory\.heap\.initial_size=256m" \
+        --set "config.server\.memory\.heap\.max_size=256m" \
+        --set "config.server\.memory\.pagecache\.size=64m" \
+        --set services.neo4j.enabled=false \
         $SECURITY_OPTS \
         $SSL_OPTS \
         --wait --timeout="$TIMEOUT" || {

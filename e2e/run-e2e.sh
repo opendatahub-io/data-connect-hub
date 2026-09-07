@@ -52,7 +52,7 @@ set +a
 : "${DCH_REST_SA:?DCH_REST_SA is required (set it in $CONFIG_FILE)}"
 DCH_TOKEN_AUDIENCE="${DCH_TOKEN_AUDIENCE:-}"
 : "${DCH_INSECURE:?DCH_INSECURE is required (set it in $CONFIG_FILE)}"
-: "${DCH_POSTGRES_IMAGE:?DCH_POSTGRES_IMAGE is required (set it in $CONFIG_FILE)}"
+DCH_POSTGRES_IMAGE="${DCH_POSTGRES_IMAGE:-}"
 DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 
 DCH_TENANT_PG_URL="${DCH_TENANT_PG_URL:-}"
@@ -324,7 +324,7 @@ seed_s3_data() {
         echo "ERROR: set DCH_MINIO_MC_IMAGE to a digest-pinned image (e.g. minio/mc@sha256:<digest>) in $CONFIG_FILE" >&2
         exit 1
     }
-    bash "$(dirname "$0")/scripts/seed-s3-data.sh" \
+    PYTHON="$VENV_PYTHON" bash "$(dirname "$0")/scripts/seed-s3-data.sh" \
         -e "$AWS_S3_ENDPOINT" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET" \
         -A "$AWS_ACCESS_KEY_ID" -S "$AWS_SECRET_ACCESS_KEY" \
         -i "$mc_image"
