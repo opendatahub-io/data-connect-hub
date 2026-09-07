@@ -1,5 +1,4 @@
 use anyhow::Result;
-use arrow_flight::flight_service_server::FlightServiceServer;
 use clap::Parser;
 #[cfg(feature = "elasticsearch")]
 use elasticsearch_connector::ElasticsearchConnector;
