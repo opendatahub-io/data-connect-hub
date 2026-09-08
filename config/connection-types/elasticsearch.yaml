@@ -2,9 +2,9 @@ name: ElasticSearch
 provider: elasticsearch
 description: Elasticsearch search and analytics engine
 credentials_fields:
-  - name: ES_HOST
-    label: Host
-    description: Elasticsearch server URL
+  - name: ES_URI
+    label: URI
+    description: Elasticsearch server URI
     required: true
     type: string
   - name: ES_USERNAME

@@ -172,7 +172,7 @@ fetch_es_ca_cert() {
 setup_es_secret() {
     E2E_ES_ENABLED="false"
     if [[ -n "$DCH_TENANT_ES_URI" ]]; then
-        local -a args=(--from-literal="ES_HOST=${DCH_TENANT_ES_URI}")
+        local -a args=(--from-literal="ES_URI=${DCH_TENANT_ES_URI}")
         [[ -n "$DCH_TENANT_ES_USERNAME" ]] && args+=(--from-literal="ES_USERNAME=${DCH_TENANT_ES_USERNAME}")
         [[ -n "$DCH_TENANT_ES_PASSWORD" ]] && args+=(--from-literal="ES_PASSWORD=${DCH_TENANT_ES_PASSWORD}")
 
@@ -212,7 +212,7 @@ setup_es_apikey_secret() {
     encoded_api_key=$(echo "$api_key_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['encoded'])" 2>/dev/null) || return 0
 
     local -a args=(
-        --from-literal="ES_HOST=${DCH_TENANT_ES_URI}"
+        --from-literal="ES_URI=${DCH_TENANT_ES_URI}"
         --from-literal="ES_API_KEY=${encoded_api_key}"
     )
     local ca_cert="$DCH_TENANT_ES_CA_CERT"

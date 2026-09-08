@@ -18,7 +18,7 @@ use moka::future::Cache;
 use crate::query::EsRequestInput;
 use crate::types;
 
-const KEY_HOST: &str = "ES_HOST";
+const KEY_URI: &str = "ES_URI";
 const KEY_USERNAME: &str = "ES_USERNAME";
 const KEY_PASSWORD: &str = "ES_PASSWORD";
 const KEY_API_KEY: &str = "ES_API_KEY";
@@ -92,8 +92,8 @@ fn build_client(
     connection_timeout: Duration,
 ) -> Result<EsClient, ConnectorError> {
     let base_url = credentials
-        .get(KEY_HOST)
-        .ok_or_else(|| ConnectorError::ConnectionError("Elasticsearch 'ES_HOST' is required".to_string()))?
+        .get(KEY_URI)
+        .ok_or_else(|| ConnectorError::ConnectionError("Elasticsearch 'ES_URI' is required".to_string()))?
         .clone();
 
     let mut builder = reqwest::Client::builder()
