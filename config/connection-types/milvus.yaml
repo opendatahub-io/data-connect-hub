@@ -2,17 +2,11 @@ name: Milvus
 provider: milvus
 description: Milvus vector database
 credentials_fields:
-  - name: MILVUS_HOST
-    label: Host
-    description: Milvus server hostname or IP address
+  - name: MILVUS_URI
+    label: URI
+    description: Milvus server URI
     required: true
     type: string
-  - name: MILVUS_PORT
-    label: Port
-    description: Milvus server port
-    required: false
-    type: string
-    default_value: "19530"
   - name: MILVUS_TOKEN
     label: Token
     description: Milvus authentication token
@@ -24,3 +18,8 @@ credentials_fields:
     required: false
     type: string
     default_value: default
+  - name: MILVUS_CA_CERT
+    label: CA Certificate
+    description: CA certificate for TLS verification
+    required: false
+    type: string

@@ -20,11 +20,9 @@ use moka::future::Cache;
 
 use crate::query::{MilvusOperation, MilvusRequestInput};
 
-const KEY_HOST: &str = "MILVUS_HOST";
-const KEY_PORT: &str = "MILVUS_PORT";
+const KEY_URI: &str = "MILVUS_URI";
 const KEY_TOKEN: &str = "MILVUS_TOKEN";
 const KEY_DATABASE: &str = "MILVUS_DATABASE";
-const DEFAULT_PORT: &str = "19530";
 
 pub struct MilvusConnector {
     clients: Cache<String, ClientV2>,
@@ -44,14 +42,11 @@ impl MilvusConnector {
     }
 
     fn make_config(&self, credentials: &HashMap<String, String>) -> Result<ConnectConfig, ConnectorError> {
-        let host = credentials
-            .get(KEY_HOST)
-            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_HOST is required".to_string()))?
+        let uri = credentials
+            .get(KEY_URI)
+            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_URI is required".to_string()))?
             .clone();
 
-        let port = credentials.get(KEY_PORT).map(|s| s.as_str()).unwrap_or(DEFAULT_PORT);
-
-        let uri = format!("http://{host}:{port}");
         let token = credentials.get(KEY_TOKEN).cloned();
         let database = credentials.get(KEY_DATABASE).cloned();
 
