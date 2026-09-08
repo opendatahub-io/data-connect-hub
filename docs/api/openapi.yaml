@@ -1,7 +1,43 @@
 openapi: 3.0.3
 info:
   title: Data Connect Hub REST API
-  description: REST API for managing data connections and connection types.
+  description: |
+    REST API for managing data connections and connection types.
+
+    ## Authentication
+
+    All endpoints except `/health` require a bearer token and a tenant header.
+
+    ### 1. Obtain a token
+
+    For your own user:
+
+    ```console
+    export user_token=$(oc whoami -t)
+    ```
+
+    For a ServiceAccount, bind the audience the service expects:
+
+    ```console
+    export user_token=$(oc create token <sa-name> -n <namespace> \
+      --audience="$(oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}')" \
+      --duration=1h)
+    ```
+
+    The token audience must match the `DataConnectService` CR's configured
+    `spec.tokenReviewAudiences`; a mismatch returns `401 unauthenticated`.
+    The list is empty by default, in which case the cluster API server's
+    own audience applies.
+
+    ### 2. Send the request
+
+    ```console
+    export TENANT_NAMESPACE=dch-example
+
+    curl -H "Authorization: Bearer $user_token" \
+         -H "x-tenant-id: $TENANT_NAMESPACE" \
+         https://dch-rest-dch-services.apps.example.com/api/v1alpha1/data/connections
+    ```
   version: 0.1.0
   license:
     name: Apache-2.0
@@ -9,6 +45,7 @@ servers:
   - url: /api/v1alpha1/data
 security:
   - tenantHeader: []
+    bearerAuth: []
 tags:
   - name: connections
     description: Data connection management
@@ -345,6 +382,12 @@ components:
       in: header
       name: x-tenant-id
       description: Tenant identifier. Required on all endpoints except /health.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        OpenShift or Kubernetes bearer token. See [Authentication](#section/Authentication) for how to obtain one.
   parameters:
     resourceId:
       name: id
