@@ -318,7 +318,8 @@
                 "schema": {
                   "type": "string",
                   "format": "binary"
-                }
+                },
+                "example": "UEsDBBQAAAAIAmuAAY4AAAACAAADAAAAYPIakvJrKrp5sQ0AiUtzUEgU0zE10y8uzStOASUmqTcEKkxUAAAsAQAA"
               }
             },
             "headers": {
