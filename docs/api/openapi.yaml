@@ -23,6 +23,7 @@ paths:
     get:
       operationId: health
       summary: Health check
+      description: Note this endpoint is directly under the root path, i.e. `/health`, not under `/api/`.
       security: []
       responses:
         '200':
@@ -360,6 +361,7 @@ components:
       properties:
         service:
           type: string
+          description: If the endpoint is called, the string 'Data Connect Hub' is returned.
           example: Data Connect Hub
     ResourceMetadata:
       type: object
