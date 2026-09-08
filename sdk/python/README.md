@@ -4,15 +4,16 @@ Python client library for the [Data Connect Hub](https://github.com/opendatahub-
 
 ## Installation
 
-> **Note:** This package is not yet published to PyPI. Install from source, or from TestPyPI for a pre-release build.
-
 ```bash
 # REST only (default)
-pip install sdk/python
+pip install data-connect-hub
 
 # REST + Flight SQL
-pip install "sdk/python[flight]"
+pip install "data-connect-hub[flight]"
 ```
+
+To install from a source checkout, use `pip install sdk/python` or
+`pip install "sdk/python[flight]"`.
 
 TestPyPI builds are PEP 440 development releases, so `--pre` is required. Install
 the SDK without dependencies from TestPyPI, then install its dependencies from
@@ -268,9 +269,7 @@ the same version and fails on the duplicate upload; land a commit first.
 **PyPI (tagged release).** Push an SDK-specific tag of `sdk-v` followed by the PEP 440
 version, for example `sdk-v0.1.0`; the tag is what defines the published version. The
 *Release Python SDK* workflow builds and validates the distribution, publishes it to PyPI
-using trusted publishing, then creates the GitHub Release. Before the first release, configure
-the PyPI project's trusted publisher for the `opendatahub-io/data-connect-hub` repository,
-the `publish-python-sdk.yml` workflow, and the `pypi` environment.
+using trusted publishing, then creates the GitHub Release.
 
 Locally, `make sdk-package-check` builds and validates the distribution the same way CI does.
 

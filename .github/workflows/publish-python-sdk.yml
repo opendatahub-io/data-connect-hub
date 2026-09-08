@@ -36,14 +36,14 @@ jobs:
         run: |
           python -m venv .sdk-release-venv
           source .sdk-release-venv/bin/activate
-          python -m pip install --upgrade build twine
+          python -m pip install --upgrade build twine packaging
           make sdk-package-check
 
       - name: Verify release version
         run: |
           # setuptools-scm derives the version from the tag, so a mismatch means
           # the tag is not a clean PEP 440 release tag (extra commits, wrong prefix).
-          version="$(python -c 'from packaging.version import Version; import sys; print(Version(sys.argv[1]))' "${GITHUB_REF_NAME#sdk-v}")"
+          version="$(.sdk-release-venv/bin/python -c 'from packaging.version import Version; import sys; print(Version(sys.argv[1]))' "${GITHUB_REF_NAME#sdk-v}")"
           wheel="sdk/python/dist/data_connect_hub-${version}-py3-none-any.whl"
           test -f "$wheel" || {
             echo "Release tag $GITHUB_REF_NAME did not produce $wheel"
