@@ -443,6 +443,7 @@ mod tests {
     use commons::api::errors::SecretStoreError;
     use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
+    use commons::api::storage::MetaStoreReader;
     use commons::api::storage::SecretStore;
     use std::collections::HashMap;
     use std::sync::{Mutex, RwLock};
@@ -459,7 +460,7 @@ mod tests {
     struct StubMetaStore;
 
     #[async_trait::async_trait]
-    impl MetaStore for StubMetaStore {
+    impl MetaStoreReader for StubMetaStore {
         async fn get_data_connections(
             &self,
             _t: &str,
@@ -504,6 +505,47 @@ mod tests {
             }
         }
 
+        async fn get_data_connection_types(
+            &self,
+            _t: &str,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
+            Ok(ResourceList {
+                total_count: 0,
+                items: vec![],
+            })
+        }
+
+        async fn get_data_connection_type(
+            &self,
+            tenant_id: &str,
+            uid: &str,
+        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
+            if tenant_id == "test-tenant" && uid == "ct-1" {
+                Ok(DataConnectionTypeResource {
+                    metadata: commons::api::ResourceMetadata {
+                        id: "ct-1".to_string(),
+                        tenant_id: Some("test-tenant".to_string()),
+                        created_at: "2026-01-01T00:00:00Z".to_string(),
+                        updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    },
+                    resource: DataConnectionType {
+                        name: "PostgreSQL".to_string(),
+                        provider: "postgres".to_string(),
+                        description: Some("PostgreSQL database connection".to_string()),
+                        credentials_fields: vec![],
+                    },
+                    status: Default::default(),
+                })
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "Data connection type '{uid}' not found"
+                )))
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MetaStore for StubMetaStore {
         async fn create_data_connection(
             &self,
             tenant_id: &str,
@@ -594,48 +636,10 @@ mod tests {
             unimplemented!()
         }
 
-        async fn get_data_connection_types(
-            &self,
-            _t: &str,
-        ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
-            Ok(ResourceList {
-                total_count: 0,
-                items: vec![],
-            })
-        }
-
         async fn get_all_data_connection_types(
             &self,
         ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
             unimplemented!()
-        }
-
-        async fn get_data_connection_type(
-            &self,
-            tenant_id: &str,
-            uid: &str,
-        ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
-            if tenant_id == "test-tenant" && uid == "ct-1" {
-                Ok(DataConnectionTypeResource {
-                    metadata: commons::api::ResourceMetadata {
-                        id: "ct-1".to_string(),
-                        tenant_id: Some("test-tenant".to_string()),
-                        created_at: "2026-01-01T00:00:00Z".to_string(),
-                        updated_at: "2026-01-01T00:00:00Z".to_string(),
-                    },
-                    resource: DataConnectionType {
-                        name: "PostgreSQL".to_string(),
-                        provider: "postgres".to_string(),
-                        description: Some("PostgreSQL database connection".to_string()),
-                        credentials_fields: vec![],
-                    },
-                    status: Default::default(),
-                })
-            } else {
-                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
-                    "Data connection type '{uid}' not found"
-                )))
-            }
         }
 
         async fn create_data_connection_type(

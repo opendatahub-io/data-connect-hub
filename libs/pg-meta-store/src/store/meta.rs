@@ -3,7 +3,7 @@ use commons::api::ResourceMetadata;
 use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus};
 use commons::api::connections::{DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus};
 use commons::api::errors::MetaStoreError;
-use commons::api::storage::MetaStore;
+use commons::api::storage::{MetaStore, MetaStoreReader};
 use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
@@ -136,7 +136,7 @@ fn deserialize_connection_type(value: serde_json::Value, global_tenant_id: &str)
 }
 
 #[async_trait::async_trait]
-impl MetaStore for PgMetaStore {
+impl MetaStoreReader for PgMetaStore {
     async fn get_data_connections(
         &self,
         tenant_id: &str,
@@ -194,6 +194,76 @@ impl MetaStore for PgMetaStore {
         })
     }
 
+    async fn get_data_connection_types(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = $2")
+            .bind(tenant_id)
+            .bind(&self.global_tenant_id)
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("failed to list connection types: {e}");
+                MetaStoreError::Query("failed to list connection types".to_string())
+            })?;
+
+        let items: Vec<DataConnectionTypeResource> = rows
+            .iter()
+            .filter_map(|row| {
+                let value: serde_json::Value = match row.try_get("data") {
+                    Ok(value) => value,
+                    Err(e) => {
+                        error!("failed to read connection type column: {e}");
+                        return None;
+                    },
+                };
+                deserialize_connection_type(value, &self.global_tenant_id)
+            })
+            .collect();
+
+        Ok(ResourceList {
+            total_count: items.len(),
+            items,
+        })
+    }
+
+    async fn get_data_connection_type(
+        &self,
+        tenant_id: &str,
+        id: &str,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3)")
+            .bind(id)
+            .bind(tenant_id)
+            .bind(&self.global_tenant_id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("connection type '{id}' not found"))
+                },
+                e => {
+                    error!("failed to get connection type '{id}': {e}");
+                    MetaStoreError::Query("failed to retrieve connection type".to_string())
+                }
+            })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read connection type column: {e}");
+            MetaStoreError::Query("failed to read connection type".to_string())
+        })?;
+        serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize connection type: {e}");
+            MetaStoreError::Deserialization(
+                "failed to deserialize connection type; see service logs for details".to_string(),
+            )
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl MetaStore for PgMetaStore {
     async fn create_data_connection(
         &self,
         tenant_id: &str,
@@ -454,72 +524,6 @@ impl MetaStore for PgMetaStore {
         Ok(ResourceList {
             total_count: items.len(),
             items,
-        })
-    }
-    async fn get_data_connection_types(
-        &self,
-        tenant_id: &str,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = $2")
-            .bind(tenant_id)
-            .bind(&self.global_tenant_id)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| {
-                error!("failed to list connection types: {e}");
-                MetaStoreError::Query("failed to list connection types".to_string())
-            })?;
-
-        let items: Vec<DataConnectionTypeResource> = rows
-            .iter()
-            .filter_map(|row| {
-                let value: serde_json::Value = match row.try_get("data") {
-                    Ok(value) => value,
-                    Err(e) => {
-                        error!("failed to read connection type column: {e}");
-                        return None;
-                    },
-                };
-                deserialize_connection_type(value, &self.global_tenant_id)
-            })
-            .collect();
-
-        Ok(ResourceList {
-            total_count: items.len(),
-            items,
-        })
-    }
-
-    async fn get_data_connection_type(
-        &self,
-        tenant_id: &str,
-        id: &str,
-    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3)")
-            .bind(id)
-            .bind(tenant_id)
-            .bind(&self.global_tenant_id)
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => {
-                    MetaStoreError::ResourceNotFound(format!("connection type '{id}' not found"))
-                },
-                e => {
-                    error!("failed to get connection type '{id}': {e}");
-                    MetaStoreError::Query("failed to retrieve connection type".to_string())
-                }
-            })?;
-
-        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
-            error!("failed to read connection type column: {e}");
-            MetaStoreError::Query("failed to read connection type".to_string())
-        })?;
-        serde_json::from_value(json_value).map_err(|e| {
-            error!("failed to deserialize connection type: {e}");
-            MetaStoreError::Deserialization(
-                "failed to deserialize connection type; see service logs for details".to_string(),
-            )
         })
     }
 

@@ -14,7 +14,7 @@ use commons::api::connections::DataFormat;
 use commons::api::connections::{CredentialsRef, DataConnection};
 use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
-use commons::api::storage::MetaStore;
+use commons::api::storage::{MetaStore, MetaStoreReader};
 
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
@@ -30,7 +30,7 @@ use tonic::transport::{Channel, Server};
 struct TestMetaStore;
 
 #[async_trait::async_trait]
-impl MetaStore for TestMetaStore {
+impl MetaStoreReader for TestMetaStore {
     async fn get_data_connections(
         &self,
         _tenant_id: &str,
@@ -66,6 +66,47 @@ impl MetaStore for TestMetaStore {
             },
         })
     }
+
+    async fn get_data_connection_types(
+        &self,
+        _tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn get_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _id: &str,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        Ok(DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: "sqlite".to_string(),
+                tenant_id: Some("default".to_string()),
+                created_at: "2026-07-21T00:00:00Z".to_string(),
+                updated_at: "2026-07-21T00:00:00Z".to_string(),
+            },
+            resource: DataConnectionType {
+                name: "SQLite".to_string(),
+                provider: "sqlite".to_string(),
+                description: None,
+                credentials_fields: vec![Field {
+                    name: "URI".to_string(),
+                    label: "Uri".to_string(),
+                    d_type: "string".to_string(),
+                    description: Some("SQLite connection URL".to_string()),
+                    required: true,
+                    enum_values: None,
+                    default_value: None,
+                }],
+            },
+            status: Default::default(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl MetaStore for TestMetaStore {
     async fn create_data_connection(
         &self,
         _tenant_id: &str,
@@ -131,45 +172,8 @@ impl MetaStore for TestMetaStore {
         unimplemented!()
     }
 
-    async fn get_data_connection_types(
-        &self,
-        _tenant_id: &str,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-        unimplemented!()
-    }
-
     async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         unimplemented!()
-    }
-
-    async fn get_data_connection_type(
-        &self,
-        _tenant_id: &str,
-        _id: &str,
-    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        Ok(DataConnectionTypeResource {
-            metadata: ResourceMetadata {
-                id: "sqlite".to_string(),
-                tenant_id: Some("default".to_string()),
-                created_at: "2026-07-21T00:00:00Z".to_string(),
-                updated_at: "2026-07-21T00:00:00Z".to_string(),
-            },
-            resource: DataConnectionType {
-                name: "SQLite".to_string(),
-                provider: "sqlite".to_string(),
-                description: None,
-                credentials_fields: vec![Field {
-                    name: "URI".to_string(),
-                    label: "Uri".to_string(),
-                    d_type: "string".to_string(),
-                    description: Some("SQLite connection URL".to_string()),
-                    required: true,
-                    enum_values: None,
-                    default_value: None,
-                }],
-            },
-            status: Default::default(),
-        })
     }
 }
 

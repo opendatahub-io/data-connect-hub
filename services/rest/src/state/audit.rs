@@ -2,7 +2,7 @@ use commons::api::connection_types::DataConnectionTypeStatus;
 use commons::api::connections::CredentialsRef;
 
 use commons::api::connections::DataConnectionResource;
-use commons::api::storage::MetaStore;
+use commons::api::storage::{MetaStore, MetaStoreReader};
 
 use crate::clients::flight::FlightDataClient;
 use crate::rest::errors::ValidationError;
@@ -244,7 +244,7 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl MetaStore for MockMetaStore {
+    impl MetaStoreReader for MockMetaStore {
         async fn get_data_connections(&self, _: &str) -> Result<ResourceList<DataConnectionResource>, MetaStoreError> {
             unimplemented!()
         }
@@ -253,6 +253,25 @@ mod tests {
                 .clone()
                 .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
         }
+        async fn get_data_connection_types(
+            &self,
+            _: &str,
+        ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_data_connection_type(
+            &self,
+            _: &str,
+            _: &str,
+        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+            self.connection_type
+                .clone()
+                .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl MetaStore for MockMetaStore {
         async fn create_data_connection(
             &self,
             _: &str,
@@ -283,25 +302,10 @@ mod tests {
         async fn delete_data_connection(&self, _: &str, _: &str) -> Result<(), MetaStoreError> {
             unimplemented!()
         }
-        async fn get_data_connection_types(
-            &self,
-            _: &str,
-        ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-            unimplemented!()
-        }
         async fn get_all_data_connection_types(
             &self,
         ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
             unimplemented!()
-        }
-        async fn get_data_connection_type(
-            &self,
-            _: &str,
-            _: &str,
-        ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-            self.connection_type
-                .clone()
-                .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
         }
         async fn create_data_connection_type(
             &self,

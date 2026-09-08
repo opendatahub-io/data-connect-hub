@@ -8,9 +8,8 @@ use crate::api::connections::{DataConnection, DataConnectionResource};
 use crate::api::errors::{MetaStoreError, SecretStoreError};
 use crate::api::secret::Secret;
 
-/// Persistent store for data connection and data connection type metadata.
 #[async_trait::async_trait]
-pub trait MetaStore {
+pub trait MetaStoreReader {
     /// Retrieves all data connections for the given tenant.
     async fn get_data_connections(
         &self,
@@ -20,6 +19,23 @@ pub trait MetaStore {
     /// Retrieves a data connection by tenant and unique identifier.
     async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError>;
 
+    /// Retrieves a data connection type by tenant and unique identifier.
+    async fn get_data_connection_type(
+        &self,
+        tenant_id: &str,
+        id: &str,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
+
+    /// Retrieves all data connection types for the given tenant.
+    async fn get_data_connection_types(
+        &self,
+        tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
+}
+
+/// Persistent store for data connection and data connection type metadata.
+#[async_trait::async_trait]
+pub trait MetaStore: MetaStoreReader {
     /// Creates a new data connection for the given tenant.
     async fn create_data_connection(
         &self,
@@ -46,21 +62,8 @@ pub trait MetaStore {
     /// Deletes the data connection identified by `uid`.
     async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError>;
 
-    /// Retrieves all data connection types for the given tenant.
-    async fn get_data_connection_types(
-        &self,
-        tenant_id: &str,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
-
     /// Retrieves all data connection types. Used internally to audit data connection types.
     async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
-
-    /// Retrieves a data connection type by tenant and unique identifier.
-    async fn get_data_connection_type(
-        &self,
-        tenant_id: &str,
-        id: &str,
-    ) -> Result<DataConnectionTypeResource, MetaStoreError>;
 
     /// Creates a new data connection type for the given tenant.
     async fn create_data_connection_type(

@@ -10,7 +10,7 @@ use commons::api::connections::{CredentialsRef, DataConnection};
 use commons::api::connections::{DataConnectionResource, DataConnectionStatus, DataFormat};
 use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
-use commons::api::storage::MetaStore;
+use commons::api::storage::{MetaStore, MetaStoreReader};
 use commons::api::{ResourceList, ResourceMetadata, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::flight::service::DataIngestionService;
@@ -31,7 +31,7 @@ struct S3TestMetaStore {
 }
 
 #[async_trait::async_trait]
-impl MetaStore for S3TestMetaStore {
+impl MetaStoreReader for S3TestMetaStore {
     async fn get_data_connections(
         &self,
         _tenant_id: &str,
@@ -64,6 +64,38 @@ impl MetaStore for S3TestMetaStore {
         })
     }
 
+    async fn get_data_connection_types(
+        &self,
+        _tenant_id: &str,
+    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
+        unimplemented!()
+    }
+
+    async fn get_data_connection_type(
+        &self,
+        _tenant_id: &str,
+        _id: &str,
+    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
+        Ok(DataConnectionTypeResource {
+            metadata: ResourceMetadata {
+                id: "s3-type".to_string(),
+                tenant_id: Some("default".to_string()),
+                created_at: "2026-01-01T00:00:00Z".to_string(),
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+            },
+            resource: DataConnectionType {
+                name: "S3".to_string(),
+                provider: "s3".to_string(),
+                description: Some("S3-compatible object storage".to_string()),
+                credentials_fields: vec![],
+            },
+            status: Default::default(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl MetaStore for S3TestMetaStore {
     async fn create_data_connection(
         &self,
         _tenant_id: &str,
@@ -94,37 +126,8 @@ impl MetaStore for S3TestMetaStore {
         unimplemented!()
     }
 
-    async fn get_data_connection_types(
-        &self,
-        _tenant_id: &str,
-    ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-        unimplemented!()
-    }
-
     async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         unimplemented!()
-    }
-
-    async fn get_data_connection_type(
-        &self,
-        _tenant_id: &str,
-        _id: &str,
-    ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        Ok(DataConnectionTypeResource {
-            metadata: ResourceMetadata {
-                id: "s3-type".to_string(),
-                tenant_id: Some("default".to_string()),
-                created_at: "2026-01-01T00:00:00Z".to_string(),
-                updated_at: "2026-01-01T00:00:00Z".to_string(),
-            },
-            resource: DataConnectionType {
-                name: "S3".to_string(),
-                provider: "s3".to_string(),
-                description: Some("S3-compatible object storage".to_string()),
-                credentials_fields: vec![],
-            },
-            status: Default::default(),
-        })
     }
 
     async fn create_data_connection_type(

@@ -19,6 +19,7 @@ use commons::api::connections::{CredentialsRef, DataConnectionResource};
 use commons::api::connector::BinaryQuery;
 use commons::api::connector::{CredentialsResolver, FlightConnector, QueryOptions};
 use commons::api::errors::ConnectorError;
+use commons::api::storage::MetaStoreReader;
 use commons::api::storage::{MetaStore, SecretStore};
 use futures::TryStreamExt;
 use prost::Message;
@@ -63,7 +64,7 @@ fn grpc_status_label(status: &Status) -> &'static str {
 
 pub struct DataIngestionService {
     pub(crate) connectors_registry: Arc<ConnectorsRegistry>,
-    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    meta_store: Arc<dyn MetaStoreReader + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
