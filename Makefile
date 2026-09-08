@@ -9,6 +9,7 @@ endif
 IMAGE            ?= data-connection-hub
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 V                ?=
+API_DOCS_PORT    ?= 8000
 
 ifneq ($(V),)
   _NOCAPTURE := -- --nocapture
@@ -23,6 +24,7 @@ endif
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
 	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
+	generate-openapi-docs serve-api-docs \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -232,6 +234,13 @@ _generate-openapi-docs-container:
 			echo "7. Copying public HTML to index.html..." && cp docs/api/index-public.html docs/api/index.html \
 		'
 
+serve-api-docs:
+	@command -v python3 >/dev/null 2>&1 || { echo "python3 not found."; exit 1; }
+	@echo "Redoc (public):   http://localhost:$(API_DOCS_PORT)/index.html"
+	@echo "Redoc (internal): http://localhost:$(API_DOCS_PORT)/index-private.html"
+	@echo "Swagger UI:       http://localhost:$(API_DOCS_PORT)/swagger.html"
+	@python3 -m http.server $(API_DOCS_PORT) --directory docs/api
+
 # -------------------------------------------------------------------
 # Dev Setup
 # -------------------------------------------------------------------
@@ -296,3 +305,7 @@ help:
 	@echo "  sdk-build            build SDK wheel and source distribution"
 	@echo "  sdk-package-check    build and validate SDK distribution metadata"
 	@echo "  sdk-all              lint + typecheck + test + package check SDK"
+	@echo ""
+	@echo "API docs (API_DOCS_PORT=8000):"
+	@echo "  generate-openapi-docs  regenerate bundles and HTML from docs/api/src"
+	@echo "  serve-api-docs         serve docs/api over HTTP for local browsing"
