@@ -59,7 +59,7 @@ data_connect_hub = ["py.typed"]
 root = "../.."
 version_scheme = "guess-next-dev"
 local_scheme = "no-local-version"
-tag_regex = "^v(?P<version>.*)$"
+tag_regex = "^sdk-v(?P<version>.*)$"
 # No fallback_version on purpose. setuptools-scm also uses it as the
 # guess-next-dev base when the repo has no tags yet, so setting it would move
 # untagged builds below the 0.1.devN series already on TestPyPI. A tree with no
