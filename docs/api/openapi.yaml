@@ -23,7 +23,7 @@ paths:
     get:
       operationId: health
       summary: Health check
-      description: Note this endpoint is directly under the root path, i.e. `/health`, not under `/api/`.
+      description: Application readiness probe. Note this endpoint is directly under the root path, i.e. `/health`, not under `/api`.
       security: []
       responses:
         '200':
