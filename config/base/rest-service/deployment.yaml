@@ -71,7 +71,7 @@ spec:
             periodSeconds: 15
         - name: rest-service
           image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
