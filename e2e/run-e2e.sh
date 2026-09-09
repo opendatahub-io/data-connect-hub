@@ -103,6 +103,15 @@ setup_sa_rbac() {
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read-write \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+        kubectl create role e2e-export-secret-create \
+            -n "$DCH_TENANT_ID" \
+            --verb=create --resource=secrets \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl create rolebinding e2e-export-secret-create-rb \
+            -n "$DCH_TENANT_ID" \
+            --role=e2e-export-secret-create \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 }
 
