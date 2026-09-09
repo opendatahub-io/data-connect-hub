@@ -10,10 +10,13 @@ from data_connect_hub.models import (
     ConnectionType,
     CreateConnectionRequest,
     CredentialsRef,
+    CredentialTestRequest,
     DataConnection,
     DataConnectionStatus,
     EnumValue,
+    InlineCredentials,
     UpdateConnectionRequest,
+    UpdateConnectionTypeRequest,
 )
 
 from .conftest import (
@@ -152,6 +155,44 @@ class TestCreateConnectionRequest:
         assert dumped["properties"] == {}
         assert dumped["credentials_ref"] == {"secret": "secret/test"}
 
+    def test_dump_includes_inline_credentials(self) -> None:
+        req = CreateConnectionRequest(
+            name="conn",
+            data_connection_type_id="postgres",
+            format="tabular",
+            credentials=InlineCredentials(
+                secret="test",
+                properties={"username": "user", "password": "secret"},
+            ),
+        )
+        dumped = req.model_dump(exclude_none=True)
+        assert "credentials_ref" not in dumped
+        assert dumped["credentials"] == {
+            "secret": "test",
+            "properties": {"username": "user", "password": "secret"},
+        }
+
+    @pytest.mark.parametrize(
+        ("credentials_ref", "credentials"),
+        [
+            (None, None),
+            (CredentialsRef(secret="existing"), InlineCredentials(secret="new", properties={})),
+        ],
+    )
+    def test_requires_exactly_one_credentials_variant(
+        self,
+        credentials_ref: CredentialsRef | None,
+        credentials: InlineCredentials | None,
+    ) -> None:
+        with pytest.raises(ValueError, match="exactly one"):
+            CreateConnectionRequest(
+                name="conn",
+                data_connection_type_id="postgres",
+                format="tabular",
+                credentials_ref=credentials_ref,
+                credentials=credentials,
+            )
+
     def test_repr_masks_properties(self) -> None:
         req = CreateConnectionRequest(
             name="conn",
@@ -178,6 +219,30 @@ class TestUpdateConnectionRequest:
         text = repr(req)
         assert "db.internal" not in text
         assert "***" in text
+
+
+class TestAdditionalRequestModels:
+    def test_connection_type_update_preserves_explicit_null(self) -> None:
+        req = UpdateConnectionTypeRequest(description=None)
+        assert req.model_dump(exclude_unset=True) == {"description": None}
+
+    def test_credentials_repr_masks_secret_values(self) -> None:
+        req = CredentialTestRequest(
+            data_connection_type_id="postgres",
+            secret={"username": "sensitive-user", "password": "sensitive-password"},
+        )
+        text = repr(req)
+        assert "sensitive-user" not in text
+        assert "sensitive-password" not in text
+        assert "***" in text
+
+    def test_credentials_validation_error_hides_secret_values(self) -> None:
+        with pytest.raises(ValueError) as exc_info:
+            CredentialTestRequest(
+                data_connection_type_id="postgres",
+                secret={"password": object()},  # type: ignore[dict-item]
+            )
+        assert "object at" not in str(exc_info.value)
 
 
 class TestConnectionType:

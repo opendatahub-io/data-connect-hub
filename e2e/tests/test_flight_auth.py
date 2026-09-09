@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from data_connect_hub import DataConnectClient, DCHConnectionError
+from data_connect_hub import DataConnectClient, DCHConfigError, DCHConnectionError
 
 
 class TestFlightAuth:
@@ -20,7 +20,7 @@ class TestFlightAuth:
 
     def test_missing_tenant_id_is_rejected(self, gateway_endpoint: str, auth_token: str, insecure: bool) -> None:
         client = DataConnectClient(gateway_endpoint, token=auth_token, tenant_id="", insecure=insecure)
-        with pytest.raises(DCHConnectionError, match="(?i)unauthorized|permission.?denied"):
+        with pytest.raises(DCHConfigError, match="tenant_id must be provided"):
             client.server_info()
 
     def test_denied_user_is_rejected(

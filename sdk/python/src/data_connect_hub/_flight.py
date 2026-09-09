@@ -96,6 +96,8 @@ class FlightClient:
             self._static_headers = build_headers(token=token, tenant_id=tenant_id)
 
     def _headers(self) -> dict[str, str]:
+        if not self._tenant_id:
+            raise DCHConfigError("tenant_id must be provided for Flight operations")
         if self._token_cache:
             return build_headers(token=self._token_cache.get(), tenant_id=self._tenant_id)
         return dict(self._static_headers)

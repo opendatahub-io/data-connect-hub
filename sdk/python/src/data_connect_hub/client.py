@@ -6,6 +6,8 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
+from pydantic import ValidationError
+
 from ._rest import RestClient
 from .exceptions import DCHConfigError
 from .models import (
@@ -14,8 +16,10 @@ from .models import (
     CreateConnectionTypeRequest,
     CredentialField,
     CredentialsRef,
+    CredentialTestRequest,
     DataConnection,
     DataFormat,
+    InlineCredentials,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
@@ -27,6 +31,13 @@ if TYPE_CHECKING:
     import pyarrow as pa
 
     from ._flight import FlightClient
+
+
+class _UnsetType:
+    pass
+
+
+_UNSET = _UnsetType()
 
 
 def _build_urls(endpoint: str) -> tuple[str, str]:
@@ -203,16 +214,23 @@ class DataConnectClient:
         name: str,
         connection_type_id: str,
         data_format: DataFormat,
-        credentials_ref: CredentialsRef,
+        credentials_ref: CredentialsRef | None = None,
+        credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
     ) -> DataConnection:
-        req = CreateConnectionRequest(
-            name=name,
-            data_connection_type_id=connection_type_id,
-            format=data_format,
-            credentials_ref=credentials_ref,
-            properties=properties or {},
-        )
+        if (credentials_ref is None) == (credentials is None):
+            raise DCHConfigError("exactly one of credentials_ref or credentials must be provided")
+        try:
+            req = CreateConnectionRequest(
+                name=name,
+                data_connection_type_id=connection_type_id,
+                format=data_format,
+                credentials_ref=credentials_ref,
+                credentials=credentials,
+                properties=properties or {},
+            )
+        except ValidationError as exc:
+            raise DCHConfigError("invalid connection request") from exc
         return self._rest.create_connection(req)
 
     def update_connection(
@@ -238,6 +256,22 @@ class DataConnectClient:
 
     def delete_connection(self, connection_id: str) -> None:
         self._rest.delete_connection(connection_id)
+
+    def export_connection(self, connection_id: str, secret_name: str) -> None:
+        self._rest.export_connection(connection_id, secret_name)
+
+    def check_connection_readiness(self, connection_id: str) -> None:
+        self._rest.check_connection_readiness(connection_id)
+
+    def download_binary(self, connection_id: str, path: str) -> bytes:
+        return self._rest.download_binary(connection_id, path)
+
+    def test_credentials(self, connection_type_id: str, secret: dict[str, str]) -> None:
+        try:
+            request = CredentialTestRequest(data_connection_type_id=connection_type_id, secret=secret)
+        except ValidationError as exc:
+            raise DCHConfigError("invalid credential test request") from exc
+        self._rest.test_credentials(request)
 
     # -- Connection Types --
 
@@ -269,17 +303,23 @@ class DataConnectClient:
         *,
         name: str | None = None,
         provider: str | None = None,
-        description: str | None = None,
+        description: str | _UnsetType | None = _UNSET,
         credentials_fields: list[CredentialField] | None = None,
     ) -> ConnectionType:
-        if all(v is None for v in (name, provider, description, credentials_fields)):
+        """Update a connection type; pass ``description=None`` to clear it."""
+        if name is None and provider is None and description is _UNSET and credentials_fields is None:
             raise DCHConfigError("at least one field must be provided for update")
-        req = UpdateConnectionTypeRequest(
-            name=name,
-            provider=provider,
-            description=description,
-            credentials_fields=credentials_fields,
-        )
+
+        updates: dict[str, object] = {}
+        if name is not None:
+            updates["name"] = name
+        if provider is not None:
+            updates["provider"] = provider
+        if description is not _UNSET:
+            updates["description"] = description
+        if credentials_fields is not None:
+            updates["credentials_fields"] = credentials_fields
+        req = UpdateConnectionTypeRequest.model_validate(updates)
         return self._rest.update_connection_type(type_id, req)
 
     def delete_connection_type(self, type_id: str) -> None:

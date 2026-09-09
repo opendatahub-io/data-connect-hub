@@ -62,6 +62,63 @@ class TestConnectionsDelegation:
         client.delete_connection("123")
         client._rest.delete_connection.assert_called_once_with("123")
 
+    def test_additional_connection_operations(self) -> None:
+        client = DataConnectClient("localhost")
+        client._rest.export_connection = MagicMock(return_value=None)  # type: ignore[method-assign]
+        client._rest.check_connection_readiness = MagicMock(return_value=None)  # type: ignore[method-assign]
+        client._rest.download_binary = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+        client._rest.test_credentials = MagicMock(return_value=None)  # type: ignore[method-assign]
+
+        client.export_connection("123", "exported")
+        client.check_connection_readiness("123")
+        assert client.download_binary("123", "model.bin") == b"data"
+        client.test_credentials("postgres", {"username": "user"})
+
+        client._rest.export_connection.assert_called_once_with("123", "exported")
+        client._rest.check_connection_readiness.assert_called_once_with("123")
+        client._rest.download_binary.assert_called_once_with("123", "model.bin")
+        request = client._rest.test_credentials.call_args[0][0]
+        assert request.model_dump() == {
+            "data_connection_type_id": "postgres",
+            "secret": {"username": "user"},
+        }
+
+    def test_create_connection_with_inline_credentials(self) -> None:
+        from data_connect_hub.models import DataConnection, InlineCredentials
+
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
+        client = DataConnectClient("localhost")
+        client._rest.create_connection = MagicMock(return_value=conn)  # type: ignore[method-assign]
+
+        client.create_connection(
+            name="test-conn",
+            connection_type_id="postgres",
+            data_format="tabular",
+            credentials=InlineCredentials(secret="new-secret", properties={"username": "user"}),
+        )
+        request = client._rest.create_connection.call_args[0][0]
+        assert request.credentials is not None
+        assert request.credentials.secret == "new-secret"
+
+    def test_create_connection_rejects_ambiguous_credentials(self) -> None:
+        from data_connect_hub.models import CredentialsRef, InlineCredentials
+
+        client = DataConnectClient("localhost")
+        with pytest.raises(DCHConfigError, match="exactly one"):
+            client.create_connection(
+                name="test-conn",
+                connection_type_id="postgres",
+                data_format="tabular",
+            )
+        with pytest.raises(DCHConfigError, match="exactly one"):
+            client.create_connection(
+                name="test-conn",
+                connection_type_id="postgres",
+                data_format="tabular",
+                credentials_ref=CredentialsRef(secret="existing"),
+                credentials=InlineCredentials(secret="new", properties={}),
+            )
+
 
 class TestEmptyUpdateGuards:
     def test_update_connection_no_fields_raises(self) -> None:
@@ -86,6 +143,23 @@ class TestEmptyUpdateGuards:
         client.update_connection("123", credentials_ref=CredentialsRef(secret="secret/new"))
         req = client._rest.update_connection.call_args[0][1]
         assert req.credentials_ref == CredentialsRef(secret="secret/new")
+
+    def test_update_connection_type_description_to_null(self) -> None:
+        from data_connect_hub.models import ConnectionType
+
+        connection_type = ConnectionType(id="ct-1", name="postgres", provider="postgres")
+        client = DataConnectClient("localhost")
+        client._rest.update_connection_type = MagicMock(return_value=connection_type)  # type: ignore[method-assign]
+
+        client.update_connection_type("ct-1", description=None)
+        request = client._rest.update_connection_type.call_args[0][1]
+        assert request.model_dump(exclude_unset=True) == {"description": None}
+
+    def test_invalid_credential_test_request_is_sanitized(self) -> None:
+        client = DataConnectClient("localhost")
+        with pytest.raises(DCHConfigError, match="invalid credential test request") as exc_info:
+            client.test_credentials("postgres", {"password": object()})  # type: ignore[dict-item]
+        assert "object at" not in str(exc_info.value)
 
 
 class TestFlightDelegation:

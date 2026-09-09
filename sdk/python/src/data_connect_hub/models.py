@@ -24,7 +24,7 @@ DataConnectionState = Literal["ready", "ingestion_not_ready", "not_ready"]
 class _MaskProperties:
     def __repr_args__(self) -> Any:
         for name, value in super().__repr_args__():  # type: ignore[misc]
-            if name == "properties" and value:
+            if name in {"properties", "secret"} and isinstance(value, dict) and value:
                 yield name, {k: "***" for k in value}
             else:
                 yield name, value
@@ -32,6 +32,13 @@ class _MaskProperties:
 
 class CredentialsRef(BaseModel):
     secret: str
+
+
+class InlineCredentials(_MaskProperties, BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    secret: str
+    properties: dict[str, str]
 
 
 class DataConnectionStatus(BaseModel):
@@ -67,11 +74,20 @@ class DataConnection(_MaskProperties, BaseModel):
 
 
 class CreateConnectionRequest(_MaskProperties, BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
     name: str
     data_connection_type_id: str
     format: DataFormat
-    credentials_ref: CredentialsRef
+    credentials_ref: CredentialsRef | None = None
+    credentials: InlineCredentials | None = None
     properties: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_credentials(self) -> CreateConnectionRequest:
+        if (self.credentials_ref is None) == (self.credentials is None):
+            raise ValueError("exactly one of credentials_ref or credentials must be provided")
+        return self
 
 
 class UpdateConnectionRequest(_MaskProperties, BaseModel):
@@ -80,6 +96,13 @@ class UpdateConnectionRequest(_MaskProperties, BaseModel):
     format: DataFormat | None = None
     credentials_ref: CredentialsRef | None = None
     properties: dict[str, str] | None = None
+
+
+class CredentialTestRequest(_MaskProperties, BaseModel):
+    model_config = ConfigDict(hide_input_in_errors=True)
+
+    data_connection_type_id: str
+    secret: dict[str, str]
 
 
 class EnumValue(BaseModel):

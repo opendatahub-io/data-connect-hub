@@ -41,7 +41,7 @@ pip install "git+https://github.com/opendatahub-io/data-connect-hub.git#subdirec
 The client takes a single gateway `endpoint` — a host or `host:port`, no scheme required — and derives both the REST (`https://`) and Flight SQL (`grpc+tls://`) URLs from it. Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control certificate verification.
 
 ```python
-from data_connect_hub import CredentialsRef, DataConnectClient
+from data_connect_hub import CredentialsRef, DataConnectClient, InlineCredentials
 
 client = DataConnectClient(
     endpoint="dch.example.com:8443",
@@ -67,7 +67,7 @@ conn = client.create_connection(
     name="my-db",
     connection_type_id="dct-a1b2c3d4",
     data_format="tabular",  # DataFormat: "tabular" | "binary"
-    credentials_ref=CredentialsRef(secret="secret/my-db"),
+    credentials_ref=CredentialsRef(secret="my-db"),
 )
 
 # Query data via Flight SQL
@@ -90,6 +90,8 @@ client.create_connection_type(name=..., provider=..., description=..., credentia
 client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
 client.delete_connection_type(type_id) -> None
 ```
+
+Pass `description=None` to remove an existing description. Omitting `description` leaves it unchanged.
 
 #### `ConnectionType`
 
@@ -147,9 +149,13 @@ A connection pairs a connection type with the actual credentials (stored in a Ku
 ```python
 client.list_connections() -> list[DataConnection]
 client.get_connection(connection_id) -> DataConnection
-client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
-client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=... | credentials=..., properties=...) -> DataConnection
+client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
 client.delete_connection(connection_id) -> None
+client.check_connection_readiness(connection_id) -> None
+client.test_credentials(connection_type_id, secret) -> None
+client.export_connection(connection_id, secret_name) -> None
+client.download_binary(connection_id, path) -> bytes
 ```
 
 #### `DataConnection`
@@ -176,11 +182,15 @@ Pass `id` as the `connection_id` argument to `get_connection`, `update_connectio
 | `"tabular"` | Queried with SQL, returns rows | `postgres`, `sqlite`, `elasticsearch`, `milvus`, `neo4j`, `uri`, `s3` |
 | `"binary"` | Opaque objects addressed by path | `s3`, `uri` |
 
-Tabular connections are read with the [Flight SQL methods](#tabular-data-queries-flight-sql). Binary connections are managed through the same REST methods as tabular ones, but reading their contents uses a separate Flight download path that **this SDK does not wrap yet** — there is no `client.download(...)`. Until it is added, use `pyarrow.flight` directly; see [`hack/py-tools/samples/binary_download.py`](../../hack/py-tools/samples/binary_download.py).
+Tabular connections are read with the [Flight SQL methods](#tabular-data-queries-flight-sql). Read a binary connection with `client.download_binary(connection_id, path)`. The returned `bytes` are buffered in memory.
 
 You normally set `format` once, at `create_connection`, but it is not immutable: `update_connection(connection_id, data_format=...)` changes it, and the server accepts the new value without checking it against the provider or re-evaluating `status`. So switching a `postgres` connection to `binary` succeeds, leaves `status` reporting `ready`, and fails only when you try to read.
 
 `credentials_ref` is a reference to a Kubernetes secret containing the connection credentials. Use `CredentialsRef(secret="secret-name")` where `secret-name` is the **name** of an existing secret in the tenant namespace (the namespace named by the connection's `tenant_id` that you passed to `DataConnectClient`). This is a bare secret name, not a `namespace/name` pair; cross-namespace references are not supported. If the secret is missing or unreadable, `status.state` becomes `"not_ready"`. The secret's keys must cover every `CredentialField` on the connection type that has `required=True`.
+
+Alternatively, pass `credentials=InlineCredentials(secret="secret-name", properties={...})` when creating a connection. The service creates that Kubernetes secret and stores its reference. Exactly one of `credentials_ref` and `credentials` is required.
+
+Use `test_credentials` to validate credentials without storing them, `check_connection_readiness` to refresh a saved connection's status, and `export_connection` to copy its credentials and metadata into another Kubernetes secret.
 
 **`DataConnectionStatus`:**
 

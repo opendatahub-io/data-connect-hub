@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -69,6 +70,36 @@ def _set_mock_flight(mock_flight: MagicMock, connectors: list[str] | None = None
     mock_result.body.to_pybytes.return_value = sink.getvalue().to_pybytes()
     mock_client.do_action.return_value = [mock_result]
     return mock_client
+
+
+class TestTenantValidation:
+    @pytest.mark.parametrize(
+        "operation",
+        [
+            lambda c: c.read("SELECT 1", "conn-1"),
+            lambda c: list(c.read_batches("SELECT 1", "conn-1")),
+            lambda c: c.read_pandas("SELECT 1", "conn-1"),
+            lambda c: c.server_info(),
+            lambda c: c.get_tables("conn-1"),
+        ],
+        ids=["read", "read_batches", "read_pandas", "server_info", "get_tables"],
+    )
+    @patch("data_connect_hub._flight.flight")
+    @patch("data_connect_hub._flight.flight_dbapi")
+    def test_missing_tenant_rejected_before_flight_request(
+        self,
+        mock_dbapi: MagicMock,
+        mock_flight: MagicMock,
+        operation: Callable[[FlightClient], Any],
+    ) -> None:
+        _set_mock_exceptions(mock_dbapi)
+        client = FlightClient(url="grpc://localhost:50051", token="tok")
+
+        with pytest.raises(DCHConfigError, match="tenant_id must be provided"):
+            operation(client)
+
+        mock_dbapi.connect.assert_not_called()
+        mock_flight.connect.assert_not_called()
 
 
 class TestRead:

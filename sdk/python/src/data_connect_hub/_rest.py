@@ -6,7 +6,7 @@ import json as _json
 import logging
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, TypeVar
 from urllib.parse import quote
 
@@ -26,6 +26,7 @@ from .models import (
     ConnectionType,
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
+    CredentialTestRequest,
     DataConnection,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
@@ -164,6 +165,8 @@ class RestClient:
             self._client.close()
 
     def _headers(self) -> dict[str, str]:
+        if not self._tenant_id:
+            raise DCHConfigError("tenant_id must be provided for REST operations")
         token = self._token_cache.get() if self._token_cache else self._token
         return build_headers(
             token=token,
@@ -185,13 +188,14 @@ class RestClient:
         path: str,
         *,
         json: dict[str, object] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> httpx.Response:
-        resp = self._do_request(method, path, json=json)
+        resp = self._do_request(method, path, json=json, params=params)
         if resp.status_code == 401 and self._token_cache is not None:
             _log.debug("Received 401; refreshing token and retrying")
             self._token_cache.refresh()
-            resp = self._do_request(method, path, json=json)
-        if resp.status_code >= 400:
+            resp = self._do_request(method, path, json=json, params=params)
+        if not 200 <= resp.status_code < 300:
             raise map_http_error(resp)
         return resp
 
@@ -201,6 +205,7 @@ class RestClient:
         path: str,
         *,
         json: dict[str, object] | None = None,
+        params: Mapping[str, str] | None = None,
     ) -> httpx.Response:
         last_exc: DCHError | None = None
         retryable = self._is_retryable(method)
@@ -213,6 +218,7 @@ class RestClient:
                     f"{self._api_base}{path}",
                     headers=self._headers(),
                     json=json,
+                    params=params,
                 )
             except httpx.RequestError as exc:
                 last_exc = _map_request_error(exc, self._base_url)
@@ -301,6 +307,24 @@ class RestClient:
     def delete_connection(self, connection_id: str) -> None:
         self._request("DELETE", f"{_CONNECTIONS_ENDPOINT}/{_segment(connection_id, name='connection_id')}")
 
+    def export_connection(self, connection_id: str, secret_name: str) -> None:
+        connection = _segment(connection_id, name="connection_id")
+        secret = _segment(secret_name, name="secret_name")
+        self._request("PUT", f"{_CONNECTIONS_ENDPOINT}/{connection}/exports/secrets/{secret}")
+
+    def check_connection_readiness(self, connection_id: str) -> None:
+        connection = _segment(connection_id, name="connection_id")
+        self._request("POST", f"{_CONNECTIONS_ENDPOINT}/{connection}/readiness")
+
+    def download_binary(self, connection_id: str, path: str) -> bytes:
+        if not path:
+            raise DCHConfigError("path must be a non-empty string")
+        connection = _segment(connection_id, name="connection_id")
+        return self._request("GET", f"{_CONNECTIONS_ENDPOINT}/{connection}/binary", params={"path": path}).content
+
+    def test_credentials(self, request: CredentialTestRequest) -> None:
+        self._request("POST", "/test/credentials", json=request.model_dump())
+
     # -- Connection Types CRUD --
 
     def list_connection_types(self) -> list[ConnectionType]:
@@ -320,10 +344,15 @@ class RestClient:
         return _validate(ConnectionType, self._parse_json(resp))
 
     def update_connection_type(self, type_id: str, request: UpdateConnectionTypeRequest) -> ConnectionType:
+        patch = {
+            field: value
+            for field, value in request.model_dump(exclude_unset=True).items()
+            if value is not None or field == "description"
+        }
         resp = self._request(
             "PATCH",
             f"{_CONNECTION_TYPES_ENDPOINT}/{_segment(type_id, name='type_id')}",
-            json=request.model_dump(exclude_none=True),
+            json=patch,
         )
         return _validate(ConnectionType, self._parse_json(resp))
 

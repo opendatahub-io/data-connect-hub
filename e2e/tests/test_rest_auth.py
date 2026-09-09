@@ -6,8 +6,8 @@ import pytest
 
 from data_connect_hub import (
     DCHAuthenticationError,
+    DCHConfigError,
     DCHForbiddenError,
-    DCHHTTPError,
     DataConnectClient,
 )
 
@@ -36,9 +36,8 @@ class TestRestAuth:
 
     def test_missing_tenant_returns_400(self, gateway_endpoint: str, auth_token: str, insecure: bool) -> None:
         client = _make_client(gateway_endpoint, token=auth_token, tenant_id="", insecure=insecure)
-        with pytest.raises(DCHHTTPError) as exc_info:
+        with pytest.raises(DCHConfigError, match="tenant_id must be provided"):
             client.list_connections()
-        assert exc_info.value.status_code == 400
 
     def test_denied_user_returns_403(
         self, gateway_endpoint: str, denied_auth_token: str, tenant_id: str, insecure: bool

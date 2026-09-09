@@ -9,6 +9,7 @@ on:
       - 'dc-controller/**'
       - 'e2e/**'
       - 'hack/**'
+      - 'sdk/python/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
   workflow_dispatch:

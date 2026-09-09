@@ -14,6 +14,7 @@ from data_connect_hub.exceptions import (
     DCHConfigError,
     DCHConnectionError,
     DCHForbiddenError,
+    DCHHTTPError,
     DCHNotFoundError,
     DCHResponseError,
     DCHServerError,
@@ -23,6 +24,8 @@ from data_connect_hub.exceptions import (
 from data_connect_hub.models import (
     CreateConnectionRequest,
     CreateConnectionTypeRequest,
+    CredentialTestRequest,
+    InlineCredentials,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
 )
@@ -139,6 +142,28 @@ class TestCreateConnection:
         result = client.create_connection(req)
         assert result.id == "123"
 
+    def test_sends_inline_credentials(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            body = json.loads(request.content)
+            assert "credentials_ref" not in body
+            assert body["credentials"] == {
+                "secret": "new-secret",
+                "properties": {"username": "user", "password": "pass"},
+            }
+            return httpx.Response(201, json=SAMPLE_CONNECTION_JSON)
+
+        client = _make_client(httpx.MockTransport(handler))
+        req = CreateConnectionRequest(
+            name="new-conn",
+            data_connection_type_id="postgres",
+            format="tabular",
+            credentials=InlineCredentials(
+                secret="new-secret",
+                properties={"username": "user", "password": "pass"},
+            ),
+        )
+        client.create_connection(req)
+
 
 class TestUpdateConnection:
     def test_sends_patch(self) -> None:
@@ -163,6 +188,61 @@ class TestDeleteConnection:
         )
         client = _make_client(transport)
         client.delete_connection("123")
+
+
+class TestConnectionOperations:
+    def test_readiness(self) -> None:
+        transport = _make_transport(
+            status=204,
+            assert_method="POST",
+            assert_path=_api_path("/connections/123/readiness"),
+        )
+        client = _make_client(transport)
+        client.check_connection_readiness("123")
+
+    def test_export_encodes_secret_name_as_one_segment(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "PUT"
+            assert request.url.raw_path.decode() == (
+                _api_path("/connections/123/exports/secrets/name%2Fwith%3Funsafe%23characters")
+            )
+            return httpx.Response(204)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.export_connection("123", "name/with?unsafe#characters")
+
+    def test_download_binary(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "GET"
+            assert request.url.path == _api_path("/connections/123/binary")
+            assert request.url.params["path"] == "models/model v1.bin"
+            return httpx.Response(200, content=b"binary-data", headers={"content-type": "application/octet-stream"})
+
+        client = _make_client(httpx.MockTransport(handler))
+        assert client.download_binary("123", "models/model v1.bin") == b"binary-data"
+
+    def test_download_binary_rejects_empty_path(self) -> None:
+        client = _make_client(_make_transport())
+        with pytest.raises(DCHConfigError, match="path must be"):
+            client.download_binary("123", "")
+
+    def test_credentials(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "POST"
+            assert request.url.path == _api_path("/test/credentials")
+            assert json.loads(request.content) == {
+                "data_connection_type_id": "postgres",
+                "secret": {"username": "user", "password": "pass"},
+            }
+            return httpx.Response(204)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.test_credentials(
+            CredentialTestRequest(
+                data_connection_type_id="postgres",
+                secret={"username": "user", "password": "pass"},
+            )
+        )
 
 
 class TestConnectionTypes:
@@ -215,6 +295,30 @@ class TestConnectionTypes:
         req = UpdateConnectionTypeRequest(name="renamed")
         client.update_connection_type("ct-1", req)
 
+    def test_update_sends_null_description(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert json.loads(request.content) == {"description": None}
+            return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.update_connection_type("ct-1", UpdateConnectionTypeRequest(description=None))
+
+    def test_update_does_not_send_null_for_required_fields(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert json.loads(request.content) == {"description": None}
+            return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.update_connection_type(
+            "ct-1",
+            UpdateConnectionTypeRequest(
+                name=None,
+                provider=None,
+                description=None,
+                credentials_fields=None,
+            ),
+        )
+
     def test_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",
@@ -235,6 +339,13 @@ class TestHeaders:
         client = _make_client(transport)
         client.list_connections()
 
+    def test_missing_tenant_rejected_before_request(self) -> None:
+        transport = _make_transport(body=[])
+        http_client = httpx.Client(transport=transport, base_url="http://test")
+        client = RestClient(url="http://test", token="test-token", tenant_id="", http_client=http_client)
+        with pytest.raises(DCHConfigError, match="tenant_id must be provided"):
+            client.list_connections()
+
 
 class TestCustomApiBase:
     def test_uses_custom_path(self) -> None:
@@ -247,6 +358,13 @@ class TestCustomApiBase:
 
 
 class TestErrorMapping:
+    def test_redirect_raises_http_error(self) -> None:
+        transport = _make_transport(status=302, body={"location": "login"})
+        client = _make_client(transport)
+        with pytest.raises(DCHHTTPError) as exc_info:
+            client.delete_connection("123")
+        assert exc_info.value.status_code == 302
+
     def test_400_raises_validation(self) -> None:
         transport = _make_transport(status=400, body={"error": "bad request"})
         client = _make_client(transport)
