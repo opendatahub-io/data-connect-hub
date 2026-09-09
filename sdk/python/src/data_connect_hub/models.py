@@ -24,7 +24,9 @@ DataConnectionState = Literal["ready", "ingestion_not_ready", "not_ready"]
 class _MaskProperties:
     def __repr_args__(self) -> Any:
         for name, value in super().__repr_args__():  # type: ignore[misc]
-            if name in {"properties", "secret"} and isinstance(value, dict) and value:
+            if name == "secret" and isinstance(value, str):
+                yield name, "***"
+            elif name in {"credentials", "properties", "secret"} and isinstance(value, dict) and value:
                 yield name, {k: "***" for k in value}
             else:
                 yield name, value
@@ -102,7 +104,7 @@ class CredentialTestRequest(_MaskProperties, BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     data_connection_type_id: str
-    secret: dict[str, str]
+    credentials: dict[str, str]
 
 
 class EnumValue(BaseModel):

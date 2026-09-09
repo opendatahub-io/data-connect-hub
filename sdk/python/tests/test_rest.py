@@ -232,7 +232,7 @@ class TestConnectionOperations:
             assert request.url.path == _api_path("/test/credentials")
             assert json.loads(request.content) == {
                 "data_connection_type_id": "postgres",
-                "secret": {"username": "user", "password": "pass"},
+                "credentials": {"username": "user", "password": "pass"},
             }
             return httpx.Response(204)
 
@@ -240,7 +240,7 @@ class TestConnectionOperations:
         client.test_credentials(
             CredentialTestRequest(
                 data_connection_type_id="postgres",
-                secret={"username": "user", "password": "pass"},
+                credentials={"username": "user", "password": "pass"},
             )
         )
 

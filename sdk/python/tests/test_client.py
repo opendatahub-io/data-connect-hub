@@ -80,7 +80,7 @@ class TestConnectionsDelegation:
         request = client._rest.test_credentials.call_args[0][0]
         assert request.model_dump() == {
             "data_connection_type_id": "postgres",
-            "secret": {"username": "user"},
+            "credentials": {"username": "user"},
         }
 
     def test_create_connection_with_inline_credentials(self) -> None:

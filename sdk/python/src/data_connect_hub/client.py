@@ -266,9 +266,9 @@ class DataConnectClient:
     def download_binary(self, connection_id: str, path: str) -> bytes:
         return self._rest.download_binary(connection_id, path)
 
-    def test_credentials(self, connection_type_id: str, secret: dict[str, str]) -> None:
+    def test_credentials(self, connection_type_id: str, credentials: dict[str, str]) -> None:
         try:
-            request = CredentialTestRequest(data_connection_type_id=connection_type_id, secret=secret)
+            request = CredentialTestRequest(data_connection_type_id=connection_type_id, credentials=credentials)
         except ValidationError as exc:
             raise DCHConfigError("invalid credential test request") from exc
         self._rest.test_credentials(request)

@@ -129,6 +129,23 @@ class TestDataConnectionRepr:
         assert "***" in text
         assert "key" in text
 
+    def test_repr_masks_inline_credentials(self) -> None:
+        credentials = InlineCredentials(
+            secret="sensitive-secret-name",
+            properties={"password": "sensitive-password"},
+        )
+        assert "sensitive-secret-name" not in repr(credentials)
+        assert "sensitive-password" not in repr(credentials)
+
+        request = CreateConnectionRequest(
+            name="conn",
+            data_connection_type_id="postgres",
+            format="tabular",
+            credentials=credentials,
+        )
+        assert "sensitive-secret-name" not in repr(request)
+        assert "sensitive-password" not in repr(request)
+
     def test_repr_credentials_ref_present(self) -> None:
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         text = repr(conn)
@@ -229,7 +246,7 @@ class TestAdditionalRequestModels:
     def test_credentials_repr_masks_secret_values(self) -> None:
         req = CredentialTestRequest(
             data_connection_type_id="postgres",
-            secret={"username": "sensitive-user", "password": "sensitive-password"},
+            credentials={"username": "sensitive-user", "password": "sensitive-password"},
         )
         text = repr(req)
         assert "sensitive-user" not in text
@@ -240,7 +257,7 @@ class TestAdditionalRequestModels:
         with pytest.raises(ValueError) as exc_info:
             CredentialTestRequest(
                 data_connection_type_id="postgres",
-                secret={"password": object()},  # type: ignore[dict-item]
+                credentials={"password": object()},  # type: ignore[dict-item]
             )
         assert "object at" not in str(exc_info.value)
 

@@ -149,11 +149,12 @@ A connection pairs a connection type with the actual credentials (stored in a Ku
 ```python
 client.list_connections() -> list[DataConnection]
 client.get_connection(connection_id) -> DataConnection
-client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=... | credentials=..., properties=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials=..., properties=...) -> DataConnection
 client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
 client.delete_connection(connection_id) -> None
 client.check_connection_readiness(connection_id) -> None
-client.test_credentials(connection_type_id, secret) -> None
+client.test_credentials(connection_type_id, credentials) -> None
 client.export_connection(connection_id, secret_name) -> None
 client.download_binary(connection_id, path) -> bytes
 ```
