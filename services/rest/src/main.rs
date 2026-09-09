@@ -14,7 +14,6 @@ use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use std::sync::Arc;
-use std::time::Duration;
 use url::Url;
 
 mod clients;
@@ -181,7 +180,7 @@ async fn main() -> Result<()> {
     );
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
-    let secret_store = KubeSecretStore::try_default(Duration::from_secs(300)).await?;
+    let secret_store = KubeSecretStore::try_default().await?;
 
     let ca_cert_pem = match &config.flight_service.ca_cert {
         Some(path) => {

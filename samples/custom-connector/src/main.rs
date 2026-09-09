@@ -6,7 +6,6 @@ use flight_service::{CommandLineArgs, configure_metrics, configure_tls, load_con
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use std::sync::Arc;
-use std::time::Duration;
 
 fn build_connectors_registry() -> ConnectorsRegistry {
     ConnectorsRegistry::new()
@@ -32,7 +31,7 @@ async fn main() -> Result<()> {
     configure_metrics(&config)?;
 
     let connectors_registry = Arc::new(build_connectors_registry());
-    let secret_store = Arc::new(KubeSecretStore::try_default(Duration::from_secs(300)).await?);
+    let secret_store = Arc::new(KubeSecretStore::try_default().await?);
     let query_options = commons::api::connector::QueryOptions {
         batch_size: config.query.batch_size,
     };

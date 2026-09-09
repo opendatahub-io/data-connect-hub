@@ -5,79 +5,53 @@ use k8s_openapi::api::core::v1::Secret as K8sSecret;
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::ObjectMeta;
 use kube::api::{DeleteParams, Patch, PatchParams, PostParams};
 use kube::{Api, Client};
-use moka::future::Cache;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
 use tracing::error;
 
 pub struct KubeSecretStore {
     client: Client,
-    cache: Cache<String, Secret>,
 }
 
 impl KubeSecretStore {
-    pub fn new(client: Client, cache_ttl: Duration) -> Self {
-        Self {
-            client,
-            cache: Cache::builder().time_to_live(cache_ttl).build(),
-        }
+    pub fn new(client: Client) -> Self {
+        Self { client }
     }
 
-    pub async fn try_default(cache_ttl: Duration) -> Result<Self, kube::Error> {
+    pub async fn try_default() -> Result<Self, kube::Error> {
         let client = Client::try_default().await?;
-        Ok(Self::new(client, cache_ttl))
+        Ok(Self::new(client))
     }
 }
 
 #[async_trait::async_trait]
 impl SecretStore for KubeSecretStore {
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError> {
-        let key = format!("{namespace}/{name}");
-        let client = self.client.clone();
-        let ns = namespace.to_string();
-        let n = name.to_string();
-
-        self.cache
-            .try_get_with(key, async move {
-                let api: Api<K8sSecret> = Api::namespaced(client, &ns);
-                let k8s_secret = api.get(&n).await.map_err(|e| {
-                    error!("failed to get secret {ns}/{n}: {e}");
-                    SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string())
-                })?;
-                let properties = extract_properties(&k8s_secret);
-                Ok(Secret {
-                    name: n,
-                    namespace: ns,
-                    properties,
-                    labels: Some(
-                        k8s_secret
-                            .metadata
-                            .labels
-                            .clone()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .collect(),
-                    ),
-                    annotations: Some(
-                        k8s_secret
-                            .metadata
-                            .annotations
-                            .clone()
-                            .unwrap_or_default()
-                            .into_iter()
-                            .collect(),
-                    ),
-                })
-            })
-            .await
-            .map_err(|e: Arc<SecretStoreError>| e.as_ref().clone())
+        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
+        let k8s_secret = api.get(name).await.map_err(|e| {
+            error!("failed to get secret {namespace}/{name}: {e}");
+            SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string())
+        })?;
+        let properties = extract_properties(&k8s_secret);
+        Ok(Secret {
+            name: name.to_string(),
+            namespace: namespace.to_string(),
+            properties,
+            labels: Some(k8s_secret.metadata.labels.unwrap_or_default().into_iter().collect()),
+            annotations: Some(
+                k8s_secret
+                    .metadata
+                    .annotations
+                    .unwrap_or_default()
+                    .into_iter()
+                    .collect(),
+            ),
+        })
     }
 
     async fn create_secret(&self, secret: &Secret, overwrite: bool) -> Result<(), SecretStoreError> {
-        let ns = Arc::new(secret.namespace.clone());
+        let ns = &secret.namespace;
 
-        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), &ns);
+        let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), ns);
 
         let labels = secret.labels.clone().map(|l| l.into_iter().collect());
         let annotations = secret.annotations.clone().map(|a| a.into_iter().collect());
@@ -118,9 +92,6 @@ impl SecretStore for KubeSecretStore {
             error!("failed to delete secret {namespace}/{name}: {e}");
             SecretStoreError::SecretNotFound(format!("{namespace}/{name}"))
         })?;
-
-        let key = format!("{namespace}/{name}");
-        self.cache.invalidate(&key).await;
 
         Ok(())
     }
