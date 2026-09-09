@@ -334,7 +334,7 @@ seed_s3_data() {
         exit 1
     }
     PYTHON="$VENV_PYTHON" bash "$(dirname "$0")/scripts/seed-s3-data.sh" \
-        -e "$AWS_S3_ENDPOINT" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET" \
+        -e "${DCH_S3_SEED_ENDPOINT:-$AWS_S3_ENDPOINT}" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET" \
         -A "$AWS_ACCESS_KEY_ID" -S "$AWS_SECRET_ACCESS_KEY" \
         -i "$mc_image"
 }

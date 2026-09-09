@@ -75,6 +75,8 @@ kubectl run "$POD_NAME" -n "$NAMESPACE" \
     --image-pull-policy=IfNotPresent \
     --restart=Never \
     --command -- /bin/sh -ceu "
+export MC_CONFIG_DIR=/tmp/mc-config
+mkdir -p \"\$MC_CONFIG_DIR\"
 ready=0
 for i in \$(seq 1 60); do
   if mc alias set local '${ENDPOINT}' '${ACCESS_KEY}' '${SECRET_KEY}' >/dev/null 2>&1; then
@@ -119,7 +121,8 @@ mc cp /tmp/dch-test-binary.bin \"local/${BUCKET}/${BINARY_KEY}\"
 "
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
-    -n "$NAMESPACE" --timeout=120s || {
+    -n "$NAMESPACE" --timeout=300s || {
+    kubectl describe pod "$POD_NAME" -n "$NAMESPACE" || true
     kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=20 || true
     echo "error: S3 seed pod '$POD_NAME' failed" >&2
     exit 1
