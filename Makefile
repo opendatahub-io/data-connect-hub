@@ -167,12 +167,12 @@ sdk-test: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)pytest tests/ -v --cov=data_connect_hub --cov-report=term-missing --cov-report=html:htmlcov
 
 sdk-lint: sdk-venv
-	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check src/ tests/
-	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format --check src/ tests/
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check src/ tests/ examples/*.py
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format --check src/ tests/ examples/*.py
 
 sdk-fmt: sdk-venv
-	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format src/ tests/
-	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check --fix src/ tests/
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format src/ tests/ examples/*.py
+	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check --fix src/ tests/ examples/*.py
 
 sdk-typecheck: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)mypy src/

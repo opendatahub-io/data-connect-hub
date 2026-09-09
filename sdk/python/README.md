@@ -1,6 +1,19 @@
 # Data Connect Hub Python SDK
 
-Python client library for the [Data Connect Hub](https://github.com/opendatahub-io/data-connect-hub) service.
+Typed Python client for managing [Data Connect Hub](https://github.com/opendatahub-io/data-connect-hub) connections and querying connected data sources.
+
+- Manage connection types and connections through the REST API
+- Validate credentials and connection readiness before querying data
+- Query tabular data through Apache Arrow Flight SQL
+- Download binary data from S3 and URI connections
+- Authenticate with static or automatically refreshed bearer tokens
+
+## Requirements
+
+- Python 3.11 or newer
+- A running Data Connect Hub deployment with its gateway accessible from your environment
+- A tenant namespace and a bearer token or service account authorized to use the Data Connect Hub services
+- The optional `flight` dependencies for Flight SQL queries
 
 ## Installation
 
@@ -12,68 +25,90 @@ pip install data-connect-hub
 pip install "data-connect-hub[flight]"
 ```
 
-To install from a source checkout, use `pip install sdk/python` or
-`pip install "sdk/python[flight]"`.
+The default installation includes REST support and installs `httpx` and `pydantic`. The `flight` extra also installs the Flight SQL driver, PyArrow, and pandas.
 
-TestPyPI builds are PEP 440 development releases, so `--pre` is required. Install
-the SDK without dependencies from TestPyPI, then install its dependencies from
-PyPI only:
+## Getting Started
 
-```bash
-pip install --pre --no-deps \
-  --index-url https://test.pypi.org/simple/ \
-  data-connect-hub
-pip install --index-url https://pypi.org/simple/ \
-  "httpx>=0.27,<1" "pydantic>=2,<3"
-```
+### Create a Client
 
-Installing from a GitHub source archive (`.../archive/main.tar.gz`) fails: archives
-carry no `.git` directory, so `setuptools-scm` cannot derive a version. This is
-deliberate — a silent fallback version would sort unpredictably against published
-releases. Install from Git instead:
-
-```bash
-pip install "git+https://github.com/opendatahub-io/data-connect-hub.git#subdirectory=sdk/python"
-```
-
-## Quick Start
-
-The client takes a single gateway `endpoint` — a host or `host:port`, no scheme required — and derives both the REST (`https://`) and Flight SQL (`grpc+tls://`) URLs from it. Only TLS endpoints are supported; use `insecure=True` or `ca_cert=` to control certificate verification.
+Provide the Data Connect Hub gateway host, bearer token, and tenant namespace:
 
 ```python
-from data_connect_hub import CredentialsRef, DataConnectClient, InlineCredentials
+from data_connect_hub import DataConnectClient
 
 client = DataConnectClient(
     endpoint="dch.example.com:8443",
-    token="<your-token>",  # or use token_provider= for auto-refresh
+    token="<your-token>",
     tenant_id="my-tenant",
 )
 
-# Or use a token provider for automatic refresh on 401:
-client = DataConnectClient(
-    endpoint="dch.example.com:8443",
-    token_provider=lambda: get_fresh_token(),  # your function; called once, cached, refreshed on 401
-    tenant_id="my-tenant",
-)
-
-# List connections (REST)
 connections = client.list_connections()
+for connection in connections:
+    print(connection.id, connection.name, connection.status.state)
+```
 
-# Get a specific connection
-conn = client.get_connection("conn-id")
+The SDK derives HTTPS and gRPC+TLS URLs from `endpoint`. A scheme is not required and is ignored when provided. Only TLS endpoints are supported. Use the client as a context manager, or call `client.close()` when finished.
 
-# Create a connection
-conn = client.create_connection(
-    name="my-db",
-    connection_type_id="dct-a1b2c3d4",
-    data_format="tabular",  # DataFormat: "tabular" | "binary"
-    credentials_ref=CredentialsRef(secret="my-db"),
+### Client Options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `endpoint` | `str` | Required | Gateway host or `host:port` |
+| `token` | `str` | `""` | Static bearer token without the `Bearer` prefix |
+| `token_provider` | `Callable[[], str] \| None` | `None` | Supplies and refreshes a bearer token |
+| `tenant_id` | `str` | `""` | Tenant Kubernetes namespace; required for API requests |
+| `api_base` | `str` | `"/api/v1alpha1/data"` | REST API path prefix |
+| `rest_timeout` | `float` | `30.0` | REST request timeout in seconds |
+| `ca_cert` | `str \| None` | `None` | Path to a custom CA certificate |
+| `insecure` | `bool` | `False` | Disables TLS certificate verification |
+| `max_retries` | `int` | `3` | Retry attempts for transient REST failures; `0` disables retries |
+| `backoff_base` | `float` | `0.5` | Initial retry backoff in seconds |
+| `backoff_max` | `float` | `30.0` | Maximum retry backoff in seconds |
+| `flight_timeout` | `float \| None` | `None` | Timeout for Flight SQL RPC calls |
+
+### Authentication and TLS
+
+`token` and `token_provider` are mutually exclusive. A token provider is called once, cached, and called again when a request receives a `401 Unauthorized` response:
+
+```python
+client = DataConnectClient(
+    endpoint="dch.example.com:8443",
+    token_provider=get_fresh_token,
+    tenant_id="my-tenant",
+    ca_cert="/path/to/cluster-ca.pem",
 )
+```
 
-# Query data via Flight SQL
+Use `insecure=True` only for development environments where certificate verification is intentionally disabled.
+
+### Configure a Data Source
+
+Before querying data:
+
+1. Define or select a [connection type](#connection-types-rest) for the provider.
+2. Create a [connection](#connection-management-rest) with credentials for the data source.
+
+The API reference describes both resources and their credential options. For a complete runnable workflow, see the [quickstart notebook](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/quickstart.ipynb).
+
+### Query Tabular Data
+
+Install the `flight` extra, then pass the connection ID with the SQL query:
+
+```python
 table = client.read("SELECT * FROM prompts", connection_id="conn-uuid")
 df = table.to_pandas()
 ```
+
+## Examples
+
+| Example | Demonstrates |
+|---|---|
+| [quickstart.ipynb](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/quickstart.ipynb) | Guided REST and Flight SQL walkthrough |
+| [connection_types.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connection_types.py) | Listing, creating, and deleting connection types |
+| [connections.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connections.py) | Credential testing and connection lifecycle operations |
+| [binary_download.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/binary_download.py) | Binary downloads from S3 or URI connections |
+| [flight_query.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/flight_query.py) | Tabular queries with Flight SQL |
+| [token_provider.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/token_provider.py) | Refreshing short-lived Kubernetes service account tokens |
 
 ## API Reference
 
@@ -89,6 +124,26 @@ client.get_connection_type(type_id) -> ConnectionType
 client.create_connection_type(name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
 client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
 client.delete_connection_type(type_id) -> None
+```
+
+For example, define a PostgreSQL connection type with a required connection URI:
+
+```python
+from data_connect_hub import CredentialField
+
+connection_type = client.create_connection_type(
+    name="PostgreSQL",
+    provider="postgres",
+    description="PostgreSQL database",
+    credentials_fields=[
+        CredentialField(
+            name="URI",
+            label="Connection URI",
+            required=True,
+            type="string",
+        )
+    ],
+)
 ```
 
 Pass `description=None` to remove an existing description. Omitting `description` leaves it unchanged.
@@ -140,7 +195,7 @@ Describes a single input field in the connection credential form.
 | `"string"` | Free-text single-line input |
 | `"enum"` | One of `enum_values` |
 
-`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every connection type shipped in [`config/connection-types/`](../../config/connection-types/) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
+`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every [built-in connection type](https://github.com/opendatahub-io/data-connect-hub/tree/main/config/connection-types) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
 
 ### Connection Management (REST)
 
@@ -192,6 +247,43 @@ You normally set `format` once, at `create_connection`, but it is not immutable:
 Alternatively, pass `credentials=InlineCredentials(secret="secret-name", properties={...})` when creating a connection. The service creates that Kubernetes secret and stores its reference. Exactly one of `credentials_ref` and `credentials` is required.
 
 Use `test_credentials` to validate credentials without storing them, `check_connection_readiness` to refresh a saved connection's status, and `export_connection` to copy its credentials and metadata into another Kubernetes secret.
+
+The credential keys must match the connection type's `credentials_fields`. For example, a PostgreSQL connection can be tested and created with inline credentials before its status is refreshed:
+
+```python
+import os
+
+from data_connect_hub import InlineCredentials
+
+credentials = {"URI": os.environ["POSTGRES_URI"]}
+client.test_credentials("dct-a1b2c3d4", credentials)
+
+conn = client.create_connection(
+    name="my-db",
+    connection_type_id="dct-a1b2c3d4",
+    data_format="tabular",
+    credentials=InlineCredentials(secret="my-db", properties=credentials),
+)
+client.check_connection_readiness(conn.id)
+conn = client.get_connection(conn.id)
+print(conn.status.state)
+
+# Optional: creates or overwrites this secret in the tenant namespace.
+client.export_connection(conn.id, "my-db-export")
+```
+
+See [`examples/connections.py`](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connections.py) for a runnable lifecycle example that loads credentials from a JSON file rather than source code.
+
+Binary downloads from S3 and URI connections return `bytes`, which are buffered in memory and can be written directly to a file:
+
+```python
+from pathlib import Path
+
+data = client.download_binary("conn-uuid", "models/model.bin")
+Path("model.bin").write_bytes(data)
+```
+
+See [`examples/binary_download.py`](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/binary_download.py) for a runnable version with environment-based configuration.
 
 **`DataConnectionStatus`:**
 
@@ -259,31 +351,6 @@ except DCHError as exc:  # connection, timeout, auth, schema drift, ...
 
 Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol errors — are retried automatically with exponential backoff on idempotent methods. See `max_retries`, `backoff_base`, and `backoff_max`.
 
-## Requirements
-
-- Python 3.11+
-- Core dependencies: httpx, pydantic
-- Flight SQL extras: adbc-driver-flightsql, pyarrow, pandas (`pip install "data-connect-hub[flight]"`)
-
-## Releases
-
-The package version is derived from Git history by `setuptools-scm` — there is no
-version file to bump. Building therefore requires a full clone with tags; a shallow
-clone or a tree without usable package metadata fails to build.
-
-**TestPyPI (pre-release).** Run the *Publish Python SDK to TestPyPI* workflow manually
-from the Actions tab. The version is a development release derived from the distance
-since the last tag, for example `0.1.devN` before the first tag exists and
-`0.1.1.dev12` after `sdk-v0.1.0`. Re-dispatching on an already-published commit produces
-the same version and fails on the duplicate upload; land a commit first.
-
-**PyPI (tagged release).** Push an SDK-specific tag of `sdk-v` followed by the PEP 440
-version, for example `sdk-v0.1.0`; the tag is what defines the published version. The
-*Release Python SDK* workflow builds and validates the distribution, publishes it to PyPI
-using trusted publishing, then creates the GitHub Release.
-
-Locally, `make sdk-package-check` builds and validates the distribution the same way CI does.
-
 ## Contributing
 
-See [CONTRIBUTING.md](../../CONTRIBUTING.md) for development setup, commands, and contribution guidelines.
+See the [contributing guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/CONTRIBUTING.md) for development setup, commands, and release instructions.

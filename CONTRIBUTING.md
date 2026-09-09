@@ -104,6 +104,8 @@ git push --force-with-lease
 
 ## Python SDK Development
 
+A Python 3.11 or newer environment is required. Install the SDK from a source checkout with `pip install sdk/python` or `pip install "sdk/python[flight]"`.
+
 A virtual environment at `sdk/python/.venv` is created automatically on first run.
 If `VIRTUAL_ENV` is already set (e.g. a manually activated venv), the Makefile uses the system Python directly.
 
@@ -114,7 +116,30 @@ make sdk-lint        # ruff check + format check
 make sdk-fmt         # auto-format
 make sdk-typecheck   # run mypy strict type checking
 make sdk-all         # lint + typecheck + test
+make sdk-package-check # build and validate distributions
 ```
+
+### Python SDK Pre-Releases and Releases
+
+The package version is derived from Git history by `setuptools-scm`; there is no version file to bump. Building requires a full clone with tags. A shallow clone or GitHub source archive has insufficient package metadata and fails rather than producing an incorrectly ordered fallback version. Install directly from Git when a packaged release is not appropriate:
+
+```bash
+pip install "git+https://github.com/opendatahub-io/data-connect-hub.git#subdirectory=sdk/python"
+```
+
+**TestPyPI pre-releases:** Run the *Publish Python SDK to TestPyPI* workflow manually. Development versions are derived from the number of commits since the latest `sdk-v` tag, for example `0.1.devN` before the first tag and `0.1.1.dev12` after `sdk-v0.1.0`. Re-running the workflow for an already published commit produces the same version and fails because PyPI does not allow duplicate files.
+
+Install a TestPyPI build without resolving dependencies from TestPyPI, then install its dependencies from PyPI:
+
+```bash
+pip install --pre --no-deps \
+  --index-url https://test.pypi.org/simple/ \
+  data-connect-hub
+pip install --index-url https://pypi.org/simple/ \
+  "httpx>=0.27,<1" "pydantic>=2,<3"
+```
+
+**PyPI releases:** Push an SDK-specific tag containing the PEP 440 version, such as `sdk-v0.1.0`. The *Release Python SDK* workflow builds and validates the distribution, publishes it to PyPI using trusted publishing, and creates the GitHub release.
 
 ## Pull Request Process
 
