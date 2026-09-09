@@ -272,7 +272,7 @@ paths:
       summary: Test credentials against a data source
       description: >
         Tests the provided credentials by attempting to connect to
-        the data source without creating any resources.
+        the data source without creating any resources. You can use `/test/credentials` to test the credentials first. Once the test is successful, you can use `/connections` to create a connection.
       tags: [test]
       requestBody:
         required: true

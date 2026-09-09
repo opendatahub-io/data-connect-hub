@@ -66,7 +66,7 @@ class TestRestTestCredentials:
             "/test/credentials",
             json={
                 "data_connection_type_id": dct_id,
-                "secret": secret,
+                "credentials": secret,
             },
         )
         assert resp.status_code == 204
@@ -85,7 +85,7 @@ class TestRestTestCredentials:
                 "/test/credentials",
                 json={
                     "data_connection_type_id": dct_id,
-                    "secret": {"URI": "postgresql://invalid:invalid@nonexistent:5432/nope"},
+                    "credentials": {"URI": "postgresql://invalid:invalid@nonexistent:5432/nope"},
                 },
             )
         assert exc_info.value.status_code == 502
@@ -101,6 +101,6 @@ class TestRestTestCredentials:
                 "/test/credentials",
                 json={
                     "data_connection_type_id": fake_type_id,
-                    "secret": {"URI": "postgresql://x:x@localhost:5432/x"},
+                    "credentials": {"URI": "postgresql://x:x@localhost:5432/x"},
                 },
             )

@@ -263,7 +263,7 @@ paths:
       operationId: testCredentials
       summary: Test credentials against a data source
       description: |
-        Tests the provided credentials by attempting to connect to the data source without creating any resources.
+        Tests the provided credentials by attempting to connect to the data source without creating any resources. You can use `/test/credentials` to test the credentials first. Once the test is successful, you can use `/connections` to create a connection.
       tags:
         - test
       requestBody:
@@ -607,13 +607,13 @@ components:
       description: Credentials to test against a data source without creating any resources.
       required:
         - data_connection_type_id
-        - secret
+        - credentials
       properties:
         data_connection_type_id:
           type: string
           description: Connection type id to test against
           example: 550e8400-e29b-41d4-a716-446655440000
-        secret:
+        credentials:
           type: object
           additionalProperties:
             type: string

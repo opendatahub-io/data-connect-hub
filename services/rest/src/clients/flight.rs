@@ -170,7 +170,7 @@ impl FlightDataClient for FlightClient {
     async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status> {
         let mut keys = vec!["data_connection_type_id".to_string()];
         let mut values = vec![creds.data_connection_type_id.clone()];
-        for (k, v) in &creds.secret {
+        for (k, v) in &creds.credentials {
             keys.push(format!("secret.{k}"));
             values.push(v.clone());
         }
