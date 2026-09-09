@@ -115,7 +115,7 @@ async fn main() -> Result<()> {
     configure_metrics(&config)?;
 
     let connectors_registry = Arc::new(build_connectors_registry(&config));
-    let secret_store = Arc::new(KubeSecretStore::try_default(Duration::from_secs(300)).await?);
+    let secret_store = Arc::new(KubeSecretStore::try_default().await?);
     let query_options = commons::api::connector::QueryOptions {
         batch_size: config.query.batch_size,
     };
