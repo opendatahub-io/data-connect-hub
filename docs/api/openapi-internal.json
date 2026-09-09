@@ -26,7 +26,7 @@
     },
     {
       "name": "connection-types",
-      "description": "Connection type definitions"
+      "description": "A `connection type` defines a schema for a data `connection`.  A connection type must be created before creating a connection of that type.  Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types.  Connection types created by the operator are known as `global` connection types and are accessible by all tenants.  Connection types created by a tenant are are only accessible by that tenant.\n"
     },
     {
       "name": "test",
@@ -388,6 +388,7 @@
       "get": {
         "operationId": "listConnectionTypes",
         "summary": "List connection types",
+        "description": "Returns all connection types that are accessible to the tenant. This includes global connection types created by the operator and any custom connection types created by the tenant.\n",
         "tags": [
           "connection-types"
         ],
@@ -413,6 +414,7 @@
       "post": {
         "operationId": "createConnectionType",
         "summary": "Create a connection type",
+        "description": "Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by a tenant are are only accessible by that tenant.\n",
         "tags": [
           "connection-types"
         ],
@@ -958,6 +960,7 @@
         "properties": {
           "name": {
             "type": "string",
+            "description": "The name of the connection type. This name is unique for connection types of this tenant.",
             "example": "PostgreSQL"
           },
           "provider": {
