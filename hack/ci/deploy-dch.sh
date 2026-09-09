@@ -15,13 +15,6 @@ docker build -t "$FLIGHT_IMAGE" -f "$REPO_ROOT/services/flight/Containerfile" "$
 echo "--- Building rest-service ---"
 docker build -t "$REST_IMAGE" -f "$REPO_ROOT/services/rest/Containerfile" "$REPO_ROOT"
 
-echo "--- Patching operand manifests for local images ---"
-sed -i.bak 's/imagePullPolicy: Always/imagePullPolicy: IfNotPresent/g' \
-    "$REPO_ROOT/config/base/flight-service/deployment.yaml" \
-    "$REPO_ROOT/config/base/rest-service/deployment.yaml"
-rm -f "$REPO_ROOT/config/base/flight-service/deployment.yaml.bak" \
-      "$REPO_ROOT/config/base/rest-service/deployment.yaml.bak"
-
 echo "--- Building dc-controller ---"
 docker build -t "$CONTROLLER_IMAGE" -f "$REPO_ROOT/dc-controller/Containerfile.konflux" "$REPO_ROOT"
 

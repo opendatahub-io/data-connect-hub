@@ -25,7 +25,7 @@ spec:
       containers:
         - name: flight-service
           image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
