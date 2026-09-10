@@ -9,6 +9,14 @@ data:
   config-file.yaml: |
     authorization:
       endpoints:
+        - path: /api/v1alpha1/audit/data-connection-types
+          mappings:
+            - methods: [post]
+              resources:
+                - resourceAttributes:
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    verb: update
         - path: /api/v1alpha1/data/connections/*/binary
           mappings:
             - methods: [get]
