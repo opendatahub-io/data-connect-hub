@@ -89,30 +89,69 @@ setup_namespaces() {
     kubectl create namespace "$DCH_NO_ACCESS_NAMESPACE" 2>/dev/null || true
 }
 
-setup_service_accounts() {
+setup_user_accounts() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
         kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 }
 
-setup_sa_rbac() {
+setup_user_rbac() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
-        kubectl delete rolebinding e2e-dch-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl create rolebinding e2e-dch-access \
+        # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
+        kubectl delete rolebinding e2e-user-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding e2e-user-access \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read-write \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
-        kubectl create role e2e-export-secret-create \
+        # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
+        kubectl create role e2e-user-export-secret \
             -n "$DCH_TENANT_ID" \
             --verb=create --resource=secrets \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        kubectl create rolebinding e2e-export-secret-create-rb \
+        kubectl create rolebinding e2e-user-export-secret-create-rb \
             -n "$DCH_TENANT_ID" \
-            --role=e2e-export-secret-create \
+            --role=e2e-user-export-secret \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
+}
+
+setup_service_rbac() {
+    # Allow flight service SA to read K8s secret for datasource in tenant namespace
+    local -a secret_names=()
+    [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
+    [[ "$E2E_S3_ENABLED" == "true" ]] && secret_names+=("--resource-name=$S3_SECRET")
+    [[ "$E2E_MILVUS_ENABLED" == "true" ]] && secret_names+=("--resource-name=$MILVUS_SECRET")
+    [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
+    [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
+    [[ "$E2E_NEO4J_ENABLED" == "true" ]] && secret_names+=("--resource-name=$NEO4J_SECRET")
+    [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
+
+    if [[ ${#secret_names[@]} -gt 0 ]]; then
+        kubectl create role e2e-flight-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --verb=get --resource=secrets \
+            "${secret_names[@]}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+        kubectl create rolebinding e2e-flight-secret-read-rb \
+            -n "$DCH_TENANT_ID" \
+            --role=e2e-flight-secret-read \
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+
+    # Allow the REST service SA to export K8s secret in tenant namespace (only needed by REST API /connections/{id}/exports/secrets/{secret_name})
+    kubectl create role e2e-rest-secret-export \
+        -n "$DCH_TENANT_ID" \
+        --verb=get,create,patch --resource=secrets \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    kubectl create rolebinding e2e-rest-secret-export-rb \
+        -n "$DCH_TENANT_ID" \
+        --role=e2e-rest-secret-export \
+        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
 # -------------------------------------------------------------------
@@ -273,39 +312,6 @@ setup_uri_server_and_secret() {
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         E2E_URI_ENABLED="true"
     fi
-}
-
-setup_flight_secret_rbac() {
-    local -a secret_names=()
-    [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
-    [[ "$E2E_S3_ENABLED" == "true" ]] && secret_names+=("--resource-name=$S3_SECRET")
-    [[ "$E2E_MILVUS_ENABLED" == "true" ]] && secret_names+=("--resource-name=$MILVUS_SECRET")
-    [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
-    [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
-    [[ "$E2E_NEO4J_ENABLED" == "true" ]] && secret_names+=("--resource-name=$NEO4J_SECRET")
-    [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
-
-    if [[ ${#secret_names[@]} -eq 0 ]]; then
-        return 0
-    fi
-
-    kubectl create role e2e-flight-secret-read \
-        -n "$DCH_TENANT_ID" \
-        --verb=get --resource=secrets \
-        "${secret_names[@]}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-    kubectl create rolebinding e2e-flight-secret-read-rb \
-        -n "$DCH_TENANT_ID" \
-        --role=e2e-flight-secret-read \
-        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-    kubectl create rolebinding e2e-rest-secret-read-rb \
-        -n "$DCH_TENANT_ID" \
-        --role=e2e-flight-secret-read \
-        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
 # -------------------------------------------------------------------
@@ -480,10 +486,10 @@ kubectl get svc -n "$DCH_SERVICE_NAMESPACE" -l app.kubernetes.io/name=rest-servi
 setup_namespaces
 echo "[2/11] Namespaces ready"
 
-setup_service_accounts
+setup_user_accounts
 echo "[3/11] Service accounts ready"
 
-setup_sa_rbac
+setup_user_rbac
 echo "[4/11] SA RBAC ready"
 
 # 4. Credential secrets
@@ -494,7 +500,7 @@ setup_es_secret
 setup_es_apikey_secret
 setup_neo4j_secret
 setup_uri_server_and_secret
-setup_flight_secret_rbac
+setup_service_rbac
 
 SECRETS_MSG=""
 [[ "$E2E_PG_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }PG"
