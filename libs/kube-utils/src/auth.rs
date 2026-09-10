@@ -35,15 +35,19 @@ pub struct AuthInfo {
     pub groups: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct AccessRequest<'a> {
+    pub api_group: &'a str,
+    pub resource: &'a str,
+    pub verb: &'a str,
+}
+
 pub struct KubeAuthClient {
     client: Client,
     token_review_audiences: Vec<String>,
     token_cache: Cache<String, Result<AuthInfo, AuthError>>,
     sar_cache: Cache<String, bool>,
 }
-
-const API_GROUP: &str = "dataconnecthub.opendatahub.io";
-const RESOURCE: &str = "data-connections";
 
 impl KubeAuthClient {
     pub fn new(client: Client, cache_ttl: Duration, token_review_audiences: Vec<String>) -> Self {
@@ -116,18 +120,30 @@ impl KubeAuthClient {
             .map_err(|e: Arc<AuthError>| e.as_ref().clone())?
     }
 
-    pub async fn authorize(&self, auth_info: &AuthInfo, tenant_id: &str, verb: &str) -> Result<(), AuthError> {
-        let key = format!("{}:{:?}:{}:{}", auth_info.username, auth_info.groups, tenant_id, verb);
+    pub async fn authorize(
+        &self,
+        auth_info: &AuthInfo,
+        tenant_id: &str,
+        access: &AccessRequest<'_>,
+    ) -> Result<(), AuthError> {
+        let key = format!(
+            "{}:{:?}:{}:{}:{}:{}",
+            auth_info.username, auth_info.groups, tenant_id, access.api_group, access.resource, access.verb
+        );
         let client = self.client.clone();
         let username = auth_info.username.clone();
         let groups = auth_info.groups.clone();
         let ns = tenant_id.to_string();
-        let v = verb.to_string();
+        let g = access.api_group.to_string();
+        let r = access.resource.to_string();
+        let v = access.verb.to_string();
 
         let allowed = self
             .sar_cache
             .try_get_with(key, async move {
-                debug!("Performing SubjectAccessReview for user={username} namespace={ns} verb={v}");
+                debug!(
+                    "Performing SubjectAccessReview for user={username} namespace={ns} group={g} resource={r} verb={v}"
+                );
                 let sar = SubjectAccessReview {
                     spec: SubjectAccessReviewSpec {
                         user: Some(username),
@@ -135,8 +151,8 @@ impl KubeAuthClient {
                         resource_attributes: Some(ResourceAttributes {
                             namespace: Some(ns),
                             verb: Some(v),
-                            group: Some(API_GROUP.into()),
-                            resource: Some(RESOURCE.into()),
+                            group: Some(g),
+                            resource: Some(r.clone()),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -164,7 +180,8 @@ impl KubeAuthClient {
             Ok(())
         } else {
             Err(AuthError::Forbidden(format!(
-                "access denied for {RESOURCE} in namespace {tenant_id}"
+                "access denied for {} in namespace {tenant_id}",
+                access.resource
             )))
         }
     }

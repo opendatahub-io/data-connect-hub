@@ -246,6 +246,7 @@ async fn start_flight_server(meta_store: impl MetaStore + Send + Sync + 'static,
         Arc::new(connectors_registry),
         Arc::new(meta_store),
         Arc::new(secret_store),
+        None,
         Default::default(),
     );
 
