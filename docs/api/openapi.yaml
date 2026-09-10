@@ -6,7 +6,15 @@ info:
 
     ## Authentication
 
-    All endpoints except `/health` require a bearer token and a tenant header.
+    All endpoints except `/health` require a bearer token. All endpoints
+    except `/health` and `/audit/data-connection-types` additionally require
+    the `x-tenant-id` header.
+
+    A missing or invalid token returns `401`, and a token that lacks
+    permission for the requested operation returns `403`. A missing or empty
+    `x-tenant-id` header is a request validation failure and returns `400`,
+    not `401`; a well-formed header naming a tenant you cannot access
+    returns `403`.
 
     ### 1. Obtain a token
 
@@ -84,6 +92,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionResourceList'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -110,6 +122,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '503':
@@ -131,6 +147,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -155,6 +175,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -169,6 +193,10 @@ paths:
           description: Connection deleted
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /connections/{id}/exports/secrets/{secret_name}:
@@ -192,6 +220,10 @@ paths:
           description: Secret created or updated
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /connections/{id}/readiness:
@@ -209,6 +241,10 @@ paths:
           description: Connection is ready
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
@@ -277,6 +313,10 @@ paths:
           description: Credentials are valid
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
   /connection-types:
@@ -294,6 +334,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionTypeResourceList'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
     post:
@@ -316,6 +360,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionTypeResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /connection-types/{id}:
@@ -335,6 +383,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionTypeResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -359,6 +411,10 @@ paths:
                 $ref: '#/components/schemas/DataConnectionTypeResource'
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
     delete:
@@ -371,6 +427,10 @@ paths:
           description: Connection type deleted
         '400':
           $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
   /audit/data-connection-types:
@@ -754,6 +814,24 @@ components:
           example:
             code: bad_request
             message: 'Invalid request: missing required field ''name'''
+    Unauthorized:
+      description: Invalid or missing authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unauthenticated
+            message: invalid or missing bearer token
+    Forbidden:
+      description: Insufficient permissions
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: forbidden
+            message: permission denied
     ServiceUnavailable:
       description: Backend service unavailable
       content:
@@ -781,24 +859,6 @@ components:
           example:
             code: not_found
             message: Data connection 'abc' not found for tenant 't1'
-    Unauthorized:
-      description: Invalid or missing authentication token
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            code: unauthenticated
-            message: invalid or missing bearer token
-    Forbidden:
-      description: Insufficient permissions
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            code: forbidden
-            message: permission denied
     NotImplemented:
       description: Operation not supported by this connector
       content:
