@@ -5,7 +5,7 @@ Typed Python client for managing [Data Connect Hub](https://github.com/opendatah
 - Manage connection types and connections through the REST API
 - Validate credentials and connection readiness before querying data
 - Query tabular data through Apache Arrow Flight SQL
-- Download binary data from S3 and URI connections
+- Download binary data from connections that support binary reads
 - Authenticate with static or automatically refreshed bearer tokens
 
 ## Requirements
@@ -13,7 +13,6 @@ Typed Python client for managing [Data Connect Hub](https://github.com/opendatah
 - Python 3.11 or newer
 - A running Data Connect Hub deployment with its gateway accessible from your environment
 - A tenant namespace and a bearer token or service account authorized to use the Data Connect Hub services
-- The optional `flight` dependencies for Flight SQL queries
 
 ## Installation
 
@@ -25,7 +24,7 @@ pip install data-connect-hub
 pip install "data-connect-hub[flight]"
 ```
 
-The default installation includes REST support and installs `httpx` and `pydantic`. The `flight` extra also installs the Flight SQL driver, PyArrow, and pandas.
+The default installation includes REST support and installs `httpx` and `pydantic`. Install the `[flight]` extra when you need Flight SQL tabular queries (`read`, `read_pandas`, `read_batches`, `get_tables`). REST-only workflows — connection management, credential testing, readiness checks, and binary downloads — work with the default install. The `flight` extra also installs the Flight SQL driver, PyArrow, and pandas.
 
 ## Getting Started
 
@@ -106,7 +105,7 @@ df = table.to_pandas()
 | [quickstart.ipynb](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/quickstart.ipynb) | Guided REST and Flight SQL walkthrough |
 | [connection_types.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connection_types.py) | Listing, creating, and deleting connection types |
 | [connections.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connections.py) | Credential testing and connection lifecycle operations |
-| [binary_download.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/binary_download.py) | Binary downloads from S3 or URI connections |
+| [binary_download.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/binary_download.py) | Binary downloads with `download_binary` |
 | [flight_query.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/flight_query.py) | Tabular queries with Flight SQL |
 | [token_provider.py](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/token_provider.py) | Refreshing short-lived Kubernetes service account tokens |
 
@@ -195,7 +194,7 @@ Describes a single input field in the connection credential form.
 | `"string"` | Free-text single-line input |
 | `"enum"` | One of `enum_values` |
 
-`type` is a free-form string that only tells a client how to render the input — the server neither validates nor interprets it. Its one credential check is that every field with `required=True` is present in the submitted secret. Every [built-in connection type](https://github.com/opendatahub-io/data-connect-hub/tree/main/config/connection-types) uses `"string"`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
+`type` is a client-side rendering hint for credential forms — the server stores it but does not validate or use it when connecting. Backend behavior is determined by the connection type's `provider` field (e.g. `"postgres"`, `"s3"`), not by `CredentialField.type`. The server's credential check is only that every field with `required=True` is present in the submitted secret. Every [built-in connection type](https://github.com/opendatahub-io/data-connect-hub/tree/main/config/connection-types) uses `"string"` for `type`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
 
 ### Connection Management (REST)
 
@@ -274,7 +273,7 @@ client.export_connection(conn.id, "my-db-export")
 
 See [`examples/connections.py`](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connections.py) for a runnable lifecycle example that loads credentials from a JSON file rather than source code.
 
-Binary downloads from S3 and URI connections return `bytes`, which are buffered in memory and can be written directly to a file:
+Binary downloads from connections with `format="binary"` return `bytes`, which are buffered in memory and can be written directly to a file:
 
 ```python
 from pathlib import Path

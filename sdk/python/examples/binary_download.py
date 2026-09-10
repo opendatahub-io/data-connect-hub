@@ -1,10 +1,10 @@
-"""Download binary data from an S3 or URI connection via the REST API.
+"""Download binary data from a binary-format connection via the REST API.
 
 Usage:
     python examples/binary_download.py
 
 Requires a running DCH gateway (default: localhost:8443) and an existing
-binary S3 or URI connection. Set environment variables to override defaults:
+connection with format="binary". Set environment variables to override defaults:
     DCH_HOST, DCH_TOKEN, DCH_TENANT_ID, DCH_CA_CERT, DCH_INSECURE,
     DCH_CONNECTION_ID, DCH_BINARY_PATH, DCH_OUTPUT_FILE
 
@@ -20,7 +20,7 @@ from data_connect_hub import DataConnectClient
 connection_id = os.getenv("DCH_CONNECTION_ID", "")
 binary_path = os.getenv("DCH_BINARY_PATH", "")
 if not connection_id or not binary_path:
-    print("Set DCH_CONNECTION_ID and DCH_BINARY_PATH for an S3 or URI connection.")
+    print("Set DCH_CONNECTION_ID and DCH_BINARY_PATH for a binary-format connection.")
     raise SystemExit(1)
 
 output_file = Path(os.getenv("DCH_OUTPUT_FILE", "download.bin"))
