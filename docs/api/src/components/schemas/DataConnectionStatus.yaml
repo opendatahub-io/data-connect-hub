@@ -1,4 +1,6 @@
 type: object
+description: >
+  Live connection health, updated by readiness checks and credential validation.
 required: [state]
 properties:
   state:

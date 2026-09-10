@@ -1,17 +1,24 @@
 type: object
 description: >
   RFC 7396 JSON Merge Patch for a DataConnection. Supply only
-  the fields you want to change.
+  the fields you want to change. Use `credentials_ref` to change the
+  credentials secret reference. Inline `credentials` in the patch body
+  are silently ignored.
 properties:
   name:
     type: string
+    description: Display name for the connection.
   data_connection_type_id:
     type: string
+    description: References a connection type id.
   format:
     $ref: "DataFormat.yaml"
   credentials_ref:
     $ref: "CredentialsRef.yaml"
   properties:
     type: object
+    description: >
+      Connector-specific non-credential configuration (e.g. host, port, bucket).
+      Keys and values are strings.
     additionalProperties:
       type: string

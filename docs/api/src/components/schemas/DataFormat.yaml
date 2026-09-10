@@ -1,2 +1,6 @@
 type: string
+description: >
+  Data access format for this connection.
+  `tabular` — queried with SQL/Flight, returns rows.
+  `binary` — opaque objects addressed by path.
 enum: [tabular, binary]

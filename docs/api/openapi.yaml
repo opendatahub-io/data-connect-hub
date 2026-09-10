@@ -56,7 +56,10 @@ security:
     bearerAuth: []
 tags:
   - name: connections
-    description: Data connection management
+    description: |
+      A `connection` binds a connection type to credentials stored in a Kubernetes secret and connector-specific `properties`. Connections are tenant-scoped and require the `x-tenant-id` header.
+      On create, supply credentials via `credentials_ref` (reference an existing secret) or `credentials` (the server creates the secret). On patch, use `credentials_ref` to point at a different secret; inline `credentials` in the patch body are silently ignored.
+      The `status.state` field reflects live connection health. Call `/connections/{id}/readiness` to refresh it.
   - name: connection-types
     description: |
       A `connection type` defines a schema for a data `connection`. A connection type must be created before creating a connection of that type. Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by the operator are known as `global` connection types and are accessible by all tenants. Connection types created by a tenant are only accessible by that tenant.
@@ -82,11 +85,13 @@ paths:
     get:
       operationId: listConnections
       summary: List connections
+      description: |
+        Returns all connections accessible to the tenant identified by `x-tenant-id`. The response is a `DataConnectionResourceList`.
       tags:
         - connections
       responses:
         '200':
-          description: Connection list
+          description: List of connection resources for the tenant
           content:
             application/json:
               schema:
@@ -105,6 +110,8 @@ paths:
       tags:
         - connections
       description: |
+        Creates a connection that binds a connection type to credentials and connector-specific properties. The referenced connection type must already exist. Use `/test/credentials` to validate credentials before creating a connection.
+        Returns `400` with `credentials_check_failed` when inline credentials do not satisfy the connection type schema. For inline credentials, a missing connection type returns `404`; for a `credentials_ref`, it returns `422`.
         Accepts two payload variants (untagged union): use `credentials_ref` to reference an existing secret, or `credentials` to supply inline credentials (the server creates the secret automatically).
       requestBody:
         required: true
@@ -116,7 +123,7 @@ paths:
                 - $ref: '#/components/schemas/DataConnectionWithCreds'
       responses:
         '201':
-          description: Connection created
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -127,21 +134,27 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /connections/{id}:
     parameters:
-      - $ref: '#/components/parameters/resourceId'
+      - $ref: '#/components/parameters/connectionId'
     get:
       operationId: getConnection
       summary: Get a connection
+      description: |
+        Returns the full connection resource, including `metadata`, `resource`, and `status`.
       tags:
         - connections
       responses:
         '200':
-          description: Connection details
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -158,7 +171,7 @@ paths:
       operationId: patchConnection
       summary: Update a connection
       description: |
-        Partially updates a connection using JSON Merge Patch (RFC 7396). Supply only the fields you want to change; omitted fields are left unchanged.
+        Partially updates a connection using JSON Merge Patch (RFC 7396). Supply only the fields you want to change; omitted fields are left unchanged. To change the credentials secret reference, patch `credentials_ref`. Inline `credentials` in the patch body are silently ignored.
       tags:
         - connections
       requestBody:
@@ -169,7 +182,7 @@ paths:
               $ref: '#/components/schemas/DataConnectionMergePatch'
       responses:
         '200':
-          description: Connection updated
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -182,11 +195,15 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
     delete:
       operationId: deleteConnection
       summary: Delete a connection
+      description: |
+        Permanently deletes the connection. The credentials secret referenced by the connection is not deleted.
       tags:
         - connections
       responses:
@@ -202,7 +219,7 @@ paths:
           $ref: '#/components/responses/NotFound'
   /connections/{id}/exports/secrets/{secret_name}:
     parameters:
-      - $ref: '#/components/parameters/resourceId'
+      - $ref: '#/components/parameters/connectionId'
       - name: secret_name
         in: path
         required: true
@@ -229,12 +246,13 @@ paths:
           $ref: '#/components/responses/NotFound'
   /connections/{id}/readiness:
     parameters:
-      - $ref: '#/components/parameters/resourceId'
+      - $ref: '#/components/parameters/connectionId'
     post:
       operationId: checkConnectionReadiness
       summary: Check connection readiness
       description: |
         Validates that the connection's credentials secret exists, matches the connection type schema, and that the data source is reachable. Updates the connection status accordingly.
+        When a credentials secret cannot be read, fails schema validation, or the data-source check fails, the connection `status` is updated before the error is returned. A missing connection returns `502` without a status update. Returns `400` with `invalid_secret` or `credentials_check_failed` when the secret is missing or does not match the connection type schema. Returns `502` with `connection_check_failed` when the connection is not found or the data source check fails. Returns `500` with `status_update_failed` when the service cannot persist an updated connection status.
       tags:
         - connections
       responses:
@@ -246,18 +264,18 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
-        '404':
-          $ref: '#/components/responses/NotFound'
-        '422':
-          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '502':
+          $ref: '#/components/responses/BadGateway'
   /connections/{id}/binary:
     parameters:
-      - $ref: '#/components/parameters/resourceId'
+      - $ref: '#/components/parameters/connectionId'
     get:
       operationId: downloadBinary
       summary: Download binary data from a connection
       description: |
-        Streams binary data (files, objects) from a data connection. The file path is connector-specific: for S3 it is an object key within the configured bucket, for URI connectors it is a relative URL path joined to the base URI. Only connectors that support binary reads (currently S3 and URI) will return data; all others respond with 501.
+        Streams binary data (files, objects) from a data connection. The `path` query parameter is connector-specific (for example, an object key or a relative URL path). Only connectors that support binary reads will return data; unsupported connectors respond with `501`.
       tags:
         - connections
       parameters:
@@ -462,6 +480,13 @@ components:
       schema:
         type: string
       description: Resource unique identifier
+    connectionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the connection
   schemas:
     HealthResponse:
       type: object
@@ -474,6 +499,8 @@ components:
           example: Data Connect Hub
     ResourceMetadata:
       type: object
+      description: |
+        Resource identity and timestamps (id, tenant_id, created_at, updated_at).
       required:
         - id
         - created_at
@@ -490,13 +517,17 @@ components:
         created_at:
           type: string
           format: date-time
+          description: Timestamp when the resource was created.
           example: '2026-01-01T00:00:00Z'
         updated_at:
           type: string
           format: date-time
+          description: Timestamp when the resource was last updated.
           example: '2026-01-01T00:00:00Z'
     DataFormat:
       type: string
+      description: |
+        Data access format for this connection. `tabular` — queried with SQL/Flight, returns rows. `binary` — opaque objects addressed by path.
       enum:
         - tabular
         - binary
@@ -508,7 +539,8 @@ components:
       properties:
         secret:
           type: string
-          description: Name of the Kubernetes secret
+          description: |
+            Name of the Kubernetes secret in the tenant namespace. This is a bare secret name, not a `namespace/name` pair; cross-namespace references are not supported.
           example: my-db-creds
       additionalProperties: false
     DataConnection:
@@ -524,6 +556,7 @@ components:
       properties:
         name:
           type: string
+          description: Display name for the connection.
           example: my-postgres
         data_connection_type_id:
           type: string
@@ -535,6 +568,8 @@ components:
           $ref: '#/components/schemas/CredentialsRef'
         properties:
           type: object
+          description: |
+            Connector-specific non-credential configuration (e.g. host, port, bucket). Keys and values are strings.
           additionalProperties:
             type: string
           example:
@@ -542,12 +577,16 @@ components:
             port: '5432'
     DataConnectionState:
       type: string
+      description: |
+        Connection health state. `ready` — credentials valid and source is queryable. `ingestion_not_ready` — credentials valid but source cannot be queried. `not_ready` — referenced secret is missing or invalid.
       enum:
         - ready
         - ingestion_not_ready
         - not_ready
     DataConnectionStatus:
       type: object
+      description: |
+        Live connection health, updated by readiness checks and credential validation.
       required:
         - state
       properties:
@@ -563,6 +602,8 @@ components:
           description: Timestamp of the last status update
     DataConnectionResource:
       type: object
+      description: |
+        A connection resource wrapping metadata, spec, and live status.
       required:
         - metadata
         - resource
@@ -583,8 +624,10 @@ components:
         total_count:
           type: integer
           minimum: 0
+          description: Total number of connections for the tenant.
         items:
           type: array
+          description: Connection resources for the tenant.
           items:
             $ref: '#/components/schemas/DataConnectionResource'
     ErrorResponse:
@@ -603,7 +646,8 @@ components:
           example: Data connection 'abc' not found for tenant 't1'
     InlineCreds:
       type: object
-      description: Inline credentials — the secret name and its key-value properties.
+      description: |
+        Inline credentials — the secret name and its key-value properties. Only used on `POST /connections`. If included in a PATCH body, the field is silently ignored; use `credentials_ref` to change the secret reference.
       required:
         - secret
         - properties
@@ -634,6 +678,7 @@ components:
       properties:
         name:
           type: string
+          description: Display name for the connection.
           example: my-postgres
         data_connection_type_id:
           type: string
@@ -645,6 +690,8 @@ components:
           $ref: '#/components/schemas/InlineCreds'
         properties:
           type: object
+          description: |
+            Connector-specific non-credential configuration (e.g. host, port, bucket). Keys and values are strings.
           additionalProperties:
             type: string
           example:
@@ -653,18 +700,22 @@ components:
     DataConnectionMergePatch:
       type: object
       description: |
-        RFC 7396 JSON Merge Patch for a DataConnection. Supply only the fields you want to change.
+        RFC 7396 JSON Merge Patch for a DataConnection. Supply only the fields you want to change. Use `credentials_ref` to change the credentials secret reference. Inline `credentials` in the patch body are silently ignored.
       properties:
         name:
           type: string
+          description: Display name for the connection.
         data_connection_type_id:
           type: string
+          description: References a connection type id.
         format:
           $ref: '#/components/schemas/DataFormat'
         credentials_ref:
           $ref: '#/components/schemas/CredentialsRef'
         properties:
           type: object
+          description: |
+            Connector-specific non-credential configuration (e.g. host, port, bucket). Keys and values are strings.
           additionalProperties:
             type: string
     TestCredentials:
@@ -847,15 +898,6 @@ components:
           example:
             code: service_unavailable
             message: Metadata store is not available
-    UnprocessableEntity:
-      description: Request semantically invalid
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/ErrorResponse'
-          example:
-            code: unprocessable_entity
-            message: Connection type '550e8400-e29b-41d4-a716-446655440000' does not exist
     NotFound:
       description: Resource not found
       content:
@@ -865,6 +907,42 @@ components:
           example:
             code: not_found
             message: Data connection 'abc' not found for tenant 't1'
+    Conflict:
+      description: Resource conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: conflict
+            message: Data connection already exists
+    UnprocessableEntity:
+      description: Request semantically invalid
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: unprocessable_entity
+            message: Connection type '550e8400-e29b-41d4-a716-446655440000' does not exist
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: status_update_failed
+            message: Failed to update data connection status
+    BadGateway:
+      description: Upstream connection check failed
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            code: connection_check_failed
+            message: 550e8400-e29b-41d4-a716-446655440000
     NotImplemented:
       description: Operation not supported by this connector
       content:

@@ -1,2 +1,7 @@
 type: string
+description: >
+  Connection health state.
+  `ready` — credentials valid and source is queryable.
+  `ingestion_not_ready` — credentials valid but source cannot be queried.
+  `not_ready` — referenced secret is missing or invalid.
 enum: [ready, ingestion_not_ready, not_ready]

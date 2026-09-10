@@ -1,4 +1,6 @@
 type: object
+description: >
+  A connection resource wrapping metadata, spec, and live status.
 required: [metadata, resource, status]
 properties:
   metadata:

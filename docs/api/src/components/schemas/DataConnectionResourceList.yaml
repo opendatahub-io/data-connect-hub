@@ -4,7 +4,9 @@ properties:
   total_count:
     type: integer
     minimum: 0
+    description: Total number of connections for the tenant.
   items:
     type: array
+    description: Connection resources for the tenant.
     items:
       $ref: "DataConnectionResource.yaml"

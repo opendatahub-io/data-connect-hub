@@ -6,6 +6,7 @@ required: [name, data_connection_type_id, format, credentials, properties]
 properties:
   name:
     type: string
+    description: Display name for the connection.
     example: my-postgres
   data_connection_type_id:
     type: string
@@ -17,6 +18,9 @@ properties:
     $ref: "InlineCreds.yaml"
   properties:
     type: object
+    description: >
+      Connector-specific non-credential configuration (e.g. host, port, bucket).
+      Keys and values are strings.
     additionalProperties:
       type: string
     example:

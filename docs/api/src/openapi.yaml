@@ -78,10 +78,13 @@ paths:
     get:
       operationId: listConnections
       summary: List connections
+      description: >
+        Returns all connections accessible to the tenant identified by
+        `x-tenant-id`. The response is a `DataConnectionResourceList`.
       tags: [connections]
       responses:
         "200":
-          description: Connection list
+          description: List of connection resources for the tenant
           content:
             application/json:
               schema:
@@ -99,6 +102,16 @@ paths:
       summary: Create a connection
       tags: [connections]
       description: >
+        Creates a connection that binds a connection type to credentials and
+        connector-specific properties. The referenced connection type must
+        already exist. Use `/test/credentials` to validate credentials
+        before creating a connection.
+
+        Returns `400` with `credentials_check_failed` when inline
+        credentials do not satisfy the connection type schema. For inline
+        credentials, a missing connection type returns `404`; for a
+        `credentials_ref`, it returns `422`.
+
         Accepts two payload variants (untagged union):
         use `credentials_ref` to reference an existing secret,
         or `credentials` to supply inline credentials (the server
@@ -113,7 +126,7 @@ paths:
                 - $ref: "components/schemas/DataConnectionWithCreds.yaml"
       responses:
         "201":
-          description: Connection created
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -124,6 +137,10 @@ paths:
           $ref: "components/responses/Unauthorized.yaml"
         "403":
           $ref: "components/responses/Forbidden.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+        "409":
+          $ref: "components/responses/Conflict.yaml"
         "422":
           $ref: "components/responses/UnprocessableEntity.yaml"
         "503":
@@ -131,14 +148,17 @@ paths:
 
   /connections/{id}:
     parameters:
-      - $ref: "#/components/parameters/resourceId"
+      - $ref: "#/components/parameters/connectionId"
     get:
       operationId: getConnection
       summary: Get a connection
+      description: >
+        Returns the full connection resource, including `metadata`,
+        `resource`, and `status`.
       tags: [connections]
       responses:
         "200":
-          description: Connection details
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -157,6 +177,8 @@ paths:
       description: >
         Partially updates a connection using JSON Merge Patch (RFC 7396).
         Supply only the fields you want to change; omitted fields are left unchanged.
+        To change the credentials secret reference, patch `credentials_ref`.
+        Inline `credentials` in the patch body are silently ignored.
       tags: [connections]
       requestBody:
         required: true
@@ -166,7 +188,7 @@ paths:
               $ref: "components/schemas/DataConnectionMergePatch.yaml"
       responses:
         "200":
-          description: Connection updated
+          description: Full connection resource with metadata, spec, and status
           content:
             application/json:
               schema:
@@ -179,11 +201,16 @@ paths:
           $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
+        "409":
+          $ref: "components/responses/Conflict.yaml"
         "422":
           $ref: "components/responses/UnprocessableEntity.yaml"
     delete:
       operationId: deleteConnection
       summary: Delete a connection
+      description: >
+        Permanently deletes the connection. The credentials secret referenced
+        by the connection is not deleted.
       tags: [connections]
       responses:
         "204":
@@ -199,7 +226,7 @@ paths:
 
   /connections/{id}/exports/secrets/{secret_name}:
     parameters:
-      - $ref: "#/components/parameters/resourceId"
+      - $ref: "#/components/parameters/connectionId"
       - name: secret_name
         in: path
         required: true
@@ -229,7 +256,7 @@ paths:
 
   /connections/{id}/readiness:
     parameters:
-      - $ref: "#/components/parameters/resourceId"
+      - $ref: "#/components/parameters/connectionId"
     post:
       operationId: checkConnectionReadiness
       summary: Check connection readiness
@@ -237,6 +264,17 @@ paths:
         Validates that the connection's credentials secret exists,
         matches the connection type schema, and that the data source
         is reachable. Updates the connection status accordingly.
+
+        When a credentials secret cannot be read, fails schema validation,
+        or the data-source check fails, the connection `status` is updated
+        before the error is returned. A missing connection returns `502`
+        without a status update. Returns `400` with `invalid_secret` or
+        `credentials_check_failed` when the secret is missing or does
+        not match the connection type schema. Returns `502` with
+        `connection_check_failed` when the connection is not found or
+        the data source check fails. Returns `500` with
+        `status_update_failed` when the service cannot persist an
+        updated connection status.
       tags: [connections]
       responses:
         "204":
@@ -247,24 +285,23 @@ paths:
           $ref: "components/responses/Unauthorized.yaml"
         "403":
           $ref: "components/responses/Forbidden.yaml"
-        "404":
-          $ref: "components/responses/NotFound.yaml"
-        "422":
-          $ref: "components/responses/UnprocessableEntity.yaml"
+        "500":
+          $ref: "components/responses/InternalServerError.yaml"
+        "502":
+          $ref: "components/responses/BadGateway.yaml"
 
   /connections/{id}/binary:
     parameters:
-      - $ref: "#/components/parameters/resourceId"
+      - $ref: "#/components/parameters/connectionId"
     get:
       operationId: downloadBinary
       summary: Download binary data from a connection
       description: >
         Streams binary data (files, objects) from a data connection.
-        The file path is connector-specific: for S3 it is an object key
-        within the configured bucket, for URI connectors it is a relative
-        URL path joined to the base URI.
-        Only connectors that support binary reads (currently S3 and URI)
-        will return data; all others respond with 501.
+        The `path` query parameter is connector-specific (for example, an
+        object key or a relative URL path). Only connectors that support
+        binary reads will return data; unsupported connectors respond
+        with `501`.
       tags: [connections]
       parameters:
         - name: path
@@ -494,10 +531,28 @@ components:
       schema:
         type: string
       description: Resource unique identifier
+    connectionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Unique identifier of the connection
 
 tags:
   - name: connections
-    description: Data connection management
+    description: >
+      A `connection` binds a connection type to credentials stored in a
+      Kubernetes secret and connector-specific `properties`. Connections are
+      tenant-scoped and require the `x-tenant-id` header.
+
+      On create, supply credentials via `credentials_ref` (reference an
+      existing secret) or `credentials` (the server creates the secret).
+      On patch, use `credentials_ref` to point at a different secret;
+      inline `credentials` in the patch body are silently ignored.
+
+      The `status.state` field reflects live connection health. Call
+      `/connections/{id}/readiness` to refresh it.
   - name: connection-types
     description: >
      A `connection type` defines a schema for a data `connection`.

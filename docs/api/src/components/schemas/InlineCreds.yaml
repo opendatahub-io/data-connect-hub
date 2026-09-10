@@ -1,5 +1,8 @@
 type: object
-description: Inline credentials — the secret name and its key-value properties.
+description: >
+  Inline credentials — the secret name and its key-value properties.
+  Only used on `POST /connections`. If included in a PATCH body, the field
+  is silently ignored; use `credentials_ref` to change the secret reference.
 required: [secret, properties]
 properties:
   secret:

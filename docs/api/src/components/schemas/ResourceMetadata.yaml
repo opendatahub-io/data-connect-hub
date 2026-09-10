@@ -1,4 +1,6 @@
 type: object
+description: >
+  Resource identity and timestamps (id, tenant_id, created_at, updated_at).
 required: [id, created_at, updated_at]
 properties:
   id:
@@ -12,8 +14,10 @@ properties:
   created_at:
     type: string
     format: date-time
+    description: Timestamp when the resource was created.
     example: "2026-01-01T00:00:00Z"
   updated_at:
     type: string
     format: date-time
+    description: Timestamp when the resource was last updated.
     example: "2026-01-01T00:00:00Z"
