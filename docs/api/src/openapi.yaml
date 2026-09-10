@@ -6,7 +6,15 @@ info:
 
     ## Authentication
 
-    All endpoints except `/health` require a bearer token and a tenant header.
+    All endpoints except `/health` require a bearer token. All endpoints
+    except `/health` and `/audit/data-connection-types` additionally require
+    the `x-tenant-id` header.
+
+    A missing or invalid token returns `401`, and a token that lacks
+    permission for the requested operation returns `403`. A missing or empty
+    `x-tenant-id` header is a request validation failure and returns `400`,
+    not `401`; a well-formed header naming a tenant you cannot access
+    returns `403`.
 
     ### 1. Obtain a token
 
@@ -80,6 +88,10 @@ paths:
                 $ref: "components/schemas/DataConnectionResourceList.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
     post:
@@ -108,6 +120,10 @@ paths:
                 $ref: "components/schemas/DataConnectionResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "422":
           $ref: "components/responses/UnprocessableEntity.yaml"
         "503":
@@ -129,6 +145,10 @@ paths:
                 $ref: "components/schemas/DataConnectionResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
     patch:
@@ -153,6 +173,10 @@ paths:
                 $ref: "components/schemas/DataConnectionResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
         "422":
@@ -166,6 +190,10 @@ paths:
           description: Connection deleted
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
 
@@ -192,6 +220,10 @@ paths:
           description: Secret created or updated
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
 
@@ -211,6 +243,10 @@ paths:
           description: Connection is ready
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
         "422":
@@ -285,6 +321,10 @@ paths:
           description: Credentials are valid
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "422":
           $ref: "components/responses/UnprocessableEntity.yaml"
 
@@ -306,14 +346,18 @@ paths:
                 $ref: "components/schemas/DataConnectionTypeResourceList.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
     post:
       operationId: createConnectionType
       summary: Create a connection type
       description: >
-        Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types.
-        Connection types created by a tenant are are only accessible by that tenant.
+        Default connection types are created by the Data Connect Hub operator. You can also create connection types.
+        Connection types created by a tenant are only accessible by that tenant.
       tags: [connection-types]
       requestBody:
         required: true
@@ -330,6 +374,10 @@ paths:
                 $ref: "components/schemas/DataConnectionTypeResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
 
@@ -349,6 +397,10 @@ paths:
                 $ref: "components/schemas/DataConnectionTypeResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
     patch:
@@ -373,6 +425,10 @@ paths:
                 $ref: "components/schemas/DataConnectionTypeResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
     delete:
@@ -384,6 +440,10 @@ paths:
           description: Connection type deleted
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
 
@@ -399,10 +459,15 @@ paths:
         This endpoint does not require the x-tenant-id header.
       x-internal: true
       tags: [connection-types]
-      security: []
+      security:
+        - bearerAuth: []
       responses:
         "202":
           description: Audit started
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
 
@@ -435,10 +500,10 @@ tags:
     description: Data connection management
   - name: connection-types
     description: >
-     A `connection type` defines a schema for a data `connection`. 
-     A connection type must be created before creating a connection of that type. 
-     Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. 
-     Connection types created by the operator are known as `global` connection types and are accessible by all tenants. 
-     Connection types created by a tenant are are only accessible by that tenant.
+     A `connection type` defines a schema for a data `connection`.
+     A connection type must be created before creating a connection of that type.
+     Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types.
+     Connection types created by the operator are known as `global` connection types and are accessible by all tenants.
+     Connection types created by a tenant are only accessible by that tenant.
   - name: test
     description: Test operations

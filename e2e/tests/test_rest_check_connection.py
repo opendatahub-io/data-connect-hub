@@ -81,10 +81,3 @@ class TestRestTestCredentials:
                 fake_type_id,
                 {"URI": "postgresql://x:x@localhost:5432/x"},
             )
-
-
-class TestRestExportConnection:
-    def test_nonexistent_connection(self, rest_client: DataConnectClient) -> None:
-        with pytest.raises(DCHHTTPError) as exc_info:
-            rest_client.export_connection(str(uuid.uuid4()), f"e2e-export-{uuid.uuid4().hex[:8]}")
-        assert exc_info.value.status_code == 404

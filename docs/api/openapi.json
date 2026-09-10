@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Data Connect Hub REST API",
-    "description": "REST API for managing data connections and connection types.\n\n## Authentication\n\nAll endpoints except `/health` require a bearer token and a tenant header.\n\n### 1. Obtain a token\n\nFor your own user:\n\n```console\nexport user_token=$(oc whoami -t)\n```\n\nFor a ServiceAccount, bind the audience the service expects:\n\n```console\nexport user_token=$(oc create token <sa-name> -n <namespace> \\\n  --audience=\"$(oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}')\" \\\n  --duration=1h)\n```\n\nThe token audience must match the `DataConnectService` CR's configured\n`spec.tokenReviewAudiences`; a mismatch returns `401 unauthenticated`.\nThe list is empty by default, in which case the cluster API server's\nown audience applies.\n\n### 2. Send the request\n\n```console\nexport TENANT_NAMESPACE=dch-example\n\ncurl -H \"Authorization: Bearer $user_token\" \\\n     -H \"x-tenant-id: $TENANT_NAMESPACE\" \\\n     https://dch-rest-dch-services.apps.example.com/api/v1alpha1/data/connections\n```\n",
+    "description": "REST API for managing data connections and connection types.\n\n## Authentication\n\nAll endpoints except `/health` require a bearer token. All endpoints\nexcept `/health` and `/audit/data-connection-types` additionally require\nthe `x-tenant-id` header.\n\nA missing or invalid token returns `401`, and a token that lacks\npermission for the requested operation returns `403`. A missing or empty\n`x-tenant-id` header is a request validation failure and returns `400`,\nnot `401`; a well-formed header naming a tenant you cannot access\nreturns `403`.\n\n### 1. Obtain a token\n\nFor your own user:\n\n```console\nexport user_token=$(oc whoami -t)\n```\n\nFor a ServiceAccount, bind the audience the service expects:\n\n```console\nexport user_token=$(oc create token <sa-name> -n <namespace> \\\n  --audience=\"$(oc get authentication cluster -o jsonpath='{.spec.serviceAccountIssuer}')\" \\\n  --duration=1h)\n```\n\nThe token audience must match the `DataConnectService` CR's configured\n`spec.tokenReviewAudiences`; a mismatch returns `401 unauthenticated`.\nThe list is empty by default, in which case the cluster API server's\nown audience applies.\n\n### 2. Send the request\n\n```console\nexport TENANT_NAMESPACE=dch-example\n\ncurl -H \"Authorization: Bearer $user_token\" \\\n     -H \"x-tenant-id: $TENANT_NAMESPACE\" \\\n     https://dch-rest-dch-services.apps.example.com/api/v1alpha1/data/connections\n```\n",
     "version": "0.1.0",
     "license": {
       "name": "Apache-2.0"
@@ -26,7 +26,7 @@
     },
     {
       "name": "connection-types",
-      "description": "A `connection type` defines a schema for a data `connection`.  A connection type must be created before creating a connection of that type.  Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types.  Connection types created by the operator are known as `global` connection types and are accessible by all tenants.  Connection types created by a tenant are are only accessible by that tenant.\n"
+      "description": "A `connection type` defines a schema for a data `connection`. A connection type must be created before creating a connection of that type. Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by the operator are known as `global` connection types and are accessible by all tenants. Connection types created by a tenant are only accessible by that tenant.\n"
     },
     {
       "name": "test",
@@ -80,6 +80,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -123,6 +129,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
           },
@@ -157,6 +169,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -194,6 +212,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           },
@@ -214,6 +238,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -250,6 +280,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -275,6 +311,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -378,6 +420,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "422": {
             "$ref": "#/components/responses/UnprocessableEntity"
           }
@@ -406,6 +454,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
           }
@@ -414,7 +468,7 @@
       "post": {
         "operationId": "createConnectionType",
         "summary": "Create a connection type",
-        "description": "Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by a tenant are are only accessible by that tenant.\n",
+        "description": "Default connection types are created by the Data Connect Hub operator. You can also create connection types. Connection types created by a tenant are only accessible by that tenant.\n",
         "tags": [
           "connection-types"
         ],
@@ -441,6 +495,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "503": {
             "$ref": "#/components/responses/ServiceUnavailable"
@@ -473,6 +533,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -510,6 +576,12 @@
           "400": {
             "$ref": "#/components/responses/BadRequest"
           },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
           "404": {
             "$ref": "#/components/responses/NotFound"
           }
@@ -527,6 +599,12 @@
           },
           "400": {
             "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
@@ -1064,6 +1142,34 @@
           }
         }
       },
+      "Unauthorized": {
+        "description": "Invalid or missing authentication token",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "unauthenticated",
+              "message": "invalid or missing bearer token"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "Insufficient permissions",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            },
+            "example": {
+              "code": "forbidden",
+              "message": "permission denied"
+            }
+          }
+        }
+      },
       "ServiceUnavailable": {
         "description": "Backend service unavailable",
         "content": {
@@ -1102,34 +1208,6 @@
             "example": {
               "code": "not_found",
               "message": "Data connection 'abc' not found for tenant 't1'"
-            }
-          }
-        }
-      },
-      "Unauthorized": {
-        "description": "Invalid or missing authentication token",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
-            },
-            "example": {
-              "code": "unauthenticated",
-              "message": "invalid or missing bearer token"
-            }
-          }
-        }
-      },
-      "Forbidden": {
-        "description": "Insufficient permissions",
-        "content": {
-          "application/json": {
-            "schema": {
-              "$ref": "#/components/schemas/ErrorResponse"
-            },
-            "example": {
-              "code": "forbidden",
-              "message": "permission denied"
             }
           }
         }
