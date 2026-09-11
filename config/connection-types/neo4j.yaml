@@ -24,3 +24,8 @@ credentials_fields:
     required: false
     type: string
     default_value: neo4j
+  - name: NEO4J_CA_CERT
+    label: CA Certificate
+    description: CA certificate for TLS verification
+    required: false
+    type: string

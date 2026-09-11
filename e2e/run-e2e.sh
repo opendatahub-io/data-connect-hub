@@ -67,6 +67,7 @@ DCH_TENANT_NEO4J_URI="${DCH_TENANT_NEO4J_URI:-}"
 DCH_TENANT_NEO4J_ADMIN_PASSWORD="${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}"
 DCH_TENANT_NEO4J_USERNAME="${DCH_TENANT_NEO4J_USERNAME:-dch_reader}"
 DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
+DCH_TENANT_NEO4J_CA_CERT="${DCH_TENANT_NEO4J_CA_CERT:-}"
 DCH_TENANT_URI="${DCH_TENANT_URI:-}"
 
 E2E_SA_NAME="e2e-user"
@@ -285,6 +286,9 @@ setup_neo4j_secret() {
             --from-literal="NEO4J_PASSWORD=${DCH_TENANT_NEO4J_PASSWORD}"
         )
         [[ -n "${DCH_TENANT_NEO4J_DATABASE:-}" ]] && args+=(--from-literal="NEO4J_DATABASE=${DCH_TENANT_NEO4J_DATABASE}")
+        if [[ -n "${DCH_TENANT_NEO4J_CA_CERT}" ]]; then
+            args+=(--from-file="NEO4J_CA_CERT=${DCH_TENANT_NEO4J_CA_CERT}")
+        fi
         kubectl create secret generic "$NEO4J_SECRET" \
             -n "$DCH_TENANT_ID" \
             "${args[@]}" \
@@ -358,11 +362,16 @@ seed_neo4j_data() {
         echo "ERROR: set DCH_TENANT_NEO4J_ADMIN_PASSWORD in $CONFIG_FILE to seed Neo4j" >&2
         exit 1
     }
-    bash "$(dirname "$0")/scripts/seed-neo4j-data.sh" \
-        -u "$DCH_TENANT_NEO4J_URI" -n "$DCH_TENANT_ID" \
-        -a "$DCH_TENANT_NEO4J_ADMIN_PASSWORD" \
-        --user "$DCH_TENANT_NEO4J_USERNAME" \
+    local -a args=(
+        -u "$DCH_TENANT_NEO4J_URI"
+        -n "$DCH_TENANT_ID"
+        -a "$DCH_TENANT_NEO4J_ADMIN_PASSWORD"
+        --user "$DCH_TENANT_NEO4J_USERNAME"
         --pass "$DCH_TENANT_NEO4J_PASSWORD"
+    )
+    [[ -n "${DCH_TENANT_NEO4J_CA_CERT:-}" ]] && args+=(--ca-cert "$DCH_TENANT_NEO4J_CA_CERT")
+
+    bash "$(dirname "$0")/scripts/seed-neo4j-data.sh" "${args[@]}"
 }
 
 seed_es_data() {

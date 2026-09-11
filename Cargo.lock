@@ -3096,6 +3096,7 @@ dependencies = [
  "neo4rs",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing",
 ]
