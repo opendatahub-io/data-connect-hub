@@ -99,10 +99,9 @@ pub fn configure_metrics(config: &ServerConfig) -> Result<()> {
 pub async fn start_server(
     mut builder: tonic::transport::Server,
     auth: &utils::AuthConfig,
-    data_service: DataIngestionService,
+    mut data_service: DataIngestionService,
     addr: std::net::SocketAddr,
 ) -> Result<()> {
-    let service = FlightServiceServer::new(data_service);
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_serving::<FlightServiceServer<DataIngestionService>>()
@@ -114,12 +113,16 @@ pub async fn start_server(
             auth.cache_ttl_secs,
             auth.token_review_audiences
         );
-        let kube_auth = KubeAuthClient::try_default(
-            Duration::from_secs(auth.cache_ttl_secs),
-            auth.token_review_audiences.clone(),
-        )
-        .await?;
-        let auth_layer = AuthLayer::new(Arc::new(kube_auth));
+        let kube_auth = Arc::new(
+            KubeAuthClient::try_default(
+                Duration::from_secs(auth.cache_ttl_secs),
+                auth.token_review_audiences.clone(),
+            )
+            .await?,
+        );
+        data_service.auth_service = Some(kube_auth.clone());
+        let service = FlightServiceServer::new(data_service);
+        let auth_layer = AuthLayer::new(kube_auth);
         builder
             .layer(auth_layer)
             .add_service(health_service)
@@ -128,6 +131,7 @@ pub async fn start_server(
             .await?;
     } else {
         tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
+        let service = FlightServiceServer::new(data_service);
         builder
             .add_service(health_service)
             .add_service(service)

@@ -104,6 +104,21 @@ setup_user_rbac() {
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read-write \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+        # Allow the e2e test SA to call the audit endpoint (cluster-scoped, no tenant header)
+        kubectl apply -f - >/dev/null <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: e2e-user-audit
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-connection-types"]
+    verbs: ["update"]
+EOF
+        kubectl create clusterrolebinding e2e-user-audit-rb \
+            --clusterrole=e2e-user-audit \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
         kubectl create role e2e-user-export-secret \
             -n "$DCH_TENANT_ID" \

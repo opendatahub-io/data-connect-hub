@@ -297,6 +297,7 @@ async fn test_flight_sql_select_prompts() {
         Arc::new(connectors_registry),
         Arc::new(TestMetaStore),
         secret_store,
+        None,
         Default::default(),
     );
 

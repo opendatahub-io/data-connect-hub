@@ -124,7 +124,7 @@ async fn main() -> Result<()> {
     let auth = config.auth;
     let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
 
-    let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
+    let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, None, query_options);
 
     start_server(builder, &auth, service, addr).await?;
     tracing::info!("DataConnectorHub Flight service stopped");

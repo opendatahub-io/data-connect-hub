@@ -1,17 +1,24 @@
+use crate::flight::QueryContext;
 use commons::api::{X_REMOTE_GROUPS, X_REMOTE_USER, X_TENANT_ID};
 use http::header::AUTHORIZATION;
 use http_body::Body;
-use kube_utils::auth::{AuthError, KubeAuthClient};
+use kube_utils::auth::{AccessRequest, AuthError, AuthInfo, KubeAuthClient};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tonic::Status;
+use tonic::metadata::MetadataMap;
 use tower::{Layer, Service};
 use tracing::{debug, warn};
 
 const HEALTH_PATH_PREFIX: &str = "/grpc.health.v1.Health/";
+const DO_ACTION_PATH: &str = "/arrow.flight.protocol.FlightService/DoAction";
+const LIST_ACTIONS_PATH: &str = "/arrow.flight.protocol.FlightService/ListActions";
 const BEARER_PREFIX: &str = "Bearer ";
+
+pub const API_GROUP: &str = "dataconnecthub.opendatahub.io";
+pub const RESOURCE_DATA_CONNECTIONS: &str = "data-connections";
 
 #[derive(Clone)]
 pub struct AuthLayer {
@@ -78,20 +85,6 @@ where
                 },
             };
 
-            let tenant_id = match req
-                .headers()
-                .get(X_TENANT_ID)
-                .and_then(|v| v.to_str().ok())
-                .filter(|value| !value.is_empty())
-            {
-                Some(value) => value.to_string(),
-                None => {
-                    return Ok(grpc_error_response(Status::permission_denied(
-                        "x-tenant-id header is required",
-                    )));
-                },
-            };
-
             let auth_info = match auth_service.authenticate(&token).await {
                 Ok(info) => info,
                 Err(e) => {
@@ -99,8 +92,34 @@ where
                 },
             };
 
-            if let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await {
-                return Ok(grpc_error_response(auth_error_to_status(&e)));
+            let tenant_optional = path == DO_ACTION_PATH || path == LIST_ACTIONS_PATH;
+
+            let tenant_id = req
+                .headers()
+                .get(X_TENANT_ID)
+                .and_then(|v| v.to_str().ok())
+                .filter(|value| !value.is_empty())
+                .map(|v| v.to_string());
+
+            match (tenant_optional, &tenant_id) {
+                (true, _) => {
+                    debug!("Skipping SAR check for tenant-optional path={}", path);
+                },
+                (false, None) => {
+                    return Ok(grpc_error_response(Status::permission_denied(
+                        "x-tenant-id header is required",
+                    )));
+                },
+                (false, Some(tid)) => {
+                    let access = AccessRequest {
+                        api_group: API_GROUP,
+                        resource: RESOURCE_DATA_CONNECTIONS,
+                        verb: "get",
+                    };
+                    if let Err(e) = auth_service.authorize(&auth_info, tid, &access).await {
+                        return Ok(grpc_error_response(auth_error_to_status(&e)));
+                    }
+                },
             }
 
             debug!("Authenticated user={} for path={}", auth_info.username, path);
@@ -149,4 +168,40 @@ fn auth_error_to_status(e: &AuthError) -> Status {
 
 fn grpc_error_response<ResBody: Default>(status: Status) -> http::Response<ResBody> {
     status.into_http()
+}
+
+pub async fn authorize_request(
+    auth_service: Option<&KubeAuthClient>,
+    metadata: &MetadataMap,
+    access: &AccessRequest<'_>,
+) -> Result<(), Status> {
+    let tenant_id = QueryContext::tenant_id(metadata)?;
+
+    if let Some(auth_service) = auth_service {
+        let username = metadata
+            .get(X_REMOTE_USER)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let groups: Vec<String> = metadata
+            .get(X_REMOTE_GROUPS)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.split(',').map(|s| s.to_string()).collect())
+            .unwrap_or_default();
+
+        let auth_info = AuthInfo { username, groups };
+        auth_service
+            .authorize(&auth_info, tenant_id, access)
+            .await
+            .map_err(|e| match e {
+                AuthError::Forbidden(msg) => Status::permission_denied(msg),
+                other => {
+                    warn!("{other}");
+                    Status::internal("authorization check failed")
+                },
+            })?;
+    }
+
+    Ok(())
 }

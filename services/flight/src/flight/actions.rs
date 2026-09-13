@@ -1,4 +1,5 @@
 use crate::flight::QueryContext;
+use crate::flight::auth;
 use crate::flight::errors::map_connector_error;
 use crate::flight::service::DataIngestionService;
 use arrow::array::{Array, StringArray};
@@ -63,10 +64,20 @@ impl DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
         let action = request.get_ref();
         match action.r#type.as_str() {
-            ACTION_CHECK_DATA_CONNECTION => self.action_check_connection(&request).await,
             ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
-            ACTION_CHECK_CREDENTIALS => self.action_check_credentials(&request).await,
-            _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
+            action_type => {
+                let access = kube_utils::auth::AccessRequest {
+                    api_group: auth::API_GROUP,
+                    resource: auth::RESOURCE_DATA_CONNECTIONS,
+                    verb: "get",
+                };
+                auth::authorize_request(self.auth_service.as_deref(), request.metadata(), &access).await?;
+                match action_type {
+                    ACTION_CHECK_DATA_CONNECTION => self.action_check_connection(&request).await,
+                    ACTION_CHECK_CREDENTIALS => self.action_check_credentials(&request).await,
+                    _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
+                }
+            },
         }
     }
 

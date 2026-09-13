@@ -22,6 +22,7 @@ use commons::api::errors::ConnectorError;
 use commons::api::storage::MetaStoreReader;
 use commons::api::storage::{MetaStore, SecretStore};
 use futures::TryStreamExt;
+use kube_utils::auth::KubeAuthClient;
 use prost::Message;
 use prost::bytes::Bytes;
 use std::collections::HashMap;
@@ -66,6 +67,7 @@ pub struct DataIngestionService {
     pub(crate) connectors_registry: Arc<ConnectorsRegistry>,
     meta_store: Arc<dyn MetaStoreReader + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
+    pub(crate) auth_service: Option<Arc<KubeAuthClient>>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
 }
@@ -75,6 +77,7 @@ impl DataIngestionService {
         connectors_registry: Arc<ConnectorsRegistry>,
         meta_store: Arc<dyn MetaStore + Send + Sync>,
         secret_store: Arc<dyn SecretStore + Send + Sync>,
+        auth_service: Option<Arc<KubeAuthClient>>,
         query_options: QueryOptions,
     ) -> Self {
         let mut builder = SqlInfoDataBuilder::new();
@@ -89,6 +92,7 @@ impl DataIngestionService {
             connectors_registry,
             meta_store,
             secret_store,
+            auth_service,
             sql_info: builder.build().expect("valid sql info"),
             query_options,
         }
