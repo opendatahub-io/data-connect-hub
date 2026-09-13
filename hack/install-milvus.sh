@@ -73,6 +73,8 @@ else
         --set pulsarv3.enabled=false \
         --set etcd.replicaCount=1 \
         --set minio.mode=standalone \
+        --set minio.image.repository=quay.io/minio/minio \
+        --set minio.image.tag=RELEASE.2024-12-18T13-15-44Z \
         --set minio.resources.requests.memory=512Mi \
         --set standalone.resources.requests.memory=512Mi \
         --set standalone.resources.requests.cpu=200m \
