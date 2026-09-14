@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator, Sequence
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -25,8 +25,6 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     import pandas as pd
     import pyarrow as pa
 
@@ -263,7 +261,8 @@ class DataConnectClient:
     def check_connection_readiness(self, connection_id: str) -> None:
         self._rest.check_connection_readiness(connection_id)
 
-    def download_binary(self, connection_id: str, path: str) -> bytes:
+    def download_binary(self, connection_id: str, path: str) -> Generator[bytes, None, None]:
+        """Yield binary chunks, closing the response when exhausted or closed."""
         return self._rest.download_binary(connection_id, path)
 
     def test_credentials(self, connection_type_id: str, credentials: dict[str, str]) -> None:

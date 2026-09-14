@@ -210,7 +210,7 @@ client.delete_connection(connection_id) -> None
 client.check_connection_readiness(connection_id) -> None
 client.test_credentials(connection_type_id, credentials) -> None
 client.export_connection(connection_id, secret_name) -> None
-client.download_binary(connection_id, path) -> bytes
+client.download_binary(connection_id, path) -> Generator[bytes, None, None]
 ```
 
 #### `DataConnection`
@@ -237,7 +237,7 @@ Pass `id` as the `connection_id` argument to `get_connection`, `update_connectio
 | `"tabular"` | Queried with SQL, returns rows | `postgres`, `sqlite`, `elasticsearch`, `milvus`, `neo4j`, `uri`, `s3` |
 | `"binary"` | Opaque objects addressed by path | `s3`, `uri` |
 
-Tabular connections are read with the [Flight SQL methods](#tabular-data-queries-flight-sql). Read a binary connection with `client.download_binary(connection_id, path)`. The returned `bytes` are buffered in memory.
+Tabular connections are read with the [Flight SQL methods](#tabular-data-queries-flight-sql). `client.download_binary(connection_id, path)` returns a generator that streams byte chunks from a binary connection. HTTP and connection errors are raised while consuming the generator. The response closes automatically when the generator is exhausted or explicitly closed.
 
 You normally set `format` once, at `create_connection`, but it is not immutable: `update_connection(connection_id, data_format=...)` changes it, and the server accepts the new value without checking it against the provider or re-evaluating `status`. So switching a `postgres` connection to `binary` succeeds, leaves `status` reporting `ready`, and fails only when you try to read.
 
@@ -273,13 +273,19 @@ client.export_connection(conn.id, "my-db-export")
 
 See [`examples/connections.py`](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/connections.py) for a runnable lifecycle example that loads credentials from a JSON file rather than source code.
 
-Binary downloads from connections with `format="binary"` return `bytes`, which are buffered in memory and can be written directly to a file:
+Binary downloads from connections with `format="binary"` return a generator of byte chunks. Write each chunk to a temporary file and replace the destination after a successful download to avoid buffering the object or leaving a partial destination:
 
 ```python
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
-data = client.download_binary("conn-uuid", "models/model.bin")
-Path("model.bin").write_bytes(data)
+destination = Path("model.bin")
+with TemporaryDirectory(dir=destination.parent) as temporary_directory:
+    temporary_path = Path(temporary_directory) / destination.name
+    with temporary_path.open("wb") as output:
+        for chunk in client.download_binary("conn-uuid", "models/model.bin"):
+            output.write(chunk)
+    temporary_path.replace(destination)
 ```
 
 See [`examples/binary_download.py`](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/python/examples/binary_download.py) for a runnable version with environment-based configuration.
@@ -348,7 +354,7 @@ except DCHError as exc:  # connection, timeout, auth, schema drift, ...
 | `DCHResponseError` | The response was not JSON, or did not match the expected schema |
 | `DCHQueryError` | A Flight SQL query failed |
 
-Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol errors — are retried automatically with exponential backoff on idempotent methods. See `max_retries`, `backoff_base`, and `backoff_max`.
+Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol errors — are retried automatically with exponential backoff on idempotent methods. Binary response-body failures are not retried after streaming starts, because restarting could duplicate data. See `max_retries`, `backoff_base`, and `backoff_max`.
 
 ## Contributing
 
