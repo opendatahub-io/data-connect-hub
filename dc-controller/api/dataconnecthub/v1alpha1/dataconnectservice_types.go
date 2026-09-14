@@ -67,6 +67,34 @@ type ServiceOverrides struct {
 	Connectors []ConnectorConfig `json:"connectors,omitempty"`
 }
 
+// FlightServiceInstance configures one independently addressable Flight service.
+type FlightServiceInstance struct {
+	// name is appended to Flight resource names. When omitted, the controller
+	// assigns a deterministic name based on the instance position.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// hostname is the externally reachable hostname for this Flight service.
+	// +required
+	// +kubebuilder:validation:MinLength=1
+	Hostname string `json:"hostname"`
+
+	// ServiceOverrides are applied after flightService defaults.
+	ServiceOverrides `json:",inline"`
+}
+
+// FlightServiceConfig configures the Flight gRPC API deployment or deployments.
+type FlightServiceConfig struct {
+	// ServiceOverrides act as shared defaults for every instance.
+	ServiceOverrides `json:",inline"`
+
+	// instances enables instance mode. Each instance creates a separate Flight
+	// deployment, service, and external route.
+	// +listType=atomic
+	// +optional
+	Instances []FlightServiceInstance `json:"instances,omitempty"`
+}
+
 // DistributionStatus identifies the platform distribution context.
 type DistributionStatus struct {
 	// name is the distribution name (e.g., SelfManagedRHOAI, OpenDataHub, Standalone)
@@ -117,9 +145,9 @@ type DataConnectServiceSpec struct {
 	// +optional
 	RestService *ServiceOverrides `json:"restService,omitempty"`
 
-	// flightService configures the Flight gRPC API deployment
+	// flightService configures the Flight gRPC API deployment or deployments.
 	// +optional
-	FlightService *ServiceOverrides `json:"flightService,omitempty"`
+	FlightService *FlightServiceConfig `json:"flightService,omitempty"`
 
 	// tokenReviewAudiences sets the audiences for Kubernetes TokenReview
 	// authentication on both the flight service and the kube-rbac-proxy

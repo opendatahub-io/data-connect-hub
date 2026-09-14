@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -240,6 +241,271 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 	return patches
 }
 
+func renderFlightInstances(resources []*unstructured.Unstructured, config *dchv1alpha1.FlightServiceConfig) []*unstructured.Unstructured {
+	var flightResources []*unstructured.Unstructured
+	var result []*unstructured.Unstructured
+	var route *unstructured.Unstructured
+	for _, obj := range resources {
+		if isFlightInstanceResource(obj) {
+			flightResources = append(flightResources, obj)
+			continue
+		}
+		if obj.GetKind() == "HTTPRoute" {
+			route = obj.DeepCopy()
+			removeFlightRouteRules(obj)
+		}
+		result = append(result, obj)
+	}
+
+	for i, instance := range config.Instances {
+		name := instance.Name
+		if name == "" {
+			name = "instance" + strconv.Itoa(i+1)
+		}
+		serviceName := nameFlightService + "-" + name
+		overrides := mergeServiceOverrides(&config.ServiceOverrides, &instance.ServiceOverrides)
+		for _, resource := range flightResources {
+			clone := resource.DeepCopy()
+			renameFlightInstanceResource(clone, serviceName)
+			if clone.GetKind() == kindDeployment {
+				applyServiceOverrides(clone, serviceName, &overrides)
+			}
+			if clone.GetKind() == kindConfigMap {
+				setConfigMapConnectors(clone, overrides.Connectors)
+			}
+			result = append(result, clone)
+		}
+		if route != nil {
+			instanceRoute := route.DeepCopy()
+			instanceRoute.SetName(serviceName)
+			rules := flightRouteRules(instanceRoute)
+			_ = unstructured.SetNestedSlice(instanceRoute.Object, rules, "spec", "rules")
+			_ = unstructured.SetNestedSlice(instanceRoute.Object, []any{instance.Hostname}, "spec", "hostnames")
+			renameFlightInstanceResource(instanceRoute, serviceName)
+			result = append(result, instanceRoute)
+		}
+	}
+	return result
+}
+
+func isFlightInstanceResource(obj *unstructured.Unstructured) bool {
+	name := obj.GetName()
+	switch obj.GetKind() {
+	case kindDeployment, "Service", kindConfigMap, "ServiceAccount", "NetworkPolicy":
+		return strings.Contains(name, nameFlightService)
+	case "ClusterRoleBinding":
+		return strings.HasSuffix(name, "flight-auth-delegator")
+	default:
+		return false
+	}
+}
+
+func renameFlightInstanceResource(obj *unstructured.Unstructured, serviceName string) {
+	content := replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
+	obj.Object = content
+	if obj.GetKind() == "ClusterRoleBinding" {
+		obj.SetName(strings.Replace(obj.GetName(), "flight-auth-delegator", serviceName+"-auth-delegator", 1))
+	}
+}
+
+func replaceStringValue(value any, old, new string) any {
+	switch value := value.(type) {
+	case string:
+		return strings.ReplaceAll(value, old, new)
+	case map[string]any:
+		for key, child := range value {
+			value[key] = replaceStringValue(child, old, new)
+		}
+	case []any:
+		for i, child := range value {
+			value[i] = replaceStringValue(child, old, new)
+		}
+	}
+	return value
+}
+
+func removeFlightRouteRules(route *unstructured.Unstructured) {
+	rules, found, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
+	if !found {
+		return
+	}
+	var retained []any
+	for _, rule := range rules {
+		if !ruleReferencesFlightService(rule) {
+			retained = append(retained, rule)
+		}
+	}
+	_ = unstructured.SetNestedSlice(route.Object, retained, "spec", "rules")
+}
+
+func flightRouteRules(route *unstructured.Unstructured) []any {
+	rules, _, _ := unstructured.NestedSlice(route.Object, "spec", "rules")
+	var flightRules []any
+	for _, rule := range rules {
+		if ruleReferencesFlightService(rule) {
+			flightRules = append(flightRules, rule)
+		}
+	}
+	return flightRules
+}
+
+func ruleReferencesFlightService(rule any) bool {
+	ruleMap, ok := rule.(map[string]any)
+	if !ok {
+		return false
+	}
+	backendRefs, _, _ := unstructured.NestedSlice(ruleMap, "backendRefs")
+	for _, ref := range backendRefs {
+		refMap, ok := ref.(map[string]any)
+		if name, _ := refMap["name"].(string); ok && strings.Contains(name, nameFlightService) {
+			return true
+		}
+	}
+	return false
+}
+
+func mergeServiceOverrides(defaults, local *dchv1alpha1.ServiceOverrides) dchv1alpha1.ServiceOverrides {
+	merged := *defaults.DeepCopy()
+	if local.Replicas != nil {
+		merged.Replicas = local.Replicas
+	}
+	merged.Resources = mergeResources(defaults.Resources, local.Resources)
+	merged.Env = mergeEnv(defaults.Env, local.Env)
+	merged.EnvFrom = append(append([]corev1.EnvFromSource{}, defaults.EnvFrom...), local.EnvFrom...)
+	merged.Volumes = append(append([]corev1.Volume{}, defaults.Volumes...), local.Volumes...)
+	merged.VolumeMounts = append(append([]corev1.VolumeMount{}, defaults.VolumeMounts...), local.VolumeMounts...)
+	merged.Connectors = mergeConnectors(defaults.Connectors, local.Connectors)
+	return merged
+}
+
+func mergeResources(defaults, local *corev1.ResourceRequirements) *corev1.ResourceRequirements {
+	if defaults == nil && local == nil {
+		return nil
+	}
+	merged := corev1.ResourceRequirements{}
+	if defaults != nil {
+		merged = *defaults.DeepCopy()
+	}
+	if local == nil {
+		return &merged
+	}
+	if merged.Requests == nil {
+		merged.Requests = corev1.ResourceList{}
+	}
+	for name, quantity := range local.Requests {
+		merged.Requests[name] = quantity
+	}
+	if merged.Limits == nil {
+		merged.Limits = corev1.ResourceList{}
+	}
+	for name, quantity := range local.Limits {
+		merged.Limits[name] = quantity
+	}
+	return &merged
+}
+
+func mergeEnv(defaults, local []corev1.EnvVar) []corev1.EnvVar {
+	merged := append([]corev1.EnvVar{}, defaults...)
+	byName := make(map[string]int, len(merged))
+	for i, env := range merged {
+		byName[env.Name] = i
+	}
+	for _, env := range local {
+		if i, found := byName[env.Name]; found {
+			merged[i] = env
+		} else {
+			byName[env.Name] = len(merged)
+			merged = append(merged, env)
+		}
+	}
+	return merged
+}
+
+func mergeConnectors(defaults, local []dchv1alpha1.ConnectorConfig) []dchv1alpha1.ConnectorConfig {
+	merged := append([]dchv1alpha1.ConnectorConfig{}, defaults...)
+	byName := make(map[string]int, len(merged))
+	for i, connector := range merged {
+		byName[connector.Name] = i
+	}
+	for _, connector := range local {
+		if i, found := byName[connector.Name]; found {
+			if connector.Enabled != nil {
+				merged[i].Enabled = connector.Enabled
+			}
+			if connector.ConnectionTimeout != nil {
+				merged[i].ConnectionTimeout = connector.ConnectionTimeout
+			}
+		} else {
+			byName[connector.Name] = len(merged)
+			merged = append(merged, connector)
+		}
+	}
+	return merged
+}
+
+func applyServiceOverrides(obj *unstructured.Unstructured, containerName string, overrides *dchv1alpha1.ServiceOverrides) {
+	if overrides.Replicas != nil {
+		_ = unstructured.SetNestedField(obj.Object, int64(*overrides.Replicas), "spec", "replicas")
+	}
+	containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+	if !found {
+		return
+	}
+	for i, value := range containers {
+		container, ok := value.(map[string]any)
+		if !ok || container["name"] != containerName {
+			continue
+		}
+		if overrides.Resources != nil {
+			container["resources"] = toUnstructured(overrides.Resources)
+		}
+		if len(overrides.Env) > 0 {
+			container["env"] = toUnstructured(overrides.Env)
+		}
+		if len(overrides.EnvFrom) > 0 {
+			container["envFrom"] = toUnstructured(overrides.EnvFrom)
+		}
+		if len(overrides.VolumeMounts) > 0 {
+			container["volumeMounts"] = toUnstructured(overrides.VolumeMounts)
+		}
+		containers[i] = container
+	}
+	_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+	if len(overrides.Volumes) > 0 {
+		_ = unstructured.SetNestedField(obj.Object, toUnstructured(overrides.Volumes), "spec", "template", "spec", "volumes")
+	}
+}
+
+func toUnstructured(value any) any {
+	data, _ := json.Marshal(value)
+	var result any
+	_ = json.Unmarshal(data, &result)
+	return result
+}
+
+func setConfigMapConnectors(obj *unstructured.Unstructured, connectors []dchv1alpha1.ConnectorConfig) {
+	if len(connectors) == 0 {
+		return
+	}
+	data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+	if !found || data["config.toml"] == "" {
+		return
+	}
+	var sections []string
+	for _, connector := range connectors {
+		section := "[connectors." + connector.Name + "]\n"
+		if connector.Enabled != nil {
+			section += fmt.Sprintf("enabled = %t\n", *connector.Enabled)
+		}
+		if connector.ConnectionTimeout != nil {
+			section += fmt.Sprintf("connection_timeout_secs = %d\n", int64(connector.ConnectionTimeout.Duration.Seconds()))
+		}
+		sections = append(sections, section)
+	}
+	data["config.toml"] = strings.TrimRight(data["config.toml"], "\n") + "\n\n" + strings.Join(sections, "\n")
+	_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+}
+
 func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -254,7 +520,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 			if !ok {
 				continue
 			}
-			if name, ok := container["name"].(string); ok && name == containerName {
+			if name, ok := container["name"].(string); ok && (name == containerName || strings.HasPrefix(name, containerName+"-")) {
 				container["image"] = image
 				containers[i] = container
 			}
@@ -367,6 +633,41 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 		data["config.toml"] = strings.ReplaceAll(toml,
 			`tenant-id = "opendatahub"`,
 			fmt.Sprintf(`tenant-id = "%s"`, namespace))
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+	}
+}
+
+func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace string) {
+	var restServiceAccount string
+	for _, obj := range resources {
+		if obj.GetKind() == "ServiceAccount" && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
+			restServiceAccount = obj.GetName()
+			break
+		}
+	}
+	if restServiceAccount == "" {
+		return
+	}
+
+	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml := data["config.toml"]
+		if !strings.Contains(toml, "[auth]") {
+			continue
+		}
+		data["config.toml"] = strings.Replace(
+			toml,
+			"[auth]\n",
+			fmt.Sprintf("[auth]\ndiscovery_service_account = %q\n", identity),
+			1,
+		)
 		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 	}
 }
@@ -561,6 +862,7 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 
 func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) bool {
 	const key = "token_review_audiences"
+	updated := false
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
@@ -615,9 +917,9 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 
 		data["config.toml"] = strings.Join(result, "\n")
 		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
-		return true
+		updated = true
 	}
-	return false
+	return updated
 }
 
 func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {
@@ -696,6 +998,16 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, de
 		}
 		ann["dataconnecthub/config-hash"] = configHash
 		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
+	}
+}
+
+func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured) {
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) || !strings.HasSuffix(obj.GetName(), "-config") {
+			continue
+		}
+		serviceName := strings.TrimSuffix(obj.GetName(), "-config")
+		annotateDeploymentWithConfigHash(resources, serviceName, obj.GetName())
 	}
 }
 
