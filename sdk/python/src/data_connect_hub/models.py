@@ -124,15 +124,11 @@ class CredentialField(BaseModel):
     default_value: str | None = None
 
 
-class Capabilities(BaseModel):
-    """Transports a connection type's provider supports."""
-
-    flight: bool = False
-    rest: bool = False
-
-
 class ConnectionTypeStatus(BaseModel):
-    capabilities: Capabilities = Field(default_factory=Capabilities)
+    flight_ready: bool = False
+    flight_url: str | None = None
+    message: str | None = None
+    updated_at: str | None = None
 
 
 class ConnectionType(BaseModel):
