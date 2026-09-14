@@ -119,7 +119,7 @@ pub async fn start_server(
             auth.token_review_audiences.clone(),
         )
         .await?;
-        let auth_layer = AuthLayer::new(Arc::new(kube_auth));
+        let auth_layer = AuthLayer::new(Arc::new(kube_auth), auth.discovery_service_account.clone());
         builder
             .layer(auth_layer)
             .add_service(health_service)
