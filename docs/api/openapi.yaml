@@ -63,6 +63,8 @@ tags:
   - name: connection-types
     description: |
       A `connection type` defines a schema for a data `connection`. A connection type must be created before creating a connection of that type. Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by the operator are known as `global` connection types and are accessible by all tenants. Connection types created by a tenant are only accessible by that tenant.
+  - name: flight-services
+    description: Flight service registration (internal)
   - name: test
     description: Test operations
 paths:
@@ -456,9 +458,9 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-  /audit/data-connection-types:
-    servers:
-      - url: /api/v1alpha1
+  /flights/{id}:
+    parameters:
+      - $ref: '#/components/parameters/resourceId'
 components:
   securitySchemes:
     tenantHeader:
@@ -801,25 +803,26 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Field'
-    Capabilities:
-      type: object
-      required:
-        - flight
-        - rest
-      properties:
-        flight:
-          type: boolean
-          description: Whether the Flight gRPC API is supported
-        rest:
-          type: boolean
-          description: Whether the REST API is supported
     DataConnectionTypeStatus:
       type: object
       required:
-        - capabilities
+        - flight_ready
       properties:
-        capabilities:
-          $ref: '#/components/schemas/Capabilities'
+        flight_ready:
+          type: boolean
+          description: Whether a Flight gRPC service supports this connection type
+        flight_url:
+          type: string
+          nullable: true
+          description: URL of the Flight service that supports this connection type
+        message:
+          type: string
+          nullable: true
+          description: Optional human-readable status message
+        updated_at:
+          type: string
+          nullable: true
+          description: Timestamp of the last status update
     DataConnectionTypeResource:
       type: object
       required:

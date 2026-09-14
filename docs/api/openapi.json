@@ -29,6 +29,10 @@
       "description": "A `connection type` defines a schema for a data `connection`. A connection type must be created before creating a connection of that type. Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by the operator are known as `global` connection types and are accessible by all tenants. Connection types created by a tenant are only accessible by that tenant.\n"
     },
     {
+      "name": "flight-services",
+      "description": "Flight service registration (internal)"
+    },
+    {
       "name": "test",
       "description": "Test operations"
     }
@@ -624,10 +628,10 @@
         }
       }
     },
-    "/audit/data-connection-types": {
-      "servers": [
+    "/flights/{id}": {
+      "parameters": [
         {
-          "url": "/api/v1alpha1"
+          "$ref": "#/components/parameters/resourceId"
         }
       ]
     }
@@ -1076,31 +1080,30 @@
           }
         }
       },
-      "Capabilities": {
-        "type": "object",
-        "required": [
-          "flight",
-          "rest"
-        ],
-        "properties": {
-          "flight": {
-            "type": "boolean",
-            "description": "Whether the Flight gRPC API is supported"
-          },
-          "rest": {
-            "type": "boolean",
-            "description": "Whether the REST API is supported"
-          }
-        }
-      },
       "DataConnectionTypeStatus": {
         "type": "object",
         "required": [
-          "capabilities"
+          "flight_ready"
         ],
         "properties": {
-          "capabilities": {
-            "$ref": "#/components/schemas/Capabilities"
+          "flight_ready": {
+            "type": "boolean",
+            "description": "Whether a Flight gRPC service supports this connection type"
+          },
+          "flight_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL of the Flight service that supports this connection type"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional human-readable status message"
+          },
+          "updated_at": {
+            "type": "string",
+            "nullable": true,
+            "description": "Timestamp of the last status update"
           }
         }
       },
