@@ -29,6 +29,7 @@ import (
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -394,6 +395,69 @@ var _ = Describe("DataConnectService Controller", func() {
 		})
 	})
 
+	Context("When trace.exporter is specified", func() {
+		const exporter = "http://otel-collector.observability.svc:4317"
+
+		BeforeEach(func() {
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					Trace: &dchv1alpha1.Trace{Exporter: exporter},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should add a [trace] section to the rest-service and flight-service configmaps", func() {
+			reconcileUntilReady()
+
+			for _, svc := range []string{nameRestService, nameFlightService} {
+				cm := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+				toml := cm.Data["config.toml"]
+				Expect(toml).To(ContainSubstring("[trace]\n" + `exporter = "` + exporter + `"`))
+			}
+		})
+	})
+
+	Context("When trace is not specified", func() {
+		BeforeEach(func() {
+			createDatabaseSecret()
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should not add a [trace] section to the configmaps", func() {
+			reconcileUntilReady()
+
+			for _, svc := range []string{nameRestService, nameFlightService} {
+				cm := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+				Expect(cm.Data["config.toml"]).NotTo(ContainSubstring("[trace]"))
+			}
+		})
+	})
+
 	Context("When database secret is missing", func() {
 		BeforeEach(func() {
 			cr := &dchv1alpha1.DataConnectService{
@@ -646,5 +710,49 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(cr.Status.Gateway.Name).To(Equal("spec-gateway"))
 			Expect(cr.Status.Gateway.Namespace).To(Equal("spec-ns"))
 		})
+	})
+})
+
+var _ = Describe("setConfigMapTraceExporter", func() {
+	newConfigMap := func(toml string) *unstructured.Unstructured {
+		return &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "svc-config"},
+			"data":       map[string]any{"config.toml": toml},
+		}}
+	}
+
+	renderedTOML := func(obj *unstructured.Unstructured) string {
+		data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
+		return data["config.toml"]
+	}
+
+	It("appends a [trace] section when none exists", func() {
+		cm := newConfigMap("[server]\nport = 8080\n")
+		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeTrue())
+		Expect(renderedTOML(cm)).To(Equal("[server]\nport = 8080\n\n[trace]\nexporter = \"http://otel:4317\"\n"))
+	})
+
+	It("replaces an existing exporter key inside the [trace] section", func() {
+		cm := newConfigMap("[trace]\nexporter = \"http://old:4317\"\nsampling = 1\n\n[server]\nport = 8080\n")
+		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://new:4317")).To(BeTrue())
+		Expect(renderedTOML(cm)).To(Equal("[trace]\nexporter = \"http://new:4317\"\nsampling = 1\n\n[server]\nport = 8080\n"))
+	})
+
+	It("leaves same-named keys in other sections untouched", func() {
+		cm := newConfigMap("[trace]\n\n[metrics]\nexporter = \"prometheus\"\n")
+		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeTrue())
+		Expect(renderedTOML(cm)).To(Equal("[trace]\nexporter = \"http://otel:4317\"\n\n[metrics]\nexporter = \"prometheus\"\n"))
+	})
+
+	It("ignores ConfigMaps without a config.toml", func() {
+		cm := &unstructured.Unstructured{Object: map[string]any{
+			"apiVersion": "v1",
+			"kind":       "ConfigMap",
+			"metadata":   map[string]any{"name": "other"},
+			"data":       map[string]any{"other.toml": "[trace]\n"},
+		}}
+		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeFalse())
 	})
 })

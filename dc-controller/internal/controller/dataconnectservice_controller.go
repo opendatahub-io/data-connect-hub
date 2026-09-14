@@ -364,6 +364,12 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapFlightServiceAddress(resources, cr.Namespace)
 
+	if cr.Spec.Trace != nil && cr.Spec.Trace.Exporter != "" {
+		if !setConfigMapTraceExporter(resources, cr.Spec.Trace.Exporter) {
+			logf.FromContext(ctx).Info("trace.exporter specified but no config.toml found in rendered manifests")
+		}
+	}
+
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
 	if len(audiences) > 0 {
 		if !setConfigMapAudiences(resources, audiences) {

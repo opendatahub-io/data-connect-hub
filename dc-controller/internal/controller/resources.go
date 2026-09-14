@@ -312,6 +312,61 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 	}
 }
 
+// setConfigMapTraceExporter writes the trace exporter endpoint into the [trace]
+// section of every rendered config.toml, appending the section when the base
+// manifest does not declare one. It reports whether any ConfigMap was updated.
+func setConfigMapTraceExporter(resources []*unstructured.Unstructured, exporter string) bool {
+	const (
+		section = "[trace]"
+		key     = "exporter"
+	)
+	exporterLine := fmt.Sprintf("%s = %q", key, exporter)
+
+	updated := false
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml, ok := data["config.toml"]
+		if !ok {
+			continue
+		}
+
+		if !strings.Contains(toml, section) {
+			toml = strings.TrimRight(toml, "\n") + "\n\n" + section + "\n" + exporterLine + "\n"
+		} else {
+			var result []string
+			inTrace := false
+			for line := range strings.SplitSeq(toml, "\n") {
+				trimmed := strings.TrimSpace(line)
+				if inTrace {
+					if strings.HasPrefix(trimmed, "[") {
+						inTrace = false
+					} else if strings.HasPrefix(trimmed, key) &&
+						(len(trimmed) == len(key) || trimmed[len(key)] == ' ' || trimmed[len(key)] == '=') {
+						continue
+					}
+				}
+				result = append(result, line)
+				if trimmed == section {
+					inTrace = true
+					result = append(result, exporterLine)
+				}
+			}
+			toml = strings.Join(result, "\n")
+		}
+
+		data["config.toml"] = toml
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		updated = true
+	}
+	return updated
+}
+
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
 	if gw == nil {
 		return nil

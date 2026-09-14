@@ -112,6 +112,15 @@ type ConnectorConfig struct {
 	ConnectionTimeout *metav1.Duration `json:"connectionTimeout,omitempty"`
 }
 
+// Trace configures distributed tracing for the data connect hub services.
+type Trace struct {
+	// exporter is the URL of the OpenTelemetry collector endpoint that
+	// traces are exported to (e.g. "http://otel-collector.observability:4317").
+	// When empty, tracing is disabled.
+	// +optional
+	Exporter string `json:"exporter,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
@@ -137,6 +146,11 @@ type DataConnectServiceSpec struct {
 	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
+
+	// trace configures distributed tracing for the services.
+	// When omitted, tracing is disabled.
+	// +optional
+	Trace *Trace `json:"trace,omitempty"`
 }
 
 // Addresses identifies an address where the service is reachable

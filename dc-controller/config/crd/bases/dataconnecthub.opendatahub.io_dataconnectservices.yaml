@@ -4639,6 +4639,18 @@ spec:
                 items:
                   type: string
                 type: array
+              trace:
+                description: |-
+                  trace configures distributed tracing for the services.
+                  When omitted, tracing is disabled.
+                properties:
+                  exporter:
+                    description: |-
+                      exporter is the URL of the OpenTelemetry collector endpoint that
+                      traces are exported to (e.g. "http://otel-collector.observability:4317").
+                      When empty, tracing is disabled.
+                    type: string
+                type: object
             type: object
           status:
             description: status defines the observed state of DataConnectService
