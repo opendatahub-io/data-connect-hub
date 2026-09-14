@@ -45,8 +45,6 @@ type Result struct {
 	ProfileFetched bool
 }
 
-// +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
-
 func Resolve(ctx context.Context, cfg *rest.Config) (Result, error) {
 	scheme := runtime.NewScheme()
 	if err := configv1.Install(scheme); err != nil {

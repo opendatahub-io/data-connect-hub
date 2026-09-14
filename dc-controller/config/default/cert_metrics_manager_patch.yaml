@@ -19,7 +19,7 @@
   value:
     name: metrics-certs
     secret:
-      secretName: metrics-server-cert
+      secretName: dc-controller-metrics-tls
       optional: false
       items:
         - key: ca.crt
