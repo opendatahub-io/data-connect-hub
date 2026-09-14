@@ -68,7 +68,7 @@ DCH_TENANT_NEO4J_ADMIN_PASSWORD="${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}"
 DCH_TENANT_NEO4J_USERNAME="${DCH_TENANT_NEO4J_USERNAME:-dch_reader}"
 DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
 DCH_TENANT_NEO4J_CA_CERT="${DCH_TENANT_NEO4J_CA_CERT:-}"
-DCH_TENANT_URI="${DCH_TENANT_URI:-}"
+DCH_URI_DEPLOY_SERVER="${DCH_URI_DEPLOY_SERVER:-false}"
 
 E2E_SA_NAME="e2e-user"
 E2E_DENIED_SA_NAME="e2e-denied-user"
@@ -79,6 +79,7 @@ ES_SECRET="e2e-es-creds"
 ES_APIKEY_SECRET="e2e-es-apikey-creds"
 NEO4J_SECRET="e2e-neo4j-creds"
 URI_SECRET="e2e-uri-creds"
+URI_SERVER_NAME="e2e-uri-server"
 ENV_FILE="$SCRIPT_DIR/.env"
 
 # -------------------------------------------------------------------
@@ -299,23 +300,33 @@ setup_neo4j_secret() {
 
 setup_uri_server_and_secret() {
     E2E_URI_ENABLED="false"
-    if [[ -n "$DCH_TENANT_URI" ]]; then
-        # Use externally provided URI
-        kubectl create secret generic "$URI_SECRET" \
-            -n "$DCH_TENANT_ID" \
-            --from-literal="URI=${DCH_TENANT_URI}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        E2E_URI_ENABLED="true"
-    elif [[ "${DCH_URI_DEPLOY_SERVER:-true}" == "true" ]]; then
-        # Deploy a test HTTP server and create the secret automatically
-        bash "$(dirname "$0")/scripts/seed-uri-data.sh" -n "$DCH_TENANT_ID"
-        local uri="http://e2e-uri-server.${DCH_TENANT_ID}.svc:8080"
-        kubectl create secret generic "$URI_SECRET" \
-            -n "$DCH_TENANT_ID" \
-            --from-literal="URI=${uri}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        E2E_URI_ENABLED="true"
+    [[ "$DCH_URI_DEPLOY_SERVER" == "true" ]] || return 0
+
+    bash "$SCRIPT_DIR/scripts/seed-uri-data.sh" \
+        -n "$DCH_TENANT_ID" -r "$URI_SERVER_NAME"
+
+    local uri_ca_cert
+    uri_ca_cert=$(mktemp)
+    if ! kubectl get secret "${URI_SERVER_NAME}-tls-ca" -n "$DCH_TENANT_ID" \
+        -o jsonpath='{.data.ca\.crt}' | base64 -d > "$uri_ca_cert" 2>/dev/null ||
+        [[ ! -s "$uri_ca_cert" ]]; then
+        rm -f "$uri_ca_cert"
+        echo "ERROR: URI server TLS CA was not found after installation" >&2
+        exit 1
     fi
+
+    local uri="https://${URI_SERVER_NAME}.${DCH_TENANT_ID}.svc:8443"
+    local -a args=(
+        --from-literal="URI=${uri}"
+        --from-file="CA_CERT=${uri_ca_cert}"
+    )
+
+    kubectl create secret generic "$URI_SECRET" \
+        -n "$DCH_TENANT_ID" \
+        "${args[@]}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    rm -f "$uri_ca_cert"
+    E2E_URI_ENABLED="true"
 }
 
 # -------------------------------------------------------------------

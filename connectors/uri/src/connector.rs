@@ -177,7 +177,33 @@ struct UriReader {
 
 const MAX_RESPONSE_BYTES: u64 = 128 * 1024 * 1024;
 
-async fn fetch_json(client: &UriClient, request: &UriRequest) -> Result<serde_json::Value, ConnectorError> {
+#[derive(Debug, PartialEq, Eq)]
+enum ResponseFormat {
+    Json,
+}
+
+fn response_format(content_type: Option<&reqwest::header::HeaderValue>) -> Result<ResponseFormat, ConnectorError> {
+    let content_type = content_type
+        .ok_or_else(|| ConnectorError::ConnectionError("HTTP response is missing Content-Type header".to_string()))?;
+    let content_type = content_type
+        .to_str()
+        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid HTTP Content-Type header: {e}")))?;
+    let media_type = content_type
+        .parse::<mime::Mime>()
+        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid HTTP Content-Type '{content_type}': {e}")))?;
+
+    if (media_type.type_() == mime::APPLICATION && media_type.subtype() == mime::JSON)
+        || media_type.suffix() == Some(mime::JSON)
+    {
+        Ok(ResponseFormat::Json)
+    } else {
+        Err(ConnectorError::ConnectionError(format!(
+            "Unsupported HTTP response Content-Type '{content_type}'"
+        )))
+    }
+}
+
+async fn fetch(client: &UriClient, request: &UriRequest) -> Result<serde_json::Value, ConnectorError> {
     let response = client
         .request(reqwest::Method::GET, &request.path)?
         .send()
@@ -192,6 +218,14 @@ async fn fetch_json(client: &UriClient, request: &UriRequest) -> Result<serde_js
         )));
     }
 
+    let format = response_format(response.headers().get(reqwest::header::CONTENT_TYPE))?;
+
+    match format {
+        ResponseFormat::Json => fetch_json(response).await,
+    }
+}
+
+async fn fetch_json(response: reqwest::Response) -> Result<serde_json::Value, ConnectorError> {
     if let Some(len) = response.content_length()
         && len > MAX_RESPONSE_BYTES
     {
@@ -224,7 +258,7 @@ impl DataReader for UriReader {
 
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let request = UriRequest::parse(query)?;
-        let response_json = fetch_json(&self.client, &request).await?;
+        let response_json = fetch(&self.client, &request).await?;
         let rows = types::extract_rows(&response_json, request.data_path.as_deref())?;
 
         if rows.is_empty() {
@@ -246,7 +280,7 @@ impl DataReader for UriReader {
         let stream = async_stream::try_stream! {
             let response_json = match cached {
                 Some(json) => json,
-                None => fetch_json(&client, &request).await?,
+                None => fetch(&client, &request).await?,
             };
             let rows = types::extract_rows(&response_json, request.data_path.as_deref())?;
 
@@ -444,6 +478,7 @@ mod tests {
     use super::*;
     use arrow::array::Array;
     use arrow::datatypes::Field;
+    use reqwest::header::HeaderValue;
 
     #[test]
     fn test_connector_provider() {
@@ -501,6 +536,31 @@ mod tests {
     fn test_build_client_missing_uri() {
         let creds = HashMap::new();
         assert!(build_client(&creds, Duration::from_secs(10)).is_err());
+    }
+
+    #[test]
+    fn test_json_content_type_accepts_json_with_parameters() {
+        let content_type = HeaderValue::from_static("application/json; charset=utf-8");
+        assert!(matches!(response_format(Some(&content_type)), Ok(ResponseFormat::Json)));
+    }
+
+    #[test]
+    fn test_json_content_type_accepts_json_suffix() {
+        let content_type = HeaderValue::from_static("application/problem+json");
+        assert!(matches!(response_format(Some(&content_type)), Ok(ResponseFormat::Json)));
+    }
+
+    #[test]
+    fn test_json_content_type_rejects_non_json() {
+        let content_type = HeaderValue::from_static("text/csv");
+        let err = response_format(Some(&content_type)).unwrap_err();
+        assert!(err.to_string().contains("Unsupported HTTP response Content-Type"));
+    }
+
+    #[test]
+    fn test_json_content_type_requires_header() {
+        let err = response_format(None).unwrap_err();
+        assert!(err.to_string().contains("HTTP response is missing Content-Type header"));
     }
 
     #[test]
