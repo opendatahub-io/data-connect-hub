@@ -30,7 +30,7 @@
     },
     {
       "name": "flight-services",
-      "description": "Flight service registration (internal)"
+      "description": "Flight service registration (internal). This requires separate RBAC roles and  should only be called by the Data Connect Hub operator.\n"
     },
     {
       "name": "test",

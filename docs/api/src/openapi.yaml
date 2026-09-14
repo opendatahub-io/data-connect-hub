@@ -587,6 +587,8 @@ tags:
      Connection types created by the operator are known as `global` connection types and are accessible by all tenants.
      Connection types created by a tenant are only accessible by that tenant.
   - name: flight-services
-    description: Flight service registration (internal)
+    description: >
+     Flight service registration (internal). This requires separate RBAC roles and 
+     should only be called by the Data Connect Hub operator.
   - name: test
     description: Test operations

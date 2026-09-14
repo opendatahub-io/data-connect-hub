@@ -328,7 +328,10 @@ pub async fn delete_flight_service(
 ) -> Result<HttpResponse, RestErrorResponse> {
     let id = parts.into_inner();
     info!("delete_flight_service: id={id}");
+
     service.meta_store.delete_flight_service(&id).await?;
+    audit_data_connection_types(service.as_ref()).await?;
+
     Ok(HttpResponse::NoContent().finish())
 }
 
