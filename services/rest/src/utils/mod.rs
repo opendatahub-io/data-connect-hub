@@ -50,6 +50,8 @@ mod tests {
             [global-connection-types]
             tenant-id = "opendatahub"
 
+            [flight-service]
+            ca-cert = "/etc/tls/flight/ca.crt"
         "#;
 
         let config = Config::builder()
@@ -60,7 +62,10 @@ mod tests {
         let server_config: ServerConfig = config.try_deserialize().unwrap();
         assert_eq!(server_config.server.address, "127.0.0.1");
         assert_eq!(server_config.server.port, 8080);
-        assert!(server_config.flight_service.ca_cert.is_none());
+        assert_eq!(
+            server_config.flight_service.ca_cert,
+            Some("/etc/tls/flight/ca.crt".to_string())
+        );
     }
 
     #[test]

@@ -32,7 +32,6 @@ pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, t
 
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
-
     async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status>;
     async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
     async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
@@ -115,7 +114,6 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
-
     async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new("GetSupportedConnectors", ""));

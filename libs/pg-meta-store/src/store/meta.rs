@@ -797,19 +797,20 @@ impl FlightDiscoveryStore for PgMetaStore {
     }
 
     async fn get_flight_service_by_connector(&self, connector: &str) -> Result<FlightServiceResource, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'resource'->'supported_connectors' @> $1::jsonb")
-            .bind(serde_json::json!([connector]))
-            .fetch_one(&self.pool)
-            .await
-            .map_err(|e| match e {
-                sqlx::Error::RowNotFound => {
-                    MetaStoreError::ResourceNotFound(format!("no flight service supports connector '{connector}'"))
-                }
-                e => {
-                    error!("failed to find flight service for connector '{connector}': {e}");
-                    MetaStoreError::Query("failed to retrieve flight service".to_string())
-                }
-            })?;
+        let row =
+            sqlx::query("SELECT data FROM flight_services WHERE data->'resource'->'supported_connectors' @> $1::jsonb")
+                .bind(serde_json::json!([connector]))
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| match e {
+                    sqlx::Error::RowNotFound => {
+                        MetaStoreError::ResourceNotFound(format!("no flight service supports connector '{connector}'"))
+                    },
+                    e => {
+                        error!("failed to find flight service for connector '{connector}': {e}");
+                        MetaStoreError::Query("failed to retrieve flight service".to_string())
+                    },
+                })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
             error!("failed to read flight service column: {e}");
@@ -912,16 +913,14 @@ impl FlightDiscoveryStore for PgMetaStore {
     }
 
     async fn delete_flight_service(&self, id: &str) -> Result<(), MetaStoreError> {
-        let result = sqlx::query(
-            "DELETE FROM flight_services WHERE data->'metadata'->>'id' = $1",
-        )
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| {
-            error!("failed to delete flight service '{id}': {e}");
-            MetaStoreError::Query("failed to delete flight service".to_string())
-        })?;
+        let result = sqlx::query("DELETE FROM flight_services WHERE data->'metadata'->>'id' = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("failed to delete flight service '{id}': {e}");
+                MetaStoreError::Query("failed to delete flight service".to_string())
+            })?;
 
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(

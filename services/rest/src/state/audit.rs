@@ -148,7 +148,7 @@ pub(crate) async fn audit_data_connection_types(api_service: &ApiService) -> Res
         let mut flight_url = None;
 
         for flight in &flights.items {
-            if flight.resource.supported_connectors.contains(&provider) && flight.resource.status.ready == true {
+            if flight.resource.supported_connectors.contains(&provider) && flight.resource.status.ready {
                 flight_url = Some(flight.resource.external_url.clone());
                 break;
             }

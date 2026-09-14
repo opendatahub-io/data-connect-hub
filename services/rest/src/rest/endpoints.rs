@@ -650,10 +650,7 @@ mod tests {
         {
             unimplemented!()
         }
-        async fn delete_flight_service(
-            &self,
-            id: &str,
-        ) -> Result<(), commons::api::errors::MetaStoreError> {
+        async fn delete_flight_service(&self, id: &str) -> Result<(), commons::api::errors::MetaStoreError> {
             if id == "fs-1" {
                 Ok(())
             } else {
@@ -1558,7 +1555,7 @@ mod tests {
                 "namespace": "test-ns",
                 "external_url": "http://127.0.0.1:1",
                 "internal_url": "http://127.0.0.1:1",
-                "status": { "state": "not_ready" }
+                "status": { "ready": false }
             }))
             .to_request();
         let resp = test::call_service(&app, req).await;
