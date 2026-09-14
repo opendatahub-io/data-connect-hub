@@ -100,18 +100,16 @@ where
                 },
             };
 
-            if tenant_id.is_none() {
-                if path != DO_ACTION_PATH || auth_info.username != discovery_service_account {
-                    return Ok(grpc_error_response(Status::permission_denied(
-                        "x-tenant-id header is required",
-                    )));
-                }
+            if tenant_id.is_none() && (path != DO_ACTION_PATH || auth_info.username != discovery_service_account) {
+                return Ok(grpc_error_response(Status::permission_denied(
+                    "x-tenant-id header is required",
+                )));
             }
 
-            if let Some(tenant_id) = tenant_id {
-                if let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await {
-                    return Ok(grpc_error_response(auth_error_to_status(&e)));
-                }
+            if let Some(tenant_id) = tenant_id
+                && let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await
+            {
+                return Ok(grpc_error_response(auth_error_to_status(&e)));
             }
 
             debug!("Authenticated user={} for path={}", auth_info.username, path);
