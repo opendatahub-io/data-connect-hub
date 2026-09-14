@@ -19,7 +19,7 @@ class TestRestS3Binary:
         if not s3_binary_path:
             pytest.skip("DCH_S3_BINARY_PATH not set")
 
-        assert rest_client.download_binary(s3_flight_connection, s3_binary_path) == b"binary-test-data-for-e2e\n"
+        assert b"".join(rest_client.download_binary(s3_flight_connection, s3_binary_path)) == b"binary-test-data-for-e2e\n"
 
     def test_binary_download_not_found(
         self,
@@ -31,7 +31,7 @@ class TestRestS3Binary:
             pytest.skip("DCH_S3_BINARY_PATH not set (need S3 configured)")
 
         with pytest.raises(DCHHTTPError) as exc_info:
-            rest_client.download_binary(s3_flight_connection, "nonexistent/path/file.bin")
+            b"".join(rest_client.download_binary(s3_flight_connection, "nonexistent/path/file.bin"))
         assert exc_info.value.status_code == 404
 
     def test_binary_download_missing_path_param(
@@ -53,7 +53,7 @@ class TestRestUriBinary:
         rest_client: DataConnectClient,
         uri_flight_connection: str,
     ) -> None:
-        assert rest_client.download_binary(uri_flight_connection, "api/binary.dat") == b"binary-test-data-for-e2e\n"
+        assert b"".join(rest_client.download_binary(uri_flight_connection, "api/binary.dat")) == b"binary-test-data-for-e2e\n"
 
     def test_binary_download_not_found(
         self,
@@ -61,7 +61,7 @@ class TestRestUriBinary:
         uri_flight_connection: str,
     ) -> None:
         with pytest.raises(DCHHTTPError) as exc_info:
-            rest_client.download_binary(uri_flight_connection, "nonexistent/path.bin")
+            b"".join(rest_client.download_binary(uri_flight_connection, "nonexistent/path.bin"))
         assert exc_info.value.status_code == 404
 
 
@@ -73,5 +73,5 @@ class TestRestBinaryUnsupported:
     ) -> None:
         """Postgres does not support binary reads."""
         with pytest.raises(DCHHTTPError) as exc_info:
-            rest_client.download_binary(pg_flight_connection, "some/path")
+            b"".join(rest_client.download_binary(pg_flight_connection, "some/path"))
         assert exc_info.value.status_code == 501

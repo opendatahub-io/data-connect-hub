@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
@@ -83,6 +84,21 @@ def _make_client(
         backoff_max=backoff_max,
         http_client=http_client,
     )
+
+
+class _ChunkedByteStream(httpx.SyncByteStream):
+    def __init__(self, chunks: list[bytes], error: httpx.RequestError | None = None) -> None:
+        self.chunks = chunks
+        self.error = error
+        self.closed = False
+
+    def __iter__(self) -> Iterator[bytes]:
+        yield from self.chunks
+        if self.error is not None:
+            raise self.error
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class TestListConnections:
@@ -219,7 +235,90 @@ class TestConnectionOperations:
             return httpx.Response(200, content=b"binary-data", headers={"content-type": "application/octet-stream"})
 
         client = _make_client(httpx.MockTransport(handler))
-        assert client.download_binary("123", "models/model v1.bin") == b"binary-data"
+        assert b"".join(client.download_binary("123", "models/model v1.bin")) == b"binary-data"
+
+    def test_download_binary_is_lazy_and_closes_response(self) -> None:
+        calls = 0
+        response_stream = _ChunkedByteStream([b"first", b"second"])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=response_stream)
+
+        client = _make_client(httpx.MockTransport(handler))
+        download = client.download_binary("123", "models/model.bin")
+
+        assert calls == 0
+        assert next(download) == b"first"
+        assert calls == 1
+        assert not response_stream.closed
+        assert list(download) == [b"second"]
+        assert response_stream.closed
+
+    def test_download_binary_closes_response_when_stopped_early(self) -> None:
+        response_stream = _ChunkedByteStream([b"first", b"second"])
+        client = _make_client(httpx.MockTransport(lambda request: httpx.Response(200, stream=response_stream)))
+        download = client.download_binary("123", "models/model.bin")
+
+        assert next(download) == b"first"
+        download.close()
+        assert response_stream.closed
+
+    def test_download_binary_maps_http_error_when_iterated(self) -> None:
+        client = _make_client(httpx.MockTransport(lambda request: httpx.Response(404, json={"error": "missing"})))
+
+        with pytest.raises(DCHNotFoundError):
+            b"".join(client.download_binary("123", "models/missing.bin"))
+
+    def test_download_binary_retries_before_streaming(self) -> None:
+        calls = 0
+        retry_response_stream = _ChunkedByteStream([])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                return httpx.Response(503, stream=retry_response_stream)
+            return httpx.Response(200, stream=_ChunkedByteStream([b"binary-data"]))
+
+        client = _make_client(httpx.MockTransport(handler), max_retries=1)
+
+        assert b"".join(client.download_binary("123", "models/model.bin")) == b"binary-data"
+        assert calls == 2
+        assert retry_response_stream.closed
+
+    def test_download_binary_does_not_retry_body_error_before_first_chunk(self) -> None:
+        calls = 0
+        failed_stream = _ChunkedByteStream([], httpx.ReadTimeout("timed out"))
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=failed_stream)
+
+        client = _make_client(httpx.MockTransport(handler), max_retries=3)
+
+        with pytest.raises(DCHTimeoutError, match="timed out"):
+            b"".join(client.download_binary("123", "models/model.bin"))
+        assert calls == 1
+        assert failed_stream.closed
+
+    def test_download_binary_does_not_retry_after_bytes_are_yielded(self) -> None:
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(200, stream=_ChunkedByteStream([b"first"], httpx.ReadError("disconnected")))
+
+        client = _make_client(httpx.MockTransport(handler), max_retries=3)
+        download = client.download_binary("123", "models/model.bin")
+
+        assert next(download) == b"first"
+        with pytest.raises(DCHConnectionError, match="disconnected"):
+            next(download)
+        assert calls == 1
 
     def test_download_binary_rejects_empty_path(self) -> None:
         client = _make_client(_make_transport())
@@ -828,6 +927,53 @@ class TestTokenProvider:
         assert call_count == 2
         assert request_count == 2
         assert result == []
+
+    def test_binary_download_401_triggers_token_refresh_and_retry(self) -> None:
+        token_calls = 0
+        request_count = 0
+
+        def provider() -> str:
+            nonlocal token_calls
+            token_calls += 1
+            return f"token-{token_calls}"
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal request_count
+            request_count += 1
+            if request_count == 1:
+                return httpx.Response(401, json={"error": "unauthorized"})
+            return httpx.Response(200, stream=_ChunkedByteStream([b"binary-data"]))
+
+        http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+        client = RestClient(
+            url="http://test",
+            token="",
+            tenant_id="t1",
+            token_provider=provider,
+            http_client=http_client,
+            max_retries=0,
+        )
+
+        assert b"".join(client.download_binary("123", "models/model.bin")) == b"binary-data"
+        assert token_calls == 2
+        assert request_count == 2
+
+    def test_binary_download_401_after_refresh_raises(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(401, json={"error": "unauthorized"})
+
+        http_client = httpx.Client(transport=httpx.MockTransport(handler), base_url="http://test")
+        client = RestClient(
+            url="http://test",
+            token="",
+            tenant_id="t1",
+            token_provider=lambda: "bad-token",
+            http_client=http_client,
+            max_retries=0,
+        )
+
+        with pytest.raises(DCHAuthenticationError):
+            b"".join(client.download_binary("123", "models/model.bin"))
 
     def test_401_after_refresh_raises(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

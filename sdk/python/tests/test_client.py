@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
+from typing import get_type_hints
 from unittest.mock import MagicMock
 
 import pytest
@@ -66,12 +68,12 @@ class TestConnectionsDelegation:
         client = DataConnectClient("localhost")
         client._rest.export_connection = MagicMock(return_value=None)  # type: ignore[method-assign]
         client._rest.check_connection_readiness = MagicMock(return_value=None)  # type: ignore[method-assign]
-        client._rest.download_binary = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+        client._rest.download_binary = MagicMock(return_value=iter([b"data"]))  # type: ignore[method-assign]
         client._rest.test_credentials = MagicMock(return_value=None)  # type: ignore[method-assign]
 
         client.export_connection("123", "exported")
         client.check_connection_readiness("123")
-        assert client.download_binary("123", "model.bin") == b"data"
+        assert b"".join(client.download_binary("123", "model.bin")) == b"data"
         client.test_credentials("postgres", {"username": "user"})
 
         client._rest.export_connection.assert_called_once_with("123", "exported")
@@ -82,6 +84,10 @@ class TestConnectionsDelegation:
             "data_connection_type_id": "postgres",
             "credentials": {"username": "user"},
         }
+
+    def test_download_binary_runtime_return_type(self) -> None:
+        hints = get_type_hints(DataConnectClient.download_binary)
+        assert hints["return"] == Generator[bytes, None, None]
 
     def test_create_connection_with_inline_credentials(self) -> None:
         from data_connect_hub.models import DataConnection, InlineCredentials

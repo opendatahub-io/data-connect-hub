@@ -6,7 +6,7 @@ import json as _json
 import logging
 import random
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Generator, Mapping
 from typing import Any, TypeVar
 from urllib.parse import quote
 
@@ -206,6 +206,7 @@ class RestClient:
         *,
         json: dict[str, object] | None = None,
         params: Mapping[str, str] | None = None,
+        stream: bool = False,
     ) -> httpx.Response:
         last_exc: DCHError | None = None
         retryable = self._is_retryable(method)
@@ -213,13 +214,14 @@ class RestClient:
 
         for attempt in range(attempts):
             try:
-                resp = self._client.request(
+                request = self._client.build_request(
                     method,
                     f"{self._api_base}{path}",
                     headers=self._headers(),
                     json=json,
                     params=params,
                 )
+                resp = self._client.send(request, stream=stream)
             except httpx.RequestError as exc:
                 last_exc = _map_request_error(exc, self._base_url)
                 # ``TransportError`` covers connect/read/write/pool timeouts,
@@ -241,6 +243,7 @@ class RestClient:
 
             if resp.status_code in _RETRYABLE_STATUS_CODES and attempt < attempts - 1:
                 delay = self._retry_after(resp, attempt)
+                resp.close()
                 _log.debug(
                     "Retry %d/%d after HTTP %d, sleeping %.2fs",
                     attempt + 1,
@@ -255,6 +258,37 @@ class RestClient:
 
         # Unreachable: every loop iteration returns, raises, or continues.
         raise last_exc or DCHError("Request failed after retries")  # pragma: no cover
+
+    def _stream_request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Mapping[str, str] | None = None,
+    ) -> Generator[bytes, None, None]:
+        """Yield a successful response body and release it when iteration ends."""
+        resp = self._do_request(method, path, params=params, stream=True)
+        if resp.status_code == 401 and self._token_cache is not None:
+            resp.close()
+            _log.debug("Received 401; refreshing token and retrying")
+            self._token_cache.refresh()
+            resp = self._do_request(method, path, params=params, stream=True)
+
+        if not 200 <= resp.status_code < 300:
+            try:
+                resp.read()
+                raise map_http_error(resp)
+            except httpx.RequestError as exc:
+                raise _map_request_error(exc, self._base_url) from exc
+            finally:
+                resp.close()
+
+        try:
+            yield from resp.iter_bytes()
+        except httpx.RequestError as exc:
+            raise _map_request_error(exc, self._base_url) from exc
+        finally:
+            resp.close()
 
     def _retry_after(self, resp: httpx.Response, attempt: int) -> float:
         """Parse numeric Retry-After header or fall back to exponential backoff.
@@ -316,11 +350,12 @@ class RestClient:
         connection = _segment(connection_id, name="connection_id")
         self._request("POST", f"{_CONNECTIONS_ENDPOINT}/{connection}/readiness")
 
-    def download_binary(self, connection_id: str, path: str) -> bytes:
+    def download_binary(self, connection_id: str, path: str) -> Generator[bytes, None, None]:
+        """Yield binary response chunks without buffering the complete object."""
         if not path:
             raise DCHConfigError("path must be a non-empty string")
         connection = _segment(connection_id, name="connection_id")
-        return self._request("GET", f"{_CONNECTIONS_ENDPOINT}/{connection}/binary", params={"path": path}).content
+        return self._stream_request("GET", f"{_CONNECTIONS_ENDPOINT}/{connection}/binary", params={"path": path})
 
     def test_credentials(self, request: CredentialTestRequest) -> None:
         self._request("POST", "/test/credentials", json=request.model_dump())
