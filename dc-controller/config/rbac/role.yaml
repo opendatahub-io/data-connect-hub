@@ -66,6 +66,7 @@ rules:
   resources:
   - data-connection-types
   - data-connections
+  - flight-services
   verbs:
   - create
   - delete
