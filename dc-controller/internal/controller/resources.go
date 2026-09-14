@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -291,9 +292,9 @@ func renderFlightInstances(resources []*unstructured.Unstructured, config *dchv1
 func isFlightInstanceResource(obj *unstructured.Unstructured) bool {
 	name := obj.GetName()
 	switch obj.GetKind() {
-	case kindDeployment, "Service", kindConfigMap, "ServiceAccount", "NetworkPolicy":
+	case kindDeployment, kindService, kindConfigMap, kindServiceAccount, "NetworkPolicy":
 		return strings.Contains(name, nameFlightService)
-	case "ClusterRoleBinding":
+	case kindClusterRoleBinding:
 		return strings.HasSuffix(name, "flight-auth-delegator")
 	default:
 		return false
@@ -303,7 +304,7 @@ func isFlightInstanceResource(obj *unstructured.Unstructured) bool {
 func renameFlightInstanceResource(obj *unstructured.Unstructured, serviceName string) {
 	content := replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
 	obj.Object = content
-	if obj.GetKind() == "ClusterRoleBinding" {
+	if obj.GetKind() == kindClusterRoleBinding {
 		obj.SetName(strings.Replace(obj.GetName(), "flight-auth-delegator", serviceName+"-auth-delegator", 1))
 	}
 }
@@ -392,15 +393,11 @@ func mergeResources(defaults, local *corev1.ResourceRequirements) *corev1.Resour
 	if merged.Requests == nil {
 		merged.Requests = corev1.ResourceList{}
 	}
-	for name, quantity := range local.Requests {
-		merged.Requests[name] = quantity
-	}
+	maps.Copy(merged.Requests, local.Requests)
 	if merged.Limits == nil {
 		merged.Limits = corev1.ResourceList{}
 	}
-	for name, quantity := range local.Limits {
-		merged.Limits[name] = quantity
-	}
+	maps.Copy(merged.Limits, local.Limits)
 	return &merged
 }
 
@@ -498,7 +495,7 @@ func setConfigMapConnectors(obj *unstructured.Unstructured, connectors []dchv1al
 			section += fmt.Sprintf("enabled = %t\n", *connector.Enabled)
 		}
 		if connector.ConnectionTimeout != nil {
-			section += fmt.Sprintf("connection_timeout_secs = %d\n", int64(connector.ConnectionTimeout.Duration.Seconds()))
+			section += fmt.Sprintf("connection_timeout_secs = %d\n", int64(connector.ConnectionTimeout.Seconds()))
 		}
 		sections = append(sections, section)
 	}
@@ -640,7 +637,7 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace string) {
 	var restServiceAccount string
 	for _, obj := range resources {
-		if obj.GetKind() == "ServiceAccount" && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
+		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
 			restServiceAccount = obj.GetName()
 			break
 		}
@@ -701,10 +698,10 @@ spec:
 // creating the Deployment first produces pods without imagePullSecrets.
 func resourcePriority(kind string) int {
 	switch kind {
-	case "ServiceAccount":
+	case kindServiceAccount:
 		return 0
 	case "ConfigMap", "Secret", "Service", "NetworkPolicy",
-		"ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding":
+		"ClusterRole", kindClusterRoleBinding, "Role", "RoleBinding":
 		return 1
 	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
 		return 2
@@ -728,7 +725,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 	for _, obj := range resources {
 		obj.SetNamespace(namespace)
 
-		if obj.GetKind() == "ClusterRoleBinding" {
+		if obj.GetKind() == kindClusterRoleBinding {
 			patchClusterRoleBindingSubjects(obj, namespace)
 		}
 
@@ -852,7 +849,7 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 		if !ok {
 			continue
 		}
-		if kind, _ := sub["kind"].(string); kind == "ServiceAccount" {
+		if kind, _ := sub["kind"].(string); kind == kindServiceAccount {
 			sub["namespace"] = namespace
 			subjects[i] = sub
 		}
