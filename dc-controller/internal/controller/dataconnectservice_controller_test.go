@@ -717,7 +717,7 @@ var _ = Describe("setConfigMapTraceExporter", func() {
 	newConfigMap := func(toml string) *unstructured.Unstructured {
 		return &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "v1",
-			"kind":       "ConfigMap",
+			"kind":       kindConfigMap,
 			"metadata":   map[string]any{"name": "svc-config"},
 			"data":       map[string]any{"config.toml": toml},
 		}}
@@ -749,7 +749,7 @@ var _ = Describe("setConfigMapTraceExporter", func() {
 	It("ignores ConfigMaps without a config.toml", func() {
 		cm := &unstructured.Unstructured{Object: map[string]any{
 			"apiVersion": "v1",
-			"kind":       "ConfigMap",
+			"kind":       kindConfigMap,
 			"metadata":   map[string]any{"name": "other"},
 			"data":       map[string]any{"other.toml": "[trace]\n"},
 		}}
