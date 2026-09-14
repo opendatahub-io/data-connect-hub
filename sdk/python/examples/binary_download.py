@@ -24,7 +24,11 @@ if not connection_id or not binary_path:
     print("Set DCH_CONNECTION_ID and DCH_BINARY_PATH for a binary-format connection.")
     raise SystemExit(1)
 
-output_file = Path(os.getenv("DCH_OUTPUT_FILE", "download.bin"))
+output_dir = Path.cwd().resolve()
+configured_output = Path(os.getenv("DCH_OUTPUT_FILE", "download.bin"))
+output_file = (output_dir / configured_output).resolve()
+if output_file.parent != output_dir:
+    raise ValueError("DCH_OUTPUT_FILE must name a file in the current directory")
 
 with TemporaryDirectory(dir=output_file.parent) as temporary_directory:
     temporary_path = Path(temporary_directory) / output_file.name
