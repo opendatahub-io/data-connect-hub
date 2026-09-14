@@ -70,8 +70,11 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	nameDatabaseConfig = "dch-database-config"
 
-	kindDeployment = "Deployment"
-	kindConfigMap  = "ConfigMap"
+	kindDeployment         = "Deployment"
+	kindConfigMap          = "ConfigMap"
+	kindService            = "Service"
+	kindServiceAccount     = "ServiceAccount"
+	kindClusterRoleBinding = "ClusterRoleBinding"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
