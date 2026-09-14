@@ -96,6 +96,80 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
     registry
 }
 
+async fn configure_tls(
+    mut builder: tonic::transport::Server,
+    tls: &utils::TlsConfig,
+) -> Result<tonic::transport::Server> {
+    tls.validate().map_err(|e| anyhow::anyhow!(e))?;
+    if let (Some(cert_file), Some(key_file)) = (&tls.cert_file, &tls.key_file) {
+        let cert = tokio::fs::read(cert_file).await?;
+        let key = tokio::fs::read(key_file).await?;
+        let identity = tonic::transport::Identity::from_pem(cert, key);
+        let tls_config = tonic::transport::ServerTlsConfig::new().identity(identity);
+        builder = builder.tls_config(tls_config)?;
+        tracing::info!("TLS enabled (cert: {}, key: {})", cert_file, key_file);
+    } else {
+        tracing::warn!("TLS is DISABLED — gRPC traffic is unencrypted");
+    }
+    Ok(builder)
+}
+
+fn configure_metrics(config: &ServerConfig) -> Result<()> {
+    if config.metrics.enabled {
+        tracing::info!(
+            "Prometheus metrics enabled on {}:{}",
+            config.metrics.address,
+            config.metrics.port
+        );
+        install_prometheus_recorder()?;
+        spawn_metrics_server(config.metrics.address.clone(), config.metrics.port);
+    } else {
+        tracing::info!("Prometheus metrics disabled");
+    }
+    Ok(())
+}
+
+async fn start_server(
+    mut builder: tonic::transport::Server,
+    auth: &utils::AuthConfig,
+    service: FlightServiceServer<DataIngestionService>,
+    addr: std::net::SocketAddr,
+) -> Result<()> {
+    let (health_reporter, health_service) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<FlightServiceServer<DataIngestionService>>()
+        .await;
+
+    if auth.enabled {
+        tracing::info!(
+            "Auth enabled (cache TTL: {}s, token_review_audiences: {:?})",
+            auth.cache_ttl_secs,
+            auth.token_review_audiences
+        );
+        let kube_auth = KubeAuthClient::try_default(
+            Duration::from_secs(auth.cache_ttl_secs),
+            auth.token_review_audiences.clone(),
+        )
+        .await?;
+        let auth_layer = AuthLayer::new(Arc::new(kube_auth), auth.discovery_service_account.clone());
+        builder
+            .layer(auth_layer)
+            .add_service(health_service)
+            .add_service(service)
+            .serve_with_shutdown(addr, shutdown_signal())
+            .await?;
+    } else {
+        tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
+        builder
+            .add_service(health_service)
+            .add_service(service)
+            .serve_with_shutdown(addr, shutdown_signal())
+            .await?;
+    }
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()

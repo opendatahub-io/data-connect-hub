@@ -194,6 +194,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
+
 	if err := (&controller.DataConnectServiceReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
@@ -201,12 +203,11 @@ func main() {
 		RestImage:          requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"),
 		FlightImage:        requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"),
 		KubeRbacProxyImage: requiredEnv("RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"),
+		FlightClient:       controller.NewHTTPFlightRegistrationClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
 	}
-
-	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),
