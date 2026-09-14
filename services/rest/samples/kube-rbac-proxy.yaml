@@ -55,8 +55,7 @@ authorization:
       mappings:
         - methods: [post,patch, delete]
           resources:
-            - rewrites:
-              resourceAttributes:
+            - resourceAttributes:
                 namespace: "{{.FromHeader}}"
                 apiGroup: dataconnecthub.opendatahub.io
                 resource: flight-services
