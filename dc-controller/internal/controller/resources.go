@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -312,59 +313,82 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 	}
 }
 
-// setConfigMapTraceExporter writes the trace exporter endpoint into the [trace]
-// section of every rendered config.toml, appending the section when the base
-// manifest does not declare one. It reports whether any ConfigMap was updated.
-func setConfigMapTraceExporter(resources []*unstructured.Unstructured, exporter string) bool {
-	const (
-		section = "[trace]"
-		key     = "exporter"
-	)
-	exporterLine := fmt.Sprintf("%s = %q", key, exporter)
+// setDeploymentEnv sets the given environment variables on the named
+// containers, overwriting any value the base manifest already declares for the
+// same name and appending the rest. It reports whether any container matched.
+func setDeploymentEnv(resources []*unstructured.Unstructured, vars []corev1.EnvVar, containerNames ...string) bool {
+	wanted := make(map[string]bool, len(containerNames))
+	for _, name := range containerNames {
+		wanted[name] = true
+	}
 
 	updated := false
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
+		if obj.GetKind() != kindDeployment {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
 		if !found {
 			continue
 		}
-		toml, ok := data["config.toml"]
-		if !ok {
-			continue
-		}
+		changed := false
+		for i, c := range containers {
+			container, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name, _ := container["name"].(string); !wanted[name] {
+				continue
+			}
 
-		if !strings.Contains(toml, section) {
-			toml = strings.TrimRight(toml, "\n") + "\n\n" + section + "\n" + exporterLine + "\n"
-		} else {
-			var result []string
-			inTrace := false
-			for line := range strings.SplitSeq(toml, "\n") {
-				trimmed := strings.TrimSpace(line)
-				if inTrace {
-					if strings.HasPrefix(trimmed, "[") {
-						inTrace = false
-					} else if strings.HasPrefix(trimmed, key) &&
-						(len(trimmed) == len(key) || trimmed[len(key)] == ' ' || trimmed[len(key)] == '=') {
+			env, _ := container["env"].([]any)
+			for _, v := range vars {
+				entry := map[string]any{"name": v.Name, "value": v.Value}
+				replaced := false
+				for j, e := range env {
+					existing, ok := e.(map[string]any)
+					if !ok {
 						continue
 					}
+					if n, _ := existing["name"].(string); n == v.Name {
+						env[j] = entry
+						replaced = true
+					}
 				}
-				result = append(result, line)
-				if trimmed == section {
-					inTrace = true
-					result = append(result, exporterLine)
+				if !replaced {
+					env = append(env, entry)
 				}
 			}
-			toml = strings.Join(result, "\n")
-		}
 
-		data["config.toml"] = toml
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
-		updated = true
+			container["env"] = env
+			containers[i] = container
+			changed = true
+		}
+		if changed {
+			_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+			updated = true
+		}
 	}
 	return updated
+}
+
+// traceEnv maps spec.trace onto the OTLP exporter environment variables,
+// omitting any field the CR leaves unset.
+func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
+	if trace == nil {
+		return nil
+	}
+	var vars []corev1.EnvVar
+	if trace.Exporter != "" {
+		vars = append(vars, corev1.EnvVar{Name: envOTLPEndpoint, Value: trace.Exporter})
+	}
+	if trace.Insecure != nil {
+		vars = append(vars, corev1.EnvVar{Name: envOTLPInsecure, Value: strconv.FormatBool(*trace.Insecure)})
+	}
+	if trace.Certificate != "" {
+		vars = append(vars, corev1.EnvVar{Name: envOTLPCertificate, Value: trace.Certificate})
+	}
+	return vars
 }
 
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
@@ -632,7 +656,7 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 				continue
 			}
 			name, _ := container["name"].(string)
-			if name != "kube-rbac-proxy" {
+			if name != nameKubeRbacProxy {
 				continue
 			}
 			var args []any

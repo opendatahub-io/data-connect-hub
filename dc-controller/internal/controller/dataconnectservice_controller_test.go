@@ -30,7 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -395,8 +397,11 @@ var _ = Describe("DataConnectService Controller", func() {
 		})
 	})
 
-	Context("When trace.exporter is specified", func() {
-		const exporter = "http://otel-collector.observability.svc:4317"
+	Context("When trace is specified", func() {
+		const (
+			exporter = "https://otel-collector.observability.svc:4317"
+			caPath   = "/etc/tls/otel/ca.crt"
+		)
 
 		BeforeEach(func() {
 			createDatabaseSecret()
@@ -406,7 +411,11 @@ var _ = Describe("DataConnectService Controller", func() {
 					Namespace: targetNamespace,
 				},
 				Spec: dchv1alpha1.DataConnectServiceSpec{
-					Trace: &dchv1alpha1.Trace{Exporter: exporter},
+					Trace: &dchv1alpha1.Trace{
+						Exporter:    exporter,
+						Insecure:    ptr.To(false),
+						Certificate: caPath,
+					},
 				},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
@@ -417,14 +426,31 @@ var _ = Describe("DataConnectService Controller", func() {
 			deleteCR()
 		})
 
-		It("should add a [trace] section to the rest-service and flight-service configmaps", func() {
+		It("should set the OTLP env vars on the rest-service and flight-service containers", func() {
 			reconcileUntilReady()
 
 			for _, svc := range []string{nameRestService, nameFlightService} {
-				cm := &corev1.ConfigMap{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
-				toml := cm.Data["config.toml"]
-				Expect(toml).To(ContainSubstring("[trace]\n" + `exporter = "` + exporter + `"`))
+				deploy := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc, Namespace: targetNamespace}, deploy)).To(Succeed())
+				container := findContainer(deploy, svc)
+				Expect(container).NotTo(BeNil())
+				Expect(container.Env).To(ContainElements(
+					corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
+					corev1.EnvVar{Name: envOTLPInsecure, Value: valueFalse},
+					corev1.EnvVar{Name: envOTLPCertificate, Value: caPath},
+				))
+			}
+		})
+
+		It("should not set the OTLP env vars on sidecar containers", func() {
+			reconcileUntilReady()
+
+			deploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
+			proxy := findContainer(deploy, nameKubeRbacProxy)
+			Expect(proxy).NotTo(BeNil())
+			for _, e := range proxy.Env {
+				Expect(e.Name).NotTo(HavePrefix("OTEL_"))
 			}
 		})
 	})
@@ -447,13 +473,17 @@ var _ = Describe("DataConnectService Controller", func() {
 			deleteCR()
 		})
 
-		It("should not add a [trace] section to the configmaps", func() {
+		It("should not set the OTLP env vars on the service containers", func() {
 			reconcileUntilReady()
 
 			for _, svc := range []string{nameRestService, nameFlightService} {
-				cm := &corev1.ConfigMap{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
-				Expect(cm.Data["config.toml"]).NotTo(ContainSubstring("[trace]"))
+				deploy := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc, Namespace: targetNamespace}, deploy)).To(Succeed())
+				container := findContainer(deploy, svc)
+				Expect(container).NotTo(BeNil())
+				for _, e := range container.Env {
+					Expect(e.Name).NotTo(HavePrefix("OTEL_"))
+				}
 			}
 		})
 	})
@@ -713,46 +743,103 @@ var _ = Describe("DataConnectService Controller", func() {
 	})
 })
 
-var _ = Describe("setConfigMapTraceExporter", func() {
-	newConfigMap := func(toml string) *unstructured.Unstructured {
-		return &unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       kindConfigMap,
-			"metadata":   map[string]any{"name": "svc-config"},
-			"data":       map[string]any{"config.toml": toml},
-		}}
+const testOTLPEndpoint = "http://otel:4317"
+
+var _ = Describe("traceEnv", func() {
+	It("returns nil when trace is unset", func() {
+		Expect(traceEnv(nil)).To(BeNil())
+	})
+
+	It("omits fields the CR leaves unset", func() {
+		Expect(traceEnv(&dchv1alpha1.Trace{Exporter: testOTLPEndpoint})).To(Equal([]corev1.EnvVar{
+			{Name: envOTLPEndpoint, Value: testOTLPEndpoint},
+		}))
+	})
+
+	It("renders insecure=true as a string", func() {
+		Expect(traceEnv(&dchv1alpha1.Trace{Insecure: ptr.To(true)})).To(Equal([]corev1.EnvVar{
+			{Name: envOTLPInsecure, Value: valueTrue},
+		}))
+	})
+
+	It("renders insecure=false rather than omitting it", func() {
+		Expect(traceEnv(&dchv1alpha1.Trace{Insecure: ptr.To(false)})).To(Equal([]corev1.EnvVar{
+			{Name: envOTLPInsecure, Value: valueFalse},
+		}))
+	})
+
+	It("renders every field when all are set", func() {
+		trace := &dchv1alpha1.Trace{
+			Exporter:    "https://otel:4317",
+			Insecure:    ptr.To(false),
+			Certificate: "/etc/tls/otel/ca.crt",
+		}
+		Expect(traceEnv(trace)).To(Equal([]corev1.EnvVar{
+			{Name: envOTLPEndpoint, Value: "https://otel:4317"},
+			{Name: envOTLPInsecure, Value: valueFalse},
+			{Name: envOTLPCertificate, Value: "/etc/tls/otel/ca.crt"},
+		}))
+	})
+})
+
+var _ = Describe("setDeploymentEnv", func() {
+	newDeployment := func(containers ...corev1.Container) *unstructured.Unstructured {
+		deploy := &appsv1.Deployment{
+			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: kindDeployment},
+			ObjectMeta: metav1.ObjectMeta{Name: "svc"},
+			Spec: appsv1.DeploymentSpec{
+				Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: containers}},
+			},
+		}
+		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deploy)
+		Expect(err).NotTo(HaveOccurred())
+		return &unstructured.Unstructured{Object: raw}
 	}
 
-	renderedTOML := func(obj *unstructured.Unstructured) string {
-		data, _, _ := unstructured.NestedStringMap(obj.Object, "data")
-		return data["config.toml"]
+	envOf := func(obj *unstructured.Unstructured, containerName string) []corev1.EnvVar {
+		deploy := &appsv1.Deployment{}
+		Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, deploy)).To(Succeed())
+		for _, c := range deploy.Spec.Template.Spec.Containers {
+			if c.Name == containerName {
+				return c.Env
+			}
+		}
+		return nil
 	}
 
-	It("appends a [trace] section when none exists", func() {
-		cm := newConfigMap("[server]\nport = 8080\n")
-		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeTrue())
-		Expect(renderedTOML(cm)).To(Equal("[server]\nport = 8080\n\n[trace]\nexporter = \"http://otel:4317\"\n"))
+	endpoint := corev1.EnvVar{Name: envOTLPEndpoint, Value: testOTLPEndpoint}
+
+	It("appends to a container with no env", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestService})
+		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).To(Equal([]corev1.EnvVar{endpoint}))
 	})
 
-	It("replaces an existing exporter key inside the [trace] section", func() {
-		cm := newConfigMap("[trace]\nexporter = \"http://old:4317\"\nsampling = 1\n\n[server]\nport = 8080\n")
-		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://new:4317")).To(BeTrue())
-		Expect(renderedTOML(cm)).To(Equal("[trace]\nexporter = \"http://new:4317\"\nsampling = 1\n\n[server]\nport = 8080\n"))
+	It("preserves env vars already on the container", func() {
+		existing := corev1.EnvVar{Name: "RUST_LOG", Value: "info"}
+		deploy := newDeployment(corev1.Container{Name: nameRestService, Env: []corev1.EnvVar{existing}})
+		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).To(Equal([]corev1.EnvVar{existing, endpoint}))
 	})
 
-	It("leaves same-named keys in other sections untouched", func() {
-		cm := newConfigMap("[trace]\n\n[metrics]\nexporter = \"prometheus\"\n")
-		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeTrue())
-		Expect(renderedTOML(cm)).To(Equal("[trace]\nexporter = \"http://otel:4317\"\n\n[metrics]\nexporter = \"prometheus\"\n"))
+	It("overwrites a same-named env var declared on the container", func() {
+		stale := corev1.EnvVar{Name: envOTLPEndpoint, Value: "http://old:4317"}
+		deploy := newDeployment(corev1.Container{Name: nameRestService, Env: []corev1.EnvVar{stale}})
+		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).To(Equal([]corev1.EnvVar{endpoint}))
 	})
 
-	It("ignores ConfigMaps without a config.toml", func() {
-		cm := &unstructured.Unstructured{Object: map[string]any{
-			"apiVersion": "v1",
-			"kind":       kindConfigMap,
-			"metadata":   map[string]any{"name": "other"},
-			"data":       map[string]any{"other.toml": "[trace]\n"},
-		}}
-		Expect(setConfigMapTraceExporter([]*unstructured.Unstructured{cm}, "http://otel:4317")).To(BeFalse())
+	It("only touches the named containers", func() {
+		deploy := newDeployment(
+			corev1.Container{Name: nameRestService},
+			corev1.Container{Name: nameKubeRbacProxy},
+		)
+		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameKubeRbacProxy)).To(BeEmpty())
+	})
+
+	It("reports false when no named container is present", func() {
+		deploy := newDeployment(corev1.Container{Name: nameKubeRbacProxy})
+		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeFalse())
 	})
 })
