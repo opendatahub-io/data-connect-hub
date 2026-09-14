@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
+use tracing::info;
 
 const ACTION_CHECK_DATA_CONNECTION: &str = "CheckDataConnection";
 const ACTION_CHECK_CREDENTIALS: &str = "CheckCredentials";
@@ -31,6 +32,7 @@ pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, t
 
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
+
     async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status>;
     async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
     async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
@@ -60,6 +62,11 @@ impl FlightClient {
     }
 
     async fn read_sa_token(&self) -> Result<String, tonic::Status> {
+        if self.sa_token_file.is_none() {
+            info!("no sa-token-file configured for flight-service auth");
+            return Ok("Bearer none".to_string());
+        }
+
         let path = self
             .sa_token_file
             .as_deref()
@@ -108,6 +115,7 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
+
     async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let mut request = tonic::Request::new(Action::new("GetSupportedConnectors", ""));

@@ -56,3 +56,12 @@ CREATE INDEX IF NOT EXISTS idx_data_connection_types_name ON data_connection_typ
 CREATE INDEX IF NOT EXISTS idx_data_connection_types_provider ON data_connection_types ((data->'resource'->>'provider'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connection_types_name_tenant ON data_connection_types ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connection_types_id ON data_connection_types ((data->'metadata'->>'id'));
+
+
+
+CREATE TABLE IF NOT EXISTS flight_services (
+    data JSONB NOT NULL
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_services_ns_name ON flight_services ((data->'resource'->>'namespace'), (data->'resource'->>'name'));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_services_id ON flight_services ((data->'metadata'->>'id'));
