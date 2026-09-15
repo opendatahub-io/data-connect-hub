@@ -1,0 +1,58 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+- ../../default
+- ../../prometheus
+- service_ca_configmap.yaml
+- rbac/tls
+
+patches:
+- path: metrics_service_patch.yaml
+  target:
+    kind: Service
+    name: metrics-service
+- path: cert_metrics_manager_patch.yaml
+  target:
+    kind: Deployment
+    name: manager
+- path: monitor_tls_patch.yaml
+  target:
+    kind: ServiceMonitor
+    name: metrics-monitor
+
+replacements:
+- source:
+    kind: Service
+    version: v1
+    name: metrics-service
+    fieldPath: metadata.name
+  targets:
+  - select:
+      kind: ServiceMonitor
+      group: monitoring.coreos.com
+      version: v1
+      name: metrics-monitor
+    fieldPaths:
+    - spec.endpoints.0.tlsConfig.serverName
+    options:
+      delimiter: '.'
+      index: 0
+      create: true
+- source:
+    kind: Service
+    version: v1
+    name: metrics-service
+    fieldPath: metadata.namespace
+  targets:
+  - select:
+      kind: ServiceMonitor
+      group: monitoring.coreos.com
+      version: v1
+      name: metrics-monitor
+    fieldPaths:
+    - spec.endpoints.0.tlsConfig.serverName
+    options:
+      delimiter: '.'
+      index: 1
+      create: true
