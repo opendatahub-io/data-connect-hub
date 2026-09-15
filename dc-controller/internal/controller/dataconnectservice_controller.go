@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,7 +187,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			log.Info("running finalizer for DataConnectService")
 			r.clearSyncedAnnotations(ctx)
 			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
-			r.deleteClusterScopedResources(ctx, cr.UID)
+			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
+				return ctrl.Result{}, err
+			}
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
 		}
@@ -532,18 +535,20 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 	}
 }
 
-func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.Context, ownerUID types.UID) {
+func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.Context, ownerUID types.UID) error {
 	log := logf.FromContext(ctx)
+	var cleanupErr error
 
 	var clusterRoles rbacv1.ClusterRoleList
 	if err := r.List(ctx, &clusterRoles, client.MatchingLabels{managedByLabel: managedByDCHService}); err != nil {
-		log.Error(err, "Failed to list DCH ClusterRoles for cleanup")
+		return fmt.Errorf("listing DCH ClusterRoles for cleanup: %w", err)
 	} else {
 		for i := range clusterRoles.Items {
 			role := &clusterRoles.Items[i]
 			if isOwnedBy(role, ownerUID) {
 				if err := r.Delete(ctx, role); err != nil && !apierrors.IsNotFound(err) {
 					log.Error(err, "Failed to delete DCH ClusterRole", "name", role.Name)
+					cleanupErr = errors.Join(cleanupErr, fmt.Errorf("deleting ClusterRole %s: %w", role.Name, err))
 				}
 			}
 		}
@@ -551,17 +556,19 @@ func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.
 
 	var clusterRoleBindings rbacv1.ClusterRoleBindingList
 	if err := r.List(ctx, &clusterRoleBindings, client.MatchingLabels{managedByLabel: managedByDCHService}); err != nil {
-		log.Error(err, "Failed to list DCH ClusterRoleBindings for cleanup")
+		return fmt.Errorf("listing DCH ClusterRoleBindings for cleanup: %w", err)
 	} else {
 		for i := range clusterRoleBindings.Items {
 			binding := &clusterRoleBindings.Items[i]
 			if isOwnedBy(binding, ownerUID) {
 				if err := r.Delete(ctx, binding); err != nil && !apierrors.IsNotFound(err) {
 					log.Error(err, "Failed to delete DCH ClusterRoleBinding", "name", binding.Name)
+					cleanupErr = errors.Join(cleanupErr, fmt.Errorf("deleting ClusterRoleBinding %s: %w", binding.Name, err))
 				}
 			}
 		}
 	}
+	return cleanupErr
 }
 
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.
