@@ -326,9 +326,48 @@ spec:
     - name: %s
       namespace: %s`, gw.Name, gw.Namespace)
 
+	gatewayPeer := fmt.Sprintf(`from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: %s
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: %s`, gw.Namespace, gw.Name)
+
 	return []kustypes.Patch{
 		{
 			Patch: patchYAML,
+		},
+		{
+			Patch: fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: rest-service
+spec:
+  ingress:
+    - %s
+      ports:
+        - port: 8443
+          protocol: TCP`, gatewayPeer),
+		},
+		{
+			Patch: fmt.Sprintf(`apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: flight-service
+spec:
+  ingress:
+    - %s
+      ports:
+        - port: 8443
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rest-service
+      ports:
+        - port: 8443
+          protocol: TCP`, gatewayPeer),
 		},
 	}
 }

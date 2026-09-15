@@ -12,10 +12,23 @@ spec:
   policyTypes:
     - Ingress
     - Egress
-  # Allow-all for now: we don't yet have a defined gateway/client topology to
-  # scope this down to. This exists so the policy can be tightened later
-  # without having to introduce the resource from scratch.
   ingress:
-    - {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opendatahub
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: odh-gateway
+      ports:
+        - port: 8443
+          protocol: TCP
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rest-service
+      ports:
+        - port: 8443
+          protocol: TCP
   egress:
     - {}
