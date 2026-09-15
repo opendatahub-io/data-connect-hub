@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Generator
+from inspect import signature
 from typing import get_type_hints
 from unittest.mock import MagicMock
 
@@ -169,6 +170,10 @@ class TestEmptyUpdateGuards:
 
 
 class TestFlightDelegation:
+    @pytest.mark.parametrize("method_name", ["read", "read_batches", "read_pandas"])
+    def test_query_methods_do_not_expose_parameters(self, method_name: str) -> None:
+        assert "parameters" not in signature(getattr(DataConnectClient, method_name)).parameters
+
     def test_read(self) -> None:
         import pyarrow as pa
 
@@ -179,18 +184,7 @@ class TestFlightDelegation:
 
         result = client.read("SELECT 1", "conn-1")
         assert result.equals(table)
-        client._flight.read.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_with_parameters(self) -> None:
-        import pyarrow as pa
-
-        table = pa.table({"col": [1]})
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-        client._flight.read.return_value = table
-
-        client.read("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_read_batches(self) -> None:
         stream = MagicMock()
@@ -200,14 +194,7 @@ class TestFlightDelegation:
 
         result = client.read_batches("SELECT 1", "conn-1")
         assert result is stream
-        client._flight.read_batches.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_batches_with_parameters(self) -> None:
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-
-        client.read_batches("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read_batches.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read_batches.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_read_pandas(self) -> None:
         import pandas as pd
@@ -219,18 +206,7 @@ class TestFlightDelegation:
 
         result = client.read_pandas("SELECT 1", "conn-1")
         assert isinstance(result, pd.DataFrame)
-        client._flight.read_pandas.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_pandas_with_parameters(self) -> None:
-        import pandas as pd
-
-        df = pd.DataFrame({"col": [1]})
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-        client._flight.read_pandas.return_value = df
-
-        client.read_pandas("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read_pandas.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read_pandas.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_server_info(self) -> None:
         client = DataConnectClient("localhost")
