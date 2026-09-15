@@ -58,6 +58,7 @@ DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 DCH_TENANT_PG_URL="${DCH_TENANT_PG_URL:-}"
 DCH_TENANT_PG_CA_CERT="${DCH_TENANT_PG_CA_CERT:-}"
 DCH_TENANT_MILVUS_URI="${DCH_TENANT_MILVUS_URI:-}"
+DCH_TENANT_MILVUS_CA_CERT="${DCH_TENANT_MILVUS_CA_CERT:-}"
 DCH_TENANT_ES_URI="${DCH_TENANT_ES_URI:-}"
 DCH_TENANT_ES_NAMESPACE="${DCH_TENANT_ES_NAMESPACE:-$DCH_TENANT_ID}"
 DCH_TENANT_ES_USERNAME="${DCH_TENANT_ES_USERNAME:-}"
@@ -205,6 +206,13 @@ setup_milvus_secret() {
         )
         [[ -n "${DCH_TENANT_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="MILVUS_TOKEN=${DCH_TENANT_MILVUS_TOKEN}")
         [[ -n "${DCH_TENANT_MILVUS_DATABASE:-}" ]] && args+=(--from-literal="MILVUS_DATABASE=${DCH_TENANT_MILVUS_DATABASE}")
+        if [[ -n "$DCH_TENANT_MILVUS_CA_CERT" ]]; then
+            [[ -f "$DCH_TENANT_MILVUS_CA_CERT" ]] || {
+                echo "ERROR: Milvus CA cert file not found: $DCH_TENANT_MILVUS_CA_CERT" >&2
+                exit 1
+            }
+            args+=(--from-file="MILVUS_CA_CERT=${DCH_TENANT_MILVUS_CA_CERT}")
+        fi
         kubectl create secret generic "$MILVUS_SECRET" \
             -n "$DCH_TENANT_ID" \
             "${args[@]}" \
@@ -363,8 +371,9 @@ seed_s3_data() {
 seed_milvus_data() {
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] || return 0
     local milvus_uri="${DCH_TENANT_MILVUS_URI}"
-    bash "$(dirname "$0")/scripts/seed-milvus-data.sh" \
-        -e "$milvus_uri" -n "$DCH_TENANT_ID"
+    local -a args=(-e "$milvus_uri" -n "$DCH_TENANT_ID")
+    [[ -n "$DCH_TENANT_MILVUS_CA_CERT" ]] && args+=(-c "$DCH_TENANT_MILVUS_CA_CERT")
+    bash "$(dirname "$0")/scripts/seed-milvus-data.sh" "${args[@]}"
 }
 
 seed_neo4j_data() {

@@ -28,6 +28,7 @@ jobs:
     timeout-minutes: 60
     env:
       E2E_CONNECTORS: postgres sqlite s3 elasticsearch neo4j milvus uri
+      E2E_SSL_ENABLED: "true"
       POSTGRES_SSL_MODE: disable
     steps:
       - name: Checkout
