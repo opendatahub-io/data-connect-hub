@@ -2,11 +2,11 @@ use actix_cors::Cors;
 use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
-use crate::clients::flight::FlightClient;
 use crate::rest::API_VERSION;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::middleware::validate_headers;
+use crate::state::ApiService;
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use commons::api::storage::MetaStore;
@@ -41,10 +41,6 @@ struct CommandLineArgs {
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/health", web::get().to(health))
-        .route(
-            &format!("/api/{API_VERSION}/audit/data-connection-types"),
-            web::post().to(audit_connection_types),
-        )
         .service(
             web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
@@ -64,7 +60,10 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                 )
                 .route("/connections/{id}/readiness", web::post().to(check_existent_connection))
                 .route("/connections/{id}/binary", web::get().to(get_binary_data))
-                .route("/test/credentials", web::post().to(test_credentials)),
+                .route("/test/credentials", web::post().to(test_credentials))
+                .route("/flights", web::post().to(create_flight_service))
+                .route("/flights/{id}", web::delete().to(delete_flight_service))
+                .route("/flights/{id}", web::patch().to(patch_flight_service)),
         )
         .default_service(web::route().to(not_found));
 }
@@ -157,6 +156,24 @@ fn log_config_source(config_file: &str, source: &str, required: bool) {
     }
 }
 
+async fn read_ca_cert(config: &ServerConfig) -> Result<Option<Vec<u8>>, anyhow::Error> {
+    match &config.flight_service.ca_cert {
+        Some(path) => {
+            tracing::info!(path, "Loading CA certificate for flight service TLS");
+            Ok(Some(tokio::fs::read(path).await?))
+        },
+        None => {
+            if config.server.sa_token_file.is_some() {
+                tracing::warn!(
+                    "sa-token-file is configured but ca-cert is not; \
+                     the bearer token will be sent over plaintext HTTP"
+                );
+            }
+            Ok(None)
+        },
+    }
+}
+
 #[actix_web::main]
 async fn main() -> Result<()> {
     rustls::crypto::aws_lc_rs::default_provider()
@@ -182,28 +199,14 @@ async fn main() -> Result<()> {
 
     let secret_store = KubeSecretStore::try_default().await?;
 
-    let ca_cert_pem = match &config.flight_service.ca_cert {
-        Some(path) => {
-            tracing::info!(path, "Loading CA certificate for flight service TLS");
-            Some(tokio::fs::read(path).await?)
-        },
-        None => {
-            if config.flight_service.sa_token_file.is_some() {
-                tracing::warn!(
-                    "sa-token-file is configured but ca-cert is not; \
-                     the bearer token will be sent over plaintext HTTP"
-                );
-            }
-            None
-        },
-    };
-    let flight_client = Arc::new(FlightClient::new(
-        config.flight_service.endpoint(),
-        ca_cert_pem,
-        config.flight_service.sa_token_file.clone(),
-    ));
+    let flight_ca_cert = read_ca_cert(&config).await?;
 
-    let service = Arc::new(ApiService::new(meta_store, Arc::new(secret_store), flight_client));
+    let service = Arc::new(ApiService::new(
+        meta_store,
+        Arc::new(secret_store),
+        flight_ca_cert,
+        config.server.sa_token_file.clone(),
+    ));
 
     HttpServer::new(move || {
         let service = service.clone();

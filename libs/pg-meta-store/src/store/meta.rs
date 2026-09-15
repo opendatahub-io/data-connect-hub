@@ -3,7 +3,8 @@ use commons::api::ResourceMetadata;
 use commons::api::connection_types::{DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus};
 use commons::api::connections::{DataConnection, DataConnectionResource, DataConnectionState, DataConnectionStatus};
 use commons::api::errors::MetaStoreError;
-use commons::api::storage::{MetaStore, MetaStoreReader};
+use commons::api::flight_discovery::{FlightService, FlightServiceResource};
+use commons::api::storage::{FlightDiscoveryStore, MetaStore, MetaStoreReader};
 use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
@@ -722,6 +723,206 @@ impl MetaStore for PgMetaStore {
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(
                 "connection type '{uid}' not found"
+            )));
+        }
+
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl FlightDiscoveryStore for PgMetaStore {
+    async fn create_flight_service(
+        &self,
+        flight_service: &FlightService,
+    ) -> Result<FlightServiceResource, MetaStoreError> {
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        let resource = FlightServiceResource {
+            metadata: ResourceMetadata {
+                id: Uuid::new_v4().to_string(),
+                tenant_id: None,
+                created_at: now.clone(),
+                updated_at: now,
+            },
+            resource: flight_service.clone(),
+        };
+
+        let json_value = serde_json::to_value(&resource).map_err(|e| {
+            error!("failed to serialize flight service: {e}");
+            MetaStoreError::Serialization("failed to serialize flight service".to_string())
+        })?;
+
+        sqlx::query("INSERT INTO flight_services (data) VALUES ($1)")
+            .bind(&json_value)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| match map_sqlx_error(e) {
+                MetaStoreError::Conflict(_) => MetaStoreError::Conflict(format!(
+                    "a flight service named '{}' already exists in namespace '{}'",
+                    flight_service.name, flight_service.namespace
+                )),
+                other => other,
+            })?;
+
+        Ok(resource)
+    }
+
+    async fn get_all_flight_services(&self) -> Result<ResourceList<FlightServiceResource>, MetaStoreError> {
+        let rows = sqlx::query("SELECT data FROM flight_services")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("failed to list flight services: {e}");
+                MetaStoreError::Query("failed to list flight services".to_string())
+            })?;
+
+        let items: Vec<FlightServiceResource> = rows
+            .iter()
+            .map(|row| {
+                let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+                    error!("failed to read flight service column: {e}");
+                    MetaStoreError::Query("failed to read flight service".to_string())
+                })?;
+                serde_json::from_value(json_value).map_err(|e| {
+                    error!("failed to deserialize flight service: {e}");
+                    MetaStoreError::Deserialization("failed to deserialize flight service".to_string())
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(ResourceList {
+            total_count: items.len(),
+            items,
+        })
+    }
+
+    async fn get_flight_service_by_connector(&self, connector: &str) -> Result<FlightServiceResource, MetaStoreError> {
+        let row =
+            sqlx::query("SELECT data FROM flight_services WHERE data->'resource'->'supported_connectors' @> $1::jsonb")
+                .bind(serde_json::json!([connector]))
+                .fetch_one(&self.pool)
+                .await
+                .map_err(|e| match e {
+                    sqlx::Error::RowNotFound => {
+                        MetaStoreError::ResourceNotFound(format!("no flight service supports connector '{connector}'"))
+                    },
+                    e => {
+                        error!("failed to find flight service for connector '{connector}': {e}");
+                        MetaStoreError::Query("failed to retrieve flight service".to_string())
+                    },
+                })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read flight service column: {e}");
+            MetaStoreError::Query("failed to read flight service".to_string())
+        })?;
+        serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize flight service: {e}");
+            MetaStoreError::Deserialization("failed to deserialize flight service".to_string())
+        })
+    }
+
+    async fn get_flight_service(&self, id: &str) -> Result<FlightServiceResource, MetaStoreError> {
+        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'metadata'->>'id' = $1")
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("flight service '{id}' not found"))
+                },
+                e => {
+                    error!("failed to get flight service '{id}': {e}");
+                    MetaStoreError::Query("failed to retrieve flight service".to_string())
+                },
+            })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read flight service column: {e}");
+            MetaStoreError::Query("failed to read flight service".to_string())
+        })?;
+        serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize flight service: {e}");
+            MetaStoreError::Deserialization("failed to deserialize flight service".to_string())
+        })
+    }
+
+    async fn update_flight_service(
+        &self,
+        id: &str,
+        update_fn: Arc<dyn Fn(FlightService) -> Result<FlightService, MetaStoreError> + Send + Sync>,
+    ) -> Result<FlightServiceResource, MetaStoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to update flight service".to_string())
+        })?;
+
+        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'metadata'->>'id' = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| match e {
+                sqlx::Error::RowNotFound => {
+                    MetaStoreError::ResourceNotFound(format!("flight service '{id}' not found"))
+                },
+                e => {
+                    error!("failed to get flight service '{id}' for update: {e}");
+                    MetaStoreError::Query("failed to update flight service".to_string())
+                },
+            })?;
+
+        let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
+            error!("failed to read flight service column: {e}");
+            MetaStoreError::Query("failed to read flight service".to_string())
+        })?;
+        let mut existing: FlightServiceResource = serde_json::from_value(json_value).map_err(|e| {
+            error!("failed to deserialize flight service: {e}");
+            MetaStoreError::Deserialization("failed to deserialize flight service".to_string())
+        })?;
+
+        let id = existing.metadata.id.clone();
+        let service = update_fn(existing.resource)?;
+
+        let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+        existing.metadata.updated_at = now;
+        existing.resource = service;
+
+        let json_value = serde_json::to_value(&existing).map_err(|e| {
+            error!("failed to serialize flight service: {e}");
+            MetaStoreError::Serialization("failed to serialize flight service".to_string())
+        })?;
+
+        sqlx::query("UPDATE flight_services SET data = $1 WHERE data->'metadata'->>'id' = $2")
+            .bind(&json_value)
+            .bind(&id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| {
+                error!("failed to update flight service '{id}': {e}");
+                MetaStoreError::Query("failed to update flight service".to_string())
+            })?;
+
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to update flight service".to_string())
+        })?;
+
+        Ok(existing)
+    }
+
+    async fn delete_flight_service(&self, id: &str) -> Result<(), MetaStoreError> {
+        let result = sqlx::query("DELETE FROM flight_services WHERE data->'metadata'->>'id' = $1")
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| {
+                error!("failed to delete flight service '{id}': {e}");
+                MetaStoreError::Query("failed to delete flight service".to_string())
+            })?;
+
+        if result.rows_affected() == 0 {
+            return Err(MetaStoreError::ResourceNotFound(format!(
+                "flight service '{id}' not found"
             )));
         }
 

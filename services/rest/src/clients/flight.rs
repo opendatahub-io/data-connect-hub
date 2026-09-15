@@ -15,6 +15,7 @@ use std::sync::Arc;
 use tokio::sync::OnceCell;
 use tonic::metadata::MetadataValue;
 use tonic::transport::Channel;
+use tracing::info;
 
 const ACTION_CHECK_DATA_CONNECTION: &str = "CheckDataConnection";
 const ACTION_CHECK_CREDENTIALS: &str = "CheckCredentials";
@@ -60,6 +61,11 @@ impl FlightClient {
     }
 
     async fn read_sa_token(&self) -> Result<String, tonic::Status> {
+        if self.sa_token_file.is_none() {
+            info!("no sa-token-file configured for flight-service auth");
+            return Ok("Bearer none".to_string());
+        }
+
         let path = self
             .sa_token_file
             .as_deref()

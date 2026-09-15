@@ -623,13 +623,6 @@
           }
         }
       }
-    },
-    "/audit/data-connection-types": {
-      "servers": [
-        {
-          "url": "/api/v1alpha1"
-        }
-      ]
     }
   },
   "components": {
@@ -1076,31 +1069,30 @@
           }
         }
       },
-      "Capabilities": {
-        "type": "object",
-        "required": [
-          "flight",
-          "rest"
-        ],
-        "properties": {
-          "flight": {
-            "type": "boolean",
-            "description": "Whether the Flight gRPC API is supported"
-          },
-          "rest": {
-            "type": "boolean",
-            "description": "Whether the REST API is supported"
-          }
-        }
-      },
       "DataConnectionTypeStatus": {
         "type": "object",
         "required": [
-          "capabilities"
+          "flight_ready"
         ],
         "properties": {
-          "capabilities": {
-            "$ref": "#/components/schemas/Capabilities"
+          "flight_ready": {
+            "type": "boolean",
+            "description": "Whether a Flight gRPC service supports this connection type"
+          },
+          "flight_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "URL of the Flight service that supports this connection type"
+          },
+          "message": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional human-readable status message"
+          },
+          "updated_at": {
+            "type": "string",
+            "nullable": true,
+            "description": "Timestamp of the last status update"
           }
         }
       },

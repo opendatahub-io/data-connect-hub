@@ -95,6 +95,49 @@ impl MetaStoreReader for S3TestMetaStore {
 }
 
 #[async_trait::async_trait]
+impl commons::api::storage::FlightDiscoveryStore for S3TestMetaStore {
+    async fn create_flight_service(
+        &self,
+        _: &commons::api::flight_discovery::FlightService,
+    ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+        unimplemented!()
+    }
+    async fn get_all_flight_services(
+        &self,
+    ) -> Result<commons::api::ResourceList<commons::api::flight_discovery::FlightServiceResource>, MetaStoreError> {
+        unimplemented!()
+    }
+    async fn get_flight_service_by_connector(
+        &self,
+        _: &str,
+    ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+        unimplemented!()
+    }
+    async fn get_flight_service(
+        &self,
+        _: &str,
+    ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+        unimplemented!()
+    }
+    async fn update_flight_service(
+        &self,
+        _: &str,
+        _: std::sync::Arc<
+            dyn Fn(
+                    commons::api::flight_discovery::FlightService,
+                ) -> Result<commons::api::flight_discovery::FlightService, MetaStoreError>
+                + Send
+                + Sync,
+        >,
+    ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+        unimplemented!()
+    }
+    async fn delete_flight_service(&self, _: &str) -> Result<(), MetaStoreError> {
+        unimplemented!()
+    }
+}
+
+#[async_trait::async_trait]
 impl MetaStore for S3TestMetaStore {
     async fn create_data_connection(
         &self,

@@ -283,16 +283,19 @@ class TestConnectionType:
         assert ct.updated_at == datetime(2026, 1, 1, tzinfo=UTC)
         assert ct.credentials_fields == []
 
-    def test_capabilities_from_wrapped_status(self) -> None:
-        data = {**SAMPLE_CONNECTION_TYPE_WRAPPED_JSON, "status": {"capabilities": {"flight": True, "rest": False}}}
+    def test_flight_ready_from_wrapped_status(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+            "status": {"flight_ready": True, "flight_url": "grpc://flight:50051"},
+        }
         ct = ConnectionType.model_validate(data)
-        assert ct.status.capabilities.flight is True
-        assert ct.status.capabilities.rest is False
+        assert ct.status.flight_ready is True
+        assert ct.status.flight_url == "grpc://flight:50051"
 
-    def test_capabilities_default_to_false(self) -> None:
+    def test_status_defaults(self) -> None:
         ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_WRAPPED_JSON)
-        assert ct.status.capabilities.flight is False
-        assert ct.status.capabilities.rest is False
+        assert ct.status.flight_ready is False
+        assert ct.status.flight_url is None
 
     def test_credentials_field_with_enum_values(self) -> None:
         ct = ConnectionType.model_validate(

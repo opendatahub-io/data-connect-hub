@@ -3,6 +3,7 @@ pub mod connections;
 pub mod connector;
 pub mod creds;
 pub mod errors;
+pub mod flight_discovery;
 pub mod secret;
 pub mod storage;
 

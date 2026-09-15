@@ -1,27 +1,20 @@
-use commons::api::connection_types::DataConnectionTypeStatus;
+use commons::api::connection_types::{DataConnectionTypeResource, DataConnectionTypeStatus};
 use commons::api::connections::CredentialsRef;
 
 use commons::api::connections::DataConnectionResource;
 use commons::api::storage::{MetaStore, MetaStoreReader};
 
 use crate::clients::flight::FlightDataClient;
+
 use crate::rest::errors::ValidationError;
+use crate::state::ApiService;
 use chrono::Utc;
-use commons::api::connection_types::DataConnectionTypeResource;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
 use commons::api::storage::SecretStore;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use tracing::info;
-
-pub struct AuditContext<'a> {
-    pub meta_store: Arc<dyn MetaStore + Send + Sync>,
-    pub secret_store: Arc<dyn SecretStore + Send + Sync>,
-    pub flight_client: &'a dyn FlightDataClient,
-}
 
 async fn set_data_connection_status(
     tenant_id: &str,
@@ -46,25 +39,27 @@ async fn set_data_connection_status(
 }
 
 pub async fn audit_data_connection(
+    api_service: &ApiService,
     tenant_id: &str,
     data_connection_id: &str,
-    ctx: &AuditContext<'_>,
 ) -> Result<(), ValidationError> {
-    let data_connection = ctx
-        .meta_store
+    let meta_store = api_service.meta_store.clone();
+    let secret_store = api_service.secret_store.clone();
+
+    let data_connection = meta_store
         .get_data_connection(tenant_id, data_connection_id)
         .await
-        .map_err(|e| ValidationError::ConnectionCheckFailed(data_connection_id.to_string()))?;
+        .map_err(|e| ValidationError::InvalidDataConnectionId(data_connection_id.to_string()))?;
 
-    let dct = ctx
-        .meta_store
+    let dct = meta_store
         .get_data_connection_type(tenant_id, &data_connection.resource.data_connection_type_id)
         .await
-        .map_err(|_| ValidationError::InvalidDataConnectionType)?;
+        .map_err(|_| {
+            ValidationError::InvalidDataConnectionType(data_connection.resource.data_connection_type_id.clone())
+        })?;
 
     let keys = {
-        let secret = ctx
-            .secret_store
+        let secret = secret_store
             .get_secret(tenant_id, data_connection.resource.credentials_ref.secret.as_str())
             .await
             .map_err(|_| ValidationError::InvalidSecret);
@@ -74,7 +69,7 @@ pub async fn audit_data_connection(
             set_data_connection_status(
                 tenant_id,
                 data_connection_id,
-                ctx.meta_store.clone(),
+                meta_store.clone(),
                 DataConnectionState::NotReady,
                 Some("Secret cannot be read".to_string()),
             )
@@ -89,7 +84,7 @@ pub async fn audit_data_connection(
         set_data_connection_status(
             tenant_id,
             data_connection_id,
-            ctx.meta_store.clone(),
+            meta_store.clone(),
             DataConnectionState::NotReady,
             Some(e.to_string()),
         )
@@ -98,14 +93,23 @@ pub async fn audit_data_connection(
     }
 
     let connection_id = data_connection.metadata.id.clone();
-    let result = ctx.flight_client.check_data_connection(tenant_id, &connection_id).await;
+
+    let flight = meta_store
+        .get_flight_service_by_connector(&dct.resource.provider)
+        .await
+        .map_err(|e| ValidationError::FlightServiceError(e.to_string()))?;
+
+    let result = api_service
+        .flight_client(flight.resource.internal_url.as_str())
+        .check_data_connection(tenant_id, &connection_id)
+        .await;
 
     match result {
         Ok(_) => {
             set_data_connection_status(
                 tenant_id,
                 data_connection_id,
-                ctx.meta_store.clone(),
+                meta_store.clone(),
                 DataConnectionState::Ready,
                 Some("Connection check successful".to_string()),
             )
@@ -115,7 +119,7 @@ pub async fn audit_data_connection(
             set_data_connection_status(
                 tenant_id,
                 data_connection_id,
-                ctx.meta_store.clone(),
+                meta_store.clone(),
                 DataConnectionState::IngestionNotReady,
                 Some("Connection check failed".to_string()),
             )
@@ -127,80 +131,44 @@ pub async fn audit_data_connection(
     Ok(())
 }
 
-pub async fn audit_data_connection_types(
-    meta_store: Arc<dyn MetaStore + Send + Sync>,
-    flight_client: &dyn FlightDataClient,
-) -> Result<(), ValidationError> {
-    let supported = flight_client.get_supported_connectors().await.map_err(|e| {
-        tracing::error!(error = %e, "failed to get supported connectors from flight service");
+pub(crate) async fn audit_data_connection_types(api_service: &ApiService) -> Result<(), ValidationError> {
+    let flights = api_service.meta_store.get_all_flight_services().await.map_err(|e| {
+        tracing::error!(error = %e, "failed to get all flight services");
         ValidationError::FlightServiceError(e.to_string())
     })?;
 
-    let supported_names: Vec<&str> = supported.iter().map(|c| c.name.as_str()).collect();
-
-    info!("supported connectors: {:?}", supported_names.join(", "));
-
-    let data_connection_types = meta_store
+    let data_connection_types = api_service
+        .meta_store
         .get_all_data_connection_types()
         .await
-        .map_err(|_| ValidationError::InvalidDataConnectionType)?;
+        .map_err(|_| ValidationError::CannotGetDataConnectionTypes)?;
 
-    for dct in &data_connection_types.items {
-        info!(
-            "Checking data connection type: {} {:?}",
-            dct.resource.name, dct.resource.provider
-        );
+    for data_connection_type in data_connection_types.items {
+        let provider = data_connection_type.resource.provider;
+        let mut flight_url = None;
 
-        let mut capabilities = dct.status.capabilities.clone();
-        let flight = supported_names.contains(&dct.resource.provider.as_str());
-        if capabilities.flight != flight {
-            capabilities.flight = flight;
-
-            info!("Capabilities after update: {:?}", capabilities);
-
-            let update_fn = Arc::new(move |current: DataConnectionTypeStatus| {
-                let mut status = current.capabilities.clone();
-                status.flight = capabilities.flight;
-                Ok(DataConnectionTypeStatus { capabilities: status })
-            });
-            meta_store
-                .update_data_connection_type_status(&dct.metadata.id, update_fn)
-                .await
-                .map_err(|e| {
-                    tracing::error!(error = %e, provider = %dct.resource.provider, "failed to update connection type status");
-                    ValidationError::InvalidDataConnectionType
-                })?;
-            info!("updated data connection type status: {:?}", dct.status);
+        for flight in &flights.items {
+            if flight.resource.supported_connectors.contains(&provider) && flight.resource.status.ready {
+                flight_url = Some(flight.resource.external_url.clone());
+                break;
+            }
         }
-    }
 
-    Ok(())
-}
-
-pub(crate) async fn audit_connection_type(
-    flight_client: &dyn FlightDataClient,
-    meta_store: &Arc<dyn MetaStore + Send + Sync>,
-    connection_type: DataConnectionTypeResource,
-) -> Result<(), ValidationError> {
-    let connectors = flight_client.get_supported_connectors().await;
-
-    if let Ok(connectors) = connectors {
-        let names: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
-        let provider = &connection_type.resource.provider;
-
-        let supports_flight = Arc::new(AtomicBool::new(names.iter().any(|n| n == provider)));
-
-        let update_fn = Arc::new(move |current: DataConnectionTypeStatus| {
-            let mut status = current.capabilities.clone();
-            status.flight = supports_flight.load(Ordering::Relaxed);
-
-            Ok(DataConnectionTypeStatus { capabilities: status })
+        let update_fn = Arc::new(move |_current: DataConnectionTypeStatus| {
+            let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            Ok(DataConnectionTypeStatus {
+                flight_ready: flight_url.is_some(),
+                flight_url: flight_url.clone(),
+                message: None,
+                updated_at: Some(now),
+            })
         });
 
-        meta_store
-            .update_data_connection_type_status(connection_type.metadata.id.as_str(), update_fn)
+        api_service
+            .meta_store
+            .update_data_connection_type_status(data_connection_type.metadata.id.as_str(), update_fn)
             .await
-            .map_err(|e| ValidationError::StatusUpdateFailed(connection_type.metadata.id.clone()))?;
+            .map_err(|_e| ValidationError::StatusUpdateFailed(data_connection_type.metadata.id.clone()))?;
     }
     Ok(())
 }
@@ -267,6 +235,65 @@ mod tests {
             self.connection_type
                 .clone()
                 .ok_or_else(|| MetaStoreError::ResourceNotFound("not found".into()))
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl commons::api::storage::FlightDiscoveryStore for MockMetaStore {
+        async fn create_flight_service(
+            &self,
+            _: &commons::api::flight_discovery::FlightService,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn get_all_flight_services(
+            &self,
+        ) -> Result<commons::api::ResourceList<commons::api::flight_discovery::FlightServiceResource>, MetaStoreError>
+        {
+            unimplemented!()
+        }
+        async fn get_flight_service_by_connector(
+            &self,
+            _: &str,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+            Ok(commons::api::flight_discovery::FlightServiceResource {
+                metadata: ResourceMetadata {
+                    id: "fs-1".to_string(),
+                    tenant_id: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                },
+                resource: commons::api::flight_discovery::FlightService {
+                    name: "test-flight".to_string(),
+                    namespace: "test".to_string(),
+                    external_url: "http://127.0.0.1:1".to_string(),
+                    internal_url: "http://127.0.0.1:1".to_string(),
+                    supported_connectors: vec![],
+                    status: Default::default(),
+                },
+            })
+        }
+        async fn get_flight_service(
+            &self,
+            _: &str,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn update_flight_service(
+            &self,
+            _: &str,
+            _: std::sync::Arc<
+                dyn Fn(
+                        commons::api::flight_discovery::FlightService,
+                    ) -> Result<commons::api::flight_discovery::FlightService, MetaStoreError>
+                    + Send
+                    + Sync,
+            >,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, MetaStoreError> {
+            unimplemented!()
+        }
+        async fn delete_flight_service(&self, _: &str) -> Result<(), MetaStoreError> {
+            unimplemented!()
         }
     }
 
@@ -422,32 +449,21 @@ mod tests {
         }
     }
 
-    use crate::clients::flight::FlightClient;
-
-    fn flight_client() -> FlightClient {
-        FlightClient::new("http://127.0.0.1:1".to_string(), None, None)
-    }
-
-    fn audit_ctx(
+    fn make_api_service(
         meta: Arc<dyn MetaStore + Send + Sync>,
         secrets: Arc<dyn SecretStore + Send + Sync>,
-        fc: &dyn FlightDataClient,
-    ) -> AuditContext<'_> {
-        AuditContext {
-            meta_store: meta,
-            secret_store: secrets,
-            flight_client: fc,
-        }
+    ) -> ApiService {
+        ApiService::new(meta, secrets, None, None)
     }
 
     #[tokio::test]
     async fn test_connection_not_found() {
         let meta = Arc::new(MockMetaStore::not_found()) as Arc<dyn MetaStore + Send + Sync>;
         let secrets = Arc::new(MockSecretStore { secret: None }) as Arc<dyn SecretStore + Send + Sync>;
-        let fc = flight_client();
+        let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection("tenant", "missing", &audit_ctx(meta, secrets, &fc)).await;
-        assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
+        let result = audit_data_connection(&api_service, "tenant", "missing").await;
+        assert!(matches!(result, Err(ValidationError::InvalidDataConnectionId(_))));
     }
 
     #[tokio::test]
@@ -458,9 +474,9 @@ mod tests {
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
-        let fc = flight_client();
+        let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection("tenant", "conn-1", &audit_ctx(meta, secrets, &fc)).await;
+        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
         assert!(matches!(result, Err(ValidationError::InvalidSecret)));
     }
 
@@ -474,9 +490,9 @@ mod tests {
         let secrets = Arc::new(MockSecretStore {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
-        let fc = flight_client();
+        let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection("tenant", "conn-1", &audit_ctx(meta, secrets, &fc)).await;
+        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
         assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
     }
 
@@ -490,9 +506,9 @@ mod tests {
         let secrets = Arc::new(MockSecretStore {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
-        let fc = flight_client();
+        let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection("tenant", "conn-1", &audit_ctx(meta, secrets, &fc)).await;
+        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
     }
 
@@ -504,10 +520,9 @@ mod tests {
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
-        let fc = flight_client();
-        let ctx = audit_ctx(meta.clone(), secrets, &fc);
+        let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection("tenant", "conn-1", &ctx).await;
+        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");
@@ -525,10 +540,9 @@ mod tests {
         let secrets = Arc::new(MockSecretStore {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
-        let fc = flight_client();
-        let ctx = audit_ctx(meta.clone(), secrets, &fc);
+        let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection("tenant", "conn-1", &ctx).await;
+        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");
@@ -546,10 +560,9 @@ mod tests {
         let secrets = Arc::new(MockSecretStore {
             secret: Some(make_secret(vec![("HOST", "localhost")])),
         });
-        let fc = flight_client();
-        let ctx = audit_ctx(meta.clone(), secrets, &fc);
+        let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection("tenant", "conn-1", &ctx).await;
+        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");

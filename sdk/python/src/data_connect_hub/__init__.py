@@ -19,7 +19,6 @@ from .exceptions import (
     DCHValidationError,
 )
 from .models import (
-    Capabilities,
     ConnectionType,
     ConnectionTypeStatus,
     CreateConnectionRequest,
@@ -45,7 +44,6 @@ except PackageNotFoundError:
     __version__ = "0.0.0+unknown"
 
 __all__ = [
-    "Capabilities",
     "ConnectionType",
     "ConnectionTypeStatus",
     "CreateConnectionRequest",
