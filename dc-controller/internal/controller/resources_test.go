@@ -27,6 +27,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
+const (
+	testSQLiteConnector              = "sqlite"
+	testTOMLEnabledKey               = "enabled"
+	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
+)
+
 func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		"kind": "ConfigMap",
@@ -54,7 +60,7 @@ func TestSetConfigMapFlightConnectorSettingsAddConnector(t *testing.T) {
 	}{
 		{
 			name:          "disabled SQLite",
-			connectorName: "sqlite",
+			connectorName: testSQLiteConnector,
 			enabled:       &disabled,
 			configTOML: `
 [connectors.default]
@@ -74,7 +80,7 @@ enabled = false
 		},
 		{
 			name:          "missing enabled",
-			connectorName: "sqlite",
+			connectorName: testSQLiteConnector,
 			configTOML: `
 [connectors.default]
 enabled = true
@@ -133,7 +139,7 @@ connection_timeout_secs = 20
 
 	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, &dchv1alpha1.ServiceOverrides{
 		Connectors: []dchv1alpha1.ConnectorConfig{
-			{Name: "sqlite", Enabled: &enabled, ConnectionTimeout: timeout},
+			{Name: testSQLiteConnector, Enabled: &enabled, ConnectionTimeout: timeout},
 			{Name: "neo4j", Enabled: &enabled},
 		},
 	}); err != nil {
@@ -165,20 +171,20 @@ connection_timeout_secs = 20
 		}
 	}
 	assertConnector("postgres", map[string]any{
-		"enabled":                 true,
-		"connection_timeout_secs": int64(30),
+		testTOMLEnabledKey:               true,
+		testTOMLConnectionTimeoutSecsKey: int64(30),
 	})
 	assertConnector("s3", map[string]any{
-		"enabled":    true,
-		"chunk_size": int64(1024),
+		testTOMLEnabledKey: true,
+		"chunk_size":       int64(1024),
 	})
-	assertConnector("sqlite", map[string]any{
-		"enabled":                 true,
-		"connection_timeout_secs": int64(30),
+	assertConnector(testSQLiteConnector, map[string]any{
+		testTOMLEnabledKey:               true,
+		testTOMLConnectionTimeoutSecsKey: int64(30),
 	})
 	assertConnector("neo4j", map[string]any{
-		"enabled":                 true,
-		"connection_timeout_secs": int64(20),
+		testTOMLEnabledKey:               true,
+		testTOMLConnectionTimeoutSecsKey: int64(20),
 	})
 	if connectors["default"].(map[string]any)["enabled"] != false {
 		t.Errorf("expected connectors.default.enabled=false, got %v", connectors["default"].(map[string]any)["enabled"])
