@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use arrow::array::{Array, StringArray};
-use arrow_flight::{flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
+use arrow_flight::sql::{Any, Command, CommandStatementQuery, server::FlightSqlService};
+use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::ResourceList;
 use commons::api::ResourceMetadata;
 use commons::api::connection_types::DataConnectionType;
@@ -27,6 +28,7 @@ use sqlx::SqlitePool;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 use tonic::transport::{Channel, Server};
+use tonic::{Request, metadata::MetadataValue};
 struct TestMetaStore;
 
 #[async_trait::async_trait]
@@ -335,4 +337,76 @@ async fn test_flight_sql_select_prompts() {
             println!("prompt[{}]: {}", i, prompts.value(i));
         }
     }
+}
+
+#[tokio::test]
+async fn test_disabled_connector_rejects_tabular_read() {
+    let service = DataIngestionService::new(
+        Arc::new(ConnectorsRegistry::new()),
+        Arc::new(TestMetaStore),
+        Arc::new(InMemorySecretStore::new(vec![])),
+        Default::default(),
+    );
+
+    let mut request = Request::new(FlightDescriptor::new_cmd(Vec::new()));
+    request
+        .metadata_mut()
+        .insert(X_DATA_CONNECTION_ID, MetadataValue::from_static("1234"));
+    request
+        .metadata_mut()
+        .insert(X_TENANT_ID, MetadataValue::from_static("default"));
+
+    let error = service
+        .get_flight_info_statement(
+            CommandStatementQuery {
+                query: "SELECT * FROM prompts".to_string(),
+                transaction_id: None,
+            },
+            request,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert!(
+        error
+            .message()
+            .contains("no connector registered for provider 'sqlite'")
+    );
+}
+
+#[tokio::test]
+async fn test_disabled_connector_rejects_binary_download() {
+    let service = DataIngestionService::new(
+        Arc::new(ConnectorsRegistry::new()),
+        Arc::new(TestMetaStore),
+        Arc::new(InMemorySecretStore::new(vec![])),
+        Default::default(),
+    );
+
+    let mut request = Request::new(FlightDescriptor::new_cmd(Vec::new()));
+    request
+        .metadata_mut()
+        .insert(X_DATA_CONNECTION_ID, MetadataValue::from_static("1234"));
+    request
+        .metadata_mut()
+        .insert(X_TENANT_ID, MetadataValue::from_static("default"));
+
+    let error = service
+        .get_flight_info_fallback(
+            Command::Unknown(Any {
+                type_url: "dataconnethub.opendatahub.io/download".to_string(),
+                value: b"some/path".to_vec().into(),
+            }),
+            request,
+        )
+        .await
+        .unwrap_err();
+
+    assert_eq!(error.code(), tonic::Code::Internal);
+    assert!(
+        error
+            .message()
+            .contains("no connector registered for provider 'sqlite'")
+    );
 }

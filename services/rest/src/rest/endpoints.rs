@@ -520,18 +520,23 @@ mod tests {
             tenant_id: &str,
             uid: &str,
         ) -> Result<DataConnectionTypeResource, commons::api::errors::MetaStoreError> {
-            if tenant_id == "test-tenant" && uid == "ct-1" {
+            if tenant_id == "test-tenant" && matches!(uid, "ct-1" | "ct-disabled") {
+                let (name, provider) = if uid == "ct-disabled" {
+                    ("SQLite", "sqlite")
+                } else {
+                    ("PostgreSQL", "postgres")
+                };
                 Ok(DataConnectionTypeResource {
                     metadata: commons::api::ResourceMetadata {
-                        id: "ct-1".to_string(),
+                        id: uid.to_string(),
                         tenant_id: Some("test-tenant".to_string()),
                         created_at: "2026-01-01T00:00:00Z".to_string(),
                         updated_at: "2026-01-01T00:00:00Z".to_string(),
                     },
                     resource: DataConnectionType {
-                        name: "PostgreSQL".to_string(),
-                        provider: "postgres".to_string(),
-                        description: Some("PostgreSQL database connection".to_string()),
+                        name: name.to_string(),
+                        provider: provider.to_string(),
+                        description: Some(format!("{name} database connection")),
                         credentials_fields: vec![],
                     },
                     status: Default::default(),
@@ -551,7 +556,7 @@ mod tests {
             tenant_id: &str,
             data_connection: &DataConnection,
         ) -> Result<DataConnectionResource, commons::api::errors::MetaStoreError> {
-            if data_connection.data_connection_type_id != "ct-1" {
+            if !matches!(data_connection.data_connection_type_id.as_str(), "ct-1" | "ct-disabled") {
                 return Err(commons::api::errors::MetaStoreError::UnprocessableEntity(format!(
                     "connection type '{}' not found",
                     data_connection.data_connection_type_id
@@ -805,24 +810,37 @@ mod tests {
     }
 
     struct StubFlightClient {
+        supported_connectors: Vec<SupportedConnector>,
         download_result: Mutex<Option<Result<Vec<RecordBatch>, tonic::Status>>>,
     }
 
     impl StubFlightClient {
         fn unused() -> Self {
             Self {
+                supported_connectors: vec![SupportedConnector {
+                    name: "postgres".to_string(),
+                    description: "PostgreSQL connector".to_string(),
+                }],
                 download_result: Mutex::new(None),
             }
         }
 
         fn succeeding(batches: Vec<RecordBatch>) -> Self {
             Self {
+                supported_connectors: vec![SupportedConnector {
+                    name: "postgres".to_string(),
+                    description: "PostgreSQL connector".to_string(),
+                }],
                 download_result: Mutex::new(Some(Ok(batches))),
             }
         }
 
         fn failing(status: tonic::Status) -> Self {
             Self {
+                supported_connectors: vec![SupportedConnector {
+                    name: "postgres".to_string(),
+                    description: "PostgreSQL connector".to_string(),
+                }],
                 download_result: Mutex::new(Some(Err(status))),
             }
         }
@@ -831,7 +849,7 @@ mod tests {
     #[async_trait::async_trait]
     impl FlightDataClient for StubFlightClient {
         async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
-            Ok(vec![])
+            Ok(self.supported_connectors.clone())
         }
         async fn check_data_connection(&self, _: &str, _: &str) -> Result<(), tonic::Status> {
             Ok(())
@@ -1232,6 +1250,63 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn test_create_connection_type_with_disabled_connector() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connection-types"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "SQLite",
+                "provider": "sqlite",
+                "description": "Disabled SQLite connector",
+                "credentials_fields": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["provider"], "sqlite");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_disabled_connector() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "my-disabled-connector",
+                "data_connection_type_id": "ct-disabled",
+                "format": "tabular",
+                "credentials_ref": {
+                    "secret": "my-disabled-connector-creds"
+                },
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["name"], "my-disabled-connector");
+    }
+
+    #[actix_web::test]
     async fn test_get_connection_type() {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
         let req = test::TestRequest::get()
@@ -1410,6 +1485,33 @@ mod tests {
         assert_eq!(resp.status(), 503);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "connection");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_disabled_connector() {
+        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::internal(
+            "connector configuration error: no connector registered for provider 'sqlite'",
+        ))));
+        let app = test::init_service(
+            App::new()
+                .app_data(svc)
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 500);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "flight_service_error");
+        assert_eq!(
+            body["message"],
+            "connector configuration error: no connector registered for provider 'sqlite'"
+        );
     }
 
     #[actix_web::test]

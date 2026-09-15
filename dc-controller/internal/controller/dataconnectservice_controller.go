@@ -363,6 +363,9 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapFlightServiceAddress(resources, cr.Namespace)
+	if err := setConfigMapFlightConnectorSettings(resources, cr.Spec.FlightService); err != nil {
+		return fmt.Errorf("setting flight-service connector configuration: %w", err)
+	}
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
 	if len(audiences) > 0 {

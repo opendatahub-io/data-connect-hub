@@ -143,6 +143,21 @@ spec:
     env:
       - name: RUST_LOG
         value: info
+    connectors:
+      - name: postgres
+        enabled: true
+      - name: sqlite
+        enabled: true
+      - name: s3
+        enabled: true
+      - name: elasticsearch
+        enabled: true
+      - name: neo4j
+        enabled: true
+      - name: milvus
+        enabled: true
+      - name: uri
+        enabled: true
 EOF
 
 if ! kubectl wait \

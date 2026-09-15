@@ -68,10 +68,9 @@ spec:
                             Defaults to the connector's built-in default when not set.
                           type: string
                         enabled:
-                          default: true
                           description: |-
                             enabled controls whether this connector is available for use.
-                            Defaults to true when the connector appears in the list.
+                            Defaults to false when omitted.
                           type: boolean
                         name:
                           description: name is the connector provider name (e.g. "postgres",
@@ -2363,10 +2362,9 @@ spec:
                             Defaults to the connector's built-in default when not set.
                           type: string
                         enabled:
-                          default: true
                           description: |-
                             enabled controls whether this connector is available for use.
-                            Defaults to true when the connector appears in the list.
+                            Defaults to false when omitted.
                           type: boolean
                         name:
                           description: name is the connector provider name (e.g. "postgres",

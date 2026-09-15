@@ -26,7 +26,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -290,6 +292,63 @@ func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, na
 			fmt.Sprintf(`address = "%s"`, fqdn))
 		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 	}
+}
+
+func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, overrides *dchv1alpha1.ServiceOverrides) error {
+	if overrides == nil || len(overrides.Connectors) == 0 {
+		return nil
+	}
+
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || obj.GetLabels()["app.kubernetes.io/name"] != nameFlightService {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		tomlText, ok := data["config.toml"]
+		if !ok {
+			continue
+		}
+		var config map[string]any
+		if err := toml.Unmarshal([]byte(tomlText), &config); err != nil {
+			return fmt.Errorf("parsing flight-service config.toml: %w", err)
+		}
+		connectors, ok := config["connectors"].(map[string]any)
+		if !ok {
+			connectors = make(map[string]any)
+			config["connectors"] = connectors
+		}
+
+		for _, connector := range overrides.Connectors {
+			if connector.Name == "" {
+				continue
+			}
+			section, ok := connectors[connector.Name].(map[string]any)
+			if !ok {
+				section = make(map[string]any)
+				connectors[connector.Name] = section
+			}
+
+			section["enabled"] = connector.Enabled != nil && *connector.Enabled
+			if connector.ConnectionTimeout != nil {
+				duration := connector.ConnectionTimeout.Duration
+				if duration <= 0 || duration%time.Second != 0 {
+					return fmt.Errorf("connector %s connectionTimeout must be a positive whole number of seconds", connector.Name)
+				}
+				section["connection_timeout_secs"] = int64(duration / time.Second)
+			}
+		}
+
+		updatedTOML, err := toml.Marshal(config)
+		if err != nil {
+			return fmt.Errorf("marshaling flight-service config.toml: %w", err)
+		}
+		data["config.toml"] = string(updatedTOML)
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+	}
+	return nil
 }
 
 func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {

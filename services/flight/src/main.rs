@@ -130,3 +130,101 @@ async fn main() -> Result<()> {
     tracing::info!("DataConnectorHub Flight service stopped");
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use commons::utils::config::GlobalConnectionTypes;
+    use flight_service::utils::{
+        AuthConfig, ConnectorsConfig, IngestionCachePools, MetricsConfig, QueryConfig, Server, TlsConfig,
+    };
+    use pg_meta_store::store::DatabaseConfig;
+    use std::collections::HashSet;
+
+    fn server_config(connectors: ConnectorsConfig) -> ServerConfig {
+        ServerConfig {
+            server: Server {
+                address: "127.0.0.1".to_string(),
+                port: 0,
+            },
+            database: DatabaseConfig {
+                url: "postgresql://localhost/test".to_string(),
+            },
+            ingestion_cache_pools: IngestionCachePools {
+                max_capacity: 1,
+                ttl_secs: 1,
+                idle_secs: 1,
+            },
+            connectors,
+            query: QueryConfig::default(),
+            auth: AuthConfig::default(),
+            metrics: MetricsConfig::default(),
+            tls: TlsConfig::default(),
+            global_connection_types: GlobalConnectionTypes::new("test".to_string()),
+        }
+    }
+
+    fn registry_names(registry: &ConnectorsRegistry) -> HashSet<String> {
+        registry
+            .get_supported_connectors()
+            .into_iter()
+            .map(|connector| connector.provider())
+            .collect()
+    }
+
+    #[test]
+    fn registry_with_default_disabled() {
+        // With the default disabled, only explicitly enabled PostgreSQL is registered.
+        let config_toml = r#"
+[default]
+enabled = false
+
+[postgres]
+enabled = true
+
+[s3]
+enabled = false
+"#;
+        let config = config::Config::builder()
+            .add_source(config::File::from_str(config_toml, config::FileFormat::Toml))
+            .build()
+            .unwrap();
+        let connectors: ConnectorsConfig = config.try_deserialize().unwrap();
+        let registry = build_connectors_registry(&server_config(connectors));
+
+        assert_eq!(registry_names(&registry), HashSet::from(["postgres".to_string()]));
+    }
+
+    #[test]
+    fn registry_with_default_enabled() {
+        // With the default enabled, unspecified connectors are registered and explicitly disabled S3 is omitted.
+        let config_toml = r#"
+[default]
+enabled = true
+
+[postgres]
+enabled = true
+
+[s3]
+enabled = false
+"#;
+        let config = config::Config::builder()
+            .add_source(config::File::from_str(config_toml, config::FileFormat::Toml))
+            .build()
+            .unwrap();
+        let connectors: ConnectorsConfig = config.try_deserialize().unwrap();
+        let registry = build_connectors_registry(&server_config(connectors));
+
+        assert_eq!(
+            registry_names(&registry),
+            HashSet::from([
+                "postgres".to_string(),
+                "sqlite".to_string(),
+                "milvus".to_string(),
+                "elasticsearch".to_string(),
+                "neo4j".to_string(),
+                "uri".to_string(),
+            ])
+        );
+    }
+}
