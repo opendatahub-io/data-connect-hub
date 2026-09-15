@@ -62,10 +62,10 @@ MINIO_ROOT_PASSWORD="${MINIO_ROOT_PASSWORD:-minioadmin}"
 MINIO_BUCKET="${MINIO_BUCKET:-e2e-test}"
 
 # CI workflow controls
-E2E_DATASOURCES="${E2E_DATASOURCES:-postgres s3 neo4j elasticsearch milvus uri}"
+E2E_CONNECTORS="${E2E_CONNECTORS:-postgres sqlite s3 elasticsearch neo4j milvus uri}"
 
-# has_datasource <name> — true if <name> is in E2E_DATASOURCES.
-has_datasource() { [[ " $E2E_DATASOURCES " == *" $1 "* ]]; }
+# has_connector <name> — true if <name> is in E2E_CONNECTORS.
+has_connector() { [[ " $E2E_CONNECTORS " == *" $1 "* ]]; }
 
 # ---------------------------------------------------------------------------
 # dump_cluster — print diagnostics for the given namespaces.

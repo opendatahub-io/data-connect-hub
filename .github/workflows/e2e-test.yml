@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     env:
-      E2E_DATASOURCES: postgres s3 neo4j elasticsearch milvus uri
+      E2E_CONNECTORS: postgres sqlite s3 elasticsearch neo4j milvus uri
       POSTGRES_SSL_MODE: disable
     steps:
       - name: Checkout
@@ -60,6 +60,11 @@ jobs:
 
       - name: Run E2E tests
         run: bash hack/ci/run-tests.sh
+
+      - name: Test disabled connector behavior
+        env:
+          E2E_DISABLED_CONNECTOR: uri
+        run: bash hack/ci/run-disabled-connector-test.sh
 
       - name: Collect cluster logs
         if: always()
