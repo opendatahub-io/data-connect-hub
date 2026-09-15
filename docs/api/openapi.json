@@ -29,10 +29,6 @@
       "description": "A `connection type` defines a schema for a data `connection`. A connection type must be created before creating a connection of that type. Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types. Connection types created by the operator are known as `global` connection types and are accessible by all tenants. Connection types created by a tenant are only accessible by that tenant.\n"
     },
     {
-      "name": "flight-services",
-      "description": "Flight service registration (internal). This requires separate RBAC roles and  should only be called by the Data Connect Hub operator.\n"
-    },
-    {
       "name": "test",
       "description": "Test operations"
     }
@@ -627,13 +623,6 @@
           }
         }
       }
-    },
-    "/flights/{id}": {
-      "parameters": [
-        {
-          "$ref": "#/components/parameters/resourceId"
-        }
-      ]
     }
   },
   "components": {

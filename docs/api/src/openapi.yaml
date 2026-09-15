@@ -485,6 +485,7 @@ paths:
           $ref: "components/responses/NotFound.yaml"
 
   /flights:
+    x-internal: true
     post:
       operationId: createFlightService
       summary: Register a flight service
@@ -515,6 +516,7 @@ paths:
           $ref: "components/responses/ServiceUnavailable.yaml"
 
   /flights/{id}:
+    x-internal: true
     parameters:
       - $ref: "#/components/parameters/resourceId"
     patch:
@@ -614,8 +616,9 @@ tags:
      Connection types created by the operator are known as `global` connection types and are accessible by all tenants.
      Connection types created by a tenant are only accessible by that tenant.
   - name: flight-services
+    x-internal: true
     description: >
-     Flight service registration (internal). This requires separate RBAC roles and 
+     Flight service registration (internal). This requires separate RBAC roles and
      should only be called by the Data Connect Hub operator.
   - name: test
     description: Test operations
