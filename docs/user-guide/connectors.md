@@ -6,7 +6,7 @@
       <th scope="col">Connector</th>
       <th scope="col">Unencrypted network transport</th>
       <th scope="col">TLS-encrypted network transport</th>
-      <th scope="col">Binary download</th>
+      <th scope="col">Supported ingestion</th>
       <th scope="col">Credential fields</th>
       <th scope="col">Input format</th>
     </tr>
@@ -27,7 +27,7 @@
           <li>Example: <code>postgresql://host/db?sslmode=verify-ca</code></li>
         </ul>
       </td>
-      <td></td>
+      <td><p>Tabular</p></td>
       <td>
         <ul>
           <li><code>URI</code> — required</li>
@@ -43,7 +43,7 @@
       <th scope="row"><code>sqlite</code></th>
       <td><strong>N/A</strong> — local file access</td>
       <td><strong>N/A</strong> — local file access</td>
-      <td></td>
+      <td><p>Tabular</p></td>
       <td>
         <ul>
           <li><code>URI</code> — required</li>
@@ -70,7 +70,7 @@
           <li>Example: <code>https://host:9200</code></li>
         </ul>
       </td>
-      <td></td>
+      <td><p>Tabular</p></td>
       <td>
         <ul>
           <li><code>ES_URI</code> — required</li>
@@ -96,7 +96,7 @@
         </ul>
       </td>
       <td></td>
-      <td></td>
+      <td><p>Tabular</p></td>
       <td>
         <ul>
           <li><code>MILVUS_URI</code> — required</li>
@@ -129,7 +129,7 @@
           <li>Example: <code>neo4j+s://host:7687</code></li>
         </ul>
       </td>
-      <td></td>
+      <td><p>Tabular</p></td>
       <td>
         <ul>
           <li><code>NEO4J_URI</code> — required</li>
@@ -159,8 +159,10 @@
         </ul>
       </td>
       <td>
-        <p>File location</p>
-        <ul><li>Example: <code>HTTP GET /api/v1alpha1/data/connections/:id/binary?path=data/model.bin</code></li></ul>
+        <ul>
+          <li>Binary</li>
+          <li>Tabular</li>
+        </ul>
       </td>
       <td>
         <ul>
@@ -196,8 +198,10 @@
         </ul>
       </td>
       <td>
-        <p>File location</p>
-        <ul><li>Example: <code>HTTP GET /api/v1alpha1/data/connections/:id/binary?path=/api/file.bin</code></li></ul>
+        <ul>
+          <li>Binary</li>
+          <li>Tabular</li>
+        </ul>
       </td>
       <td>
         <ul>
