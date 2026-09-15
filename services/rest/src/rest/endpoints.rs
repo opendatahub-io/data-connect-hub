@@ -335,6 +335,33 @@ pub async fn delete_flight_service(
     Ok(HttpResponse::NoContent().finish())
 }
 
+pub async fn patch_flight_service(
+    service: web::Data<ApiService>,
+    id: web::Path<String>,
+    body: web::Json<serde_json::Value>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    let id = id.into_inner();
+    info!("patch_flight_service:  {:?}", id);
+
+    let patch = body.into_inner();
+
+    let update_fn = Arc::new(move |service: FlightService| {
+        let mut value = serde_json::to_value(&service)
+            .map_err(|e| commons::api::errors::MetaStoreError::Serialization(e.to_string()))?;
+        json_patch::merge(&mut value, &patch);
+        info!("patch_flight_service: value={:?}", value);
+        let service = serde_json::from_value(value)
+            .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
+        Ok(service)
+    });
+
+    service.meta_store.update_flight_service(&id, update_fn).await?;
+
+    audit_data_connection_types(service.as_ref()).await?;
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
 pub async fn check_existent_connection(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
@@ -609,11 +636,10 @@ mod tests {
         }
         async fn get_flight_service(
             &self,
-            namespace: &str,
-            name: &str,
+            id: &str,
         ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>
         {
-            if namespace == "test-ns" && name == "flight-1" {
+            if id == "fs-1" {
                 Ok(commons::api::flight_discovery::FlightServiceResource {
                     metadata: commons::api::ResourceMetadata {
                         id: "fs-1".to_string(),
@@ -632,21 +658,19 @@ mod tests {
                 })
             } else {
                 Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
-                    "flight service '{namespace}/{name}' not found"
+                    "flight service '{id}' not found"
                 )))
             }
         }
         async fn update_flight_service(
             &self,
             _: &str,
-            _: &str,
             _: std::sync::Arc<
                 dyn Fn(
-                        commons::api::flight_discovery::FlightServiceResource,
-                    ) -> Result<
-                        commons::api::flight_discovery::FlightServiceResource,
-                        commons::api::errors::MetaStoreError,
-                    > + Send
+                        commons::api::flight_discovery::FlightService,
+                    )
+                        -> Result<commons::api::flight_discovery::FlightService, commons::api::errors::MetaStoreError>
+                    + Send
                     + Sync,
             >,
         ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>

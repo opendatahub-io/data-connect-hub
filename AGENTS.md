@@ -133,6 +133,7 @@ Other:
 Flight services (internal, `/api/v1alpha1/data/flights`):
 
 - `POST /api/v1alpha1/data/flights` — register a flight service (discovers supported connectors, triggers connection-type audit)
+- `PATCH /api/v1alpha1/data/flights/{id}` — update a flight service (JSON Merge Patch)
 - `DELETE /api/v1alpha1/data/flights/{id}` — unregister a flight service
 
 ## Container Builds

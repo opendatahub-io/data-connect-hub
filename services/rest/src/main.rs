@@ -62,7 +62,8 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                 .route("/connections/{id}/binary", web::get().to(get_binary_data))
                 .route("/test/credentials", web::post().to(test_credentials))
                 .route("/flights", web::post().to(create_flight_service))
-                .route("/flights/{id}", web::delete().to(delete_flight_service)),
+                .route("/flights/{id}", web::delete().to(delete_flight_service))
+                .route("/flights/{id}", web::patch().to(patch_flight_service)),
         )
         .default_service(web::route().to(not_found));
 }

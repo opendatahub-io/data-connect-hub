@@ -822,20 +822,19 @@ impl FlightDiscoveryStore for PgMetaStore {
         })
     }
 
-    async fn get_flight_service(&self, namespace: &str, name: &str) -> Result<FlightServiceResource, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'resource'->>'namespace' = $1 AND data->'resource'->>'name' = $2")
-            .bind(namespace)
-            .bind(name)
+    async fn get_flight_service(&self, id: &str) -> Result<FlightServiceResource, MetaStoreError> {
+        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'metadata'->>'id' = $1")
+            .bind(id)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| match e {
                 sqlx::Error::RowNotFound => {
-                    MetaStoreError::ResourceNotFound(format!("flight service '{namespace}/{name}' not found"))
-                }
+                    MetaStoreError::ResourceNotFound(format!("flight service '{id}' not found"))
+                },
                 e => {
-                    error!("failed to get flight service '{namespace}/{name}': {e}");
+                    error!("failed to get flight service '{id}': {e}");
                     MetaStoreError::Query("failed to retrieve flight service".to_string())
-                }
+                },
             })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
@@ -850,46 +849,45 @@ impl FlightDiscoveryStore for PgMetaStore {
 
     async fn update_flight_service(
         &self,
-        namespace: &str,
-        name: &str,
-        update_fn: Arc<dyn Fn(FlightServiceResource) -> Result<FlightServiceResource, MetaStoreError> + Send + Sync>,
+        id: &str,
+        update_fn: Arc<dyn Fn(FlightService) -> Result<FlightService, MetaStoreError> + Send + Sync>,
     ) -> Result<FlightServiceResource, MetaStoreError> {
         let mut tx = self.pool.begin().await.map_err(|e| {
             error!("failed to begin transaction: {e}");
             MetaStoreError::Query("failed to update flight service".to_string())
         })?;
 
-        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'resource'->>'namespace' = $1 AND data->'resource'->>'name' = $2 FOR UPDATE")
-            .bind(namespace)
-            .bind(name)
+        let row = sqlx::query("SELECT data FROM flight_services WHERE data->'metadata'->>'id' = $1 FOR UPDATE")
+            .bind(id)
             .fetch_one(&mut *tx)
             .await
             .map_err(|e| match e {
                 sqlx::Error::RowNotFound => {
-                    MetaStoreError::ResourceNotFound(format!("flight service '{namespace}/{name}' not found"))
-                }
+                    MetaStoreError::ResourceNotFound(format!("flight service '{id}' not found"))
+                },
                 e => {
-                    error!("failed to get flight service '{namespace}/{name}' for update: {e}");
+                    error!("failed to get flight service '{id}' for update: {e}");
                     MetaStoreError::Query("failed to update flight service".to_string())
-                }
+                },
             })?;
 
         let json_value: serde_json::Value = row.try_get("data").map_err(|e| {
             error!("failed to read flight service column: {e}");
             MetaStoreError::Query("failed to read flight service".to_string())
         })?;
-        let existing: FlightServiceResource = serde_json::from_value(json_value).map_err(|e| {
+        let mut existing: FlightServiceResource = serde_json::from_value(json_value).map_err(|e| {
             error!("failed to deserialize flight service: {e}");
             MetaStoreError::Deserialization("failed to deserialize flight service".to_string())
         })?;
 
         let id = existing.metadata.id.clone();
-        let mut resource = update_fn(existing)?;
+        let service = update_fn(existing.resource)?;
 
         let now = Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
-        resource.metadata.updated_at = now;
+        existing.metadata.updated_at = now;
+        existing.resource = service;
 
-        let json_value = serde_json::to_value(&resource).map_err(|e| {
+        let json_value = serde_json::to_value(&existing).map_err(|e| {
             error!("failed to serialize flight service: {e}");
             MetaStoreError::Serialization("failed to serialize flight service".to_string())
         })?;
@@ -900,7 +898,7 @@ impl FlightDiscoveryStore for PgMetaStore {
             .execute(&mut *tx)
             .await
             .map_err(|e| {
-                error!("failed to update flight service '{namespace}/{name}': {e}");
+                error!("failed to update flight service '{id}': {e}");
                 MetaStoreError::Query("failed to update flight service".to_string())
             })?;
 
@@ -909,7 +907,7 @@ impl FlightDiscoveryStore for PgMetaStore {
             MetaStoreError::Query("failed to update flight service".to_string())
         })?;
 
-        Ok(resource)
+        Ok(existing)
     }
 
     async fn delete_flight_service(&self, id: &str) -> Result<(), MetaStoreError> {

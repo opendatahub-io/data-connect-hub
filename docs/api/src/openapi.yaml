@@ -517,6 +517,33 @@ paths:
   /flights/{id}:
     parameters:
       - $ref: "#/components/parameters/resourceId"
+    patch:
+      operationId: patchFlightService
+      summary: Update a flight service
+      description: >
+        Partially updates a flight service using JSON Merge Patch (RFC 7396).
+        Supply only the fields you want to change; omitted fields are left
+        unchanged.
+      x-internal: true
+      tags: [flight-services]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "components/schemas/FlightService.yaml"
+      responses:
+        "200":
+          description: Flight service updated
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/FlightServiceResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
     delete:
       operationId: deleteFlightService
       summary: Unregister a flight service

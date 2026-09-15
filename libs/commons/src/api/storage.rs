@@ -50,14 +50,13 @@ pub trait FlightDiscoveryStore {
     async fn get_flight_service_by_connector(&self, connector: &str) -> Result<FlightServiceResource, MetaStoreError>;
 
     /// Retrieves a flight service by namespace and name.
-    async fn get_flight_service(&self, namespace: &str, name: &str) -> Result<FlightServiceResource, MetaStoreError>;
+    async fn get_flight_service(&self, id: &str) -> Result<FlightServiceResource, MetaStoreError>;
 
     /// Updates the status of a flight service by namespace and name.
     async fn update_flight_service(
         &self,
-        namespace: &str,
-        name: &str,
-        update_fn: Arc<dyn Fn(FlightServiceResource) -> Result<FlightServiceResource, MetaStoreError> + Send + Sync>,
+        id: &str,
+        update_fn: Arc<dyn Fn(FlightService) -> Result<FlightService, MetaStoreError> + Send + Sync>,
     ) -> Result<FlightServiceResource, MetaStoreError>;
 
     /// Deletes a flight service by id.

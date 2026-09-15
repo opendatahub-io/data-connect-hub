@@ -489,6 +489,32 @@ paths:
   /flights/{id}:
     parameters:
       - $ref: '#/components/parameters/resourceId'
+    patch:
+      operationId: patchFlightService
+      summary: Update a flight service
+      description: |
+        Partially updates a flight service using JSON Merge Patch (RFC 7396). Supply only the fields you want to change; omitted fields are left unchanged.
+      x-internal: true
+      tags:
+        - flight-services
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: '#/components/schemas/FlightService'
+      responses:
+        '200':
+          description: Flight service updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlightServiceResource'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
     delete:
       operationId: deleteFlightService
       summary: Unregister a flight service
@@ -936,11 +962,11 @@ components:
         external_url:
           type: string
           description: Externally reachable URL of the Flight service
-          example: https://flight.apps.example.com:443
+          example: grpcs://flight.apps.example.com:443
         internal_url:
           type: string
           description: Cluster-internal URL of the Flight service
-          example: grpc://flight-service.dch-services.svc:50051
+          example: grpcs://flight-service.dch-services.svc:50051
         status:
           $ref: '#/components/schemas/FlightServiceStatus'
     FlightServiceResource:
