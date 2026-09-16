@@ -314,6 +314,27 @@ pub async fn create_flight_service(
         .get_supported_connectors()
         .await?;
 
+    let connectors_names = connectors.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+
+    let flight_services = service.meta_store.get_all_flight_services().await?;
+
+    for flight_service in flight_services.items {
+        let fs_connectors = flight_service.resource.supported_connectors;
+
+        let intersection = connectors_names
+            .iter()
+            .filter(|fs| fs_connectors.contains(fs))
+            .collect::<Vec<_>>();
+
+        if !intersection.is_empty() {
+            return Err(ValidationError::ConnectorsAlreadyExists(format!(
+                "connectors already exists: {:?}",
+                intersection
+            ))
+            .into());
+        }
+    }
+
     flight.supported_connectors = connectors.into_iter().map(|c| c.name).collect();
 
     let res = api_service.meta_store.create_flight_service(&flight).await?;

@@ -53,6 +53,8 @@ pub enum ValidationError {
     InvalidDataConnectionId(String),
     #[error("Cannot get data connection types")]
     CannotGetDataConnectionTypes,
+    #[error("Connectors already exists: {0}")]
+    ConnectorsAlreadyExists(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -266,6 +268,11 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "cannot_get_data_connection_types".to_string(),
                 message: "Cannot get data connection types".to_string(),
                 status: 500,
+            },
+            ValidationError::ConnectorsAlreadyExists(error) => RestErrorResponse {
+                code: "connectors_already_exists".to_string(),
+                message: error,
+                status: 400,
             },
         }
     }
