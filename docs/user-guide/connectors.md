@@ -94,19 +94,19 @@ code {
     font-weight: 600;
   }
 
-  tbody td:nth-child(1)::before {
+  tbody td:nth-of-type(1)::before {
     content: "Unencrypted network transport";
   }
 
-  tbody td:nth-child(2)::before {
+  tbody td:nth-of-type(2)::before {
     content: "TLS-encrypted network transport";
   }
 
-  tbody td:nth-child(3)::before {
+  tbody td:nth-of-type(3)::before {
     content: "Supported ingestion";
   }
 
-  tbody td:nth-child(4)::before {
+  tbody td:nth-of-type(4)::before {
     content: "Input format";
   }
 }

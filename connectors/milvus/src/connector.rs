@@ -48,16 +48,25 @@ impl MilvusClient {
             .map_err(|e| ConnectorError::ConnectionError(format!("Milvus request failed: {e}")))?;
 
         let status = response.status();
-        let json: serde_json::Value = response
-            .json()
+        let body = response
+            .text()
             .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to read Milvus response body: {e}")))?;
+
+        if !status.is_success() {
+            return Err(ConnectorError::ConnectionError(format!(
+                "Milvus error (HTTP {status}): {body}"
+            )));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&body)
             .map_err(|e| ConnectorError::ConnectionError(format!("Failed to parse Milvus response: {e}")))?;
 
         let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
-        if !status.is_success() || code != 0 {
+        if code != 0 {
             let message = json.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
             return Err(ConnectorError::ConnectionError(format!(
-                "Milvus error (HTTP {status}, code {code}): {message}"
+                "Milvus error (code {code}): {message}"
             )));
         }
 
