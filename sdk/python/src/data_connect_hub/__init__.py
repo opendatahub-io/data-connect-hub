@@ -6,6 +6,7 @@ from .client import DataConnectClient
 from .exceptions import (
     DCHAuthenticationError,
     DCHConfigError,
+    DCHConflictError,
     DCHConnectionError,
     DCHError,
     DCHForbiddenError,
@@ -53,6 +54,7 @@ __all__ = [
     "CredentialsRef",
     "DCHAuthenticationError",
     "DCHConfigError",
+    "DCHConflictError",
     "DCHConnectionError",
     "DCHError",
     "DCHForbiddenError",

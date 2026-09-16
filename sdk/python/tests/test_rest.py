@@ -13,6 +13,7 @@ from data_connect_hub._rest import _DEFAULT_API_BASE, RestClient
 from data_connect_hub.exceptions import (
     DCHAuthenticationError,
     DCHConfigError,
+    DCHConflictError,
     DCHConnectionError,
     DCHForbiddenError,
     DCHHTTPError,
@@ -425,6 +426,16 @@ class TestConnectionTypes:
         )
         client = _make_client(transport)
         client.delete_connection_type("ct-1")
+
+    def test_delete_in_use_raises_conflict(self) -> None:
+        body = {
+            "code": "conflict",
+            "message": "cannot delete connection type 'ct-1': 2 connections still reference it",
+        }
+        client = _make_client(httpx.MockTransport(lambda request: httpx.Response(409, json=body)))
+
+        with pytest.raises(DCHConflictError, match="still reference it"):
+            client.delete_connection_type("ct-1")
 
 
 class TestHeaders:
