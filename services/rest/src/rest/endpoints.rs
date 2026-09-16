@@ -451,7 +451,7 @@ mod tests {
     use super::*;
     use crate::rest::API_VERSION;
     use crate::rest::errors::{json_config, query_config};
-    use crate::rest::middleware::validate_headers;
+    use crate::rest::middleware::{trace_request, validate_headers};
 
     fn api_path(path: &str) -> String {
         format!("/api/{API_VERSION}/data{path}")
@@ -894,6 +894,7 @@ mod tests {
         cfg.service(
             web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
+                .wrap(middleware::from_fn(trace_request))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))

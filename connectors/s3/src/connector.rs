@@ -104,6 +104,13 @@ impl FlightConnector for S3Connector {
         "Amazon compatible S3 connector".to_string()
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        connection.id = %data_connection.metadata.id,
+        )
+    )]
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -158,6 +165,7 @@ impl DataReader for S3Reader {
         PROVIDER.to_string()
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let format = self.detect_format(query)?;
         let reader = self.make_reader(query).await?;
@@ -171,6 +179,7 @@ impl DataReader for S3Reader {
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, batch_size = options.batch_size))]
     async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let format = self.detect_format(&view.query)?;
         let batch_size = options.batch_size;
@@ -191,6 +200,7 @@ impl DataReader for S3Reader {
         }
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
     async fn can_read_binary(&self, query: Arc<BinaryQuery>) -> Result<(), ConnectorError> {
         self.operator
             .stat(&query.path)
@@ -199,6 +209,7 @@ impl DataReader for S3Reader {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
     async fn read_binary(&self, query: Arc<BinaryQuery>) -> QueryOutput {
         let reader = self.make_reader(&query.path).await?;
         let schema = Arc::new(Schema::new(vec![Field::new("data", DataType::Binary, false)]));
@@ -225,6 +236,7 @@ impl DataReader for S3Reader {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         self.operator.check().await.map_err(|e| {
             tracing::error!(error = %e, "S3 connection check failed");
@@ -232,6 +244,14 @@ impl DataReader for S3Reader {
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        include_schema = include_schema,
+        row_count = tracing::field::Empty,
+        )
+    )]
     async fn list_tables(
         &self,
         table_name_filter: Option<&str>,
@@ -278,6 +298,7 @@ impl DataReader for S3Reader {
             });
         }
 
+        tracing::Span::current().record("row_count", tables.len());
         Ok(tables)
     }
 }

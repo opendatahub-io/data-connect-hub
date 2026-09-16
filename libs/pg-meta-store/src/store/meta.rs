@@ -83,6 +83,16 @@ impl PgMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        resource.id = %connection_type_id,
+        )
+    )]
     async fn validate_connection_type<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
         global_tenant_id: &str,
@@ -137,6 +147,16 @@ fn deserialize_connection_type(value: serde_json::Value, global_tenant_id: &str)
 
 #[async_trait::async_trait]
 impl MetaStoreReader for PgMetaStore {
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        row_count = tracing::field::Empty,
+        )
+    )]
     async fn get_data_connections(
         &self,
         tenant_id: &str,
@@ -164,12 +184,24 @@ impl MetaStoreReader for PgMetaStore {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        tracing::Span::current().record("row_count", items.len());
+
         Ok(ResourceList {
             total_count: items.len(),
             items,
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn get_data_connection(&self, tenant_id: &str, uid: &str) -> Result<DataConnectionResource, MetaStoreError> {
         let row = sqlx::query("SELECT data FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2")
             .bind(uid)
@@ -194,6 +226,16 @@ impl MetaStoreReader for PgMetaStore {
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        row_count = tracing::field::Empty,
+        )
+    )]
     async fn get_data_connection_types(
         &self,
         tenant_id: &str,
@@ -222,12 +264,24 @@ impl MetaStoreReader for PgMetaStore {
             })
             .collect();
 
+        tracing::Span::current().record("row_count", items.len());
+
         Ok(ResourceList {
             total_count: items.len(),
             items,
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        resource.id = %id,
+        )
+    )]
     async fn get_data_connection_type(
         &self,
         tenant_id: &str,
@@ -264,6 +318,15 @@ impl MetaStoreReader for PgMetaStore {
 
 #[async_trait::async_trait]
 impl MetaStore for PgMetaStore {
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "INSERT",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        )
+    )]
     async fn create_data_connection(
         &self,
         tenant_id: &str,
@@ -317,6 +380,16 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "UPDATE",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn update_data_connection(
         &self,
         tenant_id: &str,
@@ -397,6 +470,16 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "UPDATE",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn update_data_connection_status(
         &self,
         tenant_id: &str,
@@ -467,6 +550,16 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "DELETE",
+        db.collection.name = "data_connections",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn delete_data_connection(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
         let result = sqlx::query(
             "DELETE FROM data_connections WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",
@@ -489,6 +582,15 @@ impl MetaStore for PgMetaStore {
         Ok(())
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "SELECT",
+        db.collection.name = "data_connection_types",
+        row_count = tracing::field::Empty,
+        )
+    )]
     async fn get_all_data_connection_types(&self) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
         let rows = sqlx::query("SELECT data FROM data_connection_types")
             .fetch_all(&self.pool)
@@ -521,12 +623,23 @@ impl MetaStore for PgMetaStore {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
+        tracing::Span::current().record("row_count", items.len());
+
         Ok(ResourceList {
             total_count: items.len(),
             items,
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "INSERT",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        )
+    )]
     async fn create_data_connection_type(
         &self,
         tenant_id: &str,
@@ -564,6 +677,16 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "UPDATE",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn update_data_connection_type(
         &self,
         tenant_id: &str,
@@ -635,6 +758,15 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "UPDATE",
+        db.collection.name = "data_connection_types",
+        resource.id = %uid,
+        )
+    )]
     async fn update_data_connection_type_status(
         &self,
         uid: &str,
@@ -706,6 +838,16 @@ impl MetaStore for PgMetaStore {
         Ok(resource)
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        db.system = "postgresql",
+        db.operation = "DELETE",
+        db.collection.name = "data_connection_types",
+        tenant.id = %tenant_id,
+        resource.id = %uid,
+        )
+    )]
     async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
         let result = sqlx::query(
             "DELETE FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",

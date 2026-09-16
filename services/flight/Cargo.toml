@@ -49,6 +49,8 @@ tokio-stream = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 config = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }

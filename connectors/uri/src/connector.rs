@@ -141,6 +141,13 @@ impl FlightConnector for UriConnector {
         "URI connector".to_string()
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        connection.id = %data_connection.metadata.id,
+        )
+    )]
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -256,6 +263,7 @@ impl DataReader for UriReader {
         PROVIDER.to_string()
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let request = UriRequest::parse(query)?;
         let response_json = fetch(&self.client, &request).await?;
@@ -270,6 +278,7 @@ impl DataReader for UriReader {
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, batch_size = options.batch_size))]
     async fn read_tabular(&self, view: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let request = UriRequest::parse(&view.query)?;
         let schema = view.schema.clone();
@@ -293,6 +302,7 @@ impl DataReader for UriReader {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
     async fn can_read_binary(&self, query: Arc<BinaryQuery>) -> Result<(), ConnectorError> {
         let response = self
             .client
@@ -314,6 +324,7 @@ impl DataReader for UriReader {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
     async fn read_binary(&self, query: Arc<BinaryQuery>) -> QueryOutput {
         // Disable the total request deadline — binary downloads can be
         // arbitrarily large.  The client-level read_timeout still guards
@@ -357,6 +368,7 @@ impl DataReader for UriReader {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         let response = self
             .client

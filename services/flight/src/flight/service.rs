@@ -2,6 +2,7 @@ use crate::flight::QueryContext;
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
+use crate::flight::trace::TracedStream;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_flight::{
@@ -125,6 +126,14 @@ impl DataIngestionService {
         Ok((data_connection_type, connector))
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        tenant.id = %tenant_id,
+        connection.id = %data_connection_id,
+        connector.provider = tracing::field::Empty,
+        )
+    )]
     pub(crate) async fn get_connector_by_connection_id(
         &self,
         tenant_id: &str,
@@ -146,6 +155,7 @@ impl DataIngestionService {
             .connectors_registry
             .get_connector(data_connection_type.resource.provider.as_str())
             .map_err(map_connector_error)?;
+        tracing::Span::current().record("connector.provider", &data_connection_type.resource.provider);
 
         Ok((connection, connector))
     }
@@ -196,10 +206,11 @@ impl DataIngestionService {
             });
 
         Ok(Response::new(
-            Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
+            Box::pin(TracedStream::new(OPERATION_SQL_INFO, flight_stream)) as <Self as FlightService>::DoGetStream,
         ))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_get_flight_info_tables(
         &self,
         query: CommandGetTables,
@@ -225,6 +236,7 @@ impl DataIngestionService {
         Ok(Response::new(flight_info))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_do_get_tables(
         &self,
         query: CommandGetTables,
@@ -283,10 +295,11 @@ impl DataIngestionService {
             });
 
         Ok(Response::new(
-            Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
+            Box::pin(TracedStream::new(OPERATION_TABLES, flight_stream)) as <Self as FlightService>::DoGetStream,
         ))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_get_flight_info_statement(
         &self,
         query: CommandStatementQuery,
@@ -328,6 +341,7 @@ impl DataIngestionService {
         Ok(Response::new(flight_info))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_do_get_statement(
         &self,
         ticket: TicketStatementQuery,
@@ -375,10 +389,11 @@ impl DataIngestionService {
             });
 
         Ok(Response::new(
-            Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
+            Box::pin(TracedStream::new(OPERATION_STATEMENT, flight_stream)) as <Self as FlightService>::DoGetStream,
         ))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_get_flight_info_fallback(
         &self,
         cmd: Command,
@@ -432,6 +447,7 @@ impl DataIngestionService {
         Ok(Response::new(flight_info))
     }
 
+    #[tracing::instrument(skip_all)]
     async fn handle_do_get_fallback(
         &self,
         request: Request<Ticket>,
@@ -479,7 +495,7 @@ impl DataIngestionService {
             });
 
         Ok(Response::new(
-            Box::pin(flight_stream) as <Self as FlightService>::DoGetStream
+            Box::pin(TracedStream::new(OPERATION_BINARY, flight_stream)) as <Self as FlightService>::DoGetStream,
         ))
     }
 }
@@ -635,6 +651,13 @@ impl FlightSqlService for DataIngestionService {
 
 #[async_trait::async_trait]
 impl CredentialsResolver for DataIngestionService {
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connection.id = %connection.metadata.id,
+        secret.name = %connection.resource.credentials_ref.secret,
+        )
+    )]
     async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
         match (&connection.metadata.tenant_id, &connection.resource.credentials_ref) {
             (Some(tenant_id), CredentialsRef { secret }) => {

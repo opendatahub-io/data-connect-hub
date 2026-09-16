@@ -4,6 +4,7 @@ pub mod errors;
 pub mod metrics;
 pub mod registry;
 pub mod service;
+pub mod trace;
 
 pub use service::*;
 

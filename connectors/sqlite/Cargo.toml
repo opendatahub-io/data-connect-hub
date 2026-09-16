@@ -15,3 +15,4 @@ tokio = { workspace = true }
 futures = { workspace = true }
 async-stream = { workspace = true }
 moka = { workspace = true, features = ["future"] }
+tracing = { workspace = true }
