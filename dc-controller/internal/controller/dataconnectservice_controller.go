@@ -388,7 +388,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
 	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Spec.FlightService))
-	if err := setConfigMapFlightConnectorSettings(resources, cr.Spec.FlightService); err != nil {
+	if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 		return fmt.Errorf("setting flight-service connector configuration: %w", err)
 	}
 
