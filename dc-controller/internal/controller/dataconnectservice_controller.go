@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -70,8 +71,11 @@ const (
 	nameDataConnectHub = "data-connect-hub"
 	nameDatabaseConfig = "dch-database-config"
 
-	kindDeployment = "Deployment"
-	kindConfigMap  = "ConfigMap"
+	kindDeployment         = "Deployment"
+	kindConfigMap          = "ConfigMap"
+	kindService            = "Service"
+	kindServiceAccount     = "ServiceAccount"
+	kindClusterRoleBinding = "ClusterRoleBinding"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
@@ -157,7 +161,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;list;watch;create;update;patch;delete;post;put
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types;flight-services,verbs=get;list;watch;create;update;patch;delete;post;put
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;update;patch
@@ -221,6 +225,15 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Render and apply all manifests (services + gateway)
+	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
+		if errs := validation.IsDNS1123Label(cr.Spec.FlightService.Name); len(errs) > 0 {
+			err := fmt.Errorf("flight service name %q is invalid: %s", cr.Spec.FlightService.Name, strings.Join(errs, "; "))
+			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidFlightService", err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidFlightService", err.Error())
+			})
+		}
+	}
 	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
@@ -346,7 +359,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	gw := r.resolveGateway(cr, platCfg)
 	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
-	flightPatches := buildServicePatches(nameFlightService, cr.Spec.FlightService)
+	var flightPatches []kustypes.Patch
+	if cr.Spec.FlightService != nil {
+		flightPatches = buildServicePatches(nameFlightService, &cr.Spec.FlightService.ServiceOverrides)
+	}
 	gwPatches := buildGatewayPatches(&gw)
 
 	patches := make([]kustypes.Patch, 0, len(restPatches)+len(flightPatches)+len(gwPatches))
@@ -362,12 +378,19 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameRestService, r.RestImage)
 	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
+	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
+		resources = renderFlightService(resources, cr.Spec.FlightService)
+	}
+
 	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace)
-	if err := setConfigMapFlightConnectorSettings(resources, cr.Spec.FlightService); err != nil {
-		return fmt.Errorf("setting flight-service connector configuration: %w", err)
+	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Spec.FlightService))
+	if cr.Spec.FlightService != nil {
+		if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
+			return fmt.Errorf("setting flight-service connector configuration: %w", err)
+		}
 	}
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
@@ -378,7 +401,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
+	annotateFlightDeploymentsWithConfigHash(resources)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }

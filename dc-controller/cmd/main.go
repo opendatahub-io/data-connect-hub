@@ -194,6 +194,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
+
 	if err := (&controller.DataConnectServiceReconciler{
 		Client:             mgr.GetClient(),
 		Scheme:             mgr.GetScheme(),
@@ -205,8 +207,6 @@ func main() {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
 	}
-
-	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),

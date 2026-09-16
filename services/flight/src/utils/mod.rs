@@ -41,6 +41,8 @@ pub struct AuthConfig {
     pub cache_ttl_secs: u64,
     #[serde(default = "default_token_review_audiences")]
     pub token_review_audiences: Vec<String>,
+    #[serde(default)]
+    pub discovery_service_account: String,
 }
 
 fn default_cache_ttl_secs() -> u64 {
@@ -57,6 +59,7 @@ impl Default for AuthConfig {
             enabled: false,
             cache_ttl_secs: default_cache_ttl_secs(),
             token_review_audiences: vec![],
+            discovery_service_account: String::new(),
         }
     }
 }
