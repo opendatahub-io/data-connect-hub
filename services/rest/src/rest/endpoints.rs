@@ -19,6 +19,7 @@ use commons::api::storage::SecretStore;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
@@ -318,21 +319,22 @@ pub async fn create_flight_service(
 
     let flight_services = service.meta_store.get_all_flight_services().await?;
 
-    for flight_service in flight_services.items {
-        let fs_connectors = flight_service.resource.supported_connectors;
+    let existent_connectors = flight_services
+        .items
+        .iter()
+        .map(|fs| fs.resource.supported_connectors.clone())
+        .flatten()
+        .collect::<HashSet<_>>();
 
-        let intersection = connectors_names
-            .iter()
-            .filter(|fs| fs_connectors.contains(fs))
-            .collect::<Vec<_>>();
+    let intersection = connectors_names
+        .iter()
+        .filter(|fs| existent_connectors.contains(&fs.to_string()))
+        .collect::<Vec<_>>();
 
-        if !intersection.is_empty() {
-            return Err(ValidationError::ConnectorsAlreadyExists(format!(
-                "connectors already exists: {:?}",
-                intersection
-            ))
-            .into());
-        }
+    if !intersection.is_empty() {
+        return Err(
+            ValidationError::ConnectorsAlreadyExists(format!("connectors already exists: {:?}", intersection)).into(),
+        );
     }
 
     flight.supported_connectors = connectors.into_iter().map(|c| c.name).collect();
