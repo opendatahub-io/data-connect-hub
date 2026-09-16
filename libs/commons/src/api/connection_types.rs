@@ -44,12 +44,6 @@ impl DataConnectionType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
-pub struct Capabilities {
-    pub flight: bool,
-    pub rest: bool,
-}
-
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct DataConnectionTypeStatus {
     pub flight_ready: bool,
