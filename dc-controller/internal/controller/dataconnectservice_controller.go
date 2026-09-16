@@ -100,7 +100,6 @@ type DataConnectServiceReconciler struct {
 	RestImage          string
 	FlightImage        string
 	KubeRbacProxyImage string
-	FlightClient       FlightRegistrationClient
 }
 
 type platformConfig struct {
@@ -226,11 +225,14 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Render and apply all manifests (services + gateway)
-	if err := validateFlightInstances(cr.Spec.FlightService); err != nil {
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidFlightInstances", err.Error())
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidFlightInstances", err.Error())
-		})
+	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
+		if errs := validation.IsDNS1123Label(cr.Spec.FlightService.Name); len(errs) > 0 {
+			err := fmt.Errorf("flight service name %q is invalid: %s", cr.Spec.FlightService.Name, strings.Join(errs, "; "))
+			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidFlightService", err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidFlightService", err.Error())
+			})
+		}
 	}
 	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
@@ -270,13 +272,6 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	if err := r.registerFlightInstances(ctx, &cr); err != nil {
-		log.Error(err, "Could not register Flight service instances")
-		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
-			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForFlightRegistration", err.Error())
-		})
-	}
-
 	// All ready
 	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
@@ -285,52 +280,6 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
 		r.checkGRPCGatewaySupport(ctx, cr)
 	})
-}
-
-func validateFlightInstances(config *dchv1alpha1.FlightServiceConfig) error {
-	if config == nil || len(config.Instances) == 0 {
-		return nil
-	}
-	seen := make(map[string]struct{}, len(config.Instances))
-	for i, instance := range config.Instances {
-		name := instance.Name
-		if name == "" {
-			name = fmt.Sprintf("instance%d", i+1)
-		}
-		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {
-			return fmt.Errorf("flight service instance name %q is invalid: %s", name, strings.Join(errs, "; "))
-		}
-		if _, exists := seen[name]; exists {
-			return fmt.Errorf("flight service instance name %q is duplicated", name)
-		}
-		seen[name] = struct{}{}
-	}
-	return nil
-}
-
-func (r *DataConnectServiceReconciler) registerFlightInstances(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {
-	if r.FlightClient == nil || cr.Spec.FlightService == nil || len(cr.Spec.FlightService.Instances) == 0 {
-		return nil
-	}
-
-	for i, instance := range cr.Spec.FlightService.Instances {
-		name := instance.Name
-		if name == "" {
-			name = fmt.Sprintf("instance%d", i+1)
-		}
-		serviceName := nameFlightService + "-" + name
-		registration := FlightServiceRegistration{
-			Name:        serviceName,
-			Namespace:   cr.Namespace,
-			InternalURL: fmt.Sprintf("https://dch-%s.%s.svc.cluster.local:8443", serviceName, cr.Namespace),
-			ExternalURL: "https://" + instance.Hostname,
-			Status:      FlightServiceStatus{Ready: true},
-		}
-		if err := r.FlightClient.RegisterFlightService(ctx, cr.Namespace, registration); err != nil {
-			return fmt.Errorf("registering Flight service %q: %w", serviceName, err)
-		}
-	}
-	return nil
 }
 
 func (r *DataConnectServiceReconciler) updateStatus(
@@ -411,7 +360,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	gw := r.resolveGateway(cr, platCfg)
 	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
 	var flightPatches []kustypes.Patch
-	if cr.Spec.FlightService != nil && len(cr.Spec.FlightService.Instances) == 0 {
+	if cr.Spec.FlightService != nil {
 		flightPatches = buildServicePatches(nameFlightService, &cr.Spec.FlightService.ServiceOverrides)
 	}
 	gwPatches := buildGatewayPatches(&gw)
@@ -429,15 +378,15 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameRestService, r.RestImage)
 	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
-	if cr.Spec.FlightService != nil && len(cr.Spec.FlightService.Instances) > 0 {
-		resources = renderFlightInstances(resources, cr.Spec.FlightService)
+	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
+		resources = renderFlightService(resources, cr.Spec.FlightService)
 	}
 
 	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace)
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Spec.FlightService))
 	if err := setConfigMapFlightConnectorSettings(resources, cr.Spec.FlightService); err != nil {
 		return fmt.Errorf("setting flight-service connector configuration: %w", err)
 	}
