@@ -100,8 +100,7 @@ type ConnectorConfig struct {
 	Name string `json:"name"`
 
 	// enabled controls whether this connector is available for use.
-	// Defaults to true when the connector appears in the list.
-	// +kubebuilder:default=true
+	// Defaults to false when omitted.
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
 

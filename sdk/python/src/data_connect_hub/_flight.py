@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Callable, Generator, Sequence
+from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -130,22 +130,22 @@ class FlightClient:
         except flight_dbapi.Error as exc:
             raise DCHConnectionError(str(exc)) from exc
 
-    def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
+    def read(self, sql: str, connection_id: str) -> pa.Table:
         """Execute *sql* and return the full result as a PyArrow Table."""
         try:
-            return self._do_read(sql, connection_id, parameters=parameters)
+            return self._do_read(sql, connection_id)
         except DCHConnectionError as exc:
             if self._token_cache is not None and _is_auth_error(exc):
                 self._token_cache.refresh()
-                return self._do_read(sql, connection_id, parameters=parameters)
+                return self._do_read(sql, connection_id)
             raise
 
-    def _do_read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
+    def _do_read(self, sql: str, connection_id: str) -> pa.Table:
         conn = self._connect(connection_id)
         try:
             cursor = conn.cursor()
             try:
-                cursor.execute(sql, parameters)
+                cursor.execute(sql)
                 return cursor.fetch_arrow_table()
             except flight_dbapi.Error as exc:
                 raise DCHQueryError(str(exc)) from exc
@@ -155,9 +155,7 @@ class FlightClient:
         finally:
             conn.close()
 
-    def read_batches(
-        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
-    ) -> Generator[pa.RecordBatch, None, None]:
+    def read_batches(self, sql: str, connection_id: str) -> Generator[pa.RecordBatch, None, None]:
         """Execute *sql* and return a streaming iterator of RecordBatches.
 
         Yields one :class:`pyarrow.RecordBatch` per iteration.  The
@@ -167,11 +165,9 @@ class FlightClient:
             for batch in client.read_batches("SELECT ...", "conn-1"):
                 process(batch)
         """
-        return self._iter_batches(sql, connection_id, parameters)
+        return self._iter_batches(sql, connection_id)
 
-    def _iter_batches(
-        self, sql: str, connection_id: str, parameters: Sequence[Any] | None
-    ) -> Generator[pa.RecordBatch, None, None]:
+    def _iter_batches(self, sql: str, connection_id: str) -> Generator[pa.RecordBatch, None, None]:
         try:
             conn = self._connect(connection_id)
         except DCHConnectionError as exc:
@@ -183,7 +179,7 @@ class FlightClient:
         try:
             cursor = conn.cursor()
             try:
-                cursor.execute(sql, parameters)
+                cursor.execute(sql)
                 reader = cursor.fetch_record_batch()
                 yield from reader
             except flight_dbapi.Error as exc:
@@ -195,9 +191,9 @@ class FlightClient:
             with contextlib.suppress(Exception):
                 conn.close()
 
-    def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
+    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
         """Execute *sql* and return the result as a pandas DataFrame."""
-        return self.read(sql, connection_id, parameters=parameters).to_pandas()
+        return self.read(sql, connection_id).to_pandas()
 
     def server_info(self) -> dict[str, Any]:
         """Return Flight SQL server metadata."""

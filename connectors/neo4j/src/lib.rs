@@ -8,6 +8,19 @@
 //! (requires Neo4j Enterprise Edition). Community Edition does not support
 //! role-based access control, so all authenticated users have full access.
 //!
+//! # SSL / TLS
+//!
+//! Encryption is selected by the `NEO4J_URI` scheme:
+//!
+//! * `neo4j://`     — plaintext, no TLS
+//! * `neo4j+s://`   — TLS with server-certificate verification
+//! * `neo4j+ssc://` — TLS; neo4rs 0.8 still verifies the server certificate
+//!
+//! To trust a private/custom CA with `neo4j+s`, provide the CA certificate
+//! PEM contents through the `NEO4J_CA_CERT` credential. The connector writes
+//! the contents to a temporary file and adds it to the certificate trust store
+//! used to validate the Neo4j server.
+//!
 //! # Schema inference
 //!
 //! Schema is inferred by executing the query and inspecting the first row's

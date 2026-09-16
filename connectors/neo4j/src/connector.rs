@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Write;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
@@ -16,6 +17,7 @@ use commons::utils::config::ConnectorConfig;
 use futures::Stream;
 use moka::future::Cache;
 use neo4rs::{BoltType, Graph};
+use tempfile::NamedTempFile;
 
 use crate::types;
 
@@ -23,6 +25,7 @@ const KEY_URI: &str = "NEO4J_URI";
 const KEY_USERNAME: &str = "NEO4J_USERNAME";
 const KEY_PASSWORD: &str = "NEO4J_PASSWORD";
 const KEY_DATABASE: &str = "NEO4J_DATABASE";
+const KEY_CA_CERT: &str = "NEO4J_CA_CERT";
 
 pub struct Neo4jConnector {
     graphs: Cache<String, Graph>,
@@ -61,11 +64,37 @@ async fn build_graph(
         .cloned()
         .unwrap_or_else(|| "neo4j".to_string());
 
-    let config = neo4rs::ConfigBuilder::default()
+    // The URI scheme selects the TLS mode of the Bolt connection:
+    //   * `neo4j://`     -> plaintext (no TLS)
+    //   * `neo4j+s://`   -> TLS, verify the server certificate against the
+    //                       trust store (system roots plus any CA provided below)
+    //   * `neo4j+ssc://` -> TLS; neo4rs 0.8 still verifies the server
+    //                       certificate
+    // The connector does not force a scheme here; the operator supplies the
+    // appropriate `NEO4J_URI`. For a private/custom CA, use `neo4j+s` and
+    // provide it through `NEO4J_CA_CERT`.
+    let mut builder = neo4rs::ConfigBuilder::default()
         .uri(uri)
         .user(&username)
         .password(password)
-        .db(database.as_str())
+        .db(database.as_str());
+
+    // neo4rs 0.8 accepts a CA certificate path, while credentials from the
+    // Kubernetes Secret contain the PEM contents. Keep the temporary file
+    // alive until Graph::connect has built its TLS connector and loaded the
+    // certificate; NamedTempFile then removes it automatically.
+    let _ca_cert_file = if let Some(ca_cert_pem) = credentials.get(KEY_CA_CERT) {
+        let mut file = NamedTempFile::new()
+            .map_err(|e| ConnectorError::IOError(format!("Failed to create temporary Neo4j CA certificate: {e}")))?;
+        file.write_all(ca_cert_pem.as_bytes())
+            .map_err(|e| ConnectorError::IOError(format!("Failed to write temporary Neo4j CA certificate: {e}")))?;
+        builder = builder.with_client_certificate(file.path());
+        Some(file)
+    } else {
+        None
+    };
+
+    let config = builder
         .build()
         .map_err(|e| ConnectorError::ConnectionError(format!("Invalid Neo4j config: {e}")))?;
 

@@ -108,11 +108,13 @@ class TestRead:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_cursor(table)
+        cursor = _mock_cursor(table)
+        mock_conn.cursor.return_value = cursor
         mock_dbapi.connect.return_value = mock_conn
 
         result = flight_client.read("SELECT 1", "conn-1")
         assert result.equals(table)
+        cursor.execute.assert_called_once_with("SELECT 1")
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
@@ -184,7 +186,8 @@ class TestReadBatches:
         _set_mock_exceptions(mock_dbapi)
         table = pa.table({"col": [1, 2, 3]})
         mock_conn = MagicMock()
-        mock_conn.cursor.return_value = _mock_streaming_cursor(table)
+        cursor = _mock_streaming_cursor(table)
+        mock_conn.cursor.return_value = cursor
         mock_dbapi.connect.return_value = mock_conn
 
         batches = list(flight_client.read_batches("SELECT 1", "conn-1"))
@@ -192,6 +195,7 @@ class TestReadBatches:
         assert len(batches) >= 1
         combined = pa.Table.from_batches(batches)
         assert combined.equals(table)
+        cursor.execute.assert_called_once_with("SELECT 1")
         mock_conn.close.assert_called_once()
 
     @patch("data_connect_hub._flight.flight_dbapi")
@@ -237,18 +241,6 @@ class TestReadBatches:
 
         with pytest.raises(DCHConnectionError, match="unreachable"):
             list(flight_client.read_batches("SELECT 1", "conn-1"))
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1]})
-        cursor = _mock_streaming_cursor(table)
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = cursor
-        mock_dbapi.connect.return_value = mock_conn
-
-        list(flight_client.read_batches("SELECT $1", "conn-1", parameters=[42]))
-        cursor.execute.assert_called_once_with("SELECT $1", [42])
 
     @patch("data_connect_hub._flight.flight_dbapi")
     def test_auth_error_triggers_refresh(self, mock_dbapi: MagicMock) -> None:
@@ -739,49 +731,6 @@ class TestTLS:
         db_kwargs = mock_dbapi.connect.call_args.kwargs["db_kwargs"]
         assert "adbc.flight.sql.client_option.tls_skip_verify" not in db_kwargs
         assert "adbc.flight.sql.client_option.tls_root_certs" not in db_kwargs
-
-
-class TestParameters:
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1]})
-        cursor = _mock_cursor(table)
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = cursor
-        mock_dbapi.connect.return_value = mock_conn
-
-        params = [42]
-        flight_client.read("SELECT $1", "conn-1", parameters=params)
-
-        cursor.execute.assert_called_once_with("SELECT $1", [42])
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_none_parameters_forwarded(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1]})
-        cursor = _mock_cursor(table)
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = cursor
-        mock_dbapi.connect.return_value = mock_conn
-
-        flight_client.read("SELECT 1", "conn-1")
-
-        cursor.execute.assert_called_once_with("SELECT 1", None)
-
-    @patch("data_connect_hub._flight.flight_dbapi")
-    def test_read_pandas_forwards_parameters(self, mock_dbapi: MagicMock, flight_client: FlightClient) -> None:
-        _set_mock_exceptions(mock_dbapi)
-        table = pa.table({"col": [1]})
-        cursor = _mock_cursor(table)
-        mock_conn = MagicMock()
-        mock_conn.cursor.return_value = cursor
-        mock_dbapi.connect.return_value = mock_conn
-
-        result = flight_client.read_pandas("SELECT $1", "conn-1", parameters=[42])
-
-        assert isinstance(result, pd.DataFrame)
-        cursor.execute.assert_called_once_with("SELECT $1", [42])
 
 
 def _read_varint(data: bytes, offset: int) -> tuple[int, int]:

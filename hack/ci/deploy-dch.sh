@@ -126,6 +126,17 @@ kubectl rollout status deployment/dc-controller-manager -n "$CONTROLLER_NAMESPAC
 
 echo "=== Creating DataConnectService CR ==="
 
+if [[ -z "${E2E_CONNECTORS//[[:space:]]/}" ]]; then
+    echo "ERROR: E2E_CONNECTORS must contain at least one connector" >&2
+    exit 1
+fi
+
+flight_connector_specs="$({
+    for connector in $E2E_CONNECTORS; do
+        printf '      - name: %s\n        enabled: true\n' "$connector"
+    done
+})"
+
 kubectl apply -n "$SVC_NAMESPACE" -f - <<EOF
 apiVersion: dataconnecthub.opendatahub.io/v1alpha1
 kind: DataConnectService
@@ -143,6 +154,8 @@ spec:
     env:
       - name: RUST_LOG
         value: info
+    connectors:
+${flight_connector_specs}
 EOF
 
 if ! kubectl wait \
@@ -154,6 +167,9 @@ if ! kubectl wait \
     echo "ERROR: DataConnectService did not become Ready" >&2
     exit 1
 fi
+
+echo "=== DataConnectService CR ==="
+kubectl get "dataconnectservices.dataconnecthub.opendatahub.io/${DCS_NAME}" -n "$SVC_NAMESPACE" -o yaml
 
 echo "=== Waiting for DCH rollout ==="
 kubectl rollout status "deployment/${FLIGHT_SERVICE_NAME}" -n "$SVC_NAMESPACE" --timeout=180s
@@ -181,12 +197,12 @@ spec:
 EOF
 
 # ===================================================================
-# Tenant datasources
+# Tenant data sources for E2E connectors
 # ===================================================================
 
-echo "=== Deploying tenant datasources (${E2E_DATASOURCES}) ==="
+echo "=== Deploying tenant data sources for connectors (${E2E_CONNECTORS}) ==="
 
-if has_datasource postgres; then
+if has_connector postgres; then
     echo "--- Tenant PostgreSQL ---"
     TENANT_PG_HOST="dch-tenant-postgres"
     tenant_pg_args=(-n "$TENANT_NAMESPACE" -r "$TENANT_PG_HOST" -u dch_tenant_user -p dch_tenant_password -d dch_tenant_db -t "180s")
@@ -196,22 +212,22 @@ if has_datasource postgres; then
     bash "$REPO_ROOT/hack/install-postgresql.sh" "${tenant_pg_args[@]}"
 fi
 
-if has_datasource neo4j; then
+if has_connector neo4j; then
     echo "--- Neo4j ---"
     bash "$REPO_ROOT/hack/install-neo4j.sh" -n "$TENANT_NAMESPACE" -r "$NEO4J_HELM_RELEASE" -p "$NEO4J_ADMIN_PASSWORD"
 fi
 
-if has_datasource elasticsearch; then
+if has_connector elasticsearch; then
     echo "--- Elasticsearch ---"
     bash "$REPO_ROOT/hack/install-elasticsearch.sh" -n "$TENANT_NAMESPACE" -r "$ES_HELM_RELEASE" -p "$ES_PASSWORD"
 fi
 
-if has_datasource milvus; then
+if has_connector milvus; then
     echo "--- Milvus ---"
     bash "$REPO_ROOT/hack/install-milvus.sh" -n "$TENANT_NAMESPACE"
 fi
 
-if has_datasource s3; then
+if has_connector s3; then
     echo "--- MinIO (S3) ---"
     docker pull "$MINIO_IMAGE"
     docker pull "$MINIO_MC_IMAGE"

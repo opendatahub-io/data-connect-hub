@@ -2,14 +2,47 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 
 import pytest
-
 from data_connect_hub import DataConnectClient, DCHNotFoundError
+
+EXPECTED_OOB_CONNECTION_TYPES = {
+    "Postgres": "postgres",
+    "PGVector": "postgres",
+    "ElasticSearch": "elasticsearch",
+    "HuggingFace": "huggingface",
+    "Milvus": "milvus",
+    "Neo4j": "neo4j",
+    "URI": "uri",
+}
 
 
 class TestRestConnectionType:
+    def test_oob_connection_types_are_registered(self, rest_client: DataConnectClient) -> None:
+        """Verify the controller registers every built-in connection type."""
+        deadline = time.monotonic() + 30
+        listed_types = []
+        while time.monotonic() < deadline:
+            listed_types = rest_client.list_connection_types()
+            if all(
+                sum(connection_type.name == name for connection_type in listed_types) == 1
+                for name in EXPECTED_OOB_CONNECTION_TYPES
+            ):
+                break
+            time.sleep(1)
+
+        for name, provider in EXPECTED_OOB_CONNECTION_TYPES.items():
+            matching_types = [connection_type for connection_type in listed_types if connection_type.name == name]
+            assert len(matching_types) == 1, f"expected exactly one OOB connection type named {name!r}"
+            assert matching_types[0].provider == provider
+
+        by_name = {connection_type.name: connection_type for connection_type in listed_types}
+        postgres_schema = {(field.name, field.required, field.type) for field in by_name["Postgres"].credentials_fields}
+        pgvector_schema = {(field.name, field.required, field.type) for field in by_name["PGVector"].credentials_fields}
+        assert pgvector_schema == postgres_schema
+
     def test_crud(self, rest_client: DataConnectClient, create_connection_type) -> None:
         ct = create_connection_type(
             name="e2e-postgres-type",

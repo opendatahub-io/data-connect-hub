@@ -1,0 +1,14 @@
+name: PGVector
+provider: postgres
+description: PostgreSQL vector database connection type
+credentials_fields:
+  - name: URI
+    label: Uri
+    description: Postgres connection URI
+    required: true
+    type: string
+  - name: CA_CERT
+    label: CA Certificate
+    description: CA certificate for TLS verification
+    required: false
+    type: string

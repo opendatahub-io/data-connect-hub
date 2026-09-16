@@ -100,13 +100,21 @@ class TestFlightActions:
 
         Unlike ``list_actions`` (which only declares actions), this triggers
         ``action_get_supported_connectors`` and verifies the decoded response
-        body genuinely contains the connector provider we expect (postgres,
-        registered by the ``pg_flight_connection`` fixture).
+        body contains every connector enabled by the CI DataConnectService
+        configuration.
         """
         client, options = _flight_client_and_options(dch_client)
         try:
             names = _get_supported_connectors(client, options)
-            assert "postgres" in names
+            assert set(names) == {
+                "postgres",
+                "sqlite",
+                "s3",
+                "elasticsearch",
+                "neo4j",
+                "milvus",
+                "uri",
+            }
         finally:
             client.close()
 
