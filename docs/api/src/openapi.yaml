@@ -512,6 +512,10 @@ paths:
                 $ref: "components/schemas/FlightServiceResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
 
@@ -544,6 +548,10 @@ paths:
                 $ref: "components/schemas/FlightServiceResource.yaml"
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
     delete:
@@ -560,6 +568,10 @@ paths:
           description: Flight service deleted
         "400":
           $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
         "404":
           $ref: "components/responses/NotFound.yaml"
 
