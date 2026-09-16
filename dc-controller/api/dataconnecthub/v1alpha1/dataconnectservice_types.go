@@ -60,39 +60,20 @@ type ServiceOverrides struct {
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 
 	// connectors configures individual data connectors.
-	// When omitted, all connectors are enabled with their default settings.
 	// +listType=map
 	// +listMapKey=name
 	// +optional
 	Connectors []ConnectorConfig `json:"connectors,omitempty"`
 }
 
-// FlightServiceInstance configures one independently addressable Flight service.
-type FlightServiceInstance struct {
-	// name is appended to Flight resource names. When omitted, the controller
-	// assigns a deterministic name based on the instance position.
+// FlightServiceConfig configures the Flight gRPC API deployment.
+type FlightServiceConfig struct {
+	// name differentiates this Flight service when multiple DataConnectService
+	// resources are deployed in the same cluster.
 	// +optional
 	Name string `json:"name,omitempty"`
 
-	// hostname is the externally reachable hostname for this Flight service.
-	// +required
-	// +kubebuilder:validation:MinLength=1
-	Hostname string `json:"hostname"`
-
-	// ServiceOverrides are applied after flightService defaults.
 	ServiceOverrides `json:",inline"`
-}
-
-// FlightServiceConfig configures the Flight gRPC API deployment or deployments.
-type FlightServiceConfig struct {
-	// ServiceOverrides act as shared defaults for every instance.
-	ServiceOverrides `json:",inline"`
-
-	// instances enables instance mode. Each instance creates a separate Flight
-	// deployment, service, and external route.
-	// +listType=atomic
-	// +optional
-	Instances []FlightServiceInstance `json:"instances,omitempty"`
 }
 
 // DistributionStatus identifies the platform distribution context.

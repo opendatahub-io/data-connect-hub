@@ -56,22 +56,6 @@ type ConnectionMigrationClient interface {
 	CreateConnection(ctx context.Context, tenantID string, conn Connection) error
 }
 
-type FlightRegistrationClient interface {
-	RegisterFlightService(ctx context.Context, tenantID string, flight FlightServiceRegistration) error
-}
-
-type FlightServiceRegistration struct {
-	Name        string              `json:"name"`
-	Namespace   string              `json:"namespace"`
-	ExternalURL string              `json:"external_url"`
-	InternalURL string              `json:"internal_url"`
-	Status      FlightServiceStatus `json:"status"`
-}
-
-type FlightServiceStatus struct {
-	Ready bool `json:"ready"`
-}
-
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
 type ConnectionType struct {
 	Name              string  `json:"name"`
@@ -172,10 +156,6 @@ func NewHTTPMigrationClient(resolver URLResolver) ConnectionMigrationClient {
 	return newHTTPClient(resolver)
 }
 
-func NewHTTPFlightRegistrationClient(resolver URLResolver) FlightRegistrationClient {
-	return newHTTPClient(resolver)
-}
-
 func (c *httpConnectionTypeClient) baseURL() (string, error) {
 	return c.resolveURL()
 }
@@ -208,43 +188,6 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 	}
 	if resp.StatusCode == http.StatusConflict {
 		return ErrConflict
-	}
-	if resp.StatusCode >= 500 {
-		return ErrServiceUnavailable
-	}
-
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
-}
-
-func (c *httpConnectionTypeClient) RegisterFlightService(
-	ctx context.Context,
-	tenantID string,
-	flight FlightServiceRegistration,
-) error {
-	url, err := c.baseURL()
-	if err != nil {
-		return ErrServiceUnavailable
-	}
-
-	body, err := json.Marshal(flight)
-	if err != nil {
-		return fmt.Errorf("marshaling flight service: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1alpha1/data/flights", bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
-	}
-	c.setHeaders(req, tenantID)
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return ErrServiceUnavailable
-	}
-	defer resp.Body.Close() //nolint:errcheck
-
-	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusConflict {
-		return nil
 	}
 	if resp.StatusCode >= 500 {
 		return ErrServiceUnavailable
