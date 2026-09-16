@@ -152,21 +152,30 @@ if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
     echo "Milvus Helm release '${RELEASE}' already exists in namespace '${NAMESPACE}'"
 else
     echo "Installing Milvus standalone via Helm (namespace=${NAMESPACE}, release=${RELEASE}, chart=${CHART_VERSION})"
-    helm install "$RELEASE" milvus/milvus -n "$NAMESPACE" \
-        --version "$CHART_VERSION" \
-        --set cluster.enabled=false \
-        --set streaming.messageQueue=rocksmq \
-        --set pulsarv3.enabled=false \
-        --set etcd.replicaCount=1 \
-        --set minio.mode=standalone \
-        --set minio.image.repository=quay.io/minio/minio \
-        --set minio.image.tag=RELEASE.2025-04-03T14-56-28Z \
-        --set minio.resources.requests.memory=512Mi \
-        --set standalone.resources.requests.memory=512Mi \
-        --set standalone.resources.requests.cpu=200m \
-        "${SECURITY_OPTS[@]}" \
-        "${TLS_OPTS[@]}" \
-        --wait --timeout="$TIMEOUT" || {
+    helm_install_args=(
+        "$RELEASE" milvus/milvus
+        -n "$NAMESPACE"
+        --version "$CHART_VERSION"
+        --set cluster.enabled=false
+        --set streaming.messageQueue=rocksmq
+        --set pulsarv3.enabled=false
+        --set etcd.replicaCount=1
+        --set minio.mode=standalone
+        --set minio.image.repository=quay.io/minio/minio
+        --set minio.image.tag=RELEASE.2025-04-03T14-56-28Z
+        --set minio.resources.requests.memory=512Mi
+        --set standalone.resources.requests.memory=512Mi
+        --set standalone.resources.requests.cpu=200m
+    )
+    if ((${#SECURITY_OPTS[@]})); then
+        helm_install_args+=("${SECURITY_OPTS[@]}")
+    fi
+    if ((${#TLS_OPTS[@]})); then
+        helm_install_args+=("${TLS_OPTS[@]}")
+    fi
+    helm_install_args+=(--wait "--timeout=$TIMEOUT")
+
+    helm install "${helm_install_args[@]}" || {
         echo "error: failed to install Milvus in namespace '${NAMESPACE}'" >&2
         exit 1
     }
