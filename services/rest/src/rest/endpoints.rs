@@ -746,12 +746,17 @@ mod tests {
             tenant_id: &str,
             uid: &str,
         ) -> Result<(), commons::api::errors::MetaStoreError> {
-            if tenant_id == "test-tenant" && uid == "ct-1" {
-                Ok(())
-            } else {
-                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+            match (tenant_id, uid) {
+                ("test-tenant", "ct-1") => Ok(()),
+                // Stands in for the fk_data_connections_type violation the real store
+                // translates into a conflict.
+                ("test-tenant", "ct-in-use") => Err(commons::api::errors::MetaStoreError::Conflict(format!(
+                    "cannot delete connection type '{uid}': 2 connections still reference it \
+                     (prod-db, staging-db); delete the connections first"
+                ))),
+                _ => Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
                     "Data connection type '{uid}' not found"
-                )))
+                ))),
             }
         }
     }
@@ -1568,6 +1573,25 @@ mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 204);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_connection_type_in_use() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri(&api_path("/connection-types/ct-in-use"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 409);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "conflict");
+        let message = body["message"].as_str().unwrap();
+        assert!(
+            message.contains("2 connections still reference it"),
+            "expected the referencing count in the message, got: {message}"
+        );
     }
 
     #[actix_web::test]

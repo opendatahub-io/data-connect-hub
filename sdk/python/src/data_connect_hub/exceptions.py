@@ -42,6 +42,15 @@ class DCHForbiddenError(DCHHTTPError):
     """403 Forbidden."""
 
 
+class DCHConflictError(DCHHTTPError):
+    """409 Conflict.
+
+    Raised when the request collides with the current state of the server, for
+    example deleting a connection type that connections still reference, or
+    creating a resource whose name is already taken.
+    """
+
+
 class DCHServerError(DCHHTTPError):
     """5xx Server error."""
 
@@ -82,6 +91,8 @@ def map_http_error(response: httpx.Response) -> DCHHTTPError:
             return DCHForbiddenError(msg, response.status_code, body)
         case 404:
             return DCHNotFoundError(msg, response.status_code, body)
+        case 409:
+            return DCHConflictError(msg, response.status_code, body)
         case status if status >= 500:
             return DCHServerError(msg, response.status_code, body)
         case _:

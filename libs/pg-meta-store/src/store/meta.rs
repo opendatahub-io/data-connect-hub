@@ -27,14 +27,44 @@ pub struct PgMetaStore {
 
 const SECRETS_CA_CERT_PATH: &str = "/secrets/postgresql-ca.crt";
 
+/// Number of referencing connection names quoted back in an in-use error.
+const REFERENCING_NAME_SAMPLE: i64 = 5;
+
+fn is_sqlstate(e: &sqlx::Error, code: &str) -> bool {
+    matches!(e, sqlx::Error::Database(db_err) if db_err.code().as_deref() == Some(code))
+}
+
 fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
-    if let sqlx::Error::Database(ref db_err) = e
-        && db_err.code().as_deref() == Some("23505")
-    {
+    if is_sqlstate(&e, "23505") {
         return MetaStoreError::Conflict("a resource with the same identity already exists".to_string());
+    }
+    // On insert and update paths a foreign key violation means the referenced
+    // connection type is gone, which is the same condition validate_connection_type
+    // reports. Deletes handle 23503 separately, where it means the opposite.
+    if is_sqlstate(&e, "23503") {
+        return MetaStoreError::UnprocessableEntity("referenced connection type not found".to_string());
     }
     error!("database query failed: {e}");
     MetaStoreError::Query("failed to execute database operation".to_string())
+}
+
+// connection_type_in_use_message renders the error returned when a connection type
+// cannot be deleted because connections still reference it. An empty `names` slice
+// yields a count-only message.
+fn connection_type_in_use_message(uid: &str, count: i64, names: &[String]) -> String {
+    let subject = if count == 1 {
+        "1 connection still references it".to_string()
+    } else {
+        format!("{count} connections still reference it")
+    };
+    let detail = if names.is_empty() {
+        String::new()
+    } else if (names.len() as i64) < count {
+        format!(" ({}, ...)", names.join(", "))
+    } else {
+        format!(" ({})", names.join(", "))
+    };
+    format!("cannot delete connection type '{uid}': {subject}{detail}; delete the connections first")
 }
 
 impl PgMetaStore {
@@ -105,6 +135,55 @@ impl PgMetaStore {
                 }
             })?;
         Ok(())
+    }
+
+    // map_delete_connection_type_error converts a failed connection-type delete into
+    // a user-facing error. SQLSTATE 23503 means the fk_data_connections_type
+    // constraint rejected the delete because connections still reference the type.
+    // The referencing rows are counted only here, so a successful delete stays a
+    // single statement.
+    async fn map_delete_connection_type_error(&self, e: sqlx::Error, tenant_id: &str, uid: &str) -> MetaStoreError {
+        if !is_sqlstate(&e, "23503") {
+            error!("failed to delete connection type '{uid}': {e}");
+            return MetaStoreError::Query("failed to delete connection type".to_string());
+        }
+
+        let count = match sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM data_connections WHERE data_connection_type_id = $1",
+        )
+        .bind(uid)
+        .fetch_one(&self.pool)
+        .await
+        {
+            Ok(count) => count,
+            Err(e) => {
+                error!("failed to count connections referencing connection type '{uid}': {e}");
+                return MetaStoreError::Conflict(format!(
+                    "cannot delete connection type '{uid}': connections still reference it; delete the connections first"
+                ));
+            },
+        };
+
+        // A global connection type is referenced from tenants the caller may have no
+        // visibility into, so only the count is disclosed for those.
+        let names = if tenant_id == self.global_tenant_id {
+            Vec::new()
+        } else {
+            sqlx::query_scalar::<_, Option<String>>(
+                "SELECT data->'resource'->>'name' FROM data_connections \
+                 WHERE data_connection_type_id = $1 ORDER BY 1 LIMIT $2",
+            )
+            .bind(uid)
+            .bind(REFERENCING_NAME_SAMPLE)
+            .fetch_all(&self.pool)
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .collect()
+        };
+
+        MetaStoreError::Conflict(connection_type_in_use_message(uid, count, &names))
     }
 }
 
@@ -707,17 +786,20 @@ impl MetaStore for PgMetaStore {
     }
 
     async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
-        let result = sqlx::query(
+        // The fk_data_connections_type constraint, not this statement, is what keeps
+        // connections from being orphaned: the delete blocks on any uncommitted
+        // insert referencing this type and then fails with 23503.
+        let result = match sqlx::query(
             "DELETE FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",
         )
         .bind(uid)
         .bind(tenant_id)
         .execute(&self.pool)
         .await
-        .map_err(|e| {
-            error!("failed to delete connection type '{uid}': {e}");
-            MetaStoreError::Query("failed to delete connection type".to_string())
-        })?;
+        {
+            Ok(result) => result,
+            Err(e) => return Err(self.map_delete_connection_type_error(e, tenant_id, uid).await),
+        };
 
         if result.rows_affected() == 0 {
             return Err(MetaStoreError::ResourceNotFound(format!(
@@ -804,6 +886,38 @@ mod tests {
 
         let good = deserialize_connection_type(valid_connection_type_json("good-1", None), "global");
         assert_eq!(good.unwrap().metadata.id, "good-1");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_singular() {
+        let msg = connection_type_in_use_message("ct-1", 1, &["prod-db".to_string()]);
+        assert!(msg.contains("1 connection still references it"), "got: {msg}");
+        assert!(msg.contains("(prod-db)"), "got: {msg}");
+        assert!(msg.contains("delete the connections first"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_plural() {
+        let names = vec!["a".to_string(), "b".to_string()];
+        let msg = connection_type_in_use_message("ct-1", 2, &names);
+        assert!(msg.contains("2 connections still reference it"), "got: {msg}");
+        assert!(msg.contains("(a, b)"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_truncates_sample() {
+        // Fewer names than the count means the sample was capped; say so.
+        let names = vec!["a".to_string(), "b".to_string()];
+        let msg = connection_type_in_use_message("ct-1", 9, &names);
+        assert!(msg.contains("(a, b, ...)"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_without_names() {
+        // Global connection types disclose the count only, never tenant connection names.
+        let msg = connection_type_in_use_message("ct-1", 3, &[]);
+        assert!(msg.contains("3 connections still reference it"), "got: {msg}");
+        assert!(!msg.contains('('), "expected no name list, got: {msg}");
     }
 
     #[test]
