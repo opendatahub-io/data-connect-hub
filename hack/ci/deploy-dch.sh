@@ -224,7 +224,11 @@ fi
 
 if has_connector milvus; then
     echo "--- Milvus ---"
-    bash "$REPO_ROOT/hack/install-milvus.sh" -n "$TENANT_NAMESPACE"
+    milvus_args=(-n "$TENANT_NAMESPACE")
+    if [[ "$E2E_SSL_ENABLED" == "true" ]]; then
+        milvus_args+=(-s)
+    fi
+    bash "$REPO_ROOT/hack/install-milvus.sh" "${milvus_args[@]}"
 fi
 
 if has_connector s3; then

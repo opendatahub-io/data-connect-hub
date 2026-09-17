@@ -57,9 +57,25 @@ EOF
 fi
 
 if has_connector milvus; then
+    TENANT_MILVUS_URI="http://milvus.${TENANT_NAMESPACE}.svc:19530"
+    TENANT_MILVUS_CA_CERT=""
+    if [[ "$E2E_SSL_ENABLED" == "true" ]]; then
+        TENANT_MILVUS_URI="https://milvus.${TENANT_NAMESPACE}.svc.cluster.local:8080"
+        TENANT_MILVUS_CA_CERT="${TEMP_DIR}/milvus-ca.pem"
+        kubectl get secret milvus-milvus-tls -n "$TENANT_NAMESPACE" \
+            -o jsonpath='{.data.ca\.pem}' | base64 -d > "$TENANT_MILVUS_CA_CERT" || {
+            echo "ERROR: failed to retrieve Milvus CA certificate" >&2
+            exit 1
+        }
+        [[ -s "$TENANT_MILVUS_CA_CERT" ]] || {
+            echo "ERROR: Milvus CA certificate is empty" >&2
+            exit 1
+        }
+    fi
     cat >> "$ENV_FILE" <<EOF
 #### Milvus ####
-DCH_TENANT_MILVUS_URI=http://milvus.${TENANT_NAMESPACE}.svc:19530
+DCH_TENANT_MILVUS_URI=${TENANT_MILVUS_URI}
+DCH_TENANT_MILVUS_CA_CERT=${TENANT_MILVUS_CA_CERT}
 EOF
 fi
 

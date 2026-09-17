@@ -16,5 +16,4 @@ async-stream = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-milvus-sdk-rust = { workspace = true }
-tracing = { workspace = true }
+reqwest = { workspace = true }
