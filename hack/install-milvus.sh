@@ -2,17 +2,30 @@
 # Install Milvus standalone via Helm and wait for it to become ready.
 #
 # Usage:
-#   hack/setup-milvus.sh                          # defaults: namespace=milvus, release=milvus
-#   hack/setup-milvus.sh -n dch -r my-milvus      # custom namespace and release name
-#   hack/setup-milvus.sh -s                        # enable TLS with self-signed certs
+#   hack/install-milvus.sh                        # defaults: namespace=milvus, release=milvus
+#   hack/install-milvus.sh -n dch -r my-milvus    # custom namespace and release name
+#   hack/install-milvus.sh --ssl                  # enable TLS with self-signed certs
 #
 # Options:
 #   -n NAMESPACE     target namespace         (default: milvus)
 #   -r RELEASE       Helm release name        (default: milvus)
 #   -v VERSION       Helm chart version       (default: 5.0.25, Milvus 2.6.x)
 #   -t TIMEOUT      kubectl wait timeout     (default: 300s)
-#   -s              enable TLS with self-signed certificates
-#   -h, --help      show this help
+#   --ssl               enable SSL/TLS and require TLS
+#   --ssl-cert FILE     server certificate (PEM)
+#   --ssl-key FILE      server private key (PEM)
+#   --ssl-ca FILE       CA certificate (PEM)
+#   -h, --help          show this help
+#
+# SSL:
+#   --ssl without --ssl-cert/--ssl-key
+#       Automatically generates a self-signed CA and server certificate.
+#
+#   --ssl-cert + --ssl-key
+#       Use a user-provided server certificate and private key.
+#
+#   --ssl-ca
+#       Optional CA certificate for client-side server certificate verification.
 #
 set -euo pipefail
 
@@ -20,7 +33,11 @@ NAMESPACE="milvus"
 RELEASE="milvus"
 CHART_VERSION="5.0.25"
 TIMEOUT="300s"
+
 TLS_ENABLED="false"
+TLS_CERT=""
+TLS_KEY=""
+TLS_CA=""
 
 require_arg() {
     if [[ $# -lt 2 || -z "${2:-}" ]]; then
@@ -30,7 +47,8 @@ require_arg() {
 }
 
 usage() {
-    echo "Usage: $0 [-n namespace] [-r release] [-v chart-version] [-t timeout]"
+    echo "Usage: $0 [-n namespace] [-r release] [-v chart-version] [-t timeout] \
+[--ssl|--ssl-cert FILE|--ssl-key FILE|--ssl-ca FILE]"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -39,7 +57,10 @@ while [[ $# -gt 0 ]]; do
         -r)            require_arg "$@"; RELEASE="$2"; shift 2 ;;
         -v)            require_arg "$@"; CHART_VERSION="$2"; shift 2 ;;
         -t)            require_arg "$@"; TIMEOUT="$2"; shift 2 ;;
-        -s)            TLS_ENABLED="true"; shift ;;
+        --ssl)         TLS_ENABLED="true"; shift ;;
+        --ssl-cert)    require_arg "$@"; TLS_CERT="$2"; shift 2 ;;
+        --ssl-key)     require_arg "$@"; TLS_KEY="$2"; shift 2 ;;
+        --ssl-ca)      require_arg "$@"; TLS_CA="$2"; shift 2 ;;
         -h|--help)     usage; exit 0 ;;
         *)             echo "error: unknown option: $1" >&2; usage; exit 1 ;;
     esac
@@ -50,26 +71,55 @@ command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; 
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
-# Generate self-signed TLS certificates and create K8s secret
+# Generate self-signed TLS certificates or use user-provided certificates.
 TLS_OPTS=()
+if [[ -n "$TLS_CERT" || -n "$TLS_KEY" || -n "$TLS_CA" ]]; then
+    TLS_ENABLED="true"
+fi
+
 if [[ "$TLS_ENABLED" == "true" ]]; then
     command -v openssl >/dev/null || { echo "error: openssl not found (required for TLS)" >&2; exit 1; }
+
+    if [[ -n "$TLS_CERT" && -z "$TLS_KEY" ]] ||
+       [[ -z "$TLS_CERT" && -n "$TLS_KEY" ]]; then
+        echo "error: --ssl-cert and --ssl-key must be provided together" >&2
+        exit 1
+    fi
+
+    if [[ -n "$TLS_CA" && -z "$TLS_CERT" ]]; then
+        echo "error: --ssl-ca requires --ssl-cert and --ssl-key" >&2
+        exit 1
+    fi
+
+    [[ -z "$TLS_CERT" || -f "$TLS_CERT" ]] || {
+        echo "error: certificate file not found: $TLS_CERT" >&2
+        exit 1
+    }
+    [[ -z "$TLS_KEY" || -f "$TLS_KEY" ]] || {
+        echo "error: private key file not found: $TLS_KEY" >&2
+        exit 1
+    }
+    [[ -z "$TLS_CA" || -f "$TLS_CA" ]] || {
+        echo "error: CA certificate file not found: $TLS_CA" >&2
+        exit 1
+    }
 
     CERT_DIR="$(mktemp -d)"
     trap 'rm -rf "$CERT_DIR"' EXIT
 
-    echo "Generating self-signed TLS certificates in ${CERT_DIR}"
+    if [[ -z "$TLS_CERT" ]]; then
+        echo "Generating self-signed TLS certificates in ${CERT_DIR}"
 
-    # CA key and certificate
-    openssl genrsa -out "${CERT_DIR}/ca.key" 2048 >/dev/null 2>&1
-    openssl req -x509 -new -nodes -key "${CERT_DIR}/ca.key" -sha256 -days 3650 \
-        -out "${CERT_DIR}/ca.pem" \
-        -subj "/C=US/ST=CA/L=SanFrancisco/O=DataConnectHub/CN=MilvusCA"
+        # CA key and certificate
+        openssl genrsa -out "${CERT_DIR}/ca.key" 2048 >/dev/null 2>&1
+        openssl req -x509 -new -nodes -key "${CERT_DIR}/ca.key" -sha256 -days 3650 \
+            -out "${CERT_DIR}/ca.pem" \
+            -subj "/C=US/ST=CA/L=SanFrancisco/O=DataConnectHub/CN=MilvusCA"
 
-    # Server key and certificate signed by CA
-    openssl genrsa -out "${CERT_DIR}/server.key" 2048 >/dev/null 2>&1
+        # Server key and certificate signed by CA
+        openssl genrsa -out "${CERT_DIR}/server.key" 2048 >/dev/null 2>&1
 
-    cat > "${CERT_DIR}/openssl.cnf" <<'SSLCNF'
+        cat > "${CERT_DIR}/openssl.cnf" <<'SSLCNF'
 [req]
 distinguished_name = req_dn
 req_extensions = v3_req
@@ -81,26 +131,43 @@ DNS.1 = localhost
 DNS.2 = *.milvus.svc.cluster.local
 DNS.3 = *.milvus
 SSLCNF
-    # Replace placeholder namespace in SAN entries
-    sed -i.bak "s/\.milvus/.${NAMESPACE}/g" "${CERT_DIR}/openssl.cnf"
+        # Replace placeholder namespace in SAN entries
+        sed -i.bak "s/\.milvus/.${NAMESPACE}/g" "${CERT_DIR}/openssl.cnf"
 
-    openssl req -new -key "${CERT_DIR}/server.key" \
-        -subj "/C=US/ST=CA/L=SanFrancisco/O=DataConnectHub/CN=localhost" \
-        | openssl x509 -req -days 3650 -out "${CERT_DIR}/server.pem" \
-            -CA "${CERT_DIR}/ca.pem" -CAkey "${CERT_DIR}/ca.key" -CAcreateserial \
-            -extfile "${CERT_DIR}/openssl.cnf" -extensions v3_req 2>/dev/null
+        openssl req -new -key "${CERT_DIR}/server.key" \
+            -subj "/C=US/ST=CA/L=SanFrancisco/O=DataConnectHub/CN=localhost" \
+            | openssl x509 -req -days 3650 -out "${CERT_DIR}/server.pem" \
+                -CA "${CERT_DIR}/ca.pem" -CAkey "${CERT_DIR}/ca.key" -CAcreateserial \
+                -extfile "${CERT_DIR}/openssl.cnf" -extensions v3_req 2>/dev/null
 
-    # Create K8s secret with the certs
+        TLS_CERT="${CERT_DIR}/server.pem"
+        TLS_KEY="${CERT_DIR}/server.key"
+        TLS_CA="${CERT_DIR}/ca.pem"
+    fi
+
+    TLS_SECRET_ARGS=(
+        "--from-file=server.pem=${TLS_CERT}"
+        "--from-file=server.key=${TLS_KEY}"
+    )
+    if [[ -n "$TLS_CA" ]]; then
+        TLS_SECRET_ARGS+=("--from-file=ca.pem=${TLS_CA}")
+    fi
+
     kubectl create secret generic "${RELEASE}-milvus-tls" \
         -n "$NAMESPACE" \
-        --from-file=ca.pem="${CERT_DIR}/ca.pem" \
-        --from-file=server.pem="${CERT_DIR}/server.pem" \
-        --from-file=server.key="${CERT_DIR}/server.key" \
+        "${TLS_SECRET_ARGS[@]}" \
         --dry-run=client -o yaml | kubectl apply -f -
 
     echo "TLS secret '${RELEASE}-milvus-tls' created in namespace '${NAMESPACE}'"
-    echo "CA certificate (use as MILVUS_CA_CERT):"
-    cat "${CERT_DIR}/ca.pem"
+    if [[ -n "$TLS_CA" ]]; then
+        echo "CA certificate (use as MILVUS_CA_CERT):"
+        cat "$TLS_CA"
+    fi
+
+    ca_pem_path=""
+    if [[ -n "$TLS_CA" ]]; then
+        ca_pem_path="      caPemPath: /certs/ca.pem"
+    fi
 
     cat > "${CERT_DIR}/values-tls.yaml" <<EOF
 extraConfigFiles:
@@ -112,7 +179,7 @@ extraConfigFiles:
     tls:
       serverPemPath: /certs/server.pem
       serverKeyPath: /certs/server.key
-      caPemPath: /certs/ca.pem
+${ca_pem_path}
     common:
       security:
         tlsMode: 1

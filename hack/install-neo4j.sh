@@ -19,10 +19,10 @@
 #   -v VERSION       Helm chart version        (default: 5.26.1)
 #   -p PASSWORD     initial password          (required)
 #   -t TIMEOUT      kubectl wait timeout       (default: 300s)
-#   -s, --ssl       enable SSL/TLS and require TLS
-#   --ssl-cert FILE server certificate (PEM)
-#   --ssl-key FILE  server private key (PEM)
-#   --ssl-ca FILE   CA certificate (PEM)
+#   --ssl               enable SSL/TLS and require TLS
+#   --ssl-cert FILE     server certificate (PEM)
+#   --ssl-key FILE      server private key (PEM)
+#   --ssl-ca FILE       CA certificate (PEM)
 #   -h, --help      show this help
 #
 # SSL:
@@ -70,7 +70,7 @@ while [[ $# -gt 0 ]]; do
         -v)            require_arg "$@"; CHART_VERSION="$2"; shift 2 ;;
         -p)            require_arg "$@"; PASSWORD="$2"; shift 2 ;;
         -t)            require_arg "$@"; TIMEOUT="$2"; shift 2 ;;
-        -s|--ssl)      SSL_ENABLED=true; shift ;;
+        --ssl)         SSL_ENABLED=true; shift ;;
         --ssl-cert)    require_arg "$@"; SSL_CERT="$2"; shift 2 ;;
         --ssl-key)     require_arg "$@"; SSL_KEY="$2"; shift 2 ;;
         --ssl-ca)      require_arg "$@"; SSL_CA="$2"; shift 2 ;;

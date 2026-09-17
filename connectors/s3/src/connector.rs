@@ -13,13 +13,16 @@ use commons::api::errors::ConnectorError;
 use commons::utils::config::ConnectorConfig;
 use futures::TryStreamExt;
 use moka::future::Cache;
-use opendal::{EntryMode, Operator, Reader, layers::TimeoutLayer, services::S3};
+use opendal::{EntryMode, HttpTransporter, OperationContext, Operator, Reader, layers::TimeoutLayer, services::S3};
+use opendal_http_transport_reqwest::ReqwestTransport;
+use reqwest_opendal::{Certificate, Client};
 
 const KEY_BUCKET: &str = "AWS_S3_BUCKET";
 const KEY_ACCESS_KEY_ID: &str = "AWS_ACCESS_KEY_ID";
 const KEY_SECRET_ACCESS_KEY: &str = "AWS_SECRET_ACCESS_KEY";
 const KEY_REGION: &str = "AWS_DEFAULT_REGION";
 const KEY_ENDPOINT: &str = "AWS_S3_ENDPOINT";
+const KEY_CA_CERT: &str = "AWS_S3_CA_CERT";
 
 pub struct S3Connector {
     operators: Cache<String, Operator>,
@@ -41,6 +44,28 @@ impl S3Connector {
     pub async fn insert_operator(&self, connection_id: &str, operator: Operator) {
         self.operators.insert(connection_id.to_string(), operator).await;
     }
+}
+
+fn build_http_transport(ca_cert: &str) -> Result<HttpTransporter, ConnectorError> {
+    let certificates = Certificate::from_pem_bundle(ca_cert.as_bytes())
+        .map_err(|error| ConnectorError::ConfigError(format!("{KEY_CA_CERT} contains invalid PEM data: {error}")))?;
+
+    if certificates.is_empty() {
+        return Err(ConnectorError::ConfigError(format!(
+            "{KEY_CA_CERT} must contain at least one certificate"
+        )));
+    }
+
+    let mut client_builder = Client::builder();
+    for certificate in certificates {
+        client_builder = client_builder.add_root_certificate(certificate);
+    }
+
+    let client = client_builder
+        .build()
+        .map_err(|error| ConnectorError::ConfigError(format!("failed to configure S3 TLS client: {error}")))?;
+
+    Ok(HttpTransporter::new(ReqwestTransport::new(client)))
 }
 
 fn build_operator(
@@ -74,12 +99,17 @@ fn build_operator(
         builder = builder.endpoint(endpoint);
     }
 
-    let op = Operator::new(builder)
-        .map_err(|e| {
-            tracing::error!(error = %e, "failed to create S3 operator");
-            ConnectorError::ConnectionError("failed to create S3 operator".to_string())
-        })?
-        .layer(TimeoutLayer::new().with_timeout(connection_timeout));
+    let mut op = Operator::new(builder).map_err(|e| {
+        tracing::error!(error = %e, "failed to create S3 operator");
+        ConnectorError::ConnectionError("failed to create S3 operator".to_string())
+    })?;
+
+    if let Some(ca_cert) = credentials.get(KEY_CA_CERT).filter(|value| !value.trim().is_empty()) {
+        let transport = build_http_transport(ca_cert)?;
+        op = op.with_context(OperationContext::new().with_http_transport(transport));
+    }
+
+    let op = op.layer(TimeoutLayer::new().with_timeout(connection_timeout));
     Ok(op)
 }
 
@@ -237,10 +267,16 @@ impl DataReader for S3Reader {
         table_name_filter: Option<&str>,
         include_schema: bool,
     ) -> Result<Vec<TableInfo>, ConnectorError> {
-        let entries = self.operator.list_with("").recursive(true).await.map_err(|e| {
-            tracing::error!(error = %e, "failed to list S3 objects");
-            ConnectorError::IOError("failed to list S3 objects".to_string())
-        })?;
+        let list_prefix = table_name_filter.map(like_prefix).unwrap_or_default();
+        let entries = self
+            .operator
+            .list_with(list_prefix)
+            .recursive(true)
+            .await
+            .map_err(|e| {
+                tracing::error!(error = %e, "failed to list S3 objects");
+                ConnectorError::IOError("failed to list S3 objects".to_string())
+            })?;
 
         let paths: Vec<String> = entries
             .into_iter()
@@ -280,6 +316,13 @@ impl DataReader for S3Reader {
 
         Ok(tables)
     }
+}
+
+/// Extract the longest literal prefix from a SQL LIKE pattern (before the
+/// first `%` or `_` wildcard) so S3 listing can be narrowed server-side.
+fn like_prefix(pattern: &str) -> &str {
+    let end = pattern.find(['%', '_']).unwrap_or(pattern.len());
+    &pattern[..end]
 }
 
 fn sql_like_match(value: &str, pattern: &str) -> bool {
@@ -378,6 +421,14 @@ mod tests {
     }
 
     #[test]
+    fn test_build_operator_rejects_invalid_ca_certificate() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_CA_CERT.to_string(), "not a PEM certificate".to_string());
+        let result = build_operator(&creds, Duration::from_secs(10));
+        assert!(result.unwrap_err().to_string().contains(KEY_CA_CERT));
+    }
+
+    #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
             operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
@@ -408,6 +459,18 @@ mod tests {
             reader.detect_format("data/no-extension").unwrap(),
             FileFormat::JsonLines
         );
+    }
+
+    #[test]
+    fn test_like_prefix() {
+        assert_eq!(
+            like_prefix("datasets/dch-test-prompts.parquet"),
+            "datasets/dch-test-prompts.parquet"
+        );
+        assert_eq!(like_prefix("%dch-test-prompts%"), "");
+        assert_eq!(like_prefix("datasets/%"), "datasets/");
+        assert_eq!(like_prefix("data/_.parquet"), "data/");
+        assert_eq!(like_prefix(""), "");
     }
 
     #[test]

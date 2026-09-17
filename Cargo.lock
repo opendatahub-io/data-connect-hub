@@ -4423,7 +4423,9 @@ dependencies = [
  "futures",
  "moka",
  "opendal",
+ "opendal-http-transport-reqwest",
  "parquet",
+ "reqwest 0.13.5",
  "tokio",
  "tracing",
 ]

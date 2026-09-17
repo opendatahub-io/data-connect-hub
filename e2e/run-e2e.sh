@@ -42,41 +42,44 @@ set +a
 # -------------------------------------------------------------------
 # Validate required variables
 # -------------------------------------------------------------------
-
 : "${DCH_SERVICE_NAMESPACE:?DCH_SERVICE_NAMESPACE is required (set it in $CONFIG_FILE)}"
 : "${DCH_GATEWAY_ENDPOINT:?DCH_GATEWAY_ENDPOINT is required (set it in $CONFIG_FILE)}"
-
 : "${DCH_TENANT_ID:?DCH_TENANT_ID is required (set it in $CONFIG_FILE)}"
-: "${DCH_NO_ACCESS_NAMESPACE:?DCH_NO_ACCESS_NAMESPACE is required (set it in $CONFIG_FILE)}"
 : "${DCH_FLIGHT_SA:?DCH_FLIGHT_SA is required (set it in $CONFIG_FILE)}"
 : "${DCH_REST_SA:?DCH_REST_SA is required (set it in $CONFIG_FILE)}"
-DCH_TOKEN_AUDIENCE="${DCH_TOKEN_AUDIENCE:-}"
-: "${DCH_INSECURE:?DCH_INSECURE is required (set it in $CONFIG_FILE)}"
-DCH_POSTGRES_IMAGE="${DCH_POSTGRES_IMAGE:-}"
-DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 
-DCH_TENANT_PG_URL="${DCH_TENANT_PG_URL:-}"
-DCH_TENANT_PG_CA_CERT="${DCH_TENANT_PG_CA_CERT:-}"
-DCH_TENANT_MILVUS_URI="${DCH_TENANT_MILVUS_URI:-}"
-DCH_TENANT_MILVUS_CA_CERT="${DCH_TENANT_MILVUS_CA_CERT:-}"
-DCH_TENANT_ES_URI="${DCH_TENANT_ES_URI:-}"
+# -------------------------------------------------------------------
+# Configuration defaults
+# -------------------------------------------------------------------
+# Only declare optional variables here when the runner provides a default.
+# Optional variables without a runner default must remain unset and be
+# guarded at each use with ${VAR:-...} or an explicit presence check.
+# Required variables are validated above and do not receive defaults here.
+
+# Optional - DCH Service
+DCH_INSECURE="${DCH_INSECURE:-true}"
+DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
+DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
+
+# AWS S3 connector
+DCH_S3_SEED_DATASET="${DCH_S3_SEED_DATASET:-false}"
+
+# Elasticsearch connector
 DCH_TENANT_ES_NAMESPACE="${DCH_TENANT_ES_NAMESPACE:-$DCH_TENANT_ID}"
-DCH_TENANT_ES_USERNAME="${DCH_TENANT_ES_USERNAME:-}"
-DCH_TENANT_ES_PASSWORD="${DCH_TENANT_ES_PASSWORD:-}"
-DCH_TENANT_ES_CA_CERT="${DCH_TENANT_ES_CA_CERT:-}"
-DCH_TENANT_NEO4J_URI="${DCH_TENANT_NEO4J_URI:-}"
-DCH_TENANT_NEO4J_ADMIN_PASSWORD="${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}"
+
+# Neo4j connector
 DCH_TENANT_NEO4J_USERNAME="${DCH_TENANT_NEO4J_USERNAME:-dch_reader}"
 DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
-DCH_TENANT_NEO4J_CA_CERT="${DCH_TENANT_NEO4J_CA_CERT:-}"
-DCH_URI_DEPLOY_SERVER="${DCH_URI_DEPLOY_SERVER:-false}"
+
+# URI connector
+DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 
 E2E_SA_NAME="e2e-user"
 E2E_DENIED_SA_NAME="e2e-denied-user"
 PG_SECRET="e2e-pg-creds"
 S3_SECRET="e2e-s3-creds"
 MILVUS_SECRET="e2e-milvus-creds"
-ES_SECRET="e2e-es-creds"
+ES_BASIC_SECRET="e2e-es-basic-creds"
 ES_APIKEY_SECRET="e2e-es-apikey-creds"
 NEO4J_SECRET="e2e-neo4j-creds"
 URI_SECRET="e2e-uri-creds"
@@ -95,6 +98,9 @@ setup_namespaces() {
 setup_user_accounts() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 }
@@ -112,7 +118,7 @@ setup_user_rbac() {
             -n "$DCH_TENANT_ID" \
             --verb=create --resource=secrets \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        kubectl create rolebinding e2e-user-export-secret-create-rb \
+        kubectl create rolebinding e2e-user-export-secret-rb \
             -n "$DCH_TENANT_ID" \
             --role=e2e-user-export-secret \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
@@ -126,7 +132,7 @@ setup_service_rbac() {
     [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
     [[ "$E2E_S3_ENABLED" == "true" ]] && secret_names+=("--resource-name=$S3_SECRET")
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] && secret_names+=("--resource-name=$MILVUS_SECRET")
-    [[ "$E2E_ES_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_SECRET")
+    [[ "$E2E_ES_BASIC_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_BASIC_SECRET")
     [[ "$E2E_ES_APIKEY_ENABLED" == "true" ]] && secret_names+=("--resource-name=$ES_APIKEY_SECRET")
     [[ "$E2E_NEO4J_ENABLED" == "true" ]] && secret_names+=("--resource-name=$NEO4J_SECRET")
     [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
@@ -163,11 +169,11 @@ setup_service_rbac() {
 
 setup_pg_secret() {
     E2E_PG_ENABLED="false"
-    if [[ -n "$DCH_TENANT_PG_URL" ]]; then
-        PG_INTERNAL_URL="$DCH_TENANT_PG_URL"
+    if [[ -n "${DCH_TENANT_PG_URL:-}" ]]; then
+        PG_INTERNAL_URL="${DCH_TENANT_PG_URL}"
         local -a args=(--from-literal="URI=${PG_INTERNAL_URL}")
 
-        if [[ -n "$DCH_TENANT_PG_CA_CERT" ]]; then
+        if [[ -n "${DCH_TENANT_PG_CA_CERT:-}" ]]; then
             [[ -f "$DCH_TENANT_PG_CA_CERT" ]] || {
                 echo "ERROR: CA cert file not found: $DCH_TENANT_PG_CA_CERT" >&2
                 exit 1
@@ -186,13 +192,29 @@ setup_pg_secret() {
 setup_s3_secret() {
     E2E_S3_ENABLED="false"
     if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+        : "${AWS_S3_ENDPOINT:?AWS_S3_ENDPOINT is required when AWS credentials are set}"
+        : "${AWS_DEFAULT_REGION:?AWS_DEFAULT_REGION is required when AWS credentials are set}"
+        : "${AWS_S3_BUCKET:?AWS_S3_BUCKET is required when AWS credentials are set}"
+
+        local -a args=(
+            --from-literal="AWS_S3_ENDPOINT=${AWS_S3_ENDPOINT}"
+            --from-literal="AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
+            --from-literal="AWS_S3_BUCKET=${AWS_S3_BUCKET}"
+            --from-literal="AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+            --from-literal="AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+        )
+
+        if [[ -n "${AWS_S3_CA_CERT:-}" ]]; then
+            [[ -f "$AWS_S3_CA_CERT" ]] || {
+                echo "ERROR: S3 CA cert file not found: $AWS_S3_CA_CERT" >&2
+                exit 1
+            }
+            args+=(--from-file="AWS_S3_CA_CERT=${AWS_S3_CA_CERT}")
+        fi
+
         kubectl create secret generic "$S3_SECRET" \
             -n "$DCH_TENANT_ID" \
-            --from-literal="AWS_S3_ENDPOINT=${AWS_S3_ENDPOINT}" \
-            --from-literal="AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}" \
-            --from-literal="AWS_S3_BUCKET=${AWS_S3_BUCKET}" \
-            --from-literal="AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}" \
-            --from-literal="AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}" \
+            "${args[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         E2E_S3_ENABLED="true"
     fi
@@ -200,13 +222,13 @@ setup_s3_secret() {
 
 setup_milvus_secret() {
     E2E_MILVUS_ENABLED="false"
-    if [[ -n "$DCH_TENANT_MILVUS_URI" ]]; then
+    if [[ -n "${DCH_TENANT_MILVUS_URI:-}" ]]; then
         local -a args=(
             --from-literal="MILVUS_URI=${DCH_TENANT_MILVUS_URI}"
         )
         [[ -n "${DCH_TENANT_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="MILVUS_TOKEN=${DCH_TENANT_MILVUS_TOKEN}")
         [[ -n "${DCH_TENANT_MILVUS_DATABASE:-}" ]] && args+=(--from-literal="MILVUS_DATABASE=${DCH_TENANT_MILVUS_DATABASE}")
-        if [[ -n "$DCH_TENANT_MILVUS_CA_CERT" ]]; then
+        if [[ -n "${DCH_TENANT_MILVUS_CA_CERT:-}" ]]; then
             [[ -f "$DCH_TENANT_MILVUS_CA_CERT" ]] || {
                 echo "ERROR: Milvus CA cert file not found: $DCH_TENANT_MILVUS_CA_CERT" >&2
                 exit 1
@@ -221,48 +243,47 @@ setup_milvus_secret() {
     fi
 }
 
-fetch_es_ca_cert() {
-    local es_namespace="$DCH_TENANT_ES_NAMESPACE"
-    kubectl get secret elasticsearch-master-certs -n "$es_namespace" \
-        -o jsonpath='{.data.ca\.crt}' 2>/dev/null | base64 -d 2>/dev/null || true
-}
-
-setup_es_secret() {
-    E2E_ES_ENABLED="false"
-    if [[ -n "$DCH_TENANT_ES_URI" ]]; then
+setup_es_basic_secret() {
+    E2E_ES_BASIC_ENABLED="false"
+    if [[ -n "${DCH_TENANT_ES_URI:-}" ]]; then
         local -a args=(--from-literal="ES_URI=${DCH_TENANT_ES_URI}")
-        [[ -n "$DCH_TENANT_ES_USERNAME" ]] && args+=(--from-literal="ES_USERNAME=${DCH_TENANT_ES_USERNAME}")
-        [[ -n "$DCH_TENANT_ES_PASSWORD" ]] && args+=(--from-literal="ES_PASSWORD=${DCH_TENANT_ES_PASSWORD}")
+        [[ -n "${DCH_TENANT_ES_USERNAME:-}" ]] && args+=(--from-literal="ES_USERNAME=${DCH_TENANT_ES_USERNAME}")
+        [[ -n "${DCH_TENANT_ES_PASSWORD:-}" ]] && args+=(--from-literal="ES_PASSWORD=${DCH_TENANT_ES_PASSWORD}")
 
-        local ca_cert="$DCH_TENANT_ES_CA_CERT"
-        if [[ -z "$ca_cert" ]]; then
-            ca_cert=$(fetch_es_ca_cert)
+        local ca_cert_path="${DCH_TENANT_ES_CA_CERT:-}"
+        if [[ -n "$ca_cert_path" ]]; then
+            [[ -f "$ca_cert_path" ]] || {
+                echo "ERROR: Elasticsearch CA cert file not found: $ca_cert_path" >&2
+                exit 1
+            }
+            args+=(--from-file="ES_CA_CERT=${ca_cert_path}")
         fi
-        [[ -n "$ca_cert" ]] && args+=(--from-literal="ES_CA_CERT=${ca_cert}")
 
-        kubectl create secret generic "$ES_SECRET" \
+        kubectl create secret generic "$ES_BASIC_SECRET" \
             -n "$DCH_TENANT_ID" \
             "${args[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        E2E_ES_ENABLED="true"
+        E2E_ES_BASIC_ENABLED="true"
     fi
 }
 
 setup_es_apikey_secret() {
     E2E_ES_APIKEY_ENABLED="false"
-    [[ "$E2E_ES_ENABLED" == "true" ]] || return 0
-    [[ -n "$DCH_TENANT_ES_USERNAME" && -n "$DCH_TENANT_ES_PASSWORD" ]] || return 0
+    [[ "$E2E_ES_BASIC_ENABLED" == "true" ]] || return 0
+    [[ -n "${DCH_TENANT_ES_USERNAME:-}" && -n "${DCH_TENANT_ES_PASSWORD:-}" ]] || return 0
 
+    # API key creation requires access to an Elasticsearch pod.
     local es_namespace="$DCH_TENANT_ES_NAMESPACE"
     local es_pod
     es_pod=$(kubectl get pods -n "$es_namespace" -l app=elasticsearch-master \
         -o jsonpath='{.items[0].metadata.name}' 2>/dev/null) || return 0
     [[ -n "$es_pod" ]] || return 0
 
+    local es_scheme="${DCH_TENANT_ES_URI%%:*}"
     local api_key_json
     api_key_json=$(kubectl exec "$es_pod" -n "$es_namespace" -- \
         curl -ksf -u "${DCH_TENANT_ES_USERNAME}:${DCH_TENANT_ES_PASSWORD}" \
-        -X POST "https://localhost:9200/_security/api_key" \
+        -X POST "${es_scheme}://localhost:9200/_security/api_key" \
         -H "Content-Type: application/json" \
         -d '{"name":"e2e-test-key"}' 2>/dev/null) || return 0
 
@@ -273,11 +294,14 @@ setup_es_apikey_secret() {
         --from-literal="ES_URI=${DCH_TENANT_ES_URI}"
         --from-literal="ES_API_KEY=${encoded_api_key}"
     )
-    local ca_cert="$DCH_TENANT_ES_CA_CERT"
-    if [[ -z "$ca_cert" ]]; then
-        ca_cert=$(fetch_es_ca_cert)
+    local ca_cert_path="${DCH_TENANT_ES_CA_CERT:-}"
+    if [[ -n "$ca_cert_path" ]]; then
+        [[ -f "$ca_cert_path" ]] || {
+            echo "ERROR: Elasticsearch CA cert file not found: $ca_cert_path" >&2
+            exit 1
+        }
+        args+=(--from-file="ES_CA_CERT=${ca_cert_path}")
     fi
-    [[ -n "$ca_cert" ]] && args+=(--from-literal="ES_CA_CERT=${ca_cert}")
 
     kubectl create secret generic "$ES_APIKEY_SECRET" \
         -n "$DCH_TENANT_ID" \
@@ -288,14 +312,14 @@ setup_es_apikey_secret() {
 
 setup_neo4j_secret() {
     E2E_NEO4J_ENABLED="false"
-    if [[ -n "$DCH_TENANT_NEO4J_URI" ]]; then
+    if [[ -n "${DCH_TENANT_NEO4J_URI:-}" ]]; then
         local -a args=(
             --from-literal="NEO4J_URI=${DCH_TENANT_NEO4J_URI}"
             --from-literal="NEO4J_USERNAME=${DCH_TENANT_NEO4J_USERNAME}"
             --from-literal="NEO4J_PASSWORD=${DCH_TENANT_NEO4J_PASSWORD}"
         )
         [[ -n "${DCH_TENANT_NEO4J_DATABASE:-}" ]] && args+=(--from-literal="NEO4J_DATABASE=${DCH_TENANT_NEO4J_DATABASE}")
-        if [[ -n "${DCH_TENANT_NEO4J_CA_CERT}" ]]; then
+        if [[ -n "${DCH_TENANT_NEO4J_CA_CERT:-}" ]]; then
             args+=(--from-file="NEO4J_CA_CERT=${DCH_TENANT_NEO4J_CA_CERT}")
         fi
         kubectl create secret generic "$NEO4J_SECRET" \
@@ -308,7 +332,7 @@ setup_neo4j_secret() {
 
 setup_uri_server_and_secret() {
     E2E_URI_ENABLED="false"
-    [[ "$DCH_URI_DEPLOY_SERVER" == "true" ]] || return 0
+    [[ "$DCH_TENANT_URI_DEPLOY_SERVER" == "true" ]] || return 0
 
     bash "$SCRIPT_DIR/scripts/seed-uri-data.sh" \
         -n "$DCH_TENANT_ID" -r "$URI_SERVER_NAME"
@@ -345,40 +369,41 @@ seed_pg_data() {
     [[ "$E2E_PG_ENABLED" == "true" ]] || return 0
     if [[ -n "${DCH_TENANT_PG_CA_CERT:-}" ]]; then
         bash "$(dirname "$0")/scripts/seed-postgresql-data.sh" \
-            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" -i "$DCH_POSTGRES_IMAGE" \
+            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" \
             -c "$DCH_TENANT_PG_CA_CERT"
     else
         bash "$(dirname "$0")/scripts/seed-postgresql-data.sh" \
-            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID" -i "$DCH_POSTGRES_IMAGE"
+            -u "$PG_INTERNAL_URL" -n "$DCH_TENANT_ID"
     fi
 }
 
 seed_s3_data() {
     [[ "$E2E_S3_ENABLED" == "true" ]] || return 0
     [[ "${DCH_S3_SEED_DATASET:-}" == "true" ]] || return 0
-    # Require a digest-pinned MinIO client image (see CWE-494 in PR review).
-    local mc_image="${DCH_MINIO_MC_IMAGE:-}"
-    [[ -n "$mc_image" ]] || {
-        echo "ERROR: set DCH_MINIO_MC_IMAGE to a digest-pinned image (e.g. minio/mc@sha256:<digest>) in $CONFIG_FILE" >&2
-        exit 1
-    }
-    PYTHON="$VENV_PYTHON" bash "$(dirname "$0")/scripts/seed-s3-data.sh" \
-        -e "$AWS_S3_ENDPOINT" -n "$DCH_TENANT_ID" -b "$AWS_S3_BUCKET" \
-        -A "$AWS_ACCESS_KEY_ID" -S "$AWS_SECRET_ACCESS_KEY" \
-        -i "$mc_image"
+
+    local -a args=(
+        -e "$AWS_S3_ENDPOINT"
+        -n "$DCH_TENANT_ID"
+        -b "$AWS_S3_BUCKET"
+        -A "$AWS_ACCESS_KEY_ID"
+        -S "$AWS_SECRET_ACCESS_KEY"
+    )
+    [[ -n "${AWS_S3_CA_CERT:-}" ]] && args+=(-c "$AWS_S3_CA_CERT")
+
+    PYTHON="$VENV_PYTHON" bash "$(dirname "$0")/scripts/seed-s3-data.sh" "${args[@]}"
 }
 
 seed_milvus_data() {
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] || return 0
-    local milvus_uri="${DCH_TENANT_MILVUS_URI}"
+    local milvus_uri="${DCH_TENANT_MILVUS_URI:-}"
     local -a args=(-e "$milvus_uri" -n "$DCH_TENANT_ID")
-    [[ -n "$DCH_TENANT_MILVUS_CA_CERT" ]] && args+=(-c "$DCH_TENANT_MILVUS_CA_CERT")
+    [[ -n "${DCH_TENANT_MILVUS_CA_CERT:-}" ]] && args+=(-c "$DCH_TENANT_MILVUS_CA_CERT")
     bash "$(dirname "$0")/scripts/seed-milvus-data.sh" "${args[@]}"
 }
 
 seed_neo4j_data() {
     [[ "$E2E_NEO4J_ENABLED" == "true" ]] || return 0
-    [[ -n "$DCH_TENANT_NEO4J_ADMIN_PASSWORD" ]] || {
+    [[ -n "${DCH_TENANT_NEO4J_ADMIN_PASSWORD:-}" ]] || {
         echo "ERROR: set DCH_TENANT_NEO4J_ADMIN_PASSWORD in $CONFIG_FILE to seed Neo4j" >&2
         exit 1
     }
@@ -395,9 +420,9 @@ seed_neo4j_data() {
 }
 
 seed_es_data() {
-    [[ "$E2E_ES_ENABLED" == "true" ]] || return 0
+    [[ "$E2E_ES_BASIC_ENABLED" == "true" ]] || return 0
     local -a args=(-e "$DCH_TENANT_ES_URI" -n "$DCH_TENANT_ID")
-    [[ -n "$DCH_TENANT_ES_PASSWORD" ]] && args+=(-p "$DCH_TENANT_ES_PASSWORD")
+    [[ -n "${DCH_TENANT_ES_PASSWORD:-}" ]] && args+=(-p "$DCH_TENANT_ES_PASSWORD")
     bash "$(dirname "$0")/scripts/seed-elasticsearch-data.sh" "${args[@]}"
 }
 
@@ -407,7 +432,7 @@ seed_es_data() {
 
 generate_tokens() {
     local -a token_args=(--duration=4h)
-    [[ -n "$DCH_TOKEN_AUDIENCE" ]] && token_args+=(--audience="$DCH_TOKEN_AUDIENCE")
+    [[ -n "${DCH_TOKEN_AUDIENCE:-}" ]] && token_args+=(--audience="$DCH_TOKEN_AUDIENCE")
 
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
@@ -455,9 +480,9 @@ DCH_MILVUS_SECRET=e2e-milvus-creds
 MILVUS_EOF
     fi
 
-    if [[ "$E2E_ES_ENABLED" == "true" ]]; then
+    if [[ "$E2E_ES_BASIC_ENABLED" == "true" ]]; then
         cat >> "$ENV_FILE" <<'ES_EOF'
-DCH_ES_SECRET=e2e-es-creds
+DCH_ES_SECRET=e2e-es-basic-creds
 ES_EOF
     fi
 
@@ -525,7 +550,7 @@ echo "[4/11] SA RBAC ready"
 setup_pg_secret
 setup_s3_secret
 setup_milvus_secret
-setup_es_secret
+setup_es_basic_secret
 setup_es_apikey_secret
 setup_neo4j_secret
 setup_uri_server_and_secret
@@ -535,7 +560,7 @@ SECRETS_MSG=""
 [[ "$E2E_PG_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }PG"
 [[ "$E2E_S3_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }S3"
 [[ "$E2E_MILVUS_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Milvus"
-[[ "$E2E_ES_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
+[[ "$E2E_ES_BASIC_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
 [[ "$E2E_NEO4J_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Neo4j"
 [[ "$E2E_URI_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }URI"
 echo "[5/11] ${SECRETS_MSG:-none} secrets + Flight RBAC ready"
@@ -563,7 +588,7 @@ else
 fi
 
 seed_es_data
-if [[ "$E2E_ES_ENABLED" == "true" ]]; then
+if [[ "$E2E_ES_BASIC_ENABLED" == "true" ]]; then
     echo "[9/11] Elasticsearch test data seeded"
 else
     echo "[9/11] Elasticsearch seed skipped (DCH_TENANT_ES_URI not set)"
