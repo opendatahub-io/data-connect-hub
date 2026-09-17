@@ -9,19 +9,20 @@ by setup.sh into .env and loaded at the top of this file.
     DCH_GATEWAY_AUTH_REQUIRED  Authenticate health checks at the platform Gateway
     DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
-    DCH_PG_SECRET          K8s secret name for PG    (set by setup.sh, enables query tests)
+    DCH_PG_SECRET          K8s secret name for PG    (set by run-e2e.sh, enables query tests)
 """
 
 from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
 import uuid
 from pathlib import Path
 
 import httpx
 import pytest
-from data_connect_hub import CredentialsRef, DataConnectClient
+from data_connect_hub import CredentialField, CredentialsRef, DataConnectClient, InlineCredentials
 from data_connect_hub.client import _build_urls
 
 # ---------------------------------------------------------------------------
@@ -218,11 +219,13 @@ def create_connection_type(rest_client: DataConnectClient):
         name: str | None = None,
         provider: str = "postgres",
         description: str | None = "e2e test connection type",
+        credentials_fields: list[CredentialField] | None = None,
     ):
         ct = rest_client.create_connection_type(
             name=name or _unique_name("e2e-ct"),
             provider=provider,
             description=description,
+            credentials_fields=credentials_fields,
         )
         created_ids.append(ct.id)
         return ct
@@ -232,6 +235,38 @@ def create_connection_type(rest_client: DataConnectClient):
     for ct_id in reversed(created_ids):
         with contextlib.suppress(Exception):
             rest_client.delete_connection_type(ct_id)
+
+
+@pytest.fixture()
+def cleanup_secrets(tenant_id: str):
+    """Factory: removes test-created Kubernetes Secrets after the test."""
+    secret_names: list[str] = []
+
+    def _register(secret_name: str) -> None:
+        secret_names.append(secret_name)
+
+    yield _register
+
+    cleanup_errors: list[str] = []
+    for secret_name in reversed(secret_names):
+        try:
+            subprocess.run(
+                ["kubectl", "delete", "secret", secret_name, "--namespace", tenant_id, "--ignore-not-found"],
+                check=True,
+                timeout=30,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            detail = (exc.stderr or exc.stdout or str(exc)).strip()
+            cleanup_errors.append(f"{secret_name}: {detail}")
+        except subprocess.TimeoutExpired as exc:
+            cleanup_errors.append(f"{secret_name}: kubectl timed out after {exc.timeout}s")
+        except OSError as exc:
+            cleanup_errors.append(f"{secret_name}: {exc}")
+
+    if cleanup_errors:
+        pytest.fail("Kubernetes secret cleanup failed: " + "; ".join(cleanup_errors))
 
 
 @pytest.fixture()
@@ -245,6 +280,7 @@ def create_connection(rest_client: DataConnectClient):
         connection_type_id: str,
         data_format: str = "tabular",
         credentials_ref=None,
+        credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
     ):
         conn = rest_client.create_connection(
@@ -252,6 +288,7 @@ def create_connection(rest_client: DataConnectClient):
             connection_type_id=connection_type_id,
             data_format=data_format,
             credentials_ref=credentials_ref,
+            credentials=credentials,
             properties=properties,
         )
         created_ids.append(conn.id)

@@ -14,6 +14,7 @@ use arrow::array::{Array, AsArray};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
+use commons::api::errors::MetaStoreError;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
@@ -86,6 +87,33 @@ pub async fn get_connection(
     Ok(HttpResponse::Ok().json(connection))
 }
 
+async fn create_connection_with_secret_ref(
+    meta_store: Arc<dyn MetaStore + Send + Sync>,
+    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    tenant_id: String,
+    connection: DataConnection,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("create_connection: for tenant {:?}", tenant_id);
+
+    let dct = meta_store
+        .get_data_connection_type(&tenant_id, &connection.data_connection_type_id)
+        .await
+        .map_err(|error| match error {
+            MetaStoreError::ResourceNotFound(message) => MetaStoreError::UnprocessableEntity(message),
+            error => error,
+        })?;
+    let secret = secret_store
+        .get_secret(&tenant_id, &connection.credentials_ref.secret)
+        .await?;
+    dct.resource
+        .check_credentials_schema(&secret.properties)
+        .map_err(|e| ValidationError::CredentialsCheckFailed(e.to_string()))?;
+
+    let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
+
+    Ok(HttpResponse::Created().json(connection_res))
+}
+
 async fn create_connection_with_creds(
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     secret_store: Arc<dyn SecretStore + Send + Sync>,
@@ -142,11 +170,7 @@ pub async fn create_connection(
             create_connection_with_creds(meta_store, secret_store, tenant_id, dc_creds).await
         },
         CreateConnectionRequest::DataConnectionWithSecretRef(connection) => {
-            info!("create_connection: for tenant {:?}", tenant_id);
-
-            let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
-
-            Ok(HttpResponse::Created().json(connection_res))
+            create_connection_with_secret_ref(meta_store, secret_store, tenant_id, connection).await
         },
     }
 }
@@ -435,7 +459,7 @@ mod tests {
     use arrow::array::BinaryArray;
     use arrow::record_batch::RecordBatch;
     use commons::api::ResourceList;
-    use commons::api::connection_types::DataConnectionTypeResource;
+    use commons::api::connection_types::{DataConnectionTypeResource, Field};
     use commons::api::connections::CredentialsRef;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
@@ -537,7 +561,19 @@ mod tests {
                         name: name.to_string(),
                         provider: provider.to_string(),
                         description: Some(format!("{name} database connection")),
-                        credentials_fields: vec![],
+                        credentials_fields: if uid == "ct-1" {
+                            vec![Field {
+                                name: "username".to_string(),
+                                label: "Username".to_string(),
+                                description: None,
+                                required: true,
+                                d_type: "string".to_string(),
+                                enum_values: None,
+                                default_value: None,
+                            }]
+                        } else {
+                            vec![]
+                        },
                     },
                     status: Default::default(),
                 })
@@ -772,6 +808,26 @@ mod tests {
                         ("username".to_string(), "pg_user".to_string()),
                         ("password".to_string(), "pg_pass".to_string()),
                     ]),
+                    labels: None,
+                    annotations: None,
+                },
+            );
+            secrets.insert(
+                "test-tenant/incomplete-creds".to_string(),
+                Secret {
+                    name: "incomplete-creds".to_string(),
+                    namespace: "test-tenant".to_string(),
+                    properties: HashMap::from([("password".to_string(), "pg_pass".to_string())]),
+                    labels: None,
+                    annotations: None,
+                },
+            );
+            secrets.insert(
+                "test-tenant/my-disabled-connector-creds".to_string(),
+                Secret {
+                    name: "my-disabled-connector-creds".to_string(),
+                    namespace: "test-tenant".to_string(),
+                    properties: HashMap::new(),
                     labels: None,
                     annotations: None,
                 },
@@ -1013,6 +1069,71 @@ mod tests {
         assert_eq!(body["metadata"]["id"], "new-conn");
         assert_eq!(body["metadata"]["tenant_id"], "test-tenant");
         assert_eq!(body["resource"]["name"], "my-pg");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_inline_credentials_missing_required_field() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "my-pg",
+                "data_connection_type_id": "ct-1",
+                "format": "tabular",
+                "credentials": {
+                    "secret": "my-pg-creds",
+                    "properties": {
+                        "password": "pg_pass"
+                    }
+                },
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "credentials_check_failed");
+        assert_eq!(body["message"], "Required field username is missing");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_missing_required_field() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "my-pg",
+                "data_connection_type_id": "ct-1",
+                "format": "tabular",
+                "credentials_ref": {
+                    "secret": "incomplete-creds"
+                },
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "credentials_check_failed");
+        assert_eq!(body["message"], "Required field username is missing");
     }
 
     #[actix_web::test]
