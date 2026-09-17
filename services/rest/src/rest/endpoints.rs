@@ -218,6 +218,7 @@ pub async fn create_connection_type(
         .await?;
 
     audit_connection_type(
+        ctx.tenant_id.as_str(),
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
@@ -250,6 +251,7 @@ pub async fn patch_connection_type(
         .await?;
 
     audit_connection_type(
+        ctx.tenant_id.as_str(),
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
@@ -329,9 +331,17 @@ pub async fn get_binary_data(
         .streaming(body_stream))
 }
 
-pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
-    info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), service.flight_client.as_ref()).await?;
+pub async fn audit_connection_types(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("audit_connection_types: for tenant {:?}", ctx.tenant_id);
+    audit_data_connection_types(
+        ctx.tenant_id.as_str(),
+        service.meta_store.clone(),
+        service.flight_client.as_ref(),
+    )
+    .await?;
     Ok(HttpResponse::Accepted().finish())
 }
 
@@ -848,7 +858,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl FlightDataClient for StubFlightClient {
-        async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
+        async fn get_supported_connectors(&self, _: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
             Ok(self.supported_connectors.clone())
         }
         async fn check_data_connection(&self, _: &str, _: &str) -> Result<(), tonic::Status> {

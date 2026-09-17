@@ -44,7 +44,7 @@
   ```
   kubectl patch dataconnectservice default-dataconnectservice -n dch-services --type merge -p '{
       "spec": {"trace": {
-        "exporter": "https://tempo-trace.redhat-ods-monitoring.svc.cluster.local:4317",
+        "exporter": "https://tempo-dch-trace.redhat-ods-monitoring.svc.cluster.local:4317",
         "insecure": false,
         "certificate": "/var/run/secrets/kubernetes.io/serviceaccount/service-ca.crt"
       }}}'
@@ -60,3 +60,12 @@
 
 - Send requests to REST and Flight services.
 - Use browser to connect to jaeger UI route. You should see 2 services `dch-rest-service`, `dch-flight-service`, and you can start to find traces.
+
+## To be part of an existing Trace
+Use `traceparent` in header as example below:
+```
+TRACE_ID=cf074c0ce4848df25f2bbb780e430dd4
+SPAN_ID=5887c0c28877c40b
+curl -s -H "traceparent: 00-$TRACE_ID-$SPAN_ID-01" <the-rest-of-the-curl-command>
+```
+As an example, the request to create a connection type should show a span with `dch-rest-service` and a nested span of `dch-flight-service`.

@@ -33,7 +33,7 @@ pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, t
 
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
-    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status>;
+    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status>;
     async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
     async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
     async fn download_binary(
@@ -139,11 +139,13 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
-    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
+    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let mut request = Self::traced_request(Action::new("GetSupportedConnectors", ""));
         let sa_token = self.read_sa_token().await?;
-        Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
+        let metadata = request.metadata_mut();
+        Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
+        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
         let result = stream

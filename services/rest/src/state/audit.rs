@@ -128,10 +128,11 @@ pub async fn audit_data_connection(
 }
 
 pub async fn audit_data_connection_types(
+    tenant_id: &str,
     meta_store: Arc<dyn MetaStore + Send + Sync>,
     flight_client: &dyn FlightDataClient,
 ) -> Result<(), ValidationError> {
-    let supported = flight_client.get_supported_connectors().await.map_err(|e| {
+    let supported = flight_client.get_supported_connectors(tenant_id).await.map_err(|e| {
         tracing::error!(error = %e, "failed to get supported connectors from flight service");
         ValidationError::FlightServiceError(e.to_string())
     })?;
@@ -178,30 +179,36 @@ pub async fn audit_data_connection_types(
 }
 
 pub(crate) async fn audit_connection_type(
+    tenant_id: &str,
     flight_client: &dyn FlightDataClient,
     meta_store: &Arc<dyn MetaStore + Send + Sync>,
     connection_type: DataConnectionTypeResource,
 ) -> Result<(), ValidationError> {
-    let connectors = flight_client.get_supported_connectors().await;
+    let connectors = flight_client.get_supported_connectors(tenant_id).await.map_err(|e| {
+        tracing::error!(error = %e, "failed to get supported connectors from flight service");
+        ValidationError::FlightServiceError(e.to_string())
+    })?;
 
-    if let Ok(connectors) = connectors {
-        let names: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
-        let provider = &connection_type.resource.provider;
+    let names: Vec<String> = connectors.into_iter().map(|c| c.name).collect();
+    let provider = &connection_type.resource.provider;
 
-        let supports_flight = Arc::new(AtomicBool::new(names.iter().any(|n| n == provider)));
+    let supports_flight = Arc::new(AtomicBool::new(names.iter().any(|n| n == provider)));
 
-        let update_fn = Arc::new(move |current: DataConnectionTypeStatus| {
-            let mut status = current.capabilities.clone();
-            status.flight = supports_flight.load(Ordering::Relaxed);
+    let update_fn = Arc::new(move |current: DataConnectionTypeStatus| {
+        let mut status = current.capabilities.clone();
+        status.flight = supports_flight.load(Ordering::Relaxed);
 
-            Ok(DataConnectionTypeStatus { capabilities: status })
-        });
+        Ok(DataConnectionTypeStatus { capabilities: status })
+    });
 
-        meta_store
-            .update_data_connection_type_status(connection_type.metadata.id.as_str(), update_fn)
-            .await
-            .map_err(|e| ValidationError::StatusUpdateFailed(connection_type.metadata.id.clone()))?;
-    }
+    meta_store
+        .update_data_connection_type_status(connection_type.metadata.id.as_str(), update_fn)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, id = %connection_type.metadata.id, "failed to update connection type status");
+            ValidationError::StatusUpdateFailed(connection_type.metadata.id.clone())
+        })?;
+
     Ok(())
 }
 
@@ -494,6 +501,21 @@ mod tests {
 
         let result = audit_data_connection("tenant", "conn-1", &audit_ctx(meta, secrets, &fc)).await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
+    }
+
+    #[tokio::test]
+    async fn test_audit_connection_type_surfaces_flight_error() {
+        let dct = make_dct(vec!["HOST"]);
+        let meta = Arc::new(MockMetaStore::with_connection_and_type(
+            make_connection(CredentialsRef {
+                secret: "creds".to_string(),
+            }),
+            dct.clone(),
+        )) as Arc<dyn MetaStore + Send + Sync>;
+        let fc = flight_client();
+
+        let result = audit_connection_type("tenant", &fc, &meta, dct).await;
+        assert!(matches!(result, Err(ValidationError::FlightServiceError(_))));
     }
 
     #[tokio::test]

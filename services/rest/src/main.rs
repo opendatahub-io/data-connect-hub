@@ -47,6 +47,7 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/health", web::get().to(health))
         .service(
             web::resource(format!("/api/{API_VERSION}/audit/data-connection-types"))
+                .wrap(middleware::from_fn(validate_headers))
                 .wrap(middleware::from_fn(trace_request))
                 .route(web::post().to(audit_connection_types)),
         )

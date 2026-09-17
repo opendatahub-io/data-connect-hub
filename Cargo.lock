@@ -1012,7 +1012,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
- "tonic 0.14.6",
+ "tonic",
  "tracing",
  "tracing-opentelemetry",
  "tracing-subscriber",
@@ -2995,6 +2995,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3411,10 +3412,10 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-proto",
  "opentelemetry_sdk",
- "prost 0.14.4",
+ "prost",
  "thiserror 2.0.20",
  "tokio",
- "tonic 0.14.6",
+ "tonic",
  "tonic-types",
 ]
 
@@ -3426,8 +3427,8 @@ checksum = "56d658ba1faf63f7b9c492cfbe6e0ec365440a16132d3270c1065f7b33f1b638"
 dependencies = [
  "opentelemetry",
  "opentelemetry_sdk",
- "prost 0.14.4",
- "tonic 0.14.6",
+ "prost",
+ "tonic",
  "tonic-prost",
 ]
 
@@ -5433,9 +5434,9 @@ version = "0.14.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73ab1b02061f83d519bba3caa167f88f261ef05720ab8ebc954ade70de3348e8"
 dependencies = [
- "prost 0.14.4",
- "prost-types 0.14.4",
- "tonic 0.14.6",
+ "prost",
+ "prost-types",
+ "tonic",
 ]
 
 [[package]]
