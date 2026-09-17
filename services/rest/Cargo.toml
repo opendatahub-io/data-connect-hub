@@ -31,6 +31,10 @@ kube-utils = { workspace = true }
 tokio = { workspace = true }
 url = { workspace = true }
 chrono = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true }
 
 
 [dev-dependencies]

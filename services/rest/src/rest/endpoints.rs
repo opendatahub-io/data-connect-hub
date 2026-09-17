@@ -218,6 +218,7 @@ pub async fn create_connection_type(
         .await?;
 
     audit_connection_type(
+        ctx.tenant_id.as_str(),
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
@@ -250,6 +251,7 @@ pub async fn patch_connection_type(
         .await?;
 
     audit_connection_type(
+        ctx.tenant_id.as_str(),
         service.flight_client.as_ref(),
         &service.meta_store,
         connection_type.clone(),
@@ -329,9 +331,17 @@ pub async fn get_binary_data(
         .streaming(body_stream))
 }
 
-pub async fn audit_connection_types(service: web::Data<ApiService>) -> Result<HttpResponse, RestErrorResponse> {
-    info!("audit_connection_types");
-    audit_data_connection_types(service.meta_store.clone(), service.flight_client.as_ref()).await?;
+pub async fn audit_connection_types(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    info!("audit_connection_types: for tenant {:?}", ctx.tenant_id);
+    audit_data_connection_types(
+        ctx.tenant_id.as_str(),
+        service.meta_store.clone(),
+        service.flight_client.as_ref(),
+    )
+    .await?;
     Ok(HttpResponse::Accepted().finish())
 }
 
@@ -451,7 +461,7 @@ mod tests {
     use super::*;
     use crate::rest::API_VERSION;
     use crate::rest::errors::{json_config, query_config};
-    use crate::rest::middleware::validate_headers;
+    use crate::rest::middleware::{trace_request, validate_headers};
 
     fn api_path(path: &str) -> String {
         format!("/api/{API_VERSION}/data{path}")
@@ -848,7 +858,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl FlightDataClient for StubFlightClient {
-        async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
+        async fn get_supported_connectors(&self, _: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
             Ok(self.supported_connectors.clone())
         }
         async fn check_data_connection(&self, _: &str, _: &str) -> Result<(), tonic::Status> {
@@ -894,6 +904,7 @@ mod tests {
         cfg.service(
             web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
+                .wrap(middleware::from_fn(trace_request))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
                 .route("/connections/{id}", web::get().to(get_connection))

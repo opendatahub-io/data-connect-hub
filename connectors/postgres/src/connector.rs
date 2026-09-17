@@ -66,6 +66,13 @@ impl FlightConnector for PgConnector {
         "PostgreSQL connector".to_string()
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        connection.id = %data_connection.metadata.id,
+        )
+    )]
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -116,6 +123,7 @@ impl DataReader for PgReader {
         PROVIDER.to_string()
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let statement = self.pool.prepare(query).await.map_err(map_sqlx_error)?;
 
@@ -128,6 +136,7 @@ impl DataReader for PgReader {
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, batch_size = options.batch_size))]
     async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let pool = self.pool.clone();
         let schema = query.schema.clone();
@@ -166,6 +175,7 @@ impl DataReader for PgReader {
         Ok(Box::pin(stream))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         sqlx::query("SELECT 1")
             .execute(&self.pool)
@@ -174,6 +184,14 @@ impl DataReader for PgReader {
         Ok(())
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        include_schema = include_schema,
+        row_count = tracing::field::Empty,
+        )
+    )]
     async fn list_tables(
         &self,
         table_name_filter: Option<&str>,
@@ -232,6 +250,7 @@ impl DataReader for PgReader {
             });
         }
 
+        tracing::Span::current().record("row_count", tables.len());
         Ok(tables)
     }
 }

@@ -9,12 +9,14 @@ use arrow_flight::flight_service_client::FlightServiceClient;
 use commons::api::creds::TestCredentials;
 use commons::api::{AUTHORIZATION, X_DATA_CONNECTION_ID, X_TENANT_ID};
 use futures::TryStreamExt;
+use opentelemetry::propagation::Injector;
 use prost::Message;
 use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
-use tonic::metadata::MetadataValue;
+use tonic::metadata::{MetadataKey, MetadataValue};
 use tonic::transport::Channel;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 const ACTION_CHECK_DATA_CONNECTION: &str = "CheckDataConnection";
 const ACTION_CHECK_CREDENTIALS: &str = "CheckCredentials";
@@ -31,7 +33,7 @@ pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, t
 
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
-    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status>;
+    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status>;
     async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
     async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
     async fn download_binary(
@@ -40,6 +42,22 @@ pub trait FlightDataClient: Send + Sync {
         connection_id: &str,
         path: &str,
     ) -> Result<BinaryStream, tonic::Status>;
+}
+
+/// MetadataInjector adapts a gRPC `MetadataMap` to the OpenTelemetry
+/// `Injector` trait so the configured propagator can write `traceparent` and
+/// `tracestate` onto an outgoing request.
+struct MetadataInjector<'a>(&'a mut tonic::metadata::MetadataMap);
+
+impl Injector for MetadataInjector<'_> {
+    fn set(&mut self, key: &str, value: String) {
+        // A key or value the propagator produces should always be valid gRPC
+        // metadata; dropping it silently is preferable to failing the call the
+        // trace is merely describing.
+        if let (Ok(key), Ok(value)) = (MetadataKey::from_bytes(key.as_bytes()), MetadataValue::try_from(&value)) {
+            self.0.insert(key, value);
+        }
+    }
 }
 
 pub struct FlightClient {
@@ -68,6 +86,19 @@ impl FlightClient {
             .await
             .map_err(|e| tonic::Status::internal(format!("failed to read SA token from {path}: {e}")))?;
         Ok(format!("Bearer {}", token.trim()))
+    }
+
+    /// traced_request builds a gRPC request carrying the current trace context
+    /// in its metadata, so the flight service continues this trace rather than
+    /// starting an unrelated one. Every request this client sends must be built
+    /// through it.
+    fn traced_request<T>(message: T) -> tonic::Request<T> {
+        let mut request = tonic::Request::new(message);
+        let context = tracing::Span::current().context();
+        opentelemetry::global::get_text_map_propagator(|propagator| {
+            propagator.inject_context(&context, &mut MetadataInjector(request.metadata_mut()));
+        });
+        request
     }
 
     fn attach_header(
@@ -108,11 +139,13 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
-    async fn get_supported_connectors(&self) -> Result<Vec<SupportedConnector>, tonic::Status> {
+    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
-        let mut request = tonic::Request::new(Action::new("GetSupportedConnectors", ""));
+        let mut request = Self::traced_request(Action::new("GetSupportedConnectors", ""));
         let sa_token = self.read_sa_token().await?;
-        Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
+        let metadata = request.metadata_mut();
+        Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
+        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
         let result = stream
@@ -155,7 +188,7 @@ impl FlightDataClient for FlightClient {
 
     async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
         let mut client = self.client().await?;
-        let mut request = tonic::Request::new(Action::new(ACTION_CHECK_DATA_CONNECTION, ""));
+        let mut request = Self::traced_request(Action::new(ACTION_CHECK_DATA_CONNECTION, ""));
         let sa_token = self.read_sa_token().await?;
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
@@ -194,7 +227,7 @@ impl FlightDataClient for FlightClient {
         }
 
         let mut client = self.client().await?;
-        let mut request = tonic::Request::new(Action::new(ACTION_CHECK_CREDENTIALS, buf));
+        let mut request = Self::traced_request(Action::new(ACTION_CHECK_CREDENTIALS, buf));
         let sa_token = self.read_sa_token().await?;
         Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
         Self::attach_header(request.metadata_mut(), X_TENANT_ID, tenant_id)?;
@@ -220,7 +253,7 @@ impl FlightDataClient for FlightClient {
 
         let descriptor = FlightDescriptor::new_cmd(any.encode_to_vec());
 
-        let mut request = tonic::Request::new(descriptor);
+        let mut request = Self::traced_request(descriptor);
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
         Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
@@ -235,7 +268,7 @@ impl FlightDataClient for FlightClient {
             .and_then(|e| e.ticket)
             .ok_or_else(|| tonic::Status::internal("no ticket in flight info response"))?;
 
-        let mut request = tonic::Request::new(ticket);
+        let mut request = Self::traced_request(ticket);
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
         Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
@@ -251,5 +284,48 @@ impl FlightDataClient for FlightClient {
                 });
 
         Ok(Box::pin(batch_stream))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TRACEPARENT: &str = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01";
+
+    #[test]
+    fn test_metadata_injector_writes_header() {
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        MetadataInjector(&mut metadata).set("traceparent", TRACEPARENT.to_string());
+
+        assert_eq!(metadata.get("traceparent").unwrap().to_str().unwrap(), TRACEPARENT);
+    }
+
+    #[test]
+    fn test_metadata_injector_overwrites_existing_header() {
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        let mut injector = MetadataInjector(&mut metadata);
+        injector.set("traceparent", "stale".to_string());
+        injector.set("traceparent", TRACEPARENT.to_string());
+
+        assert_eq!(metadata.len(), 1);
+        assert_eq!(metadata.get("traceparent").unwrap().to_str().unwrap(), TRACEPARENT);
+    }
+
+    #[test]
+    fn test_metadata_injector_drops_invalid_key() {
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        MetadataInjector(&mut metadata).set("invalid key", TRACEPARENT.to_string());
+
+        assert!(metadata.is_empty());
+    }
+
+    #[test]
+    fn test_traced_request_without_tracer_sends_no_traceparent() {
+        // No OpenTelemetry layer is installed in tests, so the current context
+        // is empty and the propagator has nothing to write.
+        let request = FlightClient::traced_request(Action::new("Noop", ""));
+
+        assert!(request.metadata().get("traceparent").is_none());
     }
 }

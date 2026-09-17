@@ -25,6 +25,15 @@ impl KubeSecretStore {
 
 #[async_trait::async_trait]
 impl SecretStore for KubeSecretStore {
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        k8s.api.operation = "get",
+        k8s.resource.kind = "Secret",
+        k8s.namespace.name = %namespace,
+        k8s.secret.name = %name,
+        )
+    )]
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError> {
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
         let k8s_secret = api.get(name).await.map_err(|e| {
@@ -48,6 +57,15 @@ impl SecretStore for KubeSecretStore {
         })
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        k8s.api.operation = if overwrite { "patch" } else { "create" },
+        k8s.resource.kind = "Secret",
+        k8s.namespace.name = %secret.namespace,
+        k8s.secret.name = %secret.name,
+        )
+    )]
     async fn create_secret(&self, secret: &Secret, overwrite: bool) -> Result<(), SecretStoreError> {
         let ns = &secret.namespace;
 
@@ -86,6 +104,15 @@ impl SecretStore for KubeSecretStore {
         Ok(())
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        k8s.api.operation = "delete",
+        k8s.resource.kind = "Secret",
+        k8s.namespace.name = %namespace,
+        k8s.secret.name = %name,
+        )
+    )]
     async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError> {
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
         api.delete(name, &DeleteParams::default()).await.map_err(|e| {
@@ -96,6 +123,15 @@ impl SecretStore for KubeSecretStore {
         Ok(())
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        k8s.api.operation = "patch",
+        k8s.resource.kind = "Secret",
+        k8s.namespace.name = %namespace,
+        k8s.secret.name = %name,
+        )
+    )]
     async fn set_secret_labels(
         &self,
         namespace: &str,

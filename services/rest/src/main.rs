@@ -6,15 +6,19 @@ use crate::clients::flight::FlightClient;
 use crate::rest::API_VERSION;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
-use crate::rest::middleware::validate_headers;
+use crate::rest::middleware::{trace_request, validate_headers};
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use commons::api::storage::MetaStore;
+use commons::utils::{TraceConfig, init_tracing, log_trace_exporter};
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
 use std::sync::Arc;
 use url::Url;
+
+/// SERVICE_NAME identifies this service in exported traces.
+const SERVICE_NAME: &str = "dch-rest-service";
 
 mod clients;
 mod rest;
@@ -41,13 +45,16 @@ struct CommandLineArgs {
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
     cfg.route("/health", web::get().to(health))
-        .route(
-            &format!("/api/{API_VERSION}/audit/data-connection-types"),
-            web::post().to(audit_connection_types),
+        .service(
+            web::resource(format!("/api/{API_VERSION}/audit/data-connection-types"))
+                .wrap(middleware::from_fn(validate_headers))
+                .wrap(middleware::from_fn(trace_request))
+                .route(web::post().to(audit_connection_types)),
         )
         .service(
             web::scope(&format!("/api/{API_VERSION}/data"))
                 .wrap(middleware::from_fn(validate_headers))
+                .wrap(middleware::from_fn(trace_request))
                 .route("/connection-types", web::get().to(list_connection_types))
                 .route("/connection-types", web::post().to(create_connection_type))
                 .route("/connection-types/{id}", web::get().to(get_connection_type))
@@ -166,10 +173,13 @@ async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
 
-    commons::utils::init_tracing(args.json_logs);
+    let trace = TraceConfig::from_env();
+    let tracer_provider = init_tracing(SERVICE_NAME, args.json_logs, &trace)?;
+
     tracing::info!("Starting DataConnectorHub API service");
     log_config_source(&args.config, "--config", true);
     log_config_source(&args.secret_config, "--secret-config", false);
+    log_trace_exporter(&trace);
 
     let pg_meta_store = Arc::new(
         PgMetaStore::new(
@@ -224,6 +234,12 @@ async fn main() -> Result<()> {
     .bind((config.server.address.clone(), config.server.port))?
     .run()
     .await?;
+
+    if let Some(provider) = tracer_provider
+        && let Err(e) = provider.shutdown()
+    {
+        tracing::warn!(error = %e, "Failed to flush traces on shutdown");
+    }
 
     Ok(())
 }

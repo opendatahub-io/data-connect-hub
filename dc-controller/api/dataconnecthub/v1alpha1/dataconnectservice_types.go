@@ -111,6 +111,30 @@ type ConnectorConfig struct {
 	ConnectionTimeout *metav1.Duration `json:"connectionTimeout,omitempty"`
 }
 
+// Trace configures distributed tracing for the data connect hub services.
+// Each field is surfaced to the service containers as the corresponding
+// OpenTelemetry OTLP exporter environment variable.
+type Trace struct {
+	// exporter is the URL of the OpenTelemetry collector endpoint that traces
+	// are exported to (e.g. "http://otel-collector.observability:4317").
+	// Sets OTEL_EXPORTER_OTLP_ENDPOINT. When empty, tracing is disabled.
+	// +optional
+	Exporter string `json:"exporter,omitempty"`
+
+	// insecure disables transport security when connecting to the exporter
+	// endpoint. Sets OTEL_EXPORTER_OTLP_INSECURE. Leave unset to use the
+	// exporter's default, which is to require TLS.
+	// +optional
+	Insecure *bool `json:"insecure,omitempty"`
+
+	// certificate is the path, inside the service container, to the PEM
+	// certificate of the CA that signed the exporter endpoint's TLS
+	// certificate. Sets OTEL_EXPORTER_OTLP_CERTIFICATE. The file must be
+	// mounted into the container via the service's volumes and volumeMounts.
+	// +optional
+	Certificate string `json:"certificate,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
@@ -136,6 +160,11 @@ type DataConnectServiceSpec struct {
 	// Defaults to the ODH gateway (odh-gateway in opendatahub namespace).
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
+
+	// trace configures distributed tracing for the services.
+	// When omitted, tracing is disabled.
+	// +optional
+	Trace *Trace `json:"trace,omitempty"`
 }
 
 // Addresses identifies an address where the service is reachable

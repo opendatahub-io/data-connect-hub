@@ -17,3 +17,4 @@ moka = { workspace = true, features = ["future"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 reqwest = { workspace = true }
+tracing = { workspace = true }

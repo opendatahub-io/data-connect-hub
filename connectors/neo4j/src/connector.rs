@@ -116,6 +116,13 @@ impl FlightConnector for Neo4jConnector {
         "Neo4j graph database connector".to_string()
     }
 
+    #[tracing::instrument(
+        skip_all,
+        fields(
+        connector.provider = PROVIDER,
+        connection.id = %data_connection.metadata.id,
+        )
+    )]
     async fn get_reader(
         &self,
         data_connection: &DataConnectionResource,
@@ -148,6 +155,7 @@ impl DataReader for Neo4jReader {
         PROVIDER.to_string()
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let mut result = self
             .graph
@@ -184,6 +192,7 @@ impl DataReader for Neo4jReader {
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(Schema::new(fields)))))
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, batch_size = options.batch_size))]
     async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let graph = self.graph.clone();
         let schema = query.schema.clone();
@@ -223,6 +232,7 @@ impl DataReader for Neo4jReader {
             >)
     }
 
+    #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         let mut result = self
             .graph

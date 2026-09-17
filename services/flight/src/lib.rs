@@ -8,6 +8,7 @@ use config::{Config, File};
 use flight::DataIngestionService;
 use flight::auth::AuthLayer;
 use flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
+use flight::trace::TraceLayer;
 use kube_utils::KubeAuthClient;
 use std::sync::Arc;
 use std::time::Duration;
@@ -97,7 +98,7 @@ pub fn configure_metrics(config: &ServerConfig) -> Result<()> {
 }
 
 pub async fn start_server(
-    mut builder: tonic::transport::Server,
+    builder: tonic::transport::Server,
     auth: &utils::AuthConfig,
     data_service: DataIngestionService,
     addr: std::net::SocketAddr,
@@ -121,6 +122,7 @@ pub async fn start_server(
         .await?;
         let auth_layer = AuthLayer::new(Arc::new(kube_auth));
         builder
+            .layer(TraceLayer::new())
             .layer(auth_layer)
             .add_service(health_service)
             .add_service(service)
@@ -129,6 +131,7 @@ pub async fn start_server(
     } else {
         tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
         builder
+            .layer(TraceLayer::new())
             .add_service(health_service)
             .add_service(service)
             .serve_with_shutdown(addr, shutdown_signal())

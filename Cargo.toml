@@ -80,3 +80,14 @@ url = "2.5"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
+opentelemetry = "0.32"
+opentelemetry_sdk = "0.32"
+opentelemetry-otlp = { version = "0.32", default-features = false, features = [
+    "grpc-tonic",
+    "trace",
+    "tls-aws-lc",
+    # Without this the exporter's own error logging is compiled out, so a
+    # failing OTLP connection is completely silent.
+    "internal-logs",
+] }
+tracing-opentelemetry = "0.33"
