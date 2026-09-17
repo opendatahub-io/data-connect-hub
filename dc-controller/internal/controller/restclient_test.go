@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -26,6 +27,46 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHTTPClientVerifiesServiceCertificate(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	client := newHTTPClientWithRootCAs(func() (string, error) { return server.URL, nil }, roots)
+	if err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()); err != nil {
+		t.Fatalf("CreateConnectionType() returned an error: %v", err)
+	}
+}
+
+func TestHTTPClientRejectsUnknownServiceCertificate(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := newHTTPClientWithRootCAs(func() (string, error) { return server.URL, nil }, x509.NewCertPool())
+	if err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()); err != ErrServiceUnavailable {
+		t.Fatalf("CreateConnectionType() error = %v, want ErrServiceUnavailable", err)
+	}
+}
+
+func TestHTTPClientDoesNotDisableVerificationOrALPN(t *testing.T) {
+	client := newHTTPClientWithRootCAs(func() (string, error) { return "http://localhost", nil }, x509.NewCertPool())
+	transport := client.httpClient.Transport.(*http.Transport)
+	if transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify is enabled")
+	}
+	if transport.TLSClientConfig.NextProtos != nil {
+		t.Fatalf("NextProtos = %v, want nil", transport.TLSClientConfig.NextProtos)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 = false, want true")
+	}
+}
 
 const (
 	testProvider   = "test"
