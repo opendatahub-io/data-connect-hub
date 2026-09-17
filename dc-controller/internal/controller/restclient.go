@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 const (
 	maxResponseBodyBytes = 1 << 20 // 1 MiB
 	saTokenPath          = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	serviceCABundlePath  = "/var/run/secrets/openshift-service-ca/service-ca.crt"
 )
 
 var (
@@ -128,6 +130,10 @@ type httpConnectionTypeClient struct {
 }
 
 func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
+	return newHTTPClientWithRootCAs(resolver, loadRootCAs())
+}
+
+func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool) *httpConnectionTypeClient {
 	return &httpConnectionTypeClient{
 		resolveURL: resolver,
 		tokenPath:  saTokenPath,
@@ -135,12 +141,24 @@ func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // in-cluster service communication
-					NextProtos:         []string{"http/1.1"},
+					RootCAs: roots,
 				},
+				ForceAttemptHTTP2: true,
 			},
 		},
 	}
+}
+
+func loadRootCAs() *x509.CertPool {
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+
+	if data, err := os.ReadFile(serviceCABundlePath); err == nil {
+		roots.AppendCertsFromPEM(data)
+	}
+	return roots
 }
 
 // NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the

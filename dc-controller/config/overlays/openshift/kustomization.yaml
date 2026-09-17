@@ -16,6 +16,10 @@ patches:
   target:
     kind: Deployment
     name: manager
+- path: manager_service_ca_patch.yaml
+  target:
+    kind: Deployment
+    name: manager
 - path: monitor_tls_patch.yaml
   target:
     kind: ServiceMonitor
