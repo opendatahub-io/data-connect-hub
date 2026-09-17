@@ -1,0 +1,15 @@
+- op: add
+  path: /spec/template/spec/volumes/-
+  value:
+    name: service-ca
+    configMap:
+      name: openshift-service-ca.crt
+      items:
+      - key: service-ca.crt
+        path: service-ca.crt
+- op: add
+  path: /spec/template/spec/containers/0/volumeMounts/-
+  value:
+    name: service-ca
+    mountPath: /var/run/secrets/openshift-service-ca
+    readOnly: true

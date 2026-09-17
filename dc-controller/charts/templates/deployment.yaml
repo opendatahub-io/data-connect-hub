@@ -63,5 +63,19 @@ spec:
           periodSeconds: 10
         resources:
           {{- toYaml .Values.controllerManager.resources | nindent 10 }}
-        volumeMounts: []
-      volumes: []
+        {{- if .Values.serviceCA.enabled }}
+        volumeMounts:
+        - name: service-ca
+          mountPath: {{ .Values.serviceCA.mountPath }}
+          readOnly: true
+        {{- end }}
+      {{- if .Values.serviceCA.enabled }}
+      volumes:
+      - name: service-ca
+        configMap:
+          name: {{ .Values.serviceCA.configMapName }}
+          optional: false
+          items:
+          - key: service-ca.crt
+            path: service-ca.crt
+      {{- end }}
