@@ -73,6 +73,7 @@ kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&
 kubectl run "$POD_NAME" -n "$NAMESPACE" \
     --image="$MC_IMAGE" \
     --image-pull-policy=IfNotPresent \
+    --env=MC_CONFIG_DIR=/tmp/.mc \
     --restart=Never \
     --command -- /bin/sh -ceu "
 ready=0
