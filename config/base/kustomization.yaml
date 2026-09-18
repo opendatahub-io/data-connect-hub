@@ -5,6 +5,7 @@ resources:
   - rest-service
   - flight-service
   - gateway
+  - monitoring
 
 configurations:
   - name-reference.yaml

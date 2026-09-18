@@ -14,6 +14,11 @@ data:
     [global-connection-types]
     tenant-id = "opendatahub"
 
+    [metrics]
+    enabled = true
+    address = "0.0.0.0"
+    port = 9090
+
     [flight-service]
     address = "flight-service"
     port = 8443
