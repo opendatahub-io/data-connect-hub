@@ -243,6 +243,7 @@ code {
       <td>
         <ul>
           <li>User provides an HTTPS S3 endpoint</li>
+          <li>User may provide a custom PEM CA via <code>AWS_S3_CA_CERT</code></li>
           <li>Example: <code>https://s3.amazonaws.com</code></li>
         </ul>
       </td>

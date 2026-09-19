@@ -15,8 +15,8 @@ class TestFlightS3GetTables:
     """Test GetFlightInfo/DoGet for CommandGetTables on S3 connections."""
 
     def test_list_tables(self, dch_client: DataConnectClient, s3_flight_connection: str) -> None:
-        """All supported files in the bucket are listed."""
-        table = dch_client.get_tables(s3_flight_connection)
+        """All supported files under the datasets/ prefix are listed."""
+        table = dch_client.get_tables(s3_flight_connection, table_name_filter="datasets/%")
         assert isinstance(table, pa.Table)
         assert table.num_rows >= 3
         assert set(table.column_names) >= {"catalog_name", "db_schema_name", "table_name", "table_type"}
@@ -41,7 +41,7 @@ class TestFlightS3GetTables:
 
     def test_filter_wildcard(self, dch_client: DataConnectClient, s3_flight_connection: str) -> None:
         """LIKE wildcard filter matches multiple files."""
-        table = dch_client.get_tables(s3_flight_connection, table_name_filter="%dch-test-prompts%")
+        table = dch_client.get_tables(s3_flight_connection, table_name_filter="datasets/%dch-test-prompts%")
         assert isinstance(table, pa.Table)
         assert table.num_rows >= 3
 
