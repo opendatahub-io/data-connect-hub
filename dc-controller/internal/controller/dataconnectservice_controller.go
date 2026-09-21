@@ -428,6 +428,9 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
+	if err := setConfigMapVaultConfig(resources, cr.Spec.Vault, nameRestService, flightInstanceName); err != nil {
+		return fmt.Errorf("setting Vault configuration: %w", err)
+	}
 
 	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestServiceContainer, nameFlightServiceContainer) {
 		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
@@ -444,7 +447,6 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		}
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
-
 	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
 		return fmt.Errorf("annotating deployments with content hash: %w", err)
 	}

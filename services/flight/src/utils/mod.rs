@@ -1,4 +1,5 @@
 use commons::utils::config::{ConnectorConfig, ConnectorConfigOverride, GlobalConnectionTypes};
+use kube_utils::VaultConfig;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 
@@ -187,4 +188,6 @@ pub struct ServerConfig {
     pub tls: TlsConfig,
     #[serde(rename = "global-connection-types")]
     pub global_connection_types: GlobalConnectionTypes,
+    #[serde(default)]
+    pub vault: Option<VaultConfig>,
 }

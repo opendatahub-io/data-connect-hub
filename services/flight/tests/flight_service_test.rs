@@ -56,9 +56,7 @@ impl MetaStoreReader for TestMetaStore {
                 name: "test-db".to_string(),
                 data_connection_type_id: "sqlite".to_string(),
                 format: DataFormat::Tabular,
-                credentials_ref: CredentialsRef {
-                    secret: "sqlite_creds".to_string(),
-                },
+                credentials_ref: CredentialsRef::secret("sqlite_creds"),
                 properties: HashMap::new(),
             },
             status: DataConnectionStatus {

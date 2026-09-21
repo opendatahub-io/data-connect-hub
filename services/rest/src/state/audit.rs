@@ -1,10 +1,7 @@
 use commons::api::connection_types::{DataConnectionTypeResource, DataConnectionTypeStatus};
 use commons::api::connections::CredentialsRef;
-
 use commons::api::connections::DataConnectionResource;
 use commons::api::storage::{MetaStore, MetaStoreReader};
-
-use crate::clients::flight::FlightDataClient;
 
 use crate::rest::errors::ValidationError;
 use crate::state::ApiService;
@@ -12,7 +9,6 @@ use chrono::Utc;
 use commons::api::connections::DataConnectionState;
 use commons::api::connections::DataConnectionStatus;
 use commons::api::connections::DataFormat;
-use commons::api::storage::SecretStore;
 use std::sync::Arc;
 use tracing::info;
 
@@ -44,8 +40,6 @@ pub async fn audit_data_connection(
     data_connection_id: &str,
 ) -> Result<(), ValidationError> {
     let meta_store = api_service.meta_store.clone();
-    let secret_store = api_service.secret_store.clone();
-
     let data_connection = meta_store
         .get_data_connection(tenant_id, data_connection_id)
         .await
@@ -59,12 +53,9 @@ pub async fn audit_data_connection(
         })?;
 
     let keys = {
-        let secret = secret_store
-            .get_secret(tenant_id, data_connection.resource.credentials_ref.secret.as_str())
-            .await
-            .map_err(|_| ValidationError::InvalidSecret);
-        if let Ok(secret) = secret {
-            secret.properties
+        let credentials = api_service.credentials_resolver.resolve(&data_connection).await;
+        if let Ok(credentials) = credentials {
+            credentials
         } else {
             set_data_connection_status(
                 tenant_id,
@@ -181,9 +172,12 @@ mod tests {
     use commons::api::connection_types::{
         DataConnectionType, DataConnectionTypeResource, DataConnectionTypeStatus, Field,
     };
-    use commons::api::connections::{DataConnection, DataConnectionState, DataConnectionStatus, DataFormat};
+    use commons::api::connections::{
+        CredentialsRef, DataConnection, DataConnectionState, DataConnectionStatus, DataFormat,
+    };
     use commons::api::errors::{MetaStoreError, SecretStoreError};
     use commons::api::secret::Secret;
+    use commons::api::storage::SecretStore;
     use std::collections::HashMap;
     use std::sync::RwLock;
 
@@ -468,9 +462,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_secret_not_found() {
-        let conn = make_connection(CredentialsRef {
-            secret: "missing-secret".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("missing-secret"));
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
@@ -482,9 +474,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_credentials_schema_check_fails() {
-        let conn = make_connection(CredentialsRef {
-            secret: "creds".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("creds"));
         let dct = make_dct(vec!["HOST", "PORT"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore {
@@ -498,9 +488,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_flight_check_fails() {
-        let conn = make_connection(CredentialsRef {
-            secret: "creds".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("creds"));
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore {
@@ -514,9 +502,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_secret_not_found_sets_not_ready_status() {
-        let conn = make_connection(CredentialsRef {
-            secret: "missing-secret".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("missing-secret"));
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore { secret: None });
@@ -532,9 +518,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_credentials_check_fails_sets_not_ready_status() {
-        let conn = make_connection(CredentialsRef {
-            secret: "creds".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("creds"));
         let dct = make_dct(vec!["HOST", "PORT"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore {
@@ -552,9 +536,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_flight_check_fails_sets_ingestion_not_ready_status() {
-        let conn = make_connection(CredentialsRef {
-            secret: "creds".to_string(),
-        });
+        let conn = make_connection(CredentialsRef::secret("creds"));
         let dct = make_dct(vec!["HOST"]);
         let meta = Arc::new(MockMetaStore::with_connection_and_type(conn, dct));
         let secrets = Arc::new(MockSecretStore {
