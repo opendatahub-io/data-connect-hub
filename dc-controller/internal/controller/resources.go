@@ -240,22 +240,19 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 	return patches
 }
 
-func flightServiceResourceName(config *dchv1alpha1.FlightServiceConfig) string {
-	if config == nil || config.Name == "" {
-		return nameFlightService
-	}
-	return nameFlightService + "-" + config.Name
+func flightServiceResourceName(crName string) string {
+	return crName + "-flight"
 }
 
-func renderFlightService(resources []*unstructured.Unstructured, config *dchv1alpha1.FlightServiceConfig) []*unstructured.Unstructured {
-	serviceName := flightServiceResourceName(config)
+func renderFlightService(resources []*unstructured.Unstructured, crName string) []*unstructured.Unstructured {
+	serviceName := flightServiceResourceName(crName)
 	for _, obj := range resources {
 		if isFlightServiceResource(obj) {
 			renameFlightServiceResource(obj, serviceName)
 			continue
 		}
-		if obj.GetKind() == "HTTPRoute" && config.Name != "" {
-			obj.SetName("data-connect-hub-" + config.Name)
+		if obj.GetKind() == "HTTPRoute" {
+			obj.SetName(crName + "-route")
 			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
 		}
 	}

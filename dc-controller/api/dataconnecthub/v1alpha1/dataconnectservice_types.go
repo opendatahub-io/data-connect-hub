@@ -68,11 +68,6 @@ type ServiceOverrides struct {
 
 // FlightServiceConfig configures the Flight gRPC API deployment.
 type FlightServiceConfig struct {
-	// name differentiates this Flight service when multiple DataConnectService
-	// resources are deployed in the same cluster.
-	// +optional
-	Name string `json:"name,omitempty"`
-
 	ServiceOverrides `json:",inline"`
 }
 

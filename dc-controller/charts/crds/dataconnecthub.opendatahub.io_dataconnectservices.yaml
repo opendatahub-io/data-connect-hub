@@ -291,11 +291,6 @@ spec:
                           x-kubernetes-map-type: atomic
                       type: object
                     type: array
-                  name:
-                    description: |-
-                      name differentiates this Flight service when multiple DataConnectService
-                      resources are deployed in the same cluster.
-                    type: string
                   replicas:
                     default: 1
                     description: replicas overrides the number of pods

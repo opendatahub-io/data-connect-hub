@@ -36,7 +36,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/validation"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -226,15 +225,6 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Render and apply all manifests (services + gateway)
-	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
-		if errs := validation.IsDNS1123Label(cr.Spec.FlightService.Name); len(errs) > 0 {
-			err := fmt.Errorf("flight service name %q is invalid: %s", cr.Spec.FlightService.Name, strings.Join(errs, "; "))
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidFlightService", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidFlightService", err.Error())
-			})
-		}
-	}
 	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
@@ -379,15 +369,13 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameRestService, r.RestImage)
 	setDeploymentImage(resources, "kube-rbac-proxy", r.KubeRbacProxyImage)
 
-	if cr.Spec.FlightService != nil && cr.Spec.FlightService.Name != "" {
-		resources = renderFlightService(resources, cr.Spec.FlightService)
-	}
+	resources = renderFlightService(resources, cr.Name)
 
 	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Spec.FlightService))
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Name))
 	if cr.Spec.FlightService != nil {
 		if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
