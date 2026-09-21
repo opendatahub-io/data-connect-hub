@@ -408,6 +408,20 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 				}
 				section["connection_timeout_secs"] = int64(duration / time.Second)
 			}
+			if connector.RequestTimeout != nil {
+				duration := connector.RequestTimeout.Duration
+				if duration <= 0 || duration%time.Second != 0 {
+					return fmt.Errorf("connector %s requestTimeout must be a positive whole number of seconds", connector.Name)
+				}
+				section["request_timeout_secs"] = int64(duration / time.Second)
+			}
+			if connector.ReadTimeout != nil {
+				duration := connector.ReadTimeout.Duration
+				if duration <= 0 || duration%time.Second != 0 {
+					return fmt.Errorf("connector %s readTimeout must be a positive whole number of seconds", connector.Name)
+				}
+				section["read_timeout_secs"] = int64(duration / time.Second)
+			}
 		}
 
 		updatedTOML, err := toml.Marshal(config)

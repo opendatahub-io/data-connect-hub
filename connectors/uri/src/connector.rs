@@ -80,14 +80,11 @@ impl UriConnector {
     }
 }
 
-fn build_client(
-    credentials: &HashMap<String, String>,
-    connection_timeout: Duration,
-) -> Result<UriClient, ConnectorError> {
+fn build_client(credentials: &HashMap<String, String>, config: ConnectorConfig) -> Result<UriClient, ConnectorError> {
     let raw_url = credentials
         .get(KEY_URI)
-        .ok_or_else(|| ConnectorError::ConnectionError("'URI' credential is required".to_string()))?
-        .clone();
+        .cloned()
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
     let mut base_url =
         url::Url::parse(&raw_url).map_err(|e| ConnectorError::ConnectionError(format!("Invalid URI: {e}")))?;
     base_url.set_query(None);
@@ -97,13 +94,10 @@ fn build_client(
         base_url.set_path(&normalized);
     }
 
-    let request_timeout = Duration::from_secs(connection_timeout.as_secs().max(10) * 3);
     let mut builder = reqwest::Client::builder()
-        .no_proxy()
-        .redirect(reqwest::redirect::Policy::none())
-        .connect_timeout(connection_timeout)
-        .read_timeout(request_timeout)
-        .timeout(request_timeout);
+        .connect_timeout(config.connection_timeout())
+        .read_timeout(config.read_timeout())
+        .timeout(config.request_timeout());
 
     if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
         let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
@@ -146,14 +140,13 @@ impl FlightConnector for UriConnector {
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn DataReader>, ConnectorError> {
-        let connection_timeout = self.config.connection_timeout();
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
             .try_get_with(cache_key, async {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
-                build_client(&credentials, connection_timeout)
+                build_client(&credentials, self.config)
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
@@ -494,7 +487,7 @@ mod tests {
     #[test]
     fn test_build_client_no_auth() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         assert_eq!(client.base_url.as_str(), "http://example.com/");
         assert!(matches!(client.auth, UriAuth::None));
     }
@@ -505,7 +498,7 @@ mod tests {
             (KEY_URI.to_string(), "http://example.com".to_string()),
             (KEY_TOKEN.to_string(), "my-token".to_string()),
         ]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         assert!(matches!(client.auth, UriAuth::Token { .. }));
     }
 
@@ -516,7 +509,7 @@ mod tests {
             (KEY_USERNAME.to_string(), "user".to_string()),
             (KEY_PASSWORD.to_string(), "pass".to_string()),
         ]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         assert!(matches!(client.auth, UriAuth::Basic { .. }));
     }
 
@@ -528,14 +521,14 @@ mod tests {
             (KEY_USERNAME.to_string(), "user".to_string()),
             (KEY_PASSWORD.to_string(), "pass".to_string()),
         ]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         assert!(matches!(client.auth, UriAuth::Token { .. }));
     }
 
     #[test]
     fn test_build_client_missing_uri() {
         let creds = HashMap::new();
-        assert!(build_client(&creds, Duration::from_secs(10)).is_err());
+        assert!(build_client(&creds, ConnectorConfig::default()).is_err());
     }
 
     #[test]
@@ -566,7 +559,7 @@ mod tests {
     #[test]
     fn test_url_join_relative_path() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let req = client.request(reqwest::Method::GET, "api/data").unwrap();
         assert_eq!(req.build().unwrap().url().as_str(), "http://example.com/api/data");
     }
@@ -574,7 +567,7 @@ mod tests {
     #[test]
     fn test_url_join_trailing_slash_base() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com/".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let req = client.request(reqwest::Method::GET, "api/data").unwrap();
         assert_eq!(req.build().unwrap().url().as_str(), "http://example.com/api/data");
     }
@@ -582,7 +575,7 @@ mod tests {
     #[test]
     fn test_url_join_base_with_path_prefix() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com/v1".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let req = client.request(reqwest::Method::GET, "data").unwrap();
         assert_eq!(req.build().unwrap().url().as_str(), "http://example.com/v1/data");
     }
@@ -590,7 +583,7 @@ mod tests {
     #[test]
     fn test_url_rejects_absolute_url_with_scheme() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let err = client
             .request(reqwest::Method::GET, "https://evil.com/steal")
             .unwrap_err();
@@ -600,7 +593,7 @@ mod tests {
     #[test]
     fn test_url_scheme_colon_treated_as_relative() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let req = client.request(reqwest::Method::GET, "http:evil.com").unwrap();
         assert_eq!(req.build().unwrap().url().host_str(), Some("example.com"));
     }
@@ -608,7 +601,7 @@ mod tests {
     #[test]
     fn test_url_rejects_different_port() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com:8080".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let err = client
             .request(reqwest::Method::GET, "http://example.com:9090/x")
             .unwrap_err();
@@ -618,7 +611,7 @@ mod tests {
     #[test]
     fn test_url_rejects_path_escape() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com/v1".to_string())]);
-        let client = build_client(&creds, Duration::from_secs(10)).unwrap();
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
         let err = client
             .request(reqwest::Method::GET, "http://example.com/admin")
             .unwrap_err();

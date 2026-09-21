@@ -32,6 +32,8 @@ data:
     [connectors.default]
     enabled = true
     connection_timeout_secs = 10
+    request_timeout_secs = 30
+    read_timeout_secs = 30
 
     [global-connection-types]
     tenant-id = "opendatahub"

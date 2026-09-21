@@ -113,6 +113,18 @@ type ConnectorConfig struct {
 	// Defaults to the connector's built-in default when not set.
 	// +optional
 	ConnectionTimeout *metav1.Duration `json:"connectionTimeout,omitempty"`
+
+	// requestTimeout is the maximum duration for a complete request, including
+	// reading the response body (e.g. "30s", "5m").
+	// Defaults to the connector's built-in default when not set.
+	// +optional
+	RequestTimeout *metav1.Duration `json:"requestTimeout,omitempty"`
+
+	// readTimeout is the maximum duration allowed between successful reads from
+	// the response (e.g. "30s", "1m").
+	// Defaults to the connector's built-in default when not set.
+	// +optional
+	ReadTimeout *metav1.Duration `json:"readTimeout,omitempty"`
 }
 
 // DataConnectServiceSpec defines the desired state of DataConnectService

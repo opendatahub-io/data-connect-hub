@@ -27,6 +27,31 @@ kind load docker-image "$CI_FLIGHT_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_REST_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_CONTROLLER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 
+assert_deployment_image() {
+    local deployment="$1"
+    local namespace="$2"
+    local container="$3"
+    local expected_image="$4"
+    local actual_image
+
+    if ! actual_image="$(kubectl get deployment "$deployment" -n "$namespace" \
+        -o "jsonpath={.spec.template.spec.containers[?(@.name=='${container}')].image}" 2>/dev/null)"; then
+        echo "ERROR: failed to inspect image for deployment/${deployment} in namespace ${namespace}" >&2
+        kubectl get deployment "$deployment" -n "$namespace" -o yaml 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ "$actual_image" != "$expected_image" ]]; then
+        echo "ERROR: deployment/${deployment} container ${container} uses '${actual_image}', expected '${expected_image}'" >&2
+        kubectl get deployment "$deployment" -n "$namespace" \
+            -o 'jsonpath={range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' \
+            2>/dev/null || true
+        return 1
+    fi
+
+    echo "Verified deployment/${deployment} container ${container} uses ${expected_image}"
+}
+
 # ===================================================================
 # System PostgreSQL
 # ===================================================================
@@ -168,6 +193,23 @@ echo "=== Waiting for DCH rollout ==="
 kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl get po -n "$CI_SVC_NAMESPACE"
+
+echo "=== Verifying DCH deployment images ==="
+assert_deployment_image \
+    "dc-controller-manager" \
+    "$CI_CONTROLLER_NAMESPACE" \
+    "manager" \
+    "$CI_CONTROLLER_IMAGE"
+assert_deployment_image \
+    "$CI_FLIGHT_SERVICE_NAME" \
+    "$CI_SVC_NAMESPACE" \
+    "${CI_DCS_CR_NAME}-flight" \
+    "$CI_FLIGHT_IMAGE"
+assert_deployment_image \
+    "$CI_REST_SERVICE_NAME" \
+    "$CI_SVC_NAMESPACE" \
+    "rest-service" \
+    "$CI_REST_IMAGE"
 
 # ===================================================================
 # Flight metrics NodePort (mapped to localhost via kind extraPortMappings)

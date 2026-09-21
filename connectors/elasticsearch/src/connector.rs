@@ -87,18 +87,16 @@ impl ElasticsearchConnector {
     }
 }
 
-fn build_client(
-    credentials: &HashMap<String, String>,
-    connection_timeout: Duration,
-) -> Result<EsClient, ConnectorError> {
+fn build_client(credentials: &HashMap<String, String>, config: ConnectorConfig) -> Result<EsClient, ConnectorError> {
     let base_url = credentials
         .get(KEY_URI)
-        .ok_or_else(|| ConnectorError::ConnectionError("Elasticsearch 'ES_URI' is required".to_string()))?
-        .clone();
+        .cloned()
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
 
     let mut builder = reqwest::Client::builder()
-        .no_proxy()
-        .connect_timeout(connection_timeout);
+        .connect_timeout(config.connection_timeout())
+        .read_timeout(config.read_timeout())
+        .timeout(config.request_timeout());
 
     if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
         let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
@@ -141,15 +139,13 @@ impl FlightConnector for ElasticsearchConnector {
         data_connection: &DataConnectionResource,
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn DataReader>, ConnectorError> {
-        let connection_timeout = self.config.connection_timeout();
-
         let cache_key = data_connection.metadata.id.clone();
 
         let client = self
             .clients
             .try_get_with(cache_key, async {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
-                build_client(&credentials, connection_timeout)
+                build_client(&credentials, self.config)
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;

@@ -32,6 +32,8 @@ const (
 	testSQLiteConnector              = "sqlite"
 	testTOMLEnabledKey               = "enabled"
 	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
+	testTOMLRequestTimeoutSecsKey    = "request_timeout_secs"
+	testTOMLReadTimeoutSecsKey       = "read_timeout_secs"
 	testKindKey                      = "kind"
 	testMetadataKey                  = "metadata"
 	testNameKey                      = "name"
@@ -117,7 +119,9 @@ enabled = true
 func TestSetConfigMapFlightConnectorSettingsUpdateConnector(t *testing.T) {
 	// Update specified connector settings while preserving unspecified connector settings.
 	enabled := true
-	timeout := &metav1.Duration{Duration: 30 * time.Second}
+	connectionTimeout := &metav1.Duration{Duration: 30 * time.Second}
+	requestTimeout := &metav1.Duration{Duration: 45 * time.Second}
+	readTimeout := &metav1.Duration{Duration: 15 * time.Second}
 	configTOML := `
 [connectors.default]
 enabled = false
@@ -143,7 +147,13 @@ connection_timeout_secs = 20
 
 	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
 		Connectors: []dchv1alpha1.ConnectorConfig{
-			{Name: testSQLiteConnector, Enabled: &enabled, ConnectionTimeout: timeout},
+			{
+				Name:              testSQLiteConnector,
+				Enabled:           &enabled,
+				ConnectionTimeout: connectionTimeout,
+				RequestTimeout:    requestTimeout,
+				ReadTimeout:       readTimeout,
+			},
 			{Name: "neo4j", Enabled: &enabled},
 		},
 	}); err != nil {
@@ -185,6 +195,8 @@ connection_timeout_secs = 20
 	assertConnector(testSQLiteConnector, map[string]any{
 		testTOMLEnabledKey:               true,
 		testTOMLConnectionTimeoutSecsKey: int64(30),
+		testTOMLRequestTimeoutSecsKey:    int64(45),
+		testTOMLReadTimeoutSecsKey:       int64(15),
 	})
 	assertConnector("neo4j", map[string]any{
 		testTOMLEnabledKey:               true,
