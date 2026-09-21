@@ -110,6 +110,9 @@ spec:
             - name: flight-ca
               mountPath: /etc/tls/flight
               readOnly: true
+            - name: vault-token
+              mountPath: /var/run/secrets/vault
+              readOnly: true
           lifecycle:
             preStop:
               exec:
@@ -145,3 +148,10 @@ spec:
             items:
               - key: service-ca.crt
                 path: ca.crt
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: vault
+                  expirationSeconds: 600
+                  path: token

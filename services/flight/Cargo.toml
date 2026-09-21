@@ -70,3 +70,4 @@ sqlx = { workspace = true }
 opendal = { workspace = true }
 parquet = { workspace = true }
 arrow-csv = { workspace = true }
+tempfile = { workspace = true }

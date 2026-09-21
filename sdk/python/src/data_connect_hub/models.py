@@ -32,8 +32,33 @@ class _MaskProperties:
                 yield name, value
 
 
+class VaultCredentialsRef(BaseModel):
+    path: str
+    version: int | None = None
+
+    @model_validator(mode="after")
+    def _validate_path(self) -> VaultCredentialsRef:
+        if (
+            not self.path
+            or self.path.startswith("/")
+            or "%" in self.path
+            or any(segment in {"", ".", ".."} for segment in self.path.split("/"))
+        ):
+            raise ValueError("path must be a relative Vault path without traversal")
+        if self.version is not None and self.version < 1:
+            raise ValueError("version must be greater than zero")
+        return self
+
+
 class CredentialsRef(BaseModel):
-    secret: str
+    secret: str | None = None
+    vault: VaultCredentialsRef | None = None
+
+    @model_validator(mode="after")
+    def _validate_source(self) -> CredentialsRef:
+        if (self.secret is None) == (self.vault is None):
+            raise ValueError("exactly one of secret or vault must be provided")
+        return self
 
 
 class InlineCredentials(_MaskProperties, BaseModel):

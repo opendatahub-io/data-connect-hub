@@ -13,5 +13,9 @@ kube = { workspace = true }
 k8s-openapi = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 serde_json = { workspace = true }
+serde = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+reqwest = { workspace = true }
+tokio = { workspace = true, features = ["sync", "fs", "macros", "rt"] }
+url = { workspace = true }

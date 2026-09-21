@@ -1,4 +1,5 @@
 use commons::utils::config::GlobalConnectionTypes;
+use kube_utils::VaultConfig;
 use pg_meta_store::store::DatabaseConfig;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -55,6 +56,8 @@ pub struct ServerConfig {
     pub flight_service: FlightService,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub vault: Option<VaultConfig>,
 }
 
 pub fn default_secret_labels() -> HashMap<String, String> {

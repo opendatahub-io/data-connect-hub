@@ -3,13 +3,92 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct VaultCredentialsRef {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(try_from = "CredentialsRefWire", into = "CredentialsRefWire")]
 pub struct CredentialsRef {
-    pub secret: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub secret: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault: Option<VaultCredentialsRef>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields)]
+struct CredentialsRefWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    secret: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    vault: Option<VaultCredentialsRef>,
+}
+
+impl CredentialsRef {
+    pub fn secret(name: impl Into<String>) -> Self {
+        Self {
+            secret: Some(name.into()),
+            vault: None,
+        }
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        match (&self.secret, &self.vault) {
+            (Some(secret), None) if !secret.is_empty() => Ok(()),
+            (None, Some(vault)) => validate_vault_reference(vault),
+            _ => Err("exactly one of credentials_ref.secret or credentials_ref.vault is required".to_string()),
+        }
+    }
+}
+
+fn validate_vault_reference(vault: &VaultCredentialsRef) -> Result<(), String> {
+    if vault.path.is_empty()
+        || vault.path.starts_with('/')
+        || vault.path.contains('%')
+        || vault
+            .path
+            .split('/')
+            .any(|segment| segment.is_empty() || matches!(segment, "." | ".."))
+    {
+        return Err("credentials_ref.vault.path must be a relative path without traversal".to_string());
+    }
+    if vault.version == Some(0) {
+        return Err("credentials_ref.vault.version must be greater than zero".to_string());
+    }
+    Ok(())
+}
+
+impl TryFrom<CredentialsRefWire> for CredentialsRef {
+    type Error = String;
+
+    fn try_from(value: CredentialsRefWire) -> Result<Self, Self::Error> {
+        let reference = Self {
+            secret: value.secret,
+            vault: value.vault,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+}
+
+impl From<CredentialsRef> for CredentialsRefWire {
+    fn from(value: CredentialsRef) -> Self {
+        Self {
+            secret: value.secret,
+            vault: value.vault,
+        }
+    }
 }
 
 impl Default for CredentialsRef {
     fn default() -> Self {
-        Self { secret: "".to_string() }
+        Self {
+            secret: None,
+            vault: None,
+        }
     }
 }
 
@@ -119,9 +198,7 @@ mod tests {
                 name: "test-conn".to_string(),
                 data_connection_type_id: "postgres".to_string(),
                 format: DataFormat::Tabular,
-                credentials_ref: CredentialsRef {
-                    secret: "secret/test-conn".to_string(),
-                },
+                credentials_ref: CredentialsRef::secret("secret/test-conn"),
                 properties: HashMap::from([("key".to_string(), "value".to_string())]),
             },
             status: DataConnectionStatus {
@@ -160,7 +237,7 @@ mod tests {
         assert_eq!(res.resource.name, "test-conn");
         assert_eq!(res.resource.data_connection_type_id, "postgres");
         assert_eq!(res.resource.format, DataFormat::Tabular);
-        assert_eq!(res.resource.credentials_ref.secret, "secret/test-conn".to_string());
+        assert_eq!(res.resource.credentials_ref.secret.as_deref(), Some("secret/test-conn"));
 
         assert_eq!(res.resource.properties["key"], "value");
 
@@ -291,5 +368,27 @@ mod tests {
         let res: DataConnectionResource = serde_json::from_value(json).unwrap();
         assert_eq!(res.status.state, DataConnectionState::NotReady);
         assert!(res.status.message.is_none());
+    }
+
+    #[test]
+    fn test_vault_reference_serializes_and_deserializes() {
+        let reference: CredentialsRef = serde_json::from_value(serde_json::json!({
+            "vault": { "path": "postgres/demo", "version": 3 }
+        }))
+        .unwrap();
+
+        assert_eq!(reference.vault.unwrap().path, "postgres/demo");
+    }
+
+    #[test]
+    fn test_credentials_reference_rejects_ambiguous_or_unsafe_values() {
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"secret": "a", "vault": {"path": "postgres/demo"}}),
+            serde_json::json!({"vault": {"path": "../postgres/demo"}}),
+            serde_json::json!({"vault": {"path": "postgres/%2e%2e/demo"}}),
+        ] {
+            assert!(serde_json::from_value::<CredentialsRef>(value).is_err());
+        }
     }
 }

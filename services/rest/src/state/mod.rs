@@ -7,6 +7,7 @@ use crate::clients::flight::FlightClient;
 use crate::clients::flight::FlightDataClient;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
+use kube_utils::CompositeCredentialsResolver;
 
 pub(crate) struct ApiService {
     pub meta_store: Arc<dyn MetaStore + Send + Sync>,
@@ -14,6 +15,7 @@ pub(crate) struct ApiService {
     pub flight_ca_cert: Option<Vec<u8>>,
     pub service_account_token_file: Option<String>,
     pub global_tenant_id: String,
+    pub credentials_resolver: Arc<CompositeCredentialsResolver>,
 }
 
 impl ApiService {
@@ -24,12 +26,35 @@ impl ApiService {
         service_account_token_file: Option<String>,
         global_tenant_id: String,
     ) -> Self {
+        let credentials_resolver = Arc::new(
+            CompositeCredentialsResolver::new(secret_store.clone(), None)
+                .expect("Kubernetes-only credential resolver is valid"),
+        );
+        Self::with_credentials_resolver(
+            meta_store,
+            secret_store,
+            flight_ca_cert,
+            service_account_token_file,
+            global_tenant_id,
+            credentials_resolver,
+        )
+    }
+
+    pub fn with_credentials_resolver(
+        meta_store: Arc<dyn MetaStore + Send + Sync>,
+        secret_store: Arc<dyn SecretStore + Send + Sync>,
+        flight_ca_cert: Option<Vec<u8>>,
+        service_account_token_file: Option<String>,
+        global_tenant_id: String,
+        credentials_resolver: Arc<CompositeCredentialsResolver>,
+    ) -> Self {
         Self {
             meta_store,
             secret_store,
             flight_ca_cert,
             service_account_token_file,
             global_tenant_id,
+            credentials_resolver,
         }
     }
 

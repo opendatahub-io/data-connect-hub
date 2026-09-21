@@ -13,8 +13,9 @@ use anyhow::Result;
 use commons::api::storage::MetaStore;
 use commons::utils::{TraceConfig, init_tracing, log_trace_exporter};
 use config::{Config, File};
-use kube_utils::secrets::KubeSecretStore;
+use kube_utils::{CompositeCredentialsResolver, KubeSecretStore, VaultConfig};
 use pg_meta_store::store::PgMetaStore;
+use serde::Deserialize;
 use std::sync::Arc;
 use url::Url;
 
@@ -42,6 +43,12 @@ struct CommandLineArgs {
     /// of `config`; missing values here fall back to `config`.
     #[arg(long, default_value = "/secrets/secret-config.toml")]
     secret_config: String,
+}
+
+#[derive(Deserialize)]
+struct VaultFileConfig {
+    #[serde(default)]
+    vault: Option<VaultConfig>,
 }
 
 fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
@@ -80,7 +87,12 @@ fn load_config(config_file: String, secret_config_file: String) -> Result<Server
         .add_source(File::with_name(secret_config_file.as_str()).required(false))
         .build()?;
 
-    let config: ServerConfig = config.try_deserialize()?;
+    let mut config: ServerConfig = config.try_deserialize()?;
+    config.vault = Config::builder()
+        .add_source(File::with_name(config_file.as_str()))
+        .build()?
+        .try_deserialize::<VaultFileConfig>()?
+        .vault;
     Ok(config)
 }
 
@@ -132,8 +144,8 @@ fn redact_sensitive_fields(value: &mut serde_json::Value) {
 /// log_config_source emits the parameters read from a single config file,
 /// tagged with the CLI flag (`source`) it came from so the origin of each
 /// value is clear. Credentials embedded in a `database.url` are redacted.
-/// `required` controls whether an absent file is reported as a warning
-/// (`--config`) or silently skipped (`--secret-config`).
+/// `required` controls whether an absent file is reported as a warning or
+/// silently skipped.
 fn log_config_source(config_file: &str, source: &str, required: bool) {
     let parsed = Config::builder()
         .add_source(File::with_name(config_file).required(required))
@@ -206,16 +218,21 @@ async fn main() -> Result<()> {
     );
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
-    let secret_store = KubeSecretStore::try_default().await?;
+    let secret_store = Arc::new(KubeSecretStore::try_default().await?);
+    let credentials_resolver = Arc::new(CompositeCredentialsResolver::new(
+        secret_store.clone(),
+        config.vault.clone(),
+    )?);
 
     let flight_ca_cert = read_ca_cert(&config).await?;
 
-    let service = Arc::new(ApiService::new(
+    let service = Arc::new(ApiService::with_credentials_resolver(
         meta_store,
-        Arc::new(secret_store),
+        secret_store,
         flight_ca_cert,
         config.server.sa_token_file.clone(),
         config.global_connection_types.tenant_id.clone(),
+        credentials_resolver,
     ));
 
     let metrics_enabled = config.metrics.enabled;
@@ -268,7 +285,8 @@ async fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{redact_db_url, redact_sensitive_fields};
+    use super::{load_config, redact_db_url, redact_sensitive_fields};
+    use std::fs;
 
     #[test]
     fn test_redact_sensitive_fields_masks_nested_secrets() {
@@ -342,5 +360,50 @@ mod tests {
             redact_db_url("postgresql://user:pass@host:5432/db?a:b@c"),
             "postgresql://user:***@host:5432/db?a:b@c"
         );
+    }
+
+    #[test]
+    fn vault_settings_only_come_from_service_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let service_config = directory.path().join("service.toml");
+        let database_config = directory.path().join("database.toml");
+        fs::write(
+            &service_config,
+            r#"
+[server]
+address = "127.0.0.1"
+port = 8080
+
+[database]
+url = "postgresql://database"
+
+[global-connection-types]
+tenant-id = "tenant-a"
+
+[flight-service]
+
+[vault]
+address = "https://vault.example"
+role = "dch"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &database_config,
+            r#"
+[vault]
+address = "https://ignored.example"
+role = "ignored"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(
+            service_config.to_string_lossy().to_string(),
+            database_config.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(config.vault.unwrap().address, "https://vault.example");
     }
 }

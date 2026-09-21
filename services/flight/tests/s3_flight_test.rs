@@ -55,9 +55,7 @@ impl MetaStoreReader for S3TestMetaStore {
                 name: "test-s3".to_string(),
                 data_connection_type_id: "s3-type".to_string(),
                 format: self.format.clone(),
-                credentials_ref: CredentialsRef {
-                    secret: "s3_creds".to_string(),
-                },
+                credentials_ref: CredentialsRef::secret("s3_creds"),
                 properties: HashMap::new(),
             },
             status: Default::default(),

@@ -9,7 +9,8 @@ use flight::DataIngestionService;
 use flight::auth::AuthLayer;
 use flight::metrics::{install_prometheus_recorder, spawn_metrics_server};
 use flight::trace::TraceLayer;
-use kube_utils::KubeAuthClient;
+use kube_utils::{KubeAuthClient, VaultConfig};
+use serde::Deserialize;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::signal;
@@ -38,8 +39,19 @@ pub fn load_config(config_file: String, secret_config_file: String) -> Result<Se
         .add_source(File::with_name(secret_config_file.as_str()).required(false))
         .build()?;
 
-    let config: ServerConfig = config.try_deserialize()?;
+    let mut config: ServerConfig = config.try_deserialize()?;
+    config.vault = Config::builder()
+        .add_source(File::with_name(config_file.as_str()))
+        .build()?
+        .try_deserialize::<VaultFileConfig>()?
+        .vault;
     Ok(config)
+}
+
+#[derive(Deserialize)]
+struct VaultFileConfig {
+    #[serde(default)]
+    vault: Option<VaultConfig>,
 }
 
 pub async fn shutdown_signal() {
@@ -139,4 +151,58 @@ pub async fn start_server(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_config;
+    use std::fs;
+
+    #[test]
+    fn vault_settings_only_come_from_service_config() {
+        let directory = tempfile::tempdir().unwrap();
+        let service_config = directory.path().join("service.toml");
+        let database_config = directory.path().join("database.toml");
+        fs::write(
+            &service_config,
+            r#"
+[server]
+address = "127.0.0.1"
+port = 8443
+
+[database]
+url = "postgresql://database"
+
+[ingestion_cache_pools]
+max_capacity = 1
+ttl_secs = 1
+idle_secs = 1
+
+[global-connection-types]
+tenant-id = "tenant-a"
+
+[vault]
+address = "https://vault.example"
+role = "dch"
+"#,
+        )
+        .unwrap();
+        fs::write(
+            &database_config,
+            r#"
+[vault]
+address = "https://ignored.example"
+role = "ignored"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(
+            service_config.to_string_lossy().to_string(),
+            database_config.to_string_lossy().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(config.vault.unwrap().address, "https://vault.example");
+    }
 }

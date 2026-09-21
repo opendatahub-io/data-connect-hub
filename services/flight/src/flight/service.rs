@@ -16,16 +16,16 @@ use arrow_flight::{
     },
 };
 use commons::api::connection_types::DataConnectionTypeResource;
-use commons::api::connections::{CredentialsRef, DataConnectionResource};
+use commons::api::connections::DataConnectionResource;
 use commons::api::connector::BinaryQuery;
-use commons::api::connector::{CredentialsResolver, FlightConnector, QueryOptions};
+use commons::api::connector::{FlightConnector, QueryOptions};
 use commons::api::errors::ConnectorError;
 use commons::api::storage::MetaStoreReader;
 use commons::api::storage::{MetaStore, SecretStore};
 use futures::TryStreamExt;
+use kube_utils::CompositeCredentialsResolver;
 use prost::Message;
 use prost::bytes::Bytes;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tonic::{Request, Response, Status};
@@ -66,7 +66,7 @@ fn grpc_status_label(status: &Status) -> &'static str {
 pub struct DataIngestionService {
     pub(crate) connectors_registry: Arc<ConnectorsRegistry>,
     meta_store: Arc<dyn MetaStoreReader + Send + Sync>,
-    secret_store: Arc<dyn SecretStore + Send + Sync>,
+    pub(crate) credentials_resolver: Arc<CompositeCredentialsResolver>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
 }
@@ -76,6 +76,19 @@ impl DataIngestionService {
         connectors_registry: Arc<ConnectorsRegistry>,
         meta_store: Arc<dyn MetaStore + Send + Sync>,
         secret_store: Arc<dyn SecretStore + Send + Sync>,
+        query_options: QueryOptions,
+    ) -> Self {
+        let credentials_resolver = Arc::new(
+            CompositeCredentialsResolver::new(secret_store.clone(), None)
+                .expect("Kubernetes-only credential resolver is valid"),
+        );
+        Self::with_credentials_resolver(connectors_registry, meta_store, credentials_resolver, query_options)
+    }
+
+    pub fn with_credentials_resolver(
+        connectors_registry: Arc<ConnectorsRegistry>,
+        meta_store: Arc<dyn MetaStore + Send + Sync>,
+        credentials_resolver: Arc<CompositeCredentialsResolver>,
         query_options: QueryOptions,
     ) -> Self {
         let mut builder = SqlInfoDataBuilder::new();
@@ -89,7 +102,7 @@ impl DataIngestionService {
         Self {
             connectors_registry,
             meta_store,
-            secret_store,
+            credentials_resolver,
             sql_info: builder.build().expect("valid sql info"),
             query_options,
         }
@@ -252,7 +265,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 
@@ -313,7 +326,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 
@@ -358,7 +371,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 
@@ -419,7 +432,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(&tenant_id, &connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 
@@ -466,7 +479,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(&tenant_id, &connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 
@@ -646,29 +659,5 @@ impl FlightSqlService for DataIngestionService {
 
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_BINARY, status, started.elapsed());
         result
-    }
-}
-
-#[async_trait::async_trait]
-impl CredentialsResolver for DataIngestionService {
-    #[tracing::instrument(
-        skip_all,
-        fields(
-        connection.id = %connection.metadata.id,
-        secret.name = %connection.resource.credentials_ref.secret,
-        )
-    )]
-    async fn resolve(&self, connection: &DataConnectionResource) -> Result<HashMap<String, String>, ConnectorError> {
-        match (&connection.metadata.tenant_id, &connection.resource.credentials_ref) {
-            (Some(tenant_id), CredentialsRef { secret }) => {
-                let secret = self
-                    .secret_store
-                    .get_secret(tenant_id, secret)
-                    .await
-                    .map_err(|e| ConnectorError::ConnectionError(e.to_string()))?;
-                Ok(secret.properties.clone())
-            },
-            _ => Err(ConnectorError::ConnectionError("No credentials found".to_string())),
-        }
     }
 }

@@ -42,3 +42,4 @@ metrics-exporter-prometheus = { workspace = true }
 [dev-dependencies]
 actix-rt = "2"
 async-trait = { workspace = true }
+tempfile = { workspace = true }

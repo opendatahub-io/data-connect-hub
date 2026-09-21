@@ -32,9 +32,7 @@ impl DataConnectionWithCreds {
             name: self.name.clone(),
             data_connection_type_id: self.data_connection_type_id.clone(),
             format: self.format.clone(),
-            credentials_ref: CredentialsRef {
-                secret: self.credentials.secret.clone(),
-            },
+            credentials_ref: CredentialsRef::secret(self.credentials.secret.clone()),
             properties: self.properties.clone(),
         }
     }

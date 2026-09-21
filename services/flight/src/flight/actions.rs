@@ -142,7 +142,7 @@ impl DataIngestionService {
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
         let reader = connector
-            .get_reader(&connection, self as &dyn CredentialsResolver)
+            .get_reader(&connection, self.credentials_resolver.as_ref())
             .await
             .map_err(map_connector_error)?;
 

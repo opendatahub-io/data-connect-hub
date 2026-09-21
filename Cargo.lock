@@ -1669,6 +1669,7 @@ dependencies = [
  "serde_json",
  "sqlite-connector",
  "sqlx",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tokio-stream",
@@ -2699,9 +2700,13 @@ dependencies = [
  "k8s-openapi",
  "kube",
  "moka",
+ "reqwest 0.12.28",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tokio",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -4290,6 +4295,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror 2.0.20",
  "tokio",
  "tonic",

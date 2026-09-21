@@ -7,7 +7,7 @@ use flight_service::flight::DataIngestionService;
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::utils::ServerConfig;
 use flight_service::{CommandLineArgs, configure_metrics, configure_tls, load_config, start_server};
-use kube_utils::secrets::KubeSecretStore;
+use kube_utils::{CompositeCredentialsResolver, KubeSecretStore};
 #[cfg(feature = "milvus")]
 use milvus_connector::MilvusConnector;
 #[cfg(feature = "neo4j")]
@@ -123,6 +123,10 @@ async fn main() -> Result<()> {
 
     let connectors_registry = Arc::new(build_connectors_registry(&config));
     let secret_store = Arc::new(KubeSecretStore::try_default().await?);
+    let credentials_resolver = Arc::new(CompositeCredentialsResolver::new(
+        secret_store.clone(),
+        config.vault.clone(),
+    )?);
     let query_options = commons::api::connector::QueryOptions {
         batch_size: config.query.batch_size,
     };
@@ -131,7 +135,12 @@ async fn main() -> Result<()> {
     let auth = config.auth;
     let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
 
-    let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
+    let service = DataIngestionService::with_credentials_resolver(
+        connectors_registry,
+        meta_store,
+        credentials_resolver,
+        query_options,
+    );
 
     let server_result = start_server(builder, &auth, service, addr).await;
     tracing::info!("DataConnectorHub Flight service stopped");
@@ -175,6 +184,7 @@ mod tests {
             metrics: MetricsConfig::default(),
             tls: TlsConfig::default(),
             global_connection_types: GlobalConnectionTypes::new("test".to_string()),
+            vault: None,
         }
     }
 
