@@ -30,30 +30,8 @@ data:
     port = 9090
 
     [connectors.default]
-    enabled = false
+    enabled = true
     connection_timeout_secs = 10
-
-    [connectors.postgres]
-    enabled = true
-    connection_timeout_secs = 30
-
-    [connectors.sqlite]
-    enabled = false
-
-    [connectors.elasticsearch]
-    enabled = false
-
-    [connectors.neo4j]
-    enabled = false
-
-    [connectors.milvus]
-    enabled = false
-
-    [connectors.s3]
-    enabled = true
-
-    [connectors.uri]
-    enabled = false
 
     [global-connection-types]
     tenant-id = "opendatahub"

@@ -127,12 +127,6 @@ if [[ -z "${CI_ENABLED_CONNECTORS//[[:space:]]/}" ]]; then
     exit 1
 fi
 
-flight_connector_specs="$({
-    for connector in $CI_ENABLED_CONNECTORS; do
-        printf '      - name: %s\n        enabled: true\n' "$connector"
-    done
-})"
-
 kubectl apply -n "$CI_SVC_NAMESPACE" -f - <<EOF
 apiVersion: dataconnecthub.opendatahub.io/v1alpha1
 kind: DataConnectService
@@ -150,8 +144,6 @@ spec:
     env:
       - name: RUST_LOG
         value: info
-    connectors:
-${flight_connector_specs}
 EOF
 
 if ! kubectl wait \

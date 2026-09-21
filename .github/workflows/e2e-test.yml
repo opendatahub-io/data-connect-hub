@@ -7,6 +7,7 @@ on:
       - 'libs/**'
       - 'connectors/**'
       - 'dc-controller/**'
+      - 'config/**'
       - 'e2e/**'
       - 'hack/**'
       - 'sdk/python/**'
