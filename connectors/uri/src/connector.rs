@@ -86,8 +86,8 @@ fn build_client(
 ) -> Result<UriClient, ConnectorError> {
     let raw_url = credentials
         .get(KEY_URI)
-        .ok_or_else(|| ConnectorError::ConnectionError("'URI' credential is required".to_string()))?
-        .clone();
+        .cloned()
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
     let mut base_url =
         url::Url::parse(&raw_url).map_err(|e| ConnectorError::ConnectionError(format!("Invalid URI: {e}")))?;
     base_url.set_query(None);
@@ -99,7 +99,6 @@ fn build_client(
 
     let request_timeout = Duration::from_secs(connection_timeout.as_secs().max(10) * 3);
     let mut builder = reqwest::Client::builder()
-        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(connection_timeout)
         .read_timeout(request_timeout)

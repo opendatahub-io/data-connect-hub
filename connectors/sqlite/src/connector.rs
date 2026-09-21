@@ -61,7 +61,7 @@ impl FlightConnector for SqliteConnector {
 
                 let url = credentials
                     .get(KEY_URI)
-                    .ok_or_else(|| ConnectorError::ConnectionError("SQLite URL is required".to_string()))?;
+                    .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
 
                 sqlx::pool::PoolOptions::<sqlx::Sqlite>::new()
                     .acquire_timeout(connection_timeout)

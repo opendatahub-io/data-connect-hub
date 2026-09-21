@@ -118,7 +118,7 @@ impl FlightConnector for MilvusConnector {
 
                 let base_url = credentials
                     .get(KEY_URI)
-                    .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_URI is required".to_string()))?
+                    .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?
                     .clone();
                 let token = credentials.get(KEY_TOKEN).cloned();
                 let database = credentials.get(KEY_DATABASE).cloned();
@@ -127,7 +127,9 @@ impl FlightConnector for MilvusConnector {
                 let request_timeout = Duration::from_secs(connection_timeout.as_secs().max(10) * 3);
 
                 let mut builder = reqwest::Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
                     .connect_timeout(connection_timeout)
+                    .read_timeout(request_timeout)
                     .timeout(request_timeout);
 
                 if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {

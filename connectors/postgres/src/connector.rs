@@ -82,7 +82,7 @@ impl FlightConnector for PgConnector {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
                 let url = credentials
                     .get(KEY_URI)
-                    .ok_or_else(|| ConnectorError::ConnectionError("PostgreSQL URL is required".to_string()))?;
+                    .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
 
                 let mut options = PgConnectOptions::from_str(url.as_str())
                     .map_err(|e| ConnectorError::ConnectionError(format!("invalid PostgreSQL URL: {e}")))?;
