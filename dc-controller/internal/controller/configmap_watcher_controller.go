@@ -37,7 +37,7 @@ const (
 	annotationDisplayName  = "openshift.io/display-name"
 	annotationDescription  = "openshift.io/description"
 	annotationDCHSynced    = "dataconnecthub.opendatahub.io/synced"
-	valueSyncedTrue        = "true"
+	valueTrue              = "true"
 
 	requeueOnMigrationServiceUnavailable = 30 * time.Second
 )
@@ -73,7 +73,7 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		return ctrl.Result{}, nil
 	}
 
-	alreadySynced := cm.Annotations[annotationDCHSynced] == valueSyncedTrue
+	alreadySynced := cm.Annotations[annotationDCHSynced] == valueTrue
 
 	fieldsJSON, ok := cm.Data["fields"]
 	if !ok {
@@ -120,7 +120,7 @@ func (r *ConfigMapWatcherReconciler) markSynced(ctx context.Context, cm *corev1.
 	if cm.Annotations == nil {
 		cm.Annotations = make(map[string]string)
 	}
-	cm.Annotations[annotationDCHSynced] = valueSyncedTrue
+	cm.Annotations[annotationDCHSynced] = valueTrue
 	if err := r.Patch(ctx, cm, patch); err != nil {
 		logf.FromContext(ctx).Error(err, "failed to set synced annotation", "name", cm.Name)
 		return ctrl.Result{}, err
@@ -170,7 +170,7 @@ func (r *ConfigMapWatcherReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.ConfigMap{}, builder.WithPredicates(
 			predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				return obj.GetLabels()[labelODHConnectionType] == valueSyncedTrue
+				return obj.GetLabels()[labelODHConnectionType] == valueTrue
 			}),
 		)).
 		Named("configmapwatcher").

@@ -42,7 +42,7 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 				Name:      cmName,
 				Namespace: cmNamespace,
 				Labels: map[string]string{
-					labelODHConnectionType: valueSyncedTrue,
+					labelODHConnectionType: valueTrue,
 				},
 				Annotations: map[string]string{
 					annotationDisplayName: "Test S3 Storage",
@@ -106,12 +106,12 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(captured.CredentialsFields[0].Required).To(BeTrue())
 
 		Expect(k8sClient.Get(ctx, cmKey, cm)).To(Succeed())
-		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueTrue))
 	})
 
 	It("should verify already-synced ConfigMap still exists in REST", func() {
 		cm := newConfigMap()
-		cm.Annotations[annotationDCHSynced] = valueSyncedTrue
+		cm.Annotations[annotationDCHSynced] = valueTrue
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 
 		mock := &mockConnectionTypeClient{
@@ -141,7 +141,7 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, cmKey, cm)).To(Succeed())
-		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueTrue))
 	})
 
 	It("should requeue when REST service is unavailable", func() {

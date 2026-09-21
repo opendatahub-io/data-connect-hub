@@ -750,10 +750,15 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 	}
 }
 
-func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, deploymentContainer, configMapSuffix string) {
-	var configHash string
+const labelAppName = "app.kubernetes.io/name"
+
+func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, appLabel, annotationKey string) {
+	var parts []string
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.HasSuffix(obj.GetName(), configMapSuffix) {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		if obj.GetLabels()[labelAppName] != appLabel {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
@@ -761,51 +766,54 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, de
 			continue
 		}
 		b, _ := json.Marshal(data)
-		h := sha256.Sum256(b)
-		configHash = hex.EncodeToString(h[:])[:16]
-		break
+		parts = append(parts, obj.GetName()+"="+string(b))
 	}
-	if configHash == "" {
+	if len(parts) == 0 {
 		return
 	}
+	slices.Sort(parts)
+	h := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+	setDeploymentAnnotation(resources, appLabel, annotationKey, hex.EncodeToString(h[:])[:16])
+}
 
+func setDeploymentAnnotation(resources []*unstructured.Unstructured, appLabel, annotationKey, value string) {
+	if value == "" {
+		return
+	}
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
 			continue
 		}
-		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
-		if !found {
-			continue
-		}
-		hasContainer := false
-		for _, c := range containers {
-			if container, ok := c.(map[string]any); ok {
-				if name, _ := container["name"].(string); name == deploymentContainer {
-					hasContainer = true
-					break
-				}
-			}
-		}
-		if !hasContainer {
+		if obj.GetLabels()[labelAppName] != appLabel {
 			continue
 		}
 		ann, _, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "annotations")
 		if ann == nil {
 			ann = map[string]string{}
 		}
-		ann["dataconnecthub/config-hash"] = configHash
+		ann[annotationKey] = value
 		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
 	}
 }
 
-func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured) {
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) || !strings.HasSuffix(obj.GetName(), "-config") {
-			continue
-		}
-		serviceName := strings.TrimSuffix(obj.GetName(), "-config")
-		annotateDeploymentWithConfigHash(resources, serviceName, obj.GetName())
+func (r *DataConnectServiceReconciler) computeSecretHash(ctx context.Context, namespace, name string) string {
+	secret := &corev1.Secret{}
+	if err := r.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, secret); err != nil {
+		return ""
 	}
+	b, _ := json.Marshal(secret.Data)
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])[:16]
+}
+
+func (r *DataConnectServiceReconciler) computeConfigMapHash(ctx context.Context, namespace, name string) string {
+	cm := &corev1.ConfigMap{}
+	if err := r.Get(ctx, client.ObjectKey{Name: name, Namespace: namespace}, cm); err != nil {
+		return ""
+	}
+	b, _ := json.Marshal(cm.Data)
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:])[:16]
 }
 
 func indent(s string, spaces int) string {

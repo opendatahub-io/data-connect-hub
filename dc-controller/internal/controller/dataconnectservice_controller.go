@@ -18,10 +18,13 @@ package controller
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -59,7 +62,8 @@ const (
 	conditionTypeDegraded              = "Degraded"
 	conditionTypeGRPCGatewaySupported  = "GRPCGatewaySupported"
 
-	http2EnableAnnotation = "ingress.operator.openshift.io/default-enable-http2"
+	http2EnableAnnotation    = "ingress.operator.openshift.io/default-enable-http2"
+	annotationInjectCABundle = "service.beta.openshift.io/inject-cabundle"
 
 	requeueWaitingForReady = 10 * time.Second
 	requeueOnError         = 30 * time.Second
@@ -394,7 +398,37 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateFlightDeploymentsWithConfigHash(resources)
+	annotateDeploymentWithConfigHash(resources, flightServiceResourceName(cr.Name), "dataconnecthub/config-hash")
+	annotateDeploymentWithConfigHash(resources, nameRestService, "dataconnecthub/config-hash")
+
+	// ConfigMaps with inject-cabundle are populated by OpenShift at runtime,
+	// so the rendered data is empty. Read the live content from the cluster
+	// and combine hashes per app label.
+	caHashParts := map[string][]string{}
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap {
+			continue
+		}
+		if obj.GetAnnotations()[annotationInjectCABundle] != valueTrue {
+			continue
+		}
+		appName := obj.GetLabels()[labelAppName]
+		if appName == "" {
+			continue
+		}
+		caHash := r.computeConfigMapHash(ctx, cr.Namespace, obj.GetName())
+		if caHash != "" {
+			caHashParts[appName] = append(caHashParts[appName], obj.GetName()+"="+caHash)
+		}
+	}
+	for appName, parts := range caHashParts {
+		slices.Sort(parts)
+		h := sha256.Sum256([]byte(strings.Join(parts, "\n")))
+		setDeploymentAnnotation(resources, appName, "dataconnecthub/ca-bundle-hash", hex.EncodeToString(h[:])[:16])
+	}
+
+	flightTLSHash := r.computeSecretHash(ctx, cr.Namespace, flightServiceResourceName(cr.Name)+"-tls")
+	setDeploymentAnnotation(resources, flightServiceResourceName(cr.Name), "dataconnecthub/tls-cert-hash", flightTLSHash)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
@@ -553,7 +587,7 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 	} else {
 		for i := range cmList.Items {
 			cm := &cmList.Items[i]
-			if cm.Annotations[annotationDCHSynced] == valueSyncedTrue {
+			if cm.Annotations[annotationDCHSynced] == valueTrue {
 				patch := client.MergeFrom(cm.DeepCopy())
 				delete(cm.Annotations, annotationDCHSynced)
 				if err := r.Patch(ctx, cm, patch); err != nil {
@@ -569,7 +603,7 @@ func (r *DataConnectServiceReconciler) clearSyncedAnnotations(ctx context.Contex
 	} else {
 		for i := range secretList.Items {
 			s := &secretList.Items[i]
-			if s.Annotations[annotationDCHSynced] == valueSyncedTrue {
+			if s.Annotations[annotationDCHSynced] == valueTrue {
 				patch := client.MergeFrom(s.DeepCopy())
 				delete(s.Annotations, annotationDCHSynced)
 				if err := r.Patch(ctx, s, patch); err != nil {
@@ -788,12 +822,38 @@ func (r *DataConnectServiceReconciler) setCondition(cr *dchv1alpha1.DataConnectS
 	})
 }
 
+func (r *DataConnectServiceReconciler) resourceToReconcile(ctx context.Context, obj client.Object) []reconcile.Request {
+	var list dchv1alpha1.DataConnectServiceList
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
+		logf.FromContext(ctx).Error(err, "failed to list DataConnectService CRs for resource trigger")
+		return nil
+	}
+	requests := make([]reconcile.Request, 0, len(list.Items))
+	for i := range list.Items {
+		requests = append(requests, reconcile.Request{
+			NamespacedName: types.NamespacedName{
+				Name:      list.Items[i].Name,
+				Namespace: list.Items[i].Namespace,
+			},
+		})
+	}
+	return requests
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	ownsPredicate := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})
 
 	isPlatformConfig := predicate.NewPredicateFuncs(func(obj client.Object) bool {
 		return obj.GetName() == platformConfigName
+	})
+
+	isTLSSecret := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return obj.GetName() == "flight-service-tls" || strings.HasSuffix(obj.GetName(), "-flight-tls")
+	})
+
+	isCABundle := predicate.NewPredicateFuncs(func(obj client.Object) bool {
+		return obj.GetAnnotations()[annotationInjectCABundle] == valueTrue
 	})
 
 	return ctrl.NewControllerManagedBy(mgr).
@@ -807,6 +867,16 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.platformConfigToReconcile),
 			builder.WithPredicates(isPlatformConfig),
+		).
+		Watches(
+			&corev1.Secret{},
+			handler.EnqueueRequestsFromMapFunc(r.resourceToReconcile),
+			builder.WithPredicates(isTLSSecret),
+		).
+		Watches(
+			&corev1.ConfigMap{},
+			handler.EnqueueRequestsFromMapFunc(r.resourceToReconcile),
+			builder.WithPredicates(isCABundle),
 		).
 		Named(managedByDCHService).
 		Complete(r)

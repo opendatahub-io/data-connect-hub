@@ -67,7 +67,7 @@ func (r *SecretWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, nil
 	}
 
-	if secret.Annotations[annotationDCHSynced] == valueSyncedTrue {
+	if secret.Annotations[annotationDCHSynced] == valueTrue {
 		return ctrl.Result{}, nil
 	}
 
@@ -145,7 +145,7 @@ func (r *SecretWatcherReconciler) markSynced(ctx context.Context, secret *corev1
 	if secret.Annotations == nil {
 		secret.Annotations = make(map[string]string)
 	}
-	secret.Annotations[annotationDCHSynced] = valueSyncedTrue
+	secret.Annotations[annotationDCHSynced] = valueTrue
 	if err := r.Patch(ctx, secret, patch); err != nil {
 		logf.FromContext(ctx).Error(err, "failed to set synced annotation", "name", secret.Name)
 		return ctrl.Result{}, err
@@ -158,7 +158,7 @@ func (r *SecretWatcherReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Secret{}, builder.WithPredicates(
 			predicate.NewPredicateFuncs(func(obj client.Object) bool {
-				return obj.GetLabels()[labelODHDashboard] == valueSyncedTrue
+				return obj.GetLabels()[labelODHDashboard] == valueTrue
 			}),
 		)).
 		Named("secretwatcher").

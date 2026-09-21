@@ -70,7 +70,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 				Name:      secretName,
 				Namespace: secretNamespace,
 				Labels: map[string]string{
-					labelODHDashboard: valueSyncedTrue,
+					labelODHDashboard: valueTrue,
 				},
 				Annotations: map[string]string{
 					annotationDisplayName:       "My S3 Connection",
@@ -130,7 +130,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(captured.CredentialsRef.Secret).To(Equal(secretName))
 
 		Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
-		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueTrue))
 	})
 
 	It("should use Secret name when display-name annotation is absent", func() {
@@ -154,7 +154,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 
 	It("should skip already-synced Secret", func() {
 		secret := newSecret()
-		secret.Annotations[annotationDCHSynced] = valueSyncedTrue
+		secret.Annotations[annotationDCHSynced] = valueTrue
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 		mock := &mockMigrationClient{}
@@ -242,7 +242,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(err).NotTo(HaveOccurred())
 
 		Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
-		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueTrue))
 	})
 
 	It("should not re-create after successful sync", func() {
