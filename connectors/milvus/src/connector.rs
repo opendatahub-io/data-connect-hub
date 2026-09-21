@@ -12,10 +12,6 @@ use commons::api::connector::CredentialsResolver;
 use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
 use commons::utils::config::ConnectorConfig;
-use milvus::v2::prelude::{
-    ClientV2, ConnectConfig, FieldData, GetRequest, Ids, QueryRequest, QueryResponse, SearchRequest, SearchResponse,
-    SearchVectors,
-};
 use moka::future::Cache;
 
 use crate::query::{MilvusOperation, MilvusRequestInput};
@@ -23,9 +19,63 @@ use crate::query::{MilvusOperation, MilvusRequestInput};
 const KEY_URI: &str = "MILVUS_URI";
 const KEY_TOKEN: &str = "MILVUS_TOKEN";
 const KEY_DATABASE: &str = "MILVUS_DATABASE";
+const KEY_CA_CERT: &str = "MILVUS_CA_CERT";
+
+#[derive(Clone)]
+struct MilvusClient {
+    http: reqwest::Client,
+    base_url: String,
+    token: Option<String>,
+    database: Option<String>,
+}
+
+impl MilvusClient {
+    async fn execute(&self, path: &str, mut body: serde_json::Value) -> Result<serde_json::Value, ConnectorError> {
+        if let (Some(db), Some(obj)) = (&self.database, body.as_object_mut()) {
+            obj.entry("dbName").or_insert(serde_json::json!(db));
+        }
+
+        let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
+        let mut req = self.http.post(&url);
+        if let Some(ref token) = self.token {
+            req = req.bearer_auth(token);
+        }
+
+        let response = req
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Milvus request failed: {e}")))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to read Milvus response body: {e}")))?;
+
+        if !status.is_success() {
+            return Err(ConnectorError::ConnectionError(format!(
+                "Milvus error (HTTP {status}): {body}"
+            )));
+        }
+
+        let json: serde_json::Value = serde_json::from_str(&body)
+            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to parse Milvus response: {e}")))?;
+
+        let code = json.get("code").and_then(|c| c.as_i64()).unwrap_or(0);
+        if code != 0 {
+            let message = json.get("message").and_then(|m| m.as_str()).unwrap_or("unknown error");
+            return Err(ConnectorError::ConnectionError(format!(
+                "Milvus error (code {code}): {message}"
+            )));
+        }
+
+        Ok(json)
+    }
+}
 
 pub struct MilvusConnector {
-    clients: Cache<String, ClientV2>,
+    clients: Cache<String, MilvusClient>,
     config: ConnectorConfig,
 }
 
@@ -40,33 +90,10 @@ impl MilvusConnector {
             config,
         }
     }
-
-    fn make_config(&self, credentials: &HashMap<String, String>) -> Result<ConnectConfig, ConnectorError> {
-        let uri = credentials
-            .get(KEY_URI)
-            .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_URI is required".to_string()))?
-            .clone();
-
-        let token = credentials.get(KEY_TOKEN).cloned();
-        let database = credentials.get(KEY_DATABASE).cloned();
-
-        let connection_timeout = self.config.connection_timeout();
-
-        let mut config = ConnectConfig::new().uri(&uri).connect_timeout(connection_timeout);
-        if let Some(ref token) = token {
-            config = config.token(token);
-        }
-        if let Some(ref db) = database {
-            config = config.database(db);
-        }
-        Ok(config)
-    }
 }
 
-fn map_milvus_error(e: milvus::v2::error::Error) -> ConnectorError {
-    ConnectorError::ConnectionError(e.to_string())
-}
 const PROVIDER: &str = "milvus";
+
 #[async_trait::async_trait]
 impl FlightConnector for MilvusConnector {
     fn provider(&self) -> String {
@@ -88,9 +115,37 @@ impl FlightConnector for MilvusConnector {
             .clients
             .try_get_with(cache_key, async {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
-                ClientV2::new(&self.make_config(&credentials)?)
-                    .await
-                    .map_err(map_milvus_error)
+
+                let base_url = credentials
+                    .get(KEY_URI)
+                    .ok_or_else(|| ConnectorError::ConnectionError("MILVUS_URI is required".to_string()))?
+                    .clone();
+                let token = credentials.get(KEY_TOKEN).cloned();
+                let database = credentials.get(KEY_DATABASE).cloned();
+
+                let connection_timeout = self.config.connection_timeout();
+                let request_timeout = Duration::from_secs(connection_timeout.as_secs().max(10) * 3);
+
+                let mut builder = reqwest::Client::builder()
+                    .connect_timeout(connection_timeout)
+                    .timeout(request_timeout);
+
+                if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
+                    let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
+                        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid CA certificate: {e}")))?;
+                    builder = builder.add_root_certificate(cert);
+                }
+
+                let http = builder
+                    .build()
+                    .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build HTTP client: {e}")))?;
+
+                Ok::<_, ConnectorError>(MilvusClient {
+                    http,
+                    base_url,
+                    token,
+                    database,
+                })
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
@@ -100,7 +155,12 @@ impl FlightConnector for MilvusConnector {
 }
 
 pub struct MilvusReader {
-    client: ClientV2,
+    client: MilvusClient,
+}
+
+struct MilvusFieldDesc {
+    name: String,
+    field_type: String,
 }
 
 #[async_trait::async_trait]
@@ -110,44 +170,30 @@ impl DataReader for MilvusReader {
     }
 
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
-        let mut request = MilvusRequestInput::parse(query)?;
-
-        if let MilvusOperation::Query = request.operation() {
-            request.limit = Some(1);
-        }
-
-        let field_data = match request.operation() {
-            MilvusOperation::Query => self.execute_query(&request).await?,
-            MilvusOperation::Search => self.execute_search(&request).await?,
-            MilvusOperation::Get => self.execute_get(&request).await?,
-        };
-
-        let field_data = normalize_field_order(&request, field_data);
-        let schema = schema_from_field_data(&field_data);
+        let request = MilvusRequestInput::parse(query)?;
+        let field_descs = self.describe_collection(&request.collection_name).await?;
+        let output_fields = request.output_fields();
+        let schema = build_schema(&field_descs, output_fields.as_deref(), &request.operation);
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
     async fn read_tabular(&self, query: Arc<Query>, options: &QueryOptions) -> QueryOutput {
         let request = MilvusRequestInput::parse(&query.query)?;
-        let batch_size = options.batch_size;
         let schema = query.schema.clone();
+        let batch_size = options.batch_size;
 
-        match request.operation() {
+        match request.operation {
             MilvusOperation::Query => self.read_query_paginated(request, schema, batch_size),
             MilvusOperation::Search | MilvusOperation::Get => {
-                let field_data = match request.operation() {
-                    MilvusOperation::Search => self.execute_search(&request).await?,
-                    MilvusOperation::Get => self.execute_get(&request).await?,
-                    _ => unreachable!(),
-                };
-                let field_data = reorder_fields(&schema, field_data);
-                let total_rows = field_data.first().map(field_data_len).unwrap_or(0);
+                let endpoint = operation_endpoint(&request.operation);
+                let response = self.client.execute(endpoint, request.body).await?;
+                let rows = extract_data_rows(response);
 
                 let stream = async_stream::try_stream! {
                     let mut offset = 0;
-                    while offset < total_rows {
-                        let end = (offset + batch_size).min(total_rows);
-                        let batch = fields_to_batch(&schema, &field_data, offset, end)?;
+                    while offset < rows.len() {
+                        let end = (offset + batch_size).min(rows.len());
+                        let batch = rows_to_record_batch(&schema, &rows[offset..end])?;
                         yield batch;
                         offset = end;
                     }
@@ -158,23 +204,34 @@ impl DataReader for MilvusReader {
     }
 
     async fn check_connection(&self) -> Result<(), ConnectorError> {
-        use milvus::v2::request::utility::CheckHealthRequest;
-        let req = CheckHealthRequest::builder()
-            .build()
-            .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build health check request: {e}")))?;
-        let resp = self
-            .client
-            .check_health(req)
-            .await
-            .map_err(|e| ConnectorError::ConnectionError(format!("Milvus health check failed: {e}")))?;
-        if !resp.is_healthy() {
-            return Err(ConnectorError::ConnectionError("Milvus reported unhealthy".to_string()));
-        }
+        self.client
+            .execute("/v2/vectordb/collections/list", serde_json::json!({}))
+            .await?;
         Ok(())
     }
 }
 
 impl MilvusReader {
+    async fn describe_collection(&self, collection_name: &str) -> Result<Vec<MilvusFieldDesc>, ConnectorError> {
+        let body = serde_json::json!({ "collectionName": collection_name });
+        let response = self.client.execute("/v2/vectordb/collections/describe", body).await?;
+
+        let fields = response
+            .get("data")
+            .and_then(|d| d.get("fields"))
+            .and_then(|f| f.as_array())
+            .ok_or_else(|| ConnectorError::ConnectionError("Invalid describe response: missing fields".to_string()))?;
+
+        Ok(fields
+            .iter()
+            .filter_map(|f| {
+                let name = f.get("name")?.as_str()?.to_string();
+                let field_type = f.get("type")?.as_str()?.to_string();
+                Some(MilvusFieldDesc { name, field_type })
+            })
+            .collect())
+    }
+
     fn read_query_paginated(&self, request: MilvusRequestInput, schema: Arc<Schema>, batch_size: usize) -> QueryOutput {
         let client = self.client.clone();
         let page_size = batch_size as i64;
@@ -192,35 +249,26 @@ impl MilvusReader {
                     None => page_size,
                 };
 
-                let mut builder = QueryRequest::builder()
-                    .collection_name(&request.collection_name)
-                    .filter(request.filter.as_deref().unwrap_or(""))
-                    .offset(client_offset + fetched)
-                    .limit(this_page);
-
-                if let Some(ref fields) = request.output_fields {
-                    builder = builder.output_fields(fields.iter().map(|s| s.as_str()));
+                let mut body = request.body.clone();
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert("limit".to_string(), serde_json::json!(this_page));
+                    obj.insert("offset".to_string(), serde_json::json!(client_offset + fetched));
                 }
 
-                let req = builder
-                    .build()
-                    .map_err(|e| ConnectorError::InvalidRequest(format!("Failed to build query request: {e}")))?;
+                let response = client.execute("/v2/vectordb/entities/query", body).await?;
+                let rows = extract_data_rows(response);
 
-                let response: QueryResponse = client.query(req).await.map_err(map_milvus_error)?;
-                let field_data = response.results().get_output_fields().to_vec();
-                let field_data = reorder_fields(&schema, field_data);
-                let rows = field_data.first().map(field_data_len).unwrap_or(0);
-
-                if rows == 0 {
+                if rows.is_empty() {
                     break;
                 }
 
-                let batch = fields_to_batch(&schema, &field_data, 0, rows)?;
+                let num_rows = rows.len();
+                let batch = rows_to_record_batch(&schema, &rows)?;
                 yield batch;
 
-                fetched += rows as i64;
+                fetched += num_rows as i64;
 
-                if (rows as i64) < this_page {
+                if (num_rows as i64) < this_page {
                     break;
                 }
             }
@@ -228,252 +276,170 @@ impl MilvusReader {
 
         Ok(Box::pin(stream))
     }
+}
 
-    async fn execute_query(&self, request: &MilvusRequestInput) -> Result<Vec<FieldData>, ConnectorError> {
-        let mut builder = QueryRequest::builder()
-            .collection_name(&request.collection_name)
-            .filter(request.filter.as_deref().unwrap_or(""));
-
-        if let Some(ref fields) = request.output_fields {
-            builder = builder.output_fields(fields.iter().map(|s| s.as_str()));
-        }
-        if let Some(limit) = request.limit {
-            builder = builder.limit(limit);
-        }
-        if let Some(offset) = request.offset {
-            builder = builder.offset(offset);
-        }
-
-        let req = builder
-            .build()
-            .map_err(|e| ConnectorError::InvalidRequest(format!("Failed to build query request: {e}")))?;
-
-        let response: QueryResponse = self.client.query(req).await.map_err(map_milvus_error)?;
-
-        Ok(response.results().get_output_fields().to_vec())
-    }
-
-    async fn execute_search(&self, request: &MilvusRequestInput) -> Result<Vec<FieldData>, ConnectorError> {
-        let vectors = request
-            .data
-            .as_ref()
-            .ok_or_else(|| ConnectorError::InvalidRequest("Search requires 'data' field".to_string()))?;
-
-        let anns_field = request
-            .anns_field
-            .as_deref()
-            .ok_or_else(|| ConnectorError::InvalidRequest("Search requires 'annsField' field".to_string()))?;
-
-        let mut builder = SearchRequest::builder()
-            .collection_name(&request.collection_name)
-            .vectors(SearchVectors::Float(vectors.clone()))
-            .vector_field(anns_field);
-
-        if let Some(ref filter) = request.filter {
-            builder = builder.filter(filter);
-        }
-        if let Some(limit) = request.limit {
-            builder = builder.limit(limit);
-        }
-        if let Some(ref fields) = request.output_fields {
-            builder = builder.output_fields(fields.iter().map(|s| s.as_str()));
-        }
-
-        let req = builder
-            .build()
-            .map_err(|e| ConnectorError::InvalidRequest(format!("Failed to build search request: {e}")))?;
-
-        let response: SearchResponse = self.client.search(req).await.map_err(map_milvus_error)?;
-
-        // TODO: only the first query vector's results are returned; multi-vector queries are not yet supported.
-        Ok(response
-            .results()
-            .get_results()
-            .first()
-            .map(|r| r.get_output_fields().to_vec())
-            .unwrap_or_default())
-    }
-
-    async fn execute_get(&self, request: &MilvusRequestInput) -> Result<Vec<FieldData>, ConnectorError> {
-        let id_value = request
-            .id
-            .as_ref()
-            .ok_or_else(|| ConnectorError::InvalidRequest("Get requires 'id' field".to_string()))?;
-
-        let ids = parse_ids(id_value)?;
-
-        let mut builder = GetRequest::builder().collection_name(&request.collection_name).ids(ids);
-
-        if let Some(ref fields) = request.output_fields {
-            builder = builder.output_fields(fields.iter().map(|s| s.as_str()));
-        }
-
-        let req = builder
-            .build()
-            .map_err(|e| ConnectorError::InvalidRequest(format!("Failed to build get request: {e}")))?;
-
-        let response: QueryResponse = self.client.get(req).await.map_err(map_milvus_error)?;
-
-        Ok(response.results().get_output_fields().to_vec())
+fn operation_endpoint(op: &MilvusOperation) -> &'static str {
+    match op {
+        MilvusOperation::Query => "/v2/vectordb/entities/query",
+        MilvusOperation::Search => "/v2/vectordb/entities/search",
+        MilvusOperation::Get => "/v2/vectordb/entities/get",
     }
 }
 
-fn parse_ids(value: &serde_json::Value) -> Result<Ids, ConnectorError> {
-    match value {
-        serde_json::Value::Number(n) => {
-            let id = n
-                .as_i64()
-                .ok_or_else(|| ConnectorError::InvalidRequest("Invalid ID number".to_string()))?;
-            Ok(Ids::Int64(vec![id]))
+fn extract_data_rows(response: serde_json::Value) -> Vec<serde_json::Value> {
+    match response {
+        serde_json::Value::Object(mut map) => match map.remove("data") {
+            Some(serde_json::Value::Array(arr)) => arr,
+            _ => Vec::new(),
         },
-        serde_json::Value::String(s) => Ok(Ids::VarChar(vec![s.clone()])),
-        serde_json::Value::Array(arr) => {
-            if arr.is_empty() {
-                return Err(ConnectorError::InvalidRequest("Empty ID array".to_string()));
-            }
-            if arr[0].is_number() {
-                let ids: Vec<i64> = arr
-                    .iter()
-                    .map(|v| {
-                        v.as_i64()
-                            .ok_or_else(|| ConnectorError::InvalidRequest("Invalid ID number".to_string()))
-                    })
-                    .collect::<Result<_, _>>()?;
-                Ok(Ids::Int64(ids))
-            } else {
-                let ids: Vec<String> = arr
-                    .iter()
-                    .map(|v| {
-                        v.as_str()
-                            .map(|s| s.to_string())
-                            .ok_or_else(|| ConnectorError::InvalidRequest("Invalid string ID".to_string()))
-                    })
-                    .collect::<Result<_, _>>()?;
-                Ok(Ids::VarChar(ids))
-            }
-        },
-        _ => Err(ConnectorError::InvalidRequest("Invalid ID format".to_string())),
+        _ => Vec::new(),
     }
 }
 
-/// Ensure deterministic field ordering: use `output_fields` order if specified, otherwise sort by name.
-/// Milvus may return fields in arbitrary order across calls; this prevents schema mismatches
-/// between `get_flight_info` and `do_get`.
-fn normalize_field_order(request: &MilvusRequestInput, mut fields: Vec<FieldData>) -> Vec<FieldData> {
-    if let Some(ref output_fields) = request.output_fields {
-        let mut ordered = Vec::with_capacity(output_fields.len());
-        for name in output_fields {
-            if let Some(pos) = fields.iter().position(|f| f.name() == name) {
-                ordered.push(fields.swap_remove(pos));
-            }
-        }
-        ordered.extend(fields);
-        ordered
+fn build_schema(
+    field_descs: &[MilvusFieldDesc],
+    output_fields: Option<&[String]>,
+    operation: &MilvusOperation,
+) -> Schema {
+    let type_map: HashMap<&str, &str> = field_descs
+        .iter()
+        .map(|f| (f.name.as_str(), f.field_type.as_str()))
+        .collect();
+
+    let mut arrow_fields: Vec<Field> = if let Some(fields) = output_fields {
+        let expanded_fields: Vec<&str> = fields
+            .iter()
+            .flat_map(|name| {
+                if name == "*" {
+                    field_descs.iter().map(|field| field.name.as_str()).collect::<Vec<_>>()
+                } else {
+                    vec![name.as_str()]
+                }
+            })
+            .collect();
+
+        expanded_fields
+            .into_iter()
+            .map(|name| {
+                let arrow_type = type_map
+                    .get(name)
+                    .map(|t| milvus_type_to_arrow(t))
+                    .unwrap_or(ArrowDataType::Utf8);
+                Field::new(name, arrow_type, true)
+            })
+            .collect()
     } else {
-        fields.sort_by(|a, b| a.name().cmp(b.name()));
-        fields
+        field_descs
+            .iter()
+            .filter(|f| !is_vector_type(&f.field_type))
+            .map(|f| Field::new(&f.name, milvus_type_to_arrow(&f.field_type), true))
+            .collect()
+    };
+
+    if matches!(operation, MilvusOperation::Search) && !arrow_fields.iter().any(|f| f.name() == "distance") {
+        arrow_fields.push(Field::new("distance", ArrowDataType::Float64, true));
     }
+
+    Schema::new(arrow_fields)
 }
 
-fn reorder_fields(schema: &Schema, mut fields: Vec<FieldData>) -> Vec<FieldData> {
-    let mut ordered = Vec::with_capacity(schema.fields().len());
-    for schema_field in schema.fields() {
-        if let Some(pos) = fields.iter().position(|f| f.name() == schema_field.name()) {
-            ordered.push(fields.swap_remove(pos));
-        }
-    }
-    ordered
-}
-
-fn field_data_arrow_type(field: &FieldData) -> ArrowDataType {
-    match field {
-        FieldData::Bool { .. } => ArrowDataType::Boolean,
-        FieldData::Int8 { .. } => ArrowDataType::Int8,
-        FieldData::Int16 { .. } => ArrowDataType::Int16,
-        FieldData::Int32 { .. } => ArrowDataType::Int32,
-        FieldData::Int64 { .. } => ArrowDataType::Int64,
-        FieldData::Float { .. } => ArrowDataType::Float32,
-        FieldData::Double { .. } => ArrowDataType::Float64,
-        FieldData::VarChar { .. }
-        | FieldData::Json { .. }
-        | FieldData::Geometry { .. }
-        | FieldData::Timestamptz { .. } => ArrowDataType::Utf8,
+fn milvus_type_to_arrow(milvus_type: &str) -> ArrowDataType {
+    match milvus_type {
+        "Bool" => ArrowDataType::Boolean,
+        "Int8" => ArrowDataType::Int8,
+        "Int16" => ArrowDataType::Int16,
+        "Int32" => ArrowDataType::Int32,
+        "Int64" => ArrowDataType::Int64,
+        "Float" => ArrowDataType::Float32,
+        "Double" => ArrowDataType::Float64,
         _ => ArrowDataType::Utf8,
     }
 }
 
-fn schema_from_field_data(fields: &[FieldData]) -> Schema {
-    Schema::new(
-        fields
-            .iter()
-            .map(|f| Field::new(f.name(), field_data_arrow_type(f), true))
-            .collect::<Vec<_>>(),
+fn is_vector_type(milvus_type: &str) -> bool {
+    matches!(
+        milvus_type,
+        "FloatVector" | "Float16Vector" | "BFloat16Vector" | "BinaryVector" | "SparseFloatVector"
     )
 }
 
-fn field_data_len(field: &FieldData) -> usize {
-    match field {
-        FieldData::Bool { values, .. } => values.len(),
-        FieldData::Int8 { values, .. } => values.len(),
-        FieldData::Int16 { values, .. } => values.len(),
-        FieldData::Int32 { values, .. } => values.len(),
-        FieldData::Int64 { values, .. } => values.len(),
-        FieldData::Float { values, .. } => values.len(),
-        FieldData::Double { values, .. } => values.len(),
-        FieldData::VarChar { values, .. } => values.len(),
-        FieldData::Json { values, .. } => values.len(),
-        FieldData::Geometry { values, .. } => values.len(),
-        FieldData::Timestamptz { values, .. } => values.len(),
-        _ => 0,
-    }
-}
-
-fn field_data_to_array(field: &FieldData, offset: usize, end: usize) -> Result<ArrayRef, ConnectorError> {
-    match field {
-        FieldData::Bool { values, .. } => Ok(Arc::new(BooleanArray::from(values[offset..end].to_vec()))),
-        FieldData::Int8 { values, .. } => Ok(Arc::new(Int8Array::from(values[offset..end].to_vec()))),
-        FieldData::Int16 { values, .. } => Ok(Arc::new(Int16Array::from(values[offset..end].to_vec()))),
-        FieldData::Int32 { values, .. } => Ok(Arc::new(Int32Array::from(values[offset..end].to_vec()))),
-        FieldData::Int64 { values, .. } => Ok(Arc::new(Int64Array::from(values[offset..end].to_vec()))),
-        FieldData::Float { values, .. } => Ok(Arc::new(Float32Array::from(values[offset..end].to_vec()))),
-        FieldData::Double { values, .. } => Ok(Arc::new(Float64Array::from(values[offset..end].to_vec()))),
-        FieldData::VarChar { values, .. } => {
-            let slice: Vec<&str> = values[offset..end].iter().map(|s| s.as_str()).collect();
-            Ok(Arc::new(StringArray::from(slice)))
-        },
-        FieldData::Json { values, .. } => {
-            let slice: Vec<String> = values[offset..end].iter().map(|v| v.to_string()).collect();
-            let refs: Vec<&str> = slice.iter().map(|s| s.as_str()).collect();
-            Ok(Arc::new(StringArray::from(refs)))
-        },
-        FieldData::Geometry { values, .. } | FieldData::Timestamptz { values, .. } => {
-            let slice: Vec<&str> = values[offset..end].iter().map(|s| s.as_str()).collect();
-            Ok(Arc::new(StringArray::from(slice)))
-        },
-        _ => Err(ConnectorError::InvalidRequest(format!(
-            "Unsupported Milvus field type for field '{}'",
-            field.name()
-        ))),
-    }
-}
-
-fn fields_to_batch(
-    schema: &Arc<Schema>,
-    fields: &[FieldData],
-    offset: usize,
-    end: usize,
-) -> Result<RecordBatch, ConnectorError> {
-    let arrays: Vec<ArrayRef> = fields
+fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[serde_json::Value]) -> Result<RecordBatch, ConnectorError> {
+    let arrays: Vec<ArrayRef> = schema
+        .fields()
         .iter()
-        .map(|f| field_data_to_array(f, offset, end))
+        .map(|field| {
+            let values: Vec<Option<&serde_json::Value>> = rows.iter().map(|row| row.get(field.name())).collect();
+            json_values_to_array(field.data_type(), &values)
+        })
         .collect::<Result<_, _>>()?;
 
     RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
 
+fn json_values_to_array(
+    data_type: &ArrowDataType,
+    values: &[Option<&serde_json::Value>],
+) -> Result<ArrayRef, ConnectorError> {
+    match data_type {
+        ArrowDataType::Boolean => {
+            let arr: BooleanArray = values.iter().map(|v| v.and_then(|v| v.as_bool())).collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Int8 => {
+            let arr: Int8Array = values
+                .iter()
+                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i8))
+                .collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Int16 => {
+            let arr: Int16Array = values
+                .iter()
+                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i16))
+                .collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Int32 => {
+            let arr: Int32Array = values
+                .iter()
+                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i32))
+                .collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Int64 => {
+            let arr: Int64Array = values.iter().map(|v| v.and_then(|v| v.as_i64())).collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Float32 => {
+            let arr: Float32Array = values
+                .iter()
+                .map(|v| v.and_then(|v| v.as_f64()).map(|n| n as f32))
+                .collect();
+            Ok(Arc::new(arr))
+        },
+        ArrowDataType::Float64 => {
+            let arr: Float64Array = values.iter().map(|v| v.and_then(|v| v.as_f64())).collect();
+            Ok(Arc::new(arr))
+        },
+        _ => {
+            let arr: StringArray = values
+                .iter()
+                .map(|v| {
+                    v.map(|v| match v {
+                        serde_json::Value::String(s) => s.clone(),
+                        other => other.to_string(),
+                    })
+                })
+                .collect();
+            Ok(Arc::new(arr))
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arrow::array::Array;
 
     #[test]
     fn test_milvus_connector_provider() {
@@ -487,172 +453,257 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_ids_single_int() {
-        let v = serde_json::json!(42);
-        let ids = parse_ids(&v).unwrap();
-        match ids {
-            Ids::Int64(v) => assert_eq!(v, vec![42]),
-            _ => panic!("expected int ids"),
-        }
+    fn test_milvus_type_to_arrow() {
+        assert_eq!(milvus_type_to_arrow("Bool"), ArrowDataType::Boolean);
+        assert_eq!(milvus_type_to_arrow("Int8"), ArrowDataType::Int8);
+        assert_eq!(milvus_type_to_arrow("Int16"), ArrowDataType::Int16);
+        assert_eq!(milvus_type_to_arrow("Int32"), ArrowDataType::Int32);
+        assert_eq!(milvus_type_to_arrow("Int64"), ArrowDataType::Int64);
+        assert_eq!(milvus_type_to_arrow("Float"), ArrowDataType::Float32);
+        assert_eq!(milvus_type_to_arrow("Double"), ArrowDataType::Float64);
+        assert_eq!(milvus_type_to_arrow("VarChar"), ArrowDataType::Utf8);
+        assert_eq!(milvus_type_to_arrow("JSON"), ArrowDataType::Utf8);
+        assert_eq!(milvus_type_to_arrow("Unknown"), ArrowDataType::Utf8);
     }
 
     #[test]
-    fn test_parse_ids_array_int() {
-        let v = serde_json::json!([1, 2, 3]);
-        let ids = parse_ids(&v).unwrap();
-        match ids {
-            Ids::Int64(v) => assert_eq!(v, vec![1, 2, 3]),
-            _ => panic!("expected int ids"),
-        }
+    fn test_is_vector_type() {
+        assert!(is_vector_type("FloatVector"));
+        assert!(is_vector_type("Float16Vector"));
+        assert!(is_vector_type("BFloat16Vector"));
+        assert!(is_vector_type("BinaryVector"));
+        assert!(is_vector_type("SparseFloatVector"));
+        assert!(!is_vector_type("Int64"));
+        assert!(!is_vector_type("VarChar"));
+        assert!(!is_vector_type("Bool"));
     }
 
     #[test]
-    fn test_parse_ids_array_string() {
-        let v = serde_json::json!(["a", "b", "c"]);
-        let ids = parse_ids(&v).unwrap();
-        match ids {
-            Ids::VarChar(v) => assert_eq!(v, vec!["a", "b", "c"]),
-            _ => panic!("expected string ids"),
-        }
+    fn test_build_schema_excludes_vectors() {
+        let field_descs = vec![
+            MilvusFieldDesc {
+                name: "id".to_string(),
+                field_type: "Int64".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "name".to_string(),
+                field_type: "VarChar".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "vector".to_string(),
+                field_type: "FloatVector".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "active".to_string(),
+                field_type: "Bool".to_string(),
+            },
+        ];
+        let schema = build_schema(&field_descs, None, &MilvusOperation::Query);
+        assert_eq!(schema.fields().len(), 3);
+        assert_eq!(schema.field(0).name(), "id");
+        assert_eq!(*schema.field(0).data_type(), ArrowDataType::Int64);
+        assert_eq!(schema.field(1).name(), "name");
+        assert_eq!(*schema.field(1).data_type(), ArrowDataType::Utf8);
+        assert_eq!(schema.field(2).name(), "active");
+        assert_eq!(*schema.field(2).data_type(), ArrowDataType::Boolean);
     }
 
     #[test]
-    fn test_parse_ids_empty_array() {
-        let v = serde_json::json!([]);
-        assert!(parse_ids(&v).is_err());
+    fn test_build_schema_with_output_fields() {
+        let field_descs = vec![
+            MilvusFieldDesc {
+                name: "id".to_string(),
+                field_type: "Int64".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "name".to_string(),
+                field_type: "VarChar".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "vector".to_string(),
+                field_type: "FloatVector".to_string(),
+            },
+        ];
+        let output = vec!["id".to_string(), "name".to_string()];
+        let schema = build_schema(&field_descs, Some(&output), &MilvusOperation::Query);
+        assert_eq!(schema.fields().len(), 2);
+        assert_eq!(schema.field(0).name(), "id");
+        assert_eq!(schema.field(1).name(), "name");
     }
 
     #[test]
-    fn test_field_data_arrow_type() {
-        let f = |fd: FieldData| field_data_arrow_type(&fd);
-        assert_eq!(
-            f(FieldData::Bool {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Boolean
-        );
-        assert_eq!(
-            f(FieldData::Int8 {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Int8
-        );
-        assert_eq!(
-            f(FieldData::Int16 {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Int16
-        );
-        assert_eq!(
-            f(FieldData::Int32 {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Int32
-        );
-        assert_eq!(
-            f(FieldData::Int64 {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Int64
-        );
-        assert_eq!(
-            f(FieldData::Float {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Float32
-        );
-        assert_eq!(
-            f(FieldData::Double {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Float64
-        );
-        assert_eq!(
-            f(FieldData::VarChar {
-                name: "a".into(),
-                values: vec![]
-            }),
-            ArrowDataType::Utf8
-        );
+    fn test_build_schema_expands_wildcard_output_fields() {
+        let field_descs = vec![
+            MilvusFieldDesc {
+                name: "id".to_string(),
+                field_type: "Int64".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "name".to_string(),
+                field_type: "VarChar".to_string(),
+            },
+        ];
+        let output = vec!["*".to_string()];
+        let schema = build_schema(&field_descs, Some(&output), &MilvusOperation::Query);
+
+        assert_eq!(schema.fields().len(), 2);
+        assert_eq!(schema.field(0).name(), "id");
+        assert_eq!(*schema.field(0).data_type(), ArrowDataType::Int64);
+        assert_eq!(schema.field(1).name(), "name");
+        assert_eq!(*schema.field(1).data_type(), ArrowDataType::Utf8);
     }
 
     #[test]
-    fn test_field_data_len() {
-        let field = FieldData::Int64 {
+    fn test_build_schema_search_adds_distance() {
+        let field_descs = vec![
+            MilvusFieldDesc {
+                name: "id".to_string(),
+                field_type: "Int64".to_string(),
+            },
+            MilvusFieldDesc {
+                name: "vector".to_string(),
+                field_type: "FloatVector".to_string(),
+            },
+        ];
+        let schema = build_schema(&field_descs, None, &MilvusOperation::Search);
+        assert!(schema.fields().iter().any(|f| f.name() == "distance"));
+        let distance = schema.fields().iter().find(|f| f.name() == "distance").unwrap();
+        assert_eq!(*distance.data_type(), ArrowDataType::Float64);
+    }
+
+    #[test]
+    fn test_build_schema_search_no_duplicate_distance() {
+        let field_descs = vec![MilvusFieldDesc {
             name: "id".to_string(),
-            values: vec![1, 2, 3],
-        };
-        assert_eq!(field_data_len(&field), 3);
-
-        let field = FieldData::VarChar {
-            name: "name".to_string(),
-            values: vec!["a".to_string(), "b".to_string()],
-        };
-        assert_eq!(field_data_len(&field), 2);
+            field_type: "Int64".to_string(),
+        }];
+        let output = vec!["id".to_string(), "distance".to_string()];
+        let schema = build_schema(&field_descs, Some(&output), &MilvusOperation::Search);
+        let distance_count = schema.fields().iter().filter(|f| f.name() == "distance").count();
+        assert_eq!(distance_count, 1);
     }
 
     #[test]
-    fn test_field_data_to_array_int64() {
-        let field = FieldData::Int64 {
-            name: "id".to_string(),
-            values: vec![10, 20, 30],
-        };
-        let array = field_data_to_array(&field, 0, 3).unwrap();
-        let int_arr = array.as_any().downcast_ref::<Int64Array>().unwrap();
-        assert_eq!(int_arr.value(0), 10);
-        assert_eq!(int_arr.value(2), 30);
+    fn test_extract_data_rows() {
+        let response = serde_json::json!({
+            "code": 0,
+            "data": [
+                {"id": 1, "name": "Alice"},
+                {"id": 2, "name": "Bob"}
+            ]
+        });
+        let rows = extract_data_rows(response);
+        assert_eq!(rows.len(), 2);
     }
 
     #[test]
-    fn test_field_data_to_array_varchar() {
-        let field = FieldData::VarChar {
-            name: "name".to_string(),
-            values: vec!["alice".to_string(), "bob".to_string()],
-        };
-        let array = field_data_to_array(&field, 0, 2).unwrap();
-        let str_arr = array.as_any().downcast_ref::<StringArray>().unwrap();
-        assert_eq!(str_arr.value(0), "alice");
-        assert_eq!(str_arr.value(1), "bob");
+    fn test_extract_data_rows_empty() {
+        let response = serde_json::json!({"code": 0, "data": []});
+        let rows = extract_data_rows(response);
+        assert!(rows.is_empty());
     }
 
     #[test]
-    fn test_field_data_to_array_slice() {
-        let field = FieldData::Int32 {
-            name: "val".to_string(),
-            values: vec![1, 2, 3, 4, 5],
-        };
-        let array = field_data_to_array(&field, 1, 4).unwrap();
-        let int_arr = array.as_any().downcast_ref::<Int32Array>().unwrap();
-        assert_eq!(int_arr.len(), 3);
-        assert_eq!(int_arr.value(0), 2);
-        assert_eq!(int_arr.value(2), 4);
+    fn test_extract_data_rows_missing() {
+        let response = serde_json::json!({"code": 0});
+        let rows = extract_data_rows(response);
+        assert!(rows.is_empty());
     }
 
     #[test]
-    fn test_fields_to_batch() {
+    fn test_json_values_to_array_boolean() {
+        let v_true = serde_json::json!(true);
+        let v_false = serde_json::json!(false);
+        let vals = vec![Some(&v_true), None, Some(&v_false)];
+        let arr = json_values_to_array(&ArrowDataType::Boolean, &vals).unwrap();
+        let bool_arr = arr.as_any().downcast_ref::<BooleanArray>().unwrap();
+        assert_eq!(bool_arr.len(), 3);
+        assert!(bool_arr.value(0));
+        assert!(bool_arr.is_null(1));
+        assert!(!bool_arr.value(2));
+    }
+
+    #[test]
+    fn test_json_values_to_array_int64() {
+        let v1 = serde_json::json!(42);
+        let v2 = serde_json::json!(99);
+        let vals = vec![Some(&v1), Some(&v2), None];
+        let arr = json_values_to_array(&ArrowDataType::Int64, &vals).unwrap();
+        let int_arr = arr.as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(int_arr.value(0), 42);
+        assert_eq!(int_arr.value(1), 99);
+        assert!(int_arr.is_null(2));
+    }
+
+    #[test]
+    fn test_json_values_to_array_float64() {
+        let v = serde_json::json!(1.23);
+        let vals = vec![Some(&v), None];
+        let arr = json_values_to_array(&ArrowDataType::Float64, &vals).unwrap();
+        let f_arr = arr.as_any().downcast_ref::<Float64Array>().unwrap();
+        assert!((f_arr.value(0) - 1.23).abs() < f64::EPSILON);
+        assert!(f_arr.is_null(1));
+    }
+
+    #[test]
+    fn test_json_values_to_array_utf8_fallback() {
+        let v_str = serde_json::json!("hello");
+        let v_obj = serde_json::json!({"nested": true});
+        let vals = vec![Some(&v_str), Some(&v_obj), None];
+        let arr = json_values_to_array(&ArrowDataType::Utf8, &vals).unwrap();
+        let str_arr = arr.as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(str_arr.value(0), "hello");
+        assert_eq!(str_arr.value(1), r#"{"nested":true}"#);
+        assert!(str_arr.is_null(2));
+    }
+
+    #[test]
+    fn test_rows_to_record_batch() {
         let schema = Arc::new(Schema::new(vec![
             Field::new("id", ArrowDataType::Int64, true),
             Field::new("name", ArrowDataType::Utf8, true),
         ]));
-        let fields = vec![
-            FieldData::Int64 {
-                name: "id".to_string(),
-                values: vec![1, 2],
-            },
-            FieldData::VarChar {
-                name: "name".to_string(),
-                values: vec!["a".to_string(), "b".to_string()],
-            },
+        let rows = vec![
+            serde_json::json!({"id": 1, "name": "Alice"}),
+            serde_json::json!({"id": 2, "name": "Bob"}),
         ];
-        let batch = fields_to_batch(&schema, &fields, 0, 2).unwrap();
+        let batch = rows_to_record_batch(&schema, &rows).unwrap();
         assert_eq!(batch.num_rows(), 2);
         assert_eq!(batch.num_columns(), 2);
+
+        let id_arr = batch.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(id_arr.value(0), 1);
+        assert_eq!(id_arr.value(1), 2);
+
+        let name_arr = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(name_arr.value(0), "Alice");
+        assert_eq!(name_arr.value(1), "Bob");
+    }
+
+    #[test]
+    fn test_rows_to_record_batch_missing_fields() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", ArrowDataType::Int64, true),
+            Field::new("missing", ArrowDataType::Utf8, true),
+        ]));
+        let rows = vec![serde_json::json!({"id": 1})];
+        let batch = rows_to_record_batch(&schema, &rows).unwrap();
+        assert_eq!(batch.num_rows(), 1);
+
+        let missing_arr = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert!(missing_arr.is_null(0));
+    }
+
+    #[test]
+    fn test_operation_endpoint() {
+        assert_eq!(
+            operation_endpoint(&MilvusOperation::Query),
+            "/v2/vectordb/entities/query"
+        );
+        assert_eq!(
+            operation_endpoint(&MilvusOperation::Search),
+            "/v2/vectordb/entities/search"
+        );
+        assert_eq!(operation_endpoint(&MilvusOperation::Get), "/v2/vectordb/entities/get");
     }
 }

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Generator
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
@@ -25,8 +25,6 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
-
     import pandas as pd
     import pyarrow as pa
 
@@ -263,7 +261,8 @@ class DataConnectClient:
     def check_connection_readiness(self, connection_id: str) -> None:
         self._rest.check_connection_readiness(connection_id)
 
-    def download_binary(self, connection_id: str, path: str) -> bytes:
+    def download_binary(self, connection_id: str, path: str) -> Generator[bytes, None, None]:
+        """Yield binary chunks, closing the response when exhausted or closed."""
         return self._rest.download_binary(connection_id, path)
 
     def test_credentials(self, connection_type_id: str, credentials: dict[str, str]) -> None:
@@ -327,13 +326,11 @@ class DataConnectClient:
 
     # -- Flight SQL queries --
 
-    def read(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pa.Table:
+    def read(self, sql: str, connection_id: str) -> pa.Table:
         """Execute *sql* via Flight SQL and return the full result as a PyArrow Table."""
-        return self._require_flight().read(sql, connection_id, parameters=parameters)
+        return self._require_flight().read(sql, connection_id)
 
-    def read_batches(
-        self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None
-    ) -> Generator[pa.RecordBatch, None, None]:
+    def read_batches(self, sql: str, connection_id: str) -> Generator[pa.RecordBatch, None, None]:
         """Execute *sql* via Flight SQL and return a streaming iterator of RecordBatches.
 
         Yields one :class:`pyarrow.RecordBatch` per iteration.  The
@@ -343,11 +340,11 @@ class DataConnectClient:
             for batch in client.read_batches("SELECT ...", "conn-1"):
                 process(batch)
         """
-        return self._require_flight().read_batches(sql, connection_id, parameters=parameters)
+        return self._require_flight().read_batches(sql, connection_id)
 
-    def read_pandas(self, sql: str, connection_id: str, *, parameters: Sequence[Any] | None = None) -> pd.DataFrame:
+    def read_pandas(self, sql: str, connection_id: str) -> pd.DataFrame:
         """Execute *sql* via Flight SQL and return the result as a pandas DataFrame."""
-        return self._require_flight().read_pandas(sql, connection_id, parameters=parameters)
+        return self._require_flight().read_pandas(sql, connection_id)
 
     def get_tables(
         self,

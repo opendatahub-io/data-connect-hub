@@ -59,6 +59,8 @@ spec:
             - name: tls
               mountPath: /etc/tls/private
               readOnly: true
+            - name: tmp
+              mountPath: /tmp
           readinessProbe:
             tcpSocket:
               port: grpc
@@ -79,3 +81,7 @@ spec:
         - name: tls
           secret:
             secretName: flight-service-tls
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 10Mi

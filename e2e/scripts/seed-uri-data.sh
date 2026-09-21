@@ -1,65 +1,129 @@
 #!/usr/bin/env bash
-# Deploy a lightweight HTTP server serving static JSON for URI connector e2e tests.
+# Install a fixed HTTPS nginx server and seed JSON/binary data for URI e2e tests.
 #
 # Usage:
-#   e2e/scripts/seed-uri-data.sh -n <namespace>
+#   e2e/scripts/seed-uri-data.sh -n <namespace> [-r <release>]
 #
-# Creates:
-#   - ConfigMap with JSON test data
-#   - nginx Deployment + Service (port 8080)
-#
-# The service URL is: http://e2e-uri-server.<namespace>.svc:8080
+# The script generates a short-lived test CA and server certificate. The CA is
+# stored in <release>-tls-ca/ca.crt for the URI connector credential secret.
 
 set -euo pipefail
 
 NAMESPACE=""
-APP_NAME="e2e-uri-server"
+RELEASE="e2e-uri-server"
+IMAGE="docker.io/library/nginx:alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3"
+TIMEOUT="60s"
 
 usage() {
-    echo "Usage: $0 -n <namespace>"
-    exit 1
+    cat <<USAGE
+Usage: $0 -n <namespace> [-r <release>] [-i <image>] [-t <timeout>]
+
+Options:
+  -n NAMESPACE     target namespace (required)
+  -r RELEASE       resource name (default: e2e-uri-server)
+  -i IMAGE         nginx image (default: docker.io/library/nginx:alpine)
+  -t TIMEOUT       rollout timeout (default: 60s)
+  -h               show this help
+USAGE
 }
 
-while getopts "n:h" opt; do
-    case $opt in
+while getopts "n:r:i:t:h" opt; do
+    case "$opt" in
         n) NAMESPACE="$OPTARG" ;;
-        h) usage ;;
-        *) usage ;;
+        r) RELEASE="$OPTARG" ;;
+        i) IMAGE="$OPTARG" ;;
+        t) TIMEOUT="$OPTARG" ;;
+        h) usage; exit 0 ;;
+        *) usage >&2; exit 1 ;;
     esac
 done
 
-# --- Detect OpenShift ---
+[[ -n "$NAMESPACE" ]] || { usage >&2; exit 1; }
+command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
+command -v openssl >/dev/null || { echo "error: openssl not found" >&2; exit 1; }
+
+CERT_TMPDIR=$(mktemp -d)
+cleanup() {
+    rm -rf "$CERT_TMPDIR"
+}
+trap cleanup EXIT
+
+kubectl create namespace "$NAMESPACE" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+SERVICE_FQDN="$RELEASE.$NAMESPACE.svc.cluster.local"
+echo "Generating URI test server CA and certificate..."
+openssl req -x509 -nodes -newkey rsa:2048 \
+    -keyout "$CERT_TMPDIR/ca.key" \
+    -out "$CERT_TMPDIR/ca.crt" \
+    -subj "/CN=URI E2E Test CA" \
+    -addext "basicConstraints=critical,CA:TRUE" \
+    -addext "keyUsage=critical,keyCertSign,cRLSign" \
+    -days 365 2>/dev/null
+
+openssl req -new -nodes -newkey rsa:2048 \
+    -keyout "$CERT_TMPDIR/server.key" \
+    -out "$CERT_TMPDIR/server.csr" \
+    -subj "/CN=$SERVICE_FQDN" 2>/dev/null
+
+cat > "$CERT_TMPDIR/server-ext.cnf" <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,keyEncipherment
+extendedKeyUsage=serverAuth
+subjectAltName=DNS:$RELEASE,DNS:$RELEASE.$NAMESPACE,DNS:$RELEASE.$NAMESPACE.svc,DNS:$SERVICE_FQDN,DNS:localhost,IP:127.0.0.1
+EOF
+
+openssl x509 -req \
+    -in "$CERT_TMPDIR/server.csr" \
+    -CA "$CERT_TMPDIR/ca.crt" \
+    -CAkey "$CERT_TMPDIR/ca.key" \
+    -CAcreateserial \
+    -out "$CERT_TMPDIR/server.crt" \
+    -days 365 \
+    -extfile "$CERT_TMPDIR/server-ext.cnf" 2>/dev/null
+
+printf 'binary-test-data-for-e2e\n' > "$CERT_TMPDIR/binary.dat"
+
+kubectl create secret tls "$RELEASE-tls" \
+    -n "$NAMESPACE" \
+    --cert="$CERT_TMPDIR/server.crt" \
+    --key="$CERT_TMPDIR/server.key" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl create secret generic "$RELEASE-tls-ca" \
+    -n "$NAMESPACE" \
+    --from-file=ca.crt="$CERT_TMPDIR/ca.crt" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+kubectl create configmap "$RELEASE-data" \
+    -n "$NAMESPACE" \
+    --from-literal='cities.json=[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]' \
+    --from-literal='nested.json={"status":"ok","data":{"items":[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]}}' \
+    --from-literal='empty.json=[]' \
+    --from-file="binary.dat=$CERT_TMPDIR/binary.dat" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+NGINX_CONFIG=$(cat <<EOF
+server {
+    listen 8443 ssl;
+    root /data;
+    default_type application/json;
+    ssl_certificate /etc/nginx/tls/tls.crt;
+    ssl_certificate_key /etc/nginx/tls/tls.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location /api/ { try_files \$uri =404; }
+    location /health { return 200 '{"status":"ok"}'; }
+}
+EOF
+)
+kubectl create configmap "$RELEASE-nginx" \
+    -n "$NAMESPACE" \
+    --from-literal="default.conf=$NGINX_CONFIG" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 IS_OCP="false"
 if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
     IS_OCP="true"
 fi
-
-# --- ConfigMap: JSON test data ---
-
-kubectl create configmap "${APP_NAME}-data" \
-    -n "$NAMESPACE" \
-    --from-literal='cities.json=[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]' \
-    --from-literal='nested.json={"status":"ok","data":{"items":[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]}}' \
-    --from-literal='empty.json=[]' \
-    --from-literal="binary.dat=binary-test-data-for-e2e
-" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-# --- ConfigMap: nginx config ---
-
-kubectl create configmap "${APP_NAME}-nginx" \
-    -n "$NAMESPACE" \
-    --from-literal='default.conf=server {
-    listen 8080;
-    root /data;
-    default_type application/json;
-    location /api/ { try_files $uri =404; }
-    location /health { return 200 "{\"status\":\"ok\"}"; }
-}' \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-# --- OCP-specific YAML fragments (writable dirs for nginx) ---
 
 OCP_VOLUME_MOUNTS=""
 OCP_VOLUMES=""
@@ -95,32 +159,30 @@ EOF
     )
 fi
 
-# --- Deployment + Service ---
-
 cat <<EOF | kubectl apply -n "$NAMESPACE" -f - >/dev/null
----
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ${APP_NAME}
+  name: $RELEASE
   labels:
-    app: ${APP_NAME}
+    app: $RELEASE
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: ${APP_NAME}
+      app: $RELEASE
   template:
     metadata:
       labels:
-        app: ${APP_NAME}
+        app: $RELEASE
     spec:
       containers:
         - name: nginx
-          image: docker.io/library/nginx:alpine
+          image: $IMAGE
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 8080
+            - containerPort: 8443
+$OCP_SECURITY_CONTEXT
           volumeMounts:
             - name: data
               mountPath: /data/api
@@ -128,40 +190,47 @@ spec:
             - name: nginx-conf
               mountPath: /etc/nginx/conf.d
               readOnly: true
-${OCP_VOLUME_MOUNTS}
-${OCP_SECURITY_CONTEXT}
+            - name: tls
+              mountPath: /etc/nginx/tls
+              readOnly: true
+$OCP_VOLUME_MOUNTS
           readinessProbe:
             httpGet:
+              scheme: HTTPS
               path: /health
-              port: 8080
+              port: 8443
             initialDelaySeconds: 2
             periodSeconds: 5
       volumes:
         - name: data
           configMap:
-            name: ${APP_NAME}-data
+            name: $RELEASE-data
         - name: nginx-conf
           configMap:
-            name: ${APP_NAME}-nginx
-${OCP_VOLUMES}
+            name: $RELEASE-nginx
+        - name: tls
+          secret:
+            secretName: $RELEASE-tls
+$OCP_VOLUMES
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: ${APP_NAME}
+  name: $RELEASE
   labels:
-    app: ${APP_NAME}
+    app: $RELEASE
 spec:
   selector:
-    app: ${APP_NAME}
+    app: $RELEASE
   ports:
-    - port: 8080
-      targetPort: 8080
+    - name: https
+      port: 8443
+      targetPort: 8443
       protocol: TCP
 EOF
 
-# Restart to pick up any ConfigMap changes, then wait for readiness
-kubectl rollout restart deployment/"${APP_NAME}" -n "$NAMESPACE" >/dev/null
-kubectl rollout status deployment/"${APP_NAME}" -n "$NAMESPACE" --timeout=60s
+kubectl rollout restart deployment/"$RELEASE" -n "$NAMESPACE" >/dev/null
+kubectl rollout status deployment/"$RELEASE" -n "$NAMESPACE" --timeout="$TIMEOUT"
 
-echo "URI test server deployed at http://${APP_NAME}.${NAMESPACE}.svc:8080"
+echo "URI HTTPS test server deployed at https://$RELEASE.$NAMESPACE.svc:8443"
+echo "CA Secret: $RELEASE-tls-ca"

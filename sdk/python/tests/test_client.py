@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import sys
+from collections.abc import Generator
+from inspect import signature
+from typing import get_type_hints
 from unittest.mock import MagicMock
 
 import pytest
@@ -66,12 +69,12 @@ class TestConnectionsDelegation:
         client = DataConnectClient("localhost")
         client._rest.export_connection = MagicMock(return_value=None)  # type: ignore[method-assign]
         client._rest.check_connection_readiness = MagicMock(return_value=None)  # type: ignore[method-assign]
-        client._rest.download_binary = MagicMock(return_value=b"data")  # type: ignore[method-assign]
+        client._rest.download_binary = MagicMock(return_value=iter([b"data"]))  # type: ignore[method-assign]
         client._rest.test_credentials = MagicMock(return_value=None)  # type: ignore[method-assign]
 
         client.export_connection("123", "exported")
         client.check_connection_readiness("123")
-        assert client.download_binary("123", "model.bin") == b"data"
+        assert b"".join(client.download_binary("123", "model.bin")) == b"data"
         client.test_credentials("postgres", {"username": "user"})
 
         client._rest.export_connection.assert_called_once_with("123", "exported")
@@ -82,6 +85,10 @@ class TestConnectionsDelegation:
             "data_connection_type_id": "postgres",
             "credentials": {"username": "user"},
         }
+
+    def test_download_binary_runtime_return_type(self) -> None:
+        hints = get_type_hints(DataConnectClient.download_binary)
+        assert hints["return"] == Generator[bytes, None, None]
 
     def test_create_connection_with_inline_credentials(self) -> None:
         from data_connect_hub.models import DataConnection, InlineCredentials
@@ -163,6 +170,10 @@ class TestEmptyUpdateGuards:
 
 
 class TestFlightDelegation:
+    @pytest.mark.parametrize("method_name", ["read", "read_batches", "read_pandas"])
+    def test_query_methods_do_not_expose_parameters(self, method_name: str) -> None:
+        assert "parameters" not in signature(getattr(DataConnectClient, method_name)).parameters
+
     def test_read(self) -> None:
         import pyarrow as pa
 
@@ -173,18 +184,7 @@ class TestFlightDelegation:
 
         result = client.read("SELECT 1", "conn-1")
         assert result.equals(table)
-        client._flight.read.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_with_parameters(self) -> None:
-        import pyarrow as pa
-
-        table = pa.table({"col": [1]})
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-        client._flight.read.return_value = table
-
-        client.read("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_read_batches(self) -> None:
         stream = MagicMock()
@@ -194,14 +194,7 @@ class TestFlightDelegation:
 
         result = client.read_batches("SELECT 1", "conn-1")
         assert result is stream
-        client._flight.read_batches.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_batches_with_parameters(self) -> None:
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-
-        client.read_batches("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read_batches.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read_batches.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_read_pandas(self) -> None:
         import pandas as pd
@@ -213,18 +206,7 @@ class TestFlightDelegation:
 
         result = client.read_pandas("SELECT 1", "conn-1")
         assert isinstance(result, pd.DataFrame)
-        client._flight.read_pandas.assert_called_once_with("SELECT 1", "conn-1", parameters=None)
-
-    def test_read_pandas_with_parameters(self) -> None:
-        import pandas as pd
-
-        df = pd.DataFrame({"col": [1]})
-        client = DataConnectClient("localhost")
-        client._flight = MagicMock()
-        client._flight.read_pandas.return_value = df
-
-        client.read_pandas("SELECT $1", "conn-1", parameters=[42])
-        client._flight.read_pandas.assert_called_once_with("SELECT $1", "conn-1", parameters=[42])
+        client._flight.read_pandas.assert_called_once_with("SELECT 1", "conn-1")
 
     def test_server_info(self) -> None:
         client = DataConnectClient("localhost")

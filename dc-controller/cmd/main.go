@@ -17,7 +17,7 @@ limitations under the License.
 package main
 
 import (
-	"crypto/tls"
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -36,10 +36,12 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
+	configv1 "github.com/openshift/api/config/v1"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
+	controllertls "github.com/opendatahub-io/data-connect-hub/dc-controller/internal/tls"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -61,6 +63,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(dchv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(configv1.Install(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 	// +kubebuilder:scaffold:scheme
 }
@@ -73,9 +76,7 @@ func main() {
 	var enableLeaderElection bool
 	var probeAddr string
 	var secureMetrics bool
-	var enableHTTP2 bool
 	var manifestsPath string
-	var tlsOpts []func(*tls.Config)
 	flag.StringVar(&metricsAddr, "metrics-bind-address", "0", "The address the metrics endpoint binds to. "+
 		"Use :8443 for HTTPS or :8080 for HTTP, or leave as 0 to disable the metrics service.")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", ":8081", "The address the probe endpoint binds to.")
@@ -91,8 +92,6 @@ func main() {
 		"The directory that contains the metrics server certificate.")
 	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
-	flag.BoolVar(&enableHTTP2, "enable-http2", false,
-		"If set, HTTP/2 will be enabled for the metrics and webhook servers")
 	flag.StringVar(&manifestsPath, "manifests-path", "/manifests",
 		"Path to the kustomize manifests directory containing base/, db/, and gateway/ subdirectories")
 	opts := zap.Options{
@@ -103,23 +102,14 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	// if the enable-http2 flag is false (the default), http/2 should be disabled
-	// due to its vulnerabilities. More specifically, disabling http/2 will
-	// prevent from being vulnerable to the HTTP/2 Stream Cancellation and
-	// Rapid Reset CVEs. For more information see:
-	// - https://github.com/advisories/GHSA-qppj-fm5r-hxr3
-	// - https://github.com/advisories/GHSA-4374-p667-p6c8
-	disableHTTP2 := func(c *tls.Config) {
-		setupLog.Info("Disabling HTTP/2")
-		c.NextProtos = []string{"http/1.1"}
-	}
-
-	if !enableHTTP2 {
-		tlsOpts = append(tlsOpts, disableHTTP2)
+	tlsResult, err := controllertls.Resolve(context.Background(), ctrl.GetConfigOrDie())
+	if err != nil {
+		setupLog.Error(err, "Failed to resolve TLS profile")
+		os.Exit(1)
 	}
 
 	// Initial webhook TLS options
-	webhookTLSOpts := tlsOpts
+	webhookTLSOpts := tlsResult.TLSOpts
 	webhookServerOptions := webhook.Options{
 		TLSOpts: webhookTLSOpts,
 	}
@@ -142,7 +132,7 @@ func main() {
 	metricsServerOptions := metricsserver.Options{
 		BindAddress:   metricsAddr,
 		SecureServing: secureMetrics,
-		TLSOpts:       tlsOpts,
+		TLSOpts:       tlsResult.TLSOpts,
 	}
 
 	if secureMetrics {
@@ -157,10 +147,7 @@ func main() {
 	// generate self-signed certificates for the metrics server. While convenient for development and testing,
 	// this setup is not recommended for production.
 	//
-	// TODO(user): If you enable certManager, uncomment the following lines:
-	// - [METRICS-WITH-CERTS] at config/default/kustomization.yaml to generate and use certificates
-	// managed by cert-manager for the metrics server.
-	// - [PROMETHEUS-WITH-CERTS] at config/prometheus/kustomization.yaml for TLS certification.
+	// OpenShift deployments mount service-ca certificates through the OpenShift overlay.
 	if len(metricsCertPath) > 0 {
 		setupLog.Info("Initializing metrics certificate watcher using provided certificates",
 			"metrics-cert-path", metricsCertPath, "metrics-cert-name", metricsCertName, "metrics-cert-key", metricsCertKey)
@@ -192,6 +179,28 @@ func main() {
 	if err != nil {
 		setupLog.Error(err, "Failed to start manager")
 		os.Exit(1)
+	}
+
+	ctx, cancel := context.WithCancel(ctrl.SetupSignalHandler())
+	defer cancel()
+	if tlsResult.ProfileFetched {
+		watcher := &controllertls.ProfileWatcher{
+			Client:                 mgr.GetClient(),
+			InitialProfile:         tlsResult.ObservedProfile,
+			InitialAdherencePolicy: tlsResult.AdherencePolicy,
+			OnProfileChange: func(context.Context) {
+				setupLog.Info("TLS profile changed; initiating shutdown to reload")
+				cancel()
+			},
+			OnAdherencePolicyChange: func(context.Context) {
+				setupLog.Info("TLS adherence policy changed; initiating shutdown to reload")
+				cancel()
+			},
+		}
+		if err := watcher.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to set up TLS profile watcher")
+			os.Exit(1)
+		}
 	}
 
 	if err := (&controller.DataConnectServiceReconciler{
@@ -253,7 +262,7 @@ func main() {
 	}
 
 	setupLog.Info("Starting manager")
-	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
+	if err := mgr.Start(ctx); err != nil {
 		setupLog.Error(err, "Failed to run manager")
 		os.Exit(1)
 	}

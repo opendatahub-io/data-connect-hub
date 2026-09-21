@@ -16,6 +16,7 @@ async-stream = { workspace = true }
 moka = { workspace = true, features = ["future"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tempfile = { workspace = true }
 tracing = { workspace = true }
 chrono = { workspace = true }
 neo4rs = { workspace = true }

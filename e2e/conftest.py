@@ -512,11 +512,11 @@ def uri_flight_connection(
 ) -> str:
     """Create connection type + connection for Flight URI query tests.
 
-    The K8s secret and test HTTP server are prepared by run-e2e.sh.
+    The K8s secret and test HTTP(S) server are prepared by run-e2e.sh.
     Returns the connection ID. Cleans up REST resources after the module.
     """
     if not uri_secret:
-        pytest.skip("DCH_URI_SECRET not set (set DCH_TENANT_URI in env file)")
+        pytest.skip("DCH_URI_SECRET not set (set DCH_URI_DEPLOY_SERVER=true in env file)")
 
     ct = rest_client.create_connection_type(
         name=_unique_name("e2e-uri-type"),
