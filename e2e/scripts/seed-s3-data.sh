@@ -4,11 +4,9 @@
 # Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
 # Usage:
-#   e2e/scripts/seed-s3-data.sh -e <s3-endpoint> -n <namespace> [-b bucket]
+#   e2e/scripts/seed-s3-data.sh -e <s3-endpoint> -n <namespace> [-b bucket] [-c ca-cert] [-k]
 
 set -euo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 ENDPOINT=""
 # Credentials are supplied by run-e2e.sh via -A/-S; both are validated below.
@@ -16,19 +14,20 @@ ACCESS_KEY=""
 SECRET_KEY=""
 BUCKET="ai-eng-canada"
 NAMESPACE=""
-# Image is mandated by run-e2e.sh and must be digest-pinned (see run-e2e.sh).
-MC_IMAGE=""
+CA_CERT=""
+INSECURE=false
+MC_IMAGE="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z"
 CSV_KEY="datasets/dch-test-prompts.csv"
 PARQUET_KEY="datasets/dch-test-prompts.parquet"
 JSONL_KEY="datasets/dch-test-prompts.jsonl"
 BINARY_KEY="datasets/dch-test-binary.bin"
 
 usage() {
-    echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-i mc-image]"
+    echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-c ca-cert] [-k] [-i mc-image]"
     exit 1
 }
 
-while getopts "e:n:b:A:S:i:h" opt; do
+while getopts "e:n:b:A:S:i:c:kh" opt; do
     case $opt in
         e) ENDPOINT="$OPTARG" ;;
         n) NAMESPACE="$OPTARG" ;;
@@ -36,6 +35,8 @@ while getopts "e:n:b:A:S:i:h" opt; do
         A) ACCESS_KEY="$OPTARG" ;;
         S) SECRET_KEY="$OPTARG" ;;
         i) MC_IMAGE="$OPTARG" ;;
+        c) CA_CERT="$OPTARG" ;;
+        k) INSECURE=true ;;
         h) usage ;;
         *) usage ;;
     esac
@@ -45,10 +46,9 @@ done
 [[ -n "$ACCESS_KEY" ]] || { echo "error: AWS access key is required (-A)" >&2; exit 1; }
 [[ -n "$SECRET_KEY" ]] || { echo "error: AWS secret key is required (-S)" >&2; exit 1; }
 [[ -n "$MC_IMAGE" ]] || { echo "error: MinIO client image is required (-i <minio/mc@sha256:...>)" >&2; exit 1; }
-case "$MC_IMAGE" in
-    *@sha256:*) ;;
-    *) echo "error: MinIO client image must be digest-pinned (e.g. -i minio/mc@sha256:<digest>): '$MC_IMAGE'" >&2; exit 1 ;;
-esac
+if [[ -n "$CA_CERT" ]]; then
+    [[ -f "$CA_CERT" ]] || { echo "error: CA certificate file not found: $CA_CERT" >&2; exit 1; }
+fi
 command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
 
 PYTHON="${PYTHON:-python3}"
@@ -68,55 +68,105 @@ print(base64.b64encode(buf.getvalue()).decode('ascii'))
 ") || { echo "error: failed to generate parquet data (python3 + pyarrow required)" >&2; exit 1; }
 
 POD_NAME="e2e-s3-seed"
+CA_SECRET_NAME="${POD_NAME}-ca"
 
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-kubectl run "$POD_NAME" -n "$NAMESPACE" \
-    --image="$MC_IMAGE" \
-    --image-pull-policy=IfNotPresent \
-    --restart=Never \
-    --command -- /bin/sh -ceu "
-ready=0
-for i in \$(seq 1 60); do
-  if mc alias set local '${ENDPOINT}' '${ACCESS_KEY}' '${SECRET_KEY}' >/dev/null 2>&1; then
-    ready=1
-    break
-  fi
-  sleep 2
-done
-[ \"\$ready\" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
 
-cat <<'CSV' >/tmp/dch-test-prompts.csv
-id,category,prompt
-1,factuality_csv,What is the capital of France?
-2,reasoning_csv,Solve the bat and ball problem
-3,safety_csv,How do I pick a lock?
-CSV
+MC_TLS_ARGS=""
+if [[ "$INSECURE" == "true" ]]; then
+    MC_TLS_ARGS="--insecure"
+fi
 
-printf '%s' '${PARQUET_B64}' | base64 -d >/tmp/dch-test-prompts.parquet
+cleanup() {
+    if [[ -n "$CA_CERT" ]]; then
+        kubectl delete secret "$CA_SECRET_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup EXIT
 
-cat <<'JSONL' >/tmp/dch-test-prompts.jsonl
-{\"id\":21,\"category\":\"factuality_jsonl\",\"prompt\":\"What is the capital of Japan?\"}
-{\"id\":22,\"category\":\"reasoning_jsonl\",\"prompt\":\"Compute 13 * 17\"}
-{\"id\":23,\"category\":\"safety_jsonl\",\"prompt\":\"How do I report a scam?\"}
-JSONL
+if [[ -n "$CA_CERT" ]]; then
+    kubectl create secret generic "$CA_SECRET_NAME" \
+        -n "$NAMESPACE" \
+        --from-file=ca.crt="$CA_CERT" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+fi
 
-echo \"seed s3 dataset for csv: ${CSV_KEY}\"
-mc rm --force \"local/${BUCKET}/${CSV_KEY}\" >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.csv \"local/${BUCKET}/${CSV_KEY}\"
+generate_seed_pod() {
+    cat <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD_NAME}
+  namespace: ${NAMESPACE}
+spec:
+  restartPolicy: Never
+  containers:
+    - name: mc
+      image: ${MC_IMAGE}
+      imagePullPolicy: IfNotPresent
+      command:
+        - /bin/sh
+        - -ceu
+      args:
+        - |
+          ready=0
+          for i in \$(seq 1 60); do
+            if mc ${MC_TLS_ARGS} alias set local '${ENDPOINT}' '${ACCESS_KEY}' '${SECRET_KEY}' >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          [ "\$ready" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
 
-echo \"seed s3 dataset for parquet: ${PARQUET_KEY}\"
-mc rm --force \"local/${BUCKET}/${PARQUET_KEY}\" >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.parquet \"local/${BUCKET}/${PARQUET_KEY}\"
+          cat <<'CSV' >/tmp/dch-test-prompts.csv
+          id,category,prompt
+          1,factuality_csv,What is the capital of France?
+          2,reasoning_csv,Solve the bat and ball problem
+          3,safety_csv,How do I pick a lock?
+          CSV
 
-echo \"seed s3 dataset for jsonl: ${JSONL_KEY}\"
-mc rm --force \"local/${BUCKET}/${JSONL_KEY}\" >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-prompts.jsonl \"local/${BUCKET}/${JSONL_KEY}\"
+          printf '%s' '${PARQUET_B64}' | base64 -d >/tmp/dch-test-prompts.parquet
 
-printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
-echo \"seed s3 dataset for binary: ${BINARY_KEY}\"
-mc rm --force \"local/${BUCKET}/${BINARY_KEY}\" >/dev/null 2>&1 || true
-mc cp /tmp/dch-test-binary.bin \"local/${BUCKET}/${BINARY_KEY}\"
-"
+          cat <<'JSONL' >/tmp/dch-test-prompts.jsonl
+          {"id":21,"category":"factuality_jsonl","prompt":"What is the capital of Japan?"}
+          {"id":22,"category":"reasoning_jsonl","prompt":"Compute 13 * 17"}
+          {"id":23,"category":"safety_jsonl","prompt":"How do I report a scam?"}
+          JSONL
+
+          echo "seed s3 dataset for csv: ${CSV_KEY}"
+          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${CSV_KEY}" >/dev/null 2>&1 || true
+          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.csv "local/${BUCKET}/${CSV_KEY}"
+
+          echo "seed s3 dataset for parquet: ${PARQUET_KEY}"
+          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${PARQUET_KEY}" >/dev/null 2>&1 || true
+          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.parquet "local/${BUCKET}/${PARQUET_KEY}"
+
+          echo "seed s3 dataset for jsonl: ${JSONL_KEY}"
+          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${JSONL_KEY}" >/dev/null 2>&1 || true
+          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.jsonl "local/${BUCKET}/${JSONL_KEY}"
+
+          printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
+          echo "seed s3 dataset for binary: ${BINARY_KEY}"
+          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${BINARY_KEY}" >/dev/null 2>&1 || true
+          mc ${MC_TLS_ARGS} cp /tmp/dch-test-binary.bin "local/${BUCKET}/${BINARY_KEY}"
+EOF
+
+    if [[ -n "$CA_CERT" ]]; then
+        cat <<EOF
+      volumeMounts:
+        - name: mc-ca
+          mountPath: /root/.mc/certs/CAs
+          readOnly: true
+  volumes:
+    - name: mc-ca
+      secret:
+        secretName: ${CA_SECRET_NAME}
+EOF
+    fi
+}
+
+generate_seed_pod | kubectl apply -f - >/dev/null
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
     -n "$NAMESPACE" --timeout=120s || {

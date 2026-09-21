@@ -5,7 +5,7 @@ by setup.sh into .env and loaded at the top of this file.
 
     DCH_GATEWAY_ENDPOINT   Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
-    DCH_AUTH_TOKEN         Bearer token
+    DCH_AUTH_TOKEN          Bearer token
     DCH_GATEWAY_AUTH_REQUIRED  Authenticate health checks at the platform Gateway
     DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
@@ -25,7 +25,7 @@ from data_connect_hub import CredentialsRef, DataConnectClient
 from data_connect_hub.client import _build_urls
 
 # ---------------------------------------------------------------------------
-# Load .env written by setup.sh (does not override existing env vars)
+# Load .env written by run-e2e.sh (does not override existing env vars)
 # ---------------------------------------------------------------------------
 
 _ENV_FILE = Path(__file__).parent / ".env"
@@ -516,7 +516,7 @@ def uri_flight_connection(
     Returns the connection ID. Cleans up REST resources after the module.
     """
     if not uri_secret:
-        pytest.skip("DCH_URI_SECRET not set (set DCH_URI_DEPLOY_SERVER=true in env file)")
+        pytest.skip("DCH_URI_SECRET not set (set DCH_TENANT_URI_DEPLOY_SERVER=true in env file)")
 
     ct = rest_client.create_connection_type(
         name=_unique_name("e2e-uri-type"),
