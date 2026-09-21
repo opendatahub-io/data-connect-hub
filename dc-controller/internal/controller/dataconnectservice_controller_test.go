@@ -98,6 +98,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: targetNamespace}})
+		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "vault-ca", Namespace: targetNamespace}})
 		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "read", np + "read-write", np + "admin"} {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
@@ -359,6 +360,61 @@ var _ = Describe("DataConnectService Controller", func() {
 				envNames[e.Name] = e.Value
 			}
 			Expect(envNames).To(HaveKeyWithValue("CUSTOM_VAR", "custom-value"))
+		})
+	})
+
+	Context("When reconciling with Vault configuration", func() {
+		BeforeEach(func() {
+			createDatabaseSecret()
+			vaultCA := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: "vault-ca", Namespace: targetNamespace},
+				Data:       map[string]string{"ca.crt": "test-ca"},
+			}
+			Expect(k8sClient.Create(ctx, vaultCA)).To(Succeed())
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					Vault: &dchv1alpha1.Vault{
+						Address:      "https://vault.example",
+						Role:         "dch",
+						KVMount:      "dch-secrets",
+						AuthMount:    "kubernetes",
+						TenantPrefix: "tenants",
+						CAConfigMap: &corev1.ConfigMapKeySelector{
+							LocalObjectReference: corev1.LocalObjectReference{Name: "vault-ca"},
+							Key:                  "ca.crt",
+						},
+					},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should configure both services and mount the Vault CA", func() {
+			reconcileUntilReady()
+
+			for _, configName := range []string{np + nameRestService + "-config", flightResourceName + "-config"} {
+				config := &corev1.ConfigMap{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configName, Namespace: targetNamespace}, config)).To(Succeed())
+				Expect(config.Data["config.toml"]).To(ContainSubstring("[vault]"))
+				Expect(config.Data["config.toml"]).To(ContainSubstring("address = 'https://vault.example'"))
+				Expect(config.Data["config.toml"]).To(ContainSubstring("ca-cert = '/etc/tls/vault/ca.crt'"))
+			}
+
+			for _, deploymentName := range []string{np + nameRestService, flightResourceName} {
+				deployment := &appsv1.Deployment{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: targetNamespace}, deployment)).To(Succeed())
+				Expect(deployment.Spec.Template.Annotations).To(HaveKey(annotationConfigHash))
+				Expect(deployment.Spec.Template.Spec.Volumes).To(ContainElement(WithTransform(
+					func(volume corev1.Volume) string { return volume.Name },
+					Equal("vault-ca"),
+				)))
+			}
 		})
 	})
 

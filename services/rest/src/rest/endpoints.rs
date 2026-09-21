@@ -440,12 +440,27 @@ pub async fn export_connection(
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
         .await?;
 
+    if connection.resource.credentials_ref.vault.is_some() {
+        return Err(commons::api::errors::ConnectorError::UnsupportedOperation(
+            "Vault-backed credentials cannot be exported".to_string(),
+        )
+        .into());
+    }
+
     let mut props = HashMap::new();
 
     // Export the credentials into the new secret
     let existing_secret = service
         .secret_store
-        .get_secret(&ctx.tenant_id, connection.resource.credentials_ref.secret.as_str())
+        .get_secret(
+            &ctx.tenant_id,
+            connection
+                .resource
+                .credentials_ref
+                .secret
+                .as_deref()
+                .expect("validated secret reference"),
+        )
         .await?;
     for (key, value) in existing_secret.properties.iter() {
         props.insert(key.to_string(), value.to_string());
@@ -563,9 +578,7 @@ mod tests {
                         name: "my-pg".to_string(),
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
-                        credentials_ref: CredentialsRef {
-                            secret: "my-pg-creds".to_string(),
-                        },
+                        credentials_ref: CredentialsRef::secret("my-pg-creds"),
                         properties: HashMap::from([
                             ("host".to_string(), "localhost".to_string()),
                             ("port".to_string(), "5432".to_string()),
@@ -753,7 +766,7 @@ mod tests {
                     name: "my-pg".to_string(),
                     data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
-                    credentials_ref: CredentialsRef::default(),
+                    credentials_ref: CredentialsRef::secret("my-pg-creds"),
                     properties: std::collections::HashMap::new(),
                 };
                 let updated = update_fn(existing)?;

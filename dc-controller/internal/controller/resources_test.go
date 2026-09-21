@@ -443,6 +443,9 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
 			testNameKey: "dch-default-dcs-flight-config",
+			"labels": map[string]any{
+				labelAppName: "default-dcs-flight",
+			},
 		},
 		"data": map[string]any{
 			"config.toml": "[connectors.uri]\nenabled = false\n",
@@ -467,7 +470,7 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 		},
 	}}
 
-	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight")
+	annotateServiceDeploymentWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight")
 
 	annotations, found, err := unstructured.NestedStringMap(
 		deployment.Object,

@@ -17,6 +17,7 @@ from data_connect_hub.models import (
     InlineCredentials,
     UpdateConnectionRequest,
     UpdateConnectionTypeRequest,
+    VaultCredentialsRef,
 )
 
 from .conftest import (
@@ -90,6 +91,18 @@ class TestDataConnection:
         del data["status"]
         conn = DataConnection.model_validate(data)
         assert conn.status == DataConnectionStatus()
+
+
+class TestVaultCredentialsRef:
+    def test_accepts_relative_vault_path(self) -> None:
+        ref = CredentialsRef(vault=VaultCredentialsRef(path="postgres/demo", version=3))
+        assert ref.vault is not None
+        assert ref.vault.path == "postgres/demo"
+
+    @pytest.mark.parametrize("path", ["", "/postgres/demo", "../postgres/demo", "postgres/%2e%2e/demo"])
+    def test_rejects_unsafe_vault_path(self, path: str) -> None:
+        with pytest.raises(ValueError):
+            VaultCredentialsRef(path=path)
 
 
 class TestDataConnectionStatus:
