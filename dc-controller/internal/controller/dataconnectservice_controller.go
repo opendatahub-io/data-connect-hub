@@ -359,7 +359,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	patches = append(patches, flightPatches...)
 	patches = append(patches, gwPatches...)
 
-	resources, err := renderKustomization(manifestPath, patches, nil)
+	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}

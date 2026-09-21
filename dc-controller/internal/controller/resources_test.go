@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -188,5 +189,51 @@ connection_timeout_secs = 20
 	})
 	if connectors["default"].(map[string]any)["enabled"] != false {
 		t.Errorf("expected connectors.default.enabled=false, got %v", connectors["default"].(map[string]any)["enabled"])
+	}
+}
+
+// TestRenderKustomizationManifestRoots renders each root the controller may
+// build, through the in-memory staging that production uses, so that a
+// kustomization reaching outside its own directory is caught here.
+func TestRenderKustomizationManifestRoots(t *testing.T) {
+	manifestsPath := filepath.Join("..", "..", "..", "config")
+
+	tests := []struct {
+		name               string
+		path               string
+		wantServiceMonitor bool
+	}{
+		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift"), wantServiceMonitor: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil)
+			if err != nil {
+				t.Fatalf("rendering %s: %v", tt.path, err)
+			}
+
+			var deployments, serviceMonitors int
+			for _, obj := range resources {
+				switch obj.GetKind() {
+				case kindDeployment:
+					deployments++
+				case "ServiceMonitor":
+					serviceMonitors++
+				}
+			}
+
+			if deployments != 2 {
+				t.Errorf("rendered Deployments = %d, want 2", deployments)
+			}
+			want := 0
+			if tt.wantServiceMonitor {
+				want = 1
+			}
+			if serviceMonitors != want {
+				t.Errorf("rendered ServiceMonitors = %d, want %d", serviceMonitors, want)
+			}
+		})
 	}
 }

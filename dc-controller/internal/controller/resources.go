@@ -47,14 +47,22 @@ import (
 
 // --- Kustomize rendering ---
 
-func renderKustomization(diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
+// renderKustomization builds the kustomization at diskPath. The whole of
+// rootPath is staged in memory first, not just diskPath, so that a kustomization
+// may reference resources outside its own directory (overlays/openshift pulls in
+// ../../base). rootPath must contain diskPath.
+func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
 	absPath, err := filepath.Abs(diskPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path %s: %w", diskPath, err)
 	}
+	absRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving root %s: %w", rootPath, err)
+	}
 
 	memFS := filesys.MakeFsInMemory()
-	if err := copyDirToMemFS(absPath, memFS); err != nil {
+	if err := copyDirToMemFS(absRoot, memFS); err != nil {
 		return nil, fmt.Errorf("copying manifests to memory: %w", err)
 	}
 
