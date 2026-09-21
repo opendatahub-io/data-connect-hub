@@ -344,7 +344,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
 ) error {
-	basePath := filepath.Join(r.ManifestsPath, "base")
+	manifestPath := filepath.Join(r.ManifestsPath, "base")
+	if r.openShiftMonitoringAvailable(ctx) {
+		manifestPath = filepath.Join(r.ManifestsPath, "overlays", "openshift")
+	}
 
 	gw := r.resolveGateway(cr, platCfg)
 	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
@@ -356,7 +359,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	patches = append(patches, flightPatches...)
 	patches = append(patches, gwPatches...)
 
-	resources, err := renderKustomization(basePath, patches, nil)
+	resources, err := renderKustomization(manifestPath, patches, nil)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
@@ -383,6 +386,32 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
+}
+
+// openShiftMonitoringAvailable reports whether this is an OpenShift cluster on
+// which the prometheus-operator ServiceMonitor API is served, i.e. whether the
+// overlays/openshift manifests can be applied. Detection goes through discovery
+// rather than the platform ConfigMap because Distribution defaults to
+// "Standalone" when that ConfigMap is absent, which would silently drop metrics.
+func (r *DataConnectServiceReconciler) openShiftMonitoringAvailable(ctx context.Context) bool {
+	return r.kindServed(ctx, "config.openshift.io", "v1", "ClusterVersion") &&
+		r.kindServed(ctx, "monitoring.coreos.com", "v1", "ServiceMonitor")
+}
+
+// kindServed reports whether the cluster serves the given group/version/kind.
+// The version is pinned rather than left to discovery so that the check matches
+// the apiVersion of the manifests that will be applied. The RESTMapper reloads
+// discovery for the group on a miss, so a CRD installed after start-up is picked
+// up on a later reconcile.
+func (r *DataConnectServiceReconciler) kindServed(ctx context.Context, group, version, kind string) bool {
+	_, err := r.RESTMapper().RESTMapping(schema.GroupKind{Group: group, Kind: kind}, version)
+	if err == nil {
+		return true
+	}
+	if !meta.IsNoMatchError(err) {
+		logf.FromContext(ctx).Error(err, "checking API availability", "group", group, "version", version, "kind", kind)
+	}
+	return false
 }
 
 // ensureInitDataConnectionTypes reads connection type definitions from the
