@@ -383,19 +383,20 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameKubeRbacProxy, r.KubeRbacProxyImage)
 
 	resources = renderFlightService(resources, cr.Name)
+	flightContainerName := flightServiceResourceName(cr.Name)
 
-	setDeploymentImage(resources, nameFlightService, r.FlightImage)
+	setDeploymentImage(resources, flightContainerName, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Name))
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName)
 	if cr.Spec.FlightService != nil {
 		if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
 
-	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, nameFlightService) {
+	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, flightContainerName) {
 		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
 	}
 

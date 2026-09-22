@@ -49,8 +49,9 @@ var _ = Describe("DataConnectService Controller", func() {
 		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
 
 		// Kustomize adds this prefix to all resource names.
-		np                 = "dch-"
-		flightResourceName = np + resourceName + "-flight"
+		np                  = "dch-"
+		flightResourceName  = np + resourceName + "-flight"
+		flightContainerName = resourceName + "-flight"
 	)
 
 	ctx := context.Background()
@@ -430,17 +431,27 @@ var _ = Describe("DataConnectService Controller", func() {
 		It("should set the OTLP env vars on the rest-service and flight-service containers", func() {
 			reconcileUntilReady()
 
-			for _, svc := range []string{nameRestService, nameFlightService} {
-				deploy := &appsv1.Deployment{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc, Namespace: targetNamespace}, deploy)).To(Succeed())
-				container := findContainer(deploy, svc)
-				Expect(container).NotTo(BeNil())
-				Expect(container.Env).To(ContainElements(
-					corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
-					corev1.EnvVar{Name: envOTLPInsecure, Value: valueFalse},
-					corev1.EnvVar{Name: envOTLPCertificate, Value: caPath},
-				))
-			}
+			// Check rest-service
+			restDeploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
+			restContainer := findContainer(restDeploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			Expect(restContainer.Env).To(ContainElements(
+				corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
+				corev1.EnvVar{Name: envOTLPInsecure, Value: valueFalse},
+				corev1.EnvVar{Name: envOTLPCertificate, Value: caPath},
+			))
+
+			// Check flight-service
+			flightDeploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
+			flightContainer := findContainer(flightDeploy, flightContainerName)
+			Expect(flightContainer).NotTo(BeNil())
+			Expect(flightContainer.Env).To(ContainElements(
+				corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
+				corev1.EnvVar{Name: envOTLPInsecure, Value: valueFalse},
+				corev1.EnvVar{Name: envOTLPCertificate, Value: caPath},
+			))
 		})
 
 		It("should not set the OTLP env vars on sidecar containers", func() {
@@ -477,14 +488,22 @@ var _ = Describe("DataConnectService Controller", func() {
 		It("should not set the OTLP env vars on the service containers", func() {
 			reconcileUntilReady()
 
-			for _, svc := range []string{nameRestService, nameFlightService} {
-				deploy := &appsv1.Deployment{}
-				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + svc, Namespace: targetNamespace}, deploy)).To(Succeed())
-				container := findContainer(deploy, svc)
-				Expect(container).NotTo(BeNil())
-				for _, e := range container.Env {
-					Expect(e.Name).NotTo(HavePrefix("OTEL_"))
-				}
+			// Check rest-service
+			restDeploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
+			restContainer := findContainer(restDeploy, nameRestService)
+			Expect(restContainer).NotTo(BeNil())
+			for _, e := range restContainer.Env {
+				Expect(e.Name).NotTo(HavePrefix("OTEL_"))
+			}
+
+			// Check flight-service
+			flightDeploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
+			flightContainer := findContainer(flightDeploy, flightContainerName)
+			Expect(flightContainer).NotTo(BeNil())
+			for _, e := range flightContainer.Env {
+				Expect(e.Name).NotTo(HavePrefix("OTEL_"))
 			}
 		})
 	})
@@ -744,7 +763,10 @@ var _ = Describe("DataConnectService Controller", func() {
 	})
 })
 
-const testOTLPEndpoint = "http://otel:4317"
+const (
+	testOTLPEndpoint = "http://otel:4317"
+	testEnvRustLog   = "RUST_LOG"
+)
 
 var _ = Describe("traceEnv", func() {
 	It("returns nil when trace is unset", func() {
@@ -783,30 +805,37 @@ var _ = Describe("traceEnv", func() {
 	})
 })
 
-var _ = Describe("setDeploymentEnv", func() {
-	newDeployment := func(containers ...corev1.Container) *unstructured.Unstructured {
-		deploy := &appsv1.Deployment{
-			TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: kindDeployment},
-			ObjectMeta: metav1.ObjectMeta{Name: "svc"},
-			Spec: appsv1.DeploymentSpec{
-				Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: containers}},
-			},
-		}
-		raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deploy)
-		Expect(err).NotTo(HaveOccurred())
-		return &unstructured.Unstructured{Object: raw}
+// newDeployment creates a test Deployment as an unstructured object.
+func newDeployment(containers ...corev1.Container) *unstructured.Unstructured {
+	deploy := &appsv1.Deployment{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "apps/v1", Kind: kindDeployment},
+		ObjectMeta: metav1.ObjectMeta{Name: "svc"},
+		Spec: appsv1.DeploymentSpec{
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: containers}},
+		},
 	}
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(deploy)
+	if err != nil {
+		panic(err)
+	}
+	return &unstructured.Unstructured{Object: raw}
+}
 
-	envOf := func(obj *unstructured.Unstructured, containerName string) []corev1.EnvVar {
-		deploy := &appsv1.Deployment{}
-		Expect(runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, deploy)).To(Succeed())
-		for _, c := range deploy.Spec.Template.Spec.Containers {
-			if c.Name == containerName {
-				return c.Env
-			}
-		}
-		return nil
+// envOf extracts the env vars from a named container in an unstructured Deployment.
+func envOf(obj *unstructured.Unstructured, containerName string) []corev1.EnvVar {
+	deploy := &appsv1.Deployment{}
+	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, deploy); err != nil {
+		panic(err)
 	}
+	for _, c := range deploy.Spec.Template.Spec.Containers {
+		if c.Name == containerName {
+			return c.Env
+		}
+	}
+	return nil
+}
+
+var _ = Describe("setDeploymentEnv", func() {
 
 	endpoint := corev1.EnvVar{Name: envOTLPEndpoint, Value: testOTLPEndpoint}
 
@@ -817,7 +846,7 @@ var _ = Describe("setDeploymentEnv", func() {
 	})
 
 	It("preserves env vars already on the container", func() {
-		existing := corev1.EnvVar{Name: "RUST_LOG", Value: "info"}
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: "info"}
 		deploy := newDeployment(corev1.Container{Name: nameRestService, Env: []corev1.EnvVar{existing}})
 		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeTrue())
 		Expect(envOf(deploy, nameRestService)).To(Equal([]corev1.EnvVar{existing, endpoint}))
@@ -845,7 +874,7 @@ var _ = Describe("setDeploymentEnv", func() {
 	})
 })
 
-Describe("reconcileTraceEnv", func() {
+var _ = Describe("reconcileTraceEnv", func() {
 	It("removes stale OTLP env vars when trace config is cleared", func() {
 		staleInsecure := corev1.EnvVar{Name: envOTLPInsecure, Value: valueTrue}
 		staleCert := corev1.EnvVar{Name: envOTLPCertificate, Value: "/old/ca.crt"}
@@ -860,7 +889,7 @@ Describe("reconcileTraceEnv", func() {
 	})
 
 	It("removes stale OTLP env vars when trace fields are unset", func() {
-		existing := corev1.EnvVar{Name: "RUST_LOG", Value: "info"}
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: "info"}
 		staleEndpoint := corev1.EnvVar{Name: envOTLPEndpoint, Value: "http://old:4317"}
 		staleInsecure := corev1.EnvVar{Name: envOTLPInsecure, Value: valueTrue}
 		deploy := newDeployment(corev1.Container{
@@ -897,7 +926,7 @@ Describe("reconcileTraceEnv", func() {
 
 	It("preserves non-OTLP env vars", func() {
 		existing := []corev1.EnvVar{
-			{Name: "RUST_LOG", Value: "debug"},
+			{Name: testEnvRustLog, Value: "debug"},
 			{Name: "DATABASE_URL", Value: "postgres://..."},
 		}
 		deploy := newDeployment(corev1.Container{Name: nameRestService, Env: existing})
