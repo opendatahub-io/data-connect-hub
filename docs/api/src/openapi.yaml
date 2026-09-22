@@ -484,29 +484,96 @@ paths:
         "404":
           $ref: "components/responses/NotFound.yaml"
 
-  /audit/data-connection-types:
-    servers:
-      - url: /api/v1alpha1
+  /flights:
+    x-internal: true
     post:
-      operationId: auditConnectionTypes
-      summary: Audit all connection types
+      operationId: createFlightService
+      summary: Register a flight service
       description: >
-        Queries the Flight service for supported connectors and updates
-        the status of all connection types accordingly.
-        This endpoint does not require the x-tenant-id header.
+        Registers a new Flight gRPC service. The server probes the
+        provided endpoint to discover supported connectors and triggers
+        a connection-type audit. Returns 503 if the flight service is
+        unreachable.
       x-internal: true
-      tags: [connection-types]
-      security:
-        - bearerAuth: []
+      tags: [flight-services]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "components/schemas/FlightService.yaml"
       responses:
-        "202":
-          description: Audit started
+        "201":
+          description: Flight service registered
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/FlightServiceResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
         "401":
           $ref: "components/responses/Unauthorized.yaml"
         "403":
           $ref: "components/responses/Forbidden.yaml"
         "503":
           $ref: "components/responses/ServiceUnavailable.yaml"
+
+  /flights/{id}:
+    x-internal: true
+    parameters:
+      - $ref: "#/components/parameters/resourceId"
+    patch:
+      operationId: patchFlightService
+      summary: Update a flight service
+      description: >
+        Partially updates a flight service using JSON Merge Patch (RFC 7396).
+        Supply only the fields you want to change; omitted fields are left
+        unchanged.
+      x-internal: true
+      tags: [flight-services]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/merge-patch+json:
+            schema:
+              $ref: "components/schemas/FlightService.yaml"
+      responses:
+        "200":
+          description: Flight service updated
+          content:
+            application/json:
+              schema:
+                $ref: "components/schemas/FlightServiceResource.yaml"
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
+    delete:
+      operationId: deleteFlightService
+      summary: Unregister a flight service
+      description: >
+        Removes a previously registered Flight service and triggers
+        a connection-type audit to update status.
+      x-internal: true
+      tags: [flight-services]
+      security: []
+      responses:
+        "204":
+          description: Flight service deleted
+        "400":
+          $ref: "components/responses/BadRequest.yaml"
+        "401":
+          $ref: "components/responses/Unauthorized.yaml"
+        "403":
+          $ref: "components/responses/Forbidden.yaml"
+        "404":
+          $ref: "components/responses/NotFound.yaml"
 
 components:
   securitySchemes:
@@ -560,5 +627,10 @@ tags:
      Connection types are typically created by the Data Connect Hub operator, but you can also create your own custom connection types.
      Connection types created by the operator are known as `global` connection types and are accessible by all tenants.
      Connection types created by a tenant are only accessible by that tenant.
+  - name: flight-services
+    x-internal: true
+    description: >
+     Flight service registration (internal). This requires separate RBAC roles and
+     should only be called by the Data Connect Hub operator.
   - name: test
     description: Test operations

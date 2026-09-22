@@ -60,11 +60,15 @@ type ServiceOverrides struct {
 	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 
 	// connectors configures individual data connectors.
-	// When omitted, all connectors are enabled with their default settings.
 	// +listType=map
 	// +listMapKey=name
 	// +optional
 	Connectors []ConnectorConfig `json:"connectors,omitempty"`
+}
+
+// FlightServiceConfig configures the Flight gRPC API deployment.
+type FlightServiceConfig struct {
+	ServiceOverrides `json:",inline"`
 }
 
 // DistributionStatus identifies the platform distribution context.
@@ -141,9 +145,9 @@ type DataConnectServiceSpec struct {
 	// +optional
 	RestService *ServiceOverrides `json:"restService,omitempty"`
 
-	// flightService configures the Flight gRPC API deployment
+	// flightService configures the Flight gRPC API deployment or deployments.
 	// +optional
-	FlightService *ServiceOverrides `json:"flightService,omitempty"`
+	FlightService *FlightServiceConfig `json:"flightService,omitempty"`
 
 	// tokenReviewAudiences sets the audiences for Kubernetes TokenReview
 	// authentication on both the flight service and the kube-rbac-proxy

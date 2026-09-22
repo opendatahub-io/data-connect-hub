@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Mirrors the prefix base/ applies to its own resources; a namePrefix at the
+# overlay root would instead re-prefix everything inherited from base.
+namePrefix: dch-
+
+resources:
+  - servicemonitor.yaml

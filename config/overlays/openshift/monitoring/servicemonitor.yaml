@@ -1,0 +1,17 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: servicemonitor
+  labels:
+    app.kubernetes.io/part-of: data-connect-hub
+    monitoring.opendatahub.io/scrape: "true"
+spec:
+  # Every resource the controller applies carries this label, so a single
+  # monitor covers all DCH services that expose a "metrics" port.
+  selector:
+    matchLabels:
+      dataconnecthub.opendatahub.io/managed-by: dataconnectservice
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s

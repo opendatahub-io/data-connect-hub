@@ -65,3 +65,49 @@ func TestXKSMetricsNetworkPolicyUsesHTTPPort(t *testing.T) {
 
 	t.Fatal("rendered XKS overlay did not contain the metrics NetworkPolicy")
 }
+
+// TestServiceMonitorOnlyInOpenShiftOverlay guards the split between the manifest
+// roots the controller renders: base/ must stay applicable to any cluster, while
+// the ServiceMonitor ships only in overlays/openshift.
+func TestServiceMonitorOnlyInOpenShiftOverlay(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate manifest test")
+	}
+	configRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "config"))
+
+	baseNames := renderKinds(t, filepath.Join(configRoot, "base"), "ServiceMonitor")
+	if len(baseNames) > 0 {
+		t.Fatalf("base renders ServiceMonitor(s) %v, want none", baseNames)
+	}
+
+	overlayNames := renderKinds(t, filepath.Join(configRoot, "overlays", "openshift"), "ServiceMonitor")
+	if len(overlayNames) != 1 || overlayNames[0] != "dch-servicemonitor" {
+		t.Fatalf("openshift overlay ServiceMonitors = %v, want [dch-servicemonitor]", overlayNames)
+	}
+
+	deployments := renderKinds(t, filepath.Join(configRoot, "overlays", "openshift"), "Deployment")
+	if len(deployments) != 2 {
+		t.Fatalf("openshift overlay Deployments = %v, want the two inherited from base", deployments)
+	}
+}
+
+// renderKinds renders the kustomization at path and returns the names of every
+// rendered resource of the given kind.
+func renderKinds(t *testing.T, path, kind string) []string {
+	t.Helper()
+
+	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), path)
+	if err != nil {
+		t.Fatalf("rendering %s: %v", path, err)
+	}
+
+	var names []string
+	for _, res := range resMap.Resources() {
+		if res.GetKind() == kind {
+			names = append(names, res.GetName())
+		}
+	}
+	return names
+}

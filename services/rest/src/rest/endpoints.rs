@@ -2,31 +2,31 @@ use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 
-use crate::clients::flight::FlightDataClient;
-use crate::state::audit::AuditContext;
-use crate::state::audit::audit_connection_type;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
-
 use actix_web::{HttpResponse, web};
 use arrow::array::{Array, AsArray};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
+use commons::api::errors::MetaStoreError;
+use commons::api::flight_discovery::FlightService;
+use commons::api::flight_discovery::FlightServiceResource;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
-
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::error;
 use tracing::info;
 
 use crate::rest::CreateConnectionRequest;
 use crate::rest::DataConnectionWithCreds;
+use crate::state::ApiService;
 
 #[derive(Clone)]
 pub struct ApiContext {
@@ -36,26 +36,6 @@ pub struct ApiContext {
 #[derive(Serialize)]
 struct HealthResponse {
     service: String,
-}
-
-pub struct ApiService {
-    meta_store: Arc<dyn MetaStore + Send + Sync>,
-    secret_store: Arc<dyn SecretStore + Send + Sync>,
-    flight_client: Arc<dyn FlightDataClient>,
-}
-
-impl ApiService {
-    pub fn new(
-        meta_store: Arc<dyn MetaStore + Send + Sync>,
-        secret_store: Arc<dyn SecretStore + Send + Sync>,
-        flight_client: Arc<dyn FlightDataClient>,
-    ) -> Self {
-        Self {
-            meta_store,
-            secret_store,
-            flight_client,
-        }
-    }
 }
 
 pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
@@ -217,13 +197,7 @@ pub async fn create_connection_type(
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
         .await?;
 
-    audit_connection_type(
-        ctx.tenant_id.as_str(),
-        service.flight_client.as_ref(),
-        &service.meta_store,
-        connection_type.clone(),
-    )
-    .await?;
+    audit_data_connection_types(service.as_ref()).await?;
 
     Ok(HttpResponse::Created().json(connection_type))
 }
@@ -250,13 +224,7 @@ pub async fn patch_connection_type(
         .update_data_connection_type(ctx.tenant_id.as_str(), id.as_str(), update_fn)
         .await?;
 
-    audit_connection_type(
-        ctx.tenant_id.as_str(),
-        service.flight_client.as_ref(),
-        &service.meta_store,
-        connection_type.clone(),
-    )
-    .await?;
+    audit_data_connection_types(service.as_ref()).await?;
 
     Ok(HttpResponse::Ok().json(connection_type))
 }
@@ -300,8 +268,10 @@ pub async fn get_binary_data(
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("get_binary_data: binary download for tenant {:?}", ctx.tenant_id);
 
+    let flight = flight_service_by_connection(service.as_ref(), ctx.tenant_id.as_str(), id.as_str()).await?;
+
     let batch_stream = service
-        .flight_client
+        .flight_client(flight.resource.internal_url.as_str())
         .download_binary(&ctx.tenant_id, &id, &query.path)
         .await?;
 
@@ -331,18 +301,87 @@ pub async fn get_binary_data(
         .streaming(body_stream))
 }
 
-pub async fn audit_connection_types(
+pub async fn create_flight_service(
     service: web::Data<ApiService>,
-    ctx: web::ReqData<ApiContext>,
+    body: web::Json<FlightService>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("audit_connection_types: for tenant {:?}", ctx.tenant_id);
-    audit_data_connection_types(
-        ctx.tenant_id.as_str(),
-        service.meta_store.clone(),
-        service.flight_client.as_ref(),
-    )
-    .await?;
-    Ok(HttpResponse::Accepted().finish())
+    info!("audit_connection_types");
+
+    let api_service = service.as_ref();
+    let mut flight = body.into_inner();
+
+    let connectors = service
+        .flight_client(&flight.internal_url)
+        .get_supported_connectors(&service.global_tenant_id)
+        .await?;
+
+    let connectors_names = connectors.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+
+    let flight_services = service.meta_store.get_all_flight_services().await?;
+
+    let existent_connectors = flight_services
+        .items
+        .iter()
+        .flat_map(|fs| fs.resource.supported_connectors.clone())
+        .collect::<HashSet<_>>();
+
+    let intersection = connectors_names
+        .iter()
+        .filter(|fs| existent_connectors.contains(&fs.to_string()))
+        .collect::<Vec<_>>();
+
+    if !intersection.is_empty() {
+        return Err(
+            ValidationError::ConnectorsAlreadyExists(format!("connectors already exists: {:?}", intersection)).into(),
+        );
+    }
+
+    flight.supported_connectors = connectors.into_iter().map(|c| c.name).collect();
+
+    let res = api_service.meta_store.create_flight_service(&flight).await?;
+
+    audit_data_connection_types(api_service).await?;
+    Ok(HttpResponse::Created().json(res))
+}
+
+pub async fn delete_flight_service(
+    service: web::Data<ApiService>,
+    parts: web::Path<String>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    let id = parts.into_inner();
+    info!("delete_flight_service: id={id}");
+
+    service.meta_store.delete_flight_service(&id).await?;
+    audit_data_connection_types(service.as_ref()).await?;
+
+    Ok(HttpResponse::NoContent().finish())
+}
+
+pub async fn patch_flight_service(
+    service: web::Data<ApiService>,
+    id: web::Path<String>,
+    body: web::Json<serde_json::Value>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    let id = id.into_inner();
+    info!("patch_flight_service:  {:?}", id);
+
+    let patch = body.into_inner();
+
+    let update_fn = Arc::new(move |service: FlightService| {
+        let mut value = serde_json::to_value(&service)
+            .map_err(|e| commons::api::errors::MetaStoreError::Serialization(e.to_string()))?;
+        json_patch::merge(&mut value, &patch);
+        info!("patch_flight_service: value={:?}", value);
+        let service = serde_json::from_value(value)
+            .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
+        Ok(service)
+    });
+
+    service.meta_store.update_flight_service(&id, update_fn).await?;
+
+    audit_data_connection_types(service.as_ref()).await?;
+
+    Ok(HttpResponse::NoContent().finish())
 }
 
 pub async fn check_existent_connection(
@@ -355,12 +394,7 @@ pub async fn check_existent_connection(
     let connection_id = id.into_inner();
     let tenant_id = ctx.tenant_id.clone();
 
-    let audit_ctx = AuditContext {
-        meta_store: service.meta_store.clone(),
-        secret_store: service.secret_store.clone(),
-        flight_client: service.flight_client.as_ref(),
-    };
-    audit_data_connection(tenant_id.as_str(), connection_id.as_str(), &audit_ctx).await?;
+    audit_data_connection(service.as_ref(), tenant_id.as_str(), connection_id.as_str()).await?;
 
     info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
@@ -373,8 +407,18 @@ pub async fn test_credentials(
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("test_credentials: for tenant {:?}", ctx.tenant_id);
 
+    let dct = service
+        .meta_store
+        .get_data_connection_type(ctx.tenant_id.as_str(), &body.data_connection_type_id)
+        .await?;
+
+    let flight = service
+        .meta_store
+        .get_flight_service_by_connector(&dct.resource.provider)
+        .await?;
+
     service
-        .flight_client
+        .flight_client(flight.resource.internal_url.as_str())
         .test_credentials(&ctx.tenant_id, &body)
         .await
         .map_err(|e| ValidationError::ConnectionCheckFailed(e.message().to_string()))?;
@@ -438,25 +482,46 @@ pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
 }
 
+async fn flight_service_by_connection(
+    service: &ApiService,
+    tenant_id: &str,
+    data_connection_id: &str,
+) -> Result<FlightServiceResource, MetaStoreError> {
+    let dc = service
+        .meta_store
+        .get_data_connection(tenant_id, data_connection_id)
+        .await?;
+
+    let dct = service
+        .meta_store
+        .get_data_connection_type(tenant_id, &dc.resource.data_connection_type_id)
+        .await?;
+
+    service
+        .meta_store
+        .get_flight_service_by_connector(&dct.resource.provider)
+        .await
+}
+
+// ------------------------------------------------------------
+// Tests
+// ------------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
-    use crate::clients::flight::{BinaryStream, FlightDataClient, SupportedConnector};
     use actix_web::{App, middleware, test, web};
-    use arrow::array::BinaryArray;
-    use arrow::record_batch::RecordBatch;
     use commons::api::ResourceList;
     use commons::api::connection_types::DataConnectionTypeResource;
     use commons::api::connections::CredentialsRef;
     use commons::api::connections::DataConnectionResource;
     use commons::api::connections::DataConnectionStatus;
-    use commons::api::creds::TestCredentials;
     use commons::api::errors::SecretStoreError;
     use commons::api::secret::Secret;
     use commons::api::storage::MetaStore;
     use commons::api::storage::MetaStoreReader;
     use commons::api::storage::SecretStore;
     use std::collections::HashMap;
-    use std::sync::{Mutex, RwLock};
+    use std::sync::RwLock;
 
     use super::*;
     use crate::rest::API_VERSION;
@@ -560,6 +625,97 @@ mod tests {
     }
 
     #[async_trait::async_trait]
+    impl commons::api::storage::FlightDiscoveryStore for StubMetaStore {
+        async fn create_flight_service(
+            &self,
+            flight_service: &commons::api::flight_discovery::FlightService,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>
+        {
+            Ok(commons::api::flight_discovery::FlightServiceResource {
+                metadata: commons::api::ResourceMetadata {
+                    id: "fs-1".to_string(),
+                    tenant_id: None,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    updated_at: "2026-01-01T00:00:00Z".to_string(),
+                },
+                resource: flight_service.clone(),
+            })
+        }
+        async fn get_all_flight_services(
+            &self,
+        ) -> Result<
+            commons::api::ResourceList<commons::api::flight_discovery::FlightServiceResource>,
+            commons::api::errors::MetaStoreError,
+        > {
+            Ok(commons::api::ResourceList {
+                total_count: 0,
+                items: vec![],
+            })
+        }
+        async fn get_flight_service_by_connector(
+            &self,
+            connector: &str,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>
+        {
+            Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                "flight service for connector '{connector}' not found"
+            )))
+        }
+        async fn get_flight_service(
+            &self,
+            id: &str,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>
+        {
+            if id == "fs-1" {
+                Ok(commons::api::flight_discovery::FlightServiceResource {
+                    metadata: commons::api::ResourceMetadata {
+                        id: "fs-1".to_string(),
+                        tenant_id: None,
+                        created_at: "2026-01-01T00:00:00Z".to_string(),
+                        updated_at: "2026-01-01T00:00:00Z".to_string(),
+                    },
+                    resource: commons::api::flight_discovery::FlightService {
+                        name: "flight-1".to_string(),
+                        namespace: "test-ns".to_string(),
+                        external_url: "http://flight:50051".to_string(),
+                        internal_url: "http://flight:50051".to_string(),
+                        supported_connectors: vec![],
+                        status: Default::default(),
+                    },
+                })
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "flight service '{id}' not found"
+                )))
+            }
+        }
+        async fn update_flight_service(
+            &self,
+            _: &str,
+            _: std::sync::Arc<
+                dyn Fn(
+                        commons::api::flight_discovery::FlightService,
+                    )
+                        -> Result<commons::api::flight_discovery::FlightService, commons::api::errors::MetaStoreError>
+                    + Send
+                    + Sync,
+            >,
+        ) -> Result<commons::api::flight_discovery::FlightServiceResource, commons::api::errors::MetaStoreError>
+        {
+            unimplemented!()
+        }
+        async fn delete_flight_service(&self, id: &str) -> Result<(), commons::api::errors::MetaStoreError> {
+            if id == "fs-1" {
+                Ok(())
+            } else {
+                Err(commons::api::errors::MetaStoreError::ResourceNotFound(format!(
+                    "flight service '{id}' not found"
+                )))
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
     impl MetaStore for StubMetaStore {
         async fn create_data_connection(
             &self,
@@ -654,7 +810,10 @@ mod tests {
         async fn get_all_data_connection_types(
             &self,
         ) -> Result<ResourceList<DataConnectionTypeResource>, commons::api::errors::MetaStoreError> {
-            unimplemented!()
+            Ok(ResourceList {
+                total_count: 0,
+                items: vec![],
+            })
         }
 
         async fn create_data_connection_type(
@@ -819,84 +978,13 @@ mod tests {
         }
     }
 
-    struct StubFlightClient {
-        supported_connectors: Vec<SupportedConnector>,
-        download_result: Mutex<Option<Result<Vec<RecordBatch>, tonic::Status>>>,
-    }
-
-    impl StubFlightClient {
-        fn unused() -> Self {
-            Self {
-                supported_connectors: vec![SupportedConnector {
-                    name: "postgres".to_string(),
-                    description: "PostgreSQL connector".to_string(),
-                }],
-                download_result: Mutex::new(None),
-            }
-        }
-
-        fn succeeding(batches: Vec<RecordBatch>) -> Self {
-            Self {
-                supported_connectors: vec![SupportedConnector {
-                    name: "postgres".to_string(),
-                    description: "PostgreSQL connector".to_string(),
-                }],
-                download_result: Mutex::new(Some(Ok(batches))),
-            }
-        }
-
-        fn failing(status: tonic::Status) -> Self {
-            Self {
-                supported_connectors: vec![SupportedConnector {
-                    name: "postgres".to_string(),
-                    description: "PostgreSQL connector".to_string(),
-                }],
-                download_result: Mutex::new(Some(Err(status))),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl FlightDataClient for StubFlightClient {
-        async fn get_supported_connectors(&self, _: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
-            Ok(self.supported_connectors.clone())
-        }
-        async fn check_data_connection(&self, _: &str, _: &str) -> Result<(), tonic::Status> {
-            Ok(())
-        }
-        async fn test_credentials(&self, _: &str, _: &TestCredentials) -> Result<(), tonic::Status> {
-            Ok(())
-        }
-        async fn download_binary(&self, _: &str, _: &str, _: &str) -> Result<BinaryStream, tonic::Status> {
-            let result = self
-                .download_result
-                .lock()
-                .unwrap()
-                .take()
-                .expect("download_binary called but no result configured");
-            match result {
-                Ok(batches) => {
-                    let stream = futures::stream::iter(batches.into_iter().map(Ok));
-                    Ok(Box::pin(stream))
-                },
-                Err(status) => Err(status),
-            }
-        }
-    }
-
-    fn make_binary_batch(data: &[u8]) -> RecordBatch {
-        RecordBatch::try_from_iter(vec![("data", Arc::new(BinaryArray::from(vec![data])) as _)]).unwrap()
-    }
-
     fn test_service() -> web::Data<ApiService> {
-        test_service_with_flight(Arc::new(StubFlightClient::unused()))
-    }
-
-    fn test_service_with_flight(flight_client: Arc<dyn FlightDataClient>) -> web::Data<ApiService> {
         web::Data::new(ApiService::new(
             Arc::new(StubMetaStore),
             Arc::new(StubSecretStore::new()),
-            flight_client,
+            None,
+            None,
+            "test-tenant".to_string(),
         ))
     }
 
@@ -1380,152 +1468,6 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_get_binary_data_happy_path() {
-        let batch = make_binary_batch(b"hello world");
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::succeeding(vec![batch])));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=models/model.bin"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 200);
-        assert_eq!(resp.headers().get("content-type").unwrap(), "application/octet-stream");
-        assert_eq!(
-            resp.headers().get("content-disposition").unwrap(),
-            "attachment; filename=\"model.bin\""
-        );
-        let body = test::read_body(resp).await;
-        assert_eq!(body.as_ref(), b"hello world");
-    }
-
-    #[actix_web::test]
-    async fn test_get_binary_data_multiple_batches() {
-        let batches = vec![make_binary_batch(b"chunk1"), make_binary_batch(b"chunk2")];
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::succeeding(batches)));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=data/file.bin"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 200);
-        let body = test::read_body(resp).await;
-        assert_eq!(body.as_ref(), b"chunk1chunk2");
-    }
-
-    #[actix_web::test]
-    async fn test_get_binary_data_not_found() {
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::not_found(
-            "file not found",
-        ))));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=missing/file.bin"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 404);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "not_found");
-        assert_eq!(body["message"], "file not found");
-    }
-
-    #[actix_web::test]
-    async fn test_get_binary_data_unsupported_connector() {
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::unimplemented(
-            "binary reads are not supported for this connector",
-        ))));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 501);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "unsupported_operation");
-    }
-
-    #[actix_web::test]
-    async fn test_get_binary_data_flight_unavailable() {
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::unavailable(
-            "flight service unavailable",
-        ))));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 503);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "connection");
-    }
-
-    #[actix_web::test]
-    async fn test_get_binary_data_disabled_connector() {
-        let svc = test_service_with_flight(Arc::new(StubFlightClient::failing(tonic::Status::internal(
-            "connector configuration error: no connector registered for provider 'sqlite'",
-        ))));
-        let app = test::init_service(
-            App::new()
-                .app_data(svc)
-                .app_data(query_config())
-                .configure(test_app_config),
-        )
-        .await;
-        let req = test::TestRequest::get()
-            .uri(&api_path("/connections/conn-1/binary?path=some/path"))
-            .insert_header(("x-tenant-id", "test-tenant"))
-            .to_request();
-        let resp = test::call_service(&app, req).await;
-
-        assert_eq!(resp.status(), 500);
-        let body: serde_json::Value = test::read_body_json(resp).await;
-        assert_eq!(body["code"], "flight_service_error");
-        assert_eq!(
-            body["message"],
-            "connector configuration error: no connector registered for provider 'sqlite'"
-        );
-    }
-
-    #[actix_web::test]
     async fn test_patch_connection_type_replace_name() {
         let app = test::init_service(
             App::new()
@@ -1695,5 +1637,89 @@ mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 404);
+    }
+
+    fn discovery_path(path: &str) -> String {
+        format!("/api/{API_VERSION}/discovery{path}")
+    }
+
+    fn test_discovery_app_config(cfg: &mut web::ServiceConfig) {
+        cfg.service(
+            web::scope(&format!("/api/{API_VERSION}/discovery"))
+                .route("/flights", web::post().to(create_flight_service))
+                .route("/flights/{id}", web::delete().to(delete_flight_service)),
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_create_flight_service_unreachable() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_discovery_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&discovery_path("/flights"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "flight-1",
+                "namespace": "test-ns",
+                "external_url": "http://127.0.0.1:1",
+                "internal_url": "http://127.0.0.1:1",
+                "status": { "ready": false }
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 503);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "connection");
+    }
+
+    #[actix_web::test]
+    async fn test_create_flight_service_invalid_body() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_discovery_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&discovery_path("/flights"))
+            .insert_header(("content-type", "application/json"))
+            .set_payload("{}")
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_json");
+    }
+
+    #[actix_web::test]
+    async fn test_delete_flight_service() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_discovery_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri(&discovery_path("/flights/fs-1"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+    }
+
+    #[actix_web::test]
+    async fn test_delete_flight_service_not_found() {
+        let app = test::init_service(App::new().app_data(test_service()).configure(test_discovery_app_config)).await;
+        let req = test::TestRequest::delete()
+            .uri(&discovery_path("/flights/nonexistent"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 404);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "not_found");
     }
 }

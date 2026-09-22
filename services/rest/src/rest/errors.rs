@@ -31,14 +31,14 @@ pub enum ValidationError {
     DeserializationError(String),
     #[error("Invalid tenant ID")]
     InvalidTenantId,
-    #[error("Invalid data connection type")]
-    InvalidDataConnectionType,
     #[error("Invalid secret")]
     InvalidSecret,
     #[error("{0}")]
     UnsupportedProvider(String),
     #[error("Flight service error: {0}")]
     FlightServiceError(String),
+    #[error("Flight service not found: {0}")]
+    FlightServiceNotFound(String),
     #[error("Missing field: {0}")]
     MissingField(String),
     #[error("Connection check failed: {0}")]
@@ -47,6 +47,14 @@ pub enum ValidationError {
     CredentialsCheckFailed(String),
     #[error("Status update failed: {0}")]
     StatusUpdateFailed(String),
+    #[error("Invalid data connection type: {0}")]
+    InvalidDataConnectionType(String),
+    #[error("Invalid data connection ID: {0}")]
+    InvalidDataConnectionId(String),
+    #[error("Cannot get data connection types")]
+    CannotGetDataConnectionTypes,
+    #[error("Connectors already exists: {0}")]
+    ConnectorsAlreadyExists(String),
 }
 
 impl fmt::Display for RestErrorResponse {
@@ -196,6 +204,11 @@ impl From<EndpointError> for RestErrorResponse {
 impl From<ValidationError> for RestErrorResponse {
     fn from(err: ValidationError) -> Self {
         match err {
+            ValidationError::FlightServiceNotFound(error) => RestErrorResponse {
+                code: "flight_service_not_found".to_string(),
+                message: error,
+                status: 404,
+            },
             ValidationError::DeserializationError(error) => RestErrorResponse {
                 code: "deserialization_error".to_string(),
                 message: error,
@@ -204,11 +217,6 @@ impl From<ValidationError> for RestErrorResponse {
             ValidationError::InvalidTenantId => RestErrorResponse {
                 code: "invalid_tenant_id".to_string(),
                 message: "Invalid tenant ID".to_string(),
-                status: 400,
-            },
-            ValidationError::InvalidDataConnectionType => RestErrorResponse {
-                code: "invalid_data_connection_type".to_string(),
-                message: "Invalid data connection type".to_string(),
                 status: 400,
             },
             ValidationError::InvalidSecret => RestErrorResponse {
@@ -245,6 +253,26 @@ impl From<ValidationError> for RestErrorResponse {
                 code: "status_update_failed".to_string(),
                 message: error,
                 status: 500,
+            },
+            ValidationError::InvalidDataConnectionType(error) => RestErrorResponse {
+                code: "invalid_data_connection_type".to_string(),
+                message: error,
+                status: 400,
+            },
+            ValidationError::InvalidDataConnectionId(error) => RestErrorResponse {
+                code: "invalid_data_connection_id".to_string(),
+                message: error,
+                status: 400,
+            },
+            ValidationError::CannotGetDataConnectionTypes => RestErrorResponse {
+                code: "cannot_get_data_connection_types".to_string(),
+                message: "Cannot get data connection types".to_string(),
+                status: 500,
+            },
+            ValidationError::ConnectorsAlreadyExists(error) => RestErrorResponse {
+                code: "connectors_already_exists".to_string(),
+                message: error,
+                status: 400,
             },
         }
     }

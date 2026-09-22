@@ -1,5 +1,18 @@
 type: object
-required: [capabilities]
+required: [flight_ready]
 properties:
-  capabilities:
-    $ref: "Capabilities.yaml"
+  flight_ready:
+    type: boolean
+    description: Whether a Flight gRPC service supports this connection type
+  flight_url:
+    type: string
+    nullable: true
+    description: URL of the Flight service that supports this connection type
+  message:
+    type: string
+    nullable: true
+    description: Optional human-readable status message
+  updated_at:
+    type: string
+    nullable: true
+    description: Timestamp of the last status update

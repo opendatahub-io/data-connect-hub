@@ -44,15 +44,13 @@ impl DataConnectionType {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
-pub struct Capabilities {
-    pub flight: bool,
-    pub rest: bool,
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct DataConnectionTypeStatus {
-    pub capabilities: Capabilities,
+    pub flight_ready: bool,
+    pub flight_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+    pub updated_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -50,3 +50,13 @@ authorization:
                 apiGroup: dataconnecthub.opendatahub.io
                 resource: data-connection-types
                 verb: "{{.FromMethod}}"
+
+    - path: /api/v1alpha1/data/flights/*
+      mappings:
+        - methods: [post,patch, delete]
+          resources:
+            - resourceAttributes:
+                namespace: "{{.FromHeader}}"
+                apiGroup: dataconnecthub.opendatahub.io
+                resource: flight-services
+                verb: "{{.FromMethod}}"

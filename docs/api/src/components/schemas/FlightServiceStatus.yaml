@@ -1,0 +1,6 @@
+type: object
+required: [ready]
+properties:
+  ready:
+    type: boolean
+    description: Whether the Flight service is reachable and healthy

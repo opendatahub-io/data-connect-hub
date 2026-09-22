@@ -1,0 +1,6 @@
+# These exceptions cover the profile-dispatch branches in the centralized
+# OpenShift TLS resolver. Old and Custom are valid administrator-selected
+# profiles under StrictAllComponents; they are not hardcoded server defaults.
+exceptions:
+  - tls-profile-old:dc-controller/internal/tls/profile.go
+  - tls-profile-custom:dc-controller/internal/tls/profile.go

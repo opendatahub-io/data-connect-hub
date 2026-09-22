@@ -49,7 +49,8 @@ var _ = Describe("DataConnectService Controller", func() {
 		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
 
 		// Kustomize adds this prefix to all resource names.
-		np = "dch-"
+		np                 = "dch-"
+		flightResourceName = np + resourceName + "-flight"
 	)
 
 	ctx := context.Background()
@@ -79,19 +80,19 @@ var _ = Describe("DataConnectService Controller", func() {
 	}
 
 	cleanupOperatorResources := func() {
-		for _, name := range []string{np + nameRestService, np + nameFlightService} {
+		for _, name := range []string{np + nameRestService, flightResourceName} {
 			_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 			_ = k8sClient.Delete(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 			_ = k8sClient.Delete(ctx, &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		for _, name := range []string{
 			np + nameRestService + "-config",
-			np + nameFlightService + "-config",
+			flightResourceName + "-config",
 			np + nameRestService + "-kube-rbac-proxy-config",
 		} {
 			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
-		for _, name := range []string{np + nameDataConnectHub + "-sa", np + nameFlightService + "-sa"} {
+		for _, name := range []string{np + nameDataConnectHub + "-sa", flightResourceName + "-sa"} {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: targetNamespace}})
@@ -140,7 +141,7 @@ var _ = Describe("DataConnectService Controller", func() {
 				return
 			}
 
-			for _, name := range []string{np + nameRestService, np + nameFlightService} {
+			for _, name := range []string{np + nameRestService, flightResourceName} {
 				deploy := &appsv1.Deployment{}
 				if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: targetNamespace}, deploy); err == nil {
 					simulateDeploymentReady(name)
@@ -200,7 +201,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
 			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(testFlightImage))
 		})
 
@@ -212,7 +213,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(restSvc.Spec.Ports[0].Port).To(Equal(int32(8443)))
 
 			flightSvc := &corev1.Service{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService, Namespace: targetNamespace}, flightSvc)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightSvc)).To(Succeed())
 			Expect(flightSvc.Spec.Ports[0].Port).To(Equal(int32(8443)))
 		})
 
@@ -252,7 +253,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionFalse))
 
-			for _, name := range []string{np + nameRestService, np + nameFlightService} {
+			for _, name := range []string{np + nameRestService, flightResourceName} {
 				simulateDeploymentReady(name)
 			}
 			result, err = r.Reconcile(ctx, req)
@@ -379,7 +380,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			reconcileUntilReady()
 
 			cm := &corev1.ConfigMap{}
-			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
 			toml := cm.Data["config.toml"]
 			Expect(toml).To(ContainSubstring(`token_review_audiences = ["https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id"]`))
 		})
@@ -540,7 +541,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 
 			flightDeploy := &appsv1.Deployment{}
-			err = k8sClient.Get(ctx, types.NamespacedName{Name: np + nameFlightService, Namespace: targetNamespace}, flightDeploy)
+			err = k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 		})
 	})

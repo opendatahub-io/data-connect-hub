@@ -129,7 +129,12 @@ Connection types (`/api/v1alpha1/data/connection-types`):
 Other:
 
 - `POST /api/v1alpha1/data/test/credentials` — test credentials without persisting
-- `POST /api/v1alpha1/audit/data-connection-types` — trigger flight-service audit of all connection types
+
+Flight services (internal, `/api/v1alpha1/data/flights`):
+
+- `POST /api/v1alpha1/data/flights` — register a flight service (discovers supported connectors, triggers connection-type audit)
+- `PATCH /api/v1alpha1/data/flights/{id}` — update a flight service (JSON Merge Patch)
+- `DELETE /api/v1alpha1/data/flights/{id}` — unregister a flight service
 
 ## Container Builds
 

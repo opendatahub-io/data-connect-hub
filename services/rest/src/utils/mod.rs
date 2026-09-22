@@ -7,23 +7,14 @@ use std::collections::HashMap;
 pub struct Server {
     pub address: String,
     pub port: u16,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct FlightService {
-    pub address: String,
-    pub port: u16,
-    #[serde(rename = "ca-cert")]
-    pub ca_cert: Option<String>,
     #[serde(rename = "sa-token-file")]
     pub sa_token_file: Option<String>,
 }
 
-impl FlightService {
-    pub fn endpoint(&self) -> String {
-        let scheme = if self.ca_cert.is_some() { "https" } else { "http" };
-        format!("{scheme}://{}:{}", self.address, self.port)
-    }
+#[derive(Debug, Deserialize, Clone)]
+pub struct FlightService {
+    #[serde(rename = "ca-cert")]
+    pub ca_cert: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -60,8 +51,7 @@ mod tests {
             tenant-id = "opendatahub"
 
             [flight-service]
-            address = "127.0.0.1"
-            port = 50051
+            ca-cert = "/etc/tls/flight/ca.crt"
         "#;
 
         let config = Config::builder()
@@ -72,10 +62,10 @@ mod tests {
         let server_config: ServerConfig = config.try_deserialize().unwrap();
         assert_eq!(server_config.server.address, "127.0.0.1");
         assert_eq!(server_config.server.port, 8080);
-        assert_eq!(server_config.flight_service.address, "127.0.0.1");
-        assert_eq!(server_config.flight_service.port, 50051);
-        assert!(server_config.flight_service.ca_cert.is_none());
-        assert_eq!(server_config.flight_service.endpoint(), "http://127.0.0.1:50051");
+        assert_eq!(
+            server_config.flight_service.ca_cert,
+            Some("/etc/tls/flight/ca.crt".to_string())
+        );
     }
 
     #[test]

@@ -6,6 +6,8 @@ use crate::api::connection_types::{DataConnectionType, DataConnectionTypeResourc
 use crate::api::connections::DataConnectionStatus;
 use crate::api::connections::{DataConnection, DataConnectionResource};
 use crate::api::errors::{MetaStoreError, SecretStoreError};
+use crate::api::flight_discovery::FlightService;
+use crate::api::flight_discovery::FlightServiceResource;
 use crate::api::secret::Secret;
 
 #[async_trait::async_trait]
@@ -33,9 +35,37 @@ pub trait MetaStoreReader {
     ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError>;
 }
 
+#[async_trait::async_trait]
+pub trait FlightDiscoveryStore {
+    /// Creates a new flight service.
+    async fn create_flight_service(
+        &self,
+        flight_service: &FlightService,
+    ) -> Result<FlightServiceResource, MetaStoreError>;
+
+    /// Retrieves all flight services.
+    async fn get_all_flight_services(&self) -> Result<ResourceList<FlightServiceResource>, MetaStoreError>;
+
+    /// Retrieves a flight service by connector.
+    async fn get_flight_service_by_connector(&self, connector: &str) -> Result<FlightServiceResource, MetaStoreError>;
+
+    /// Retrieves a flight service by namespace and name.
+    async fn get_flight_service(&self, id: &str) -> Result<FlightServiceResource, MetaStoreError>;
+
+    /// Updates the status of a flight service by namespace and name.
+    async fn update_flight_service(
+        &self,
+        id: &str,
+        update_fn: Arc<dyn Fn(FlightService) -> Result<FlightService, MetaStoreError> + Send + Sync>,
+    ) -> Result<FlightServiceResource, MetaStoreError>;
+
+    /// Deletes a flight service by id.
+    async fn delete_flight_service(&self, id: &str) -> Result<(), MetaStoreError>;
+}
+
 /// Persistent store for data connection and data connection type metadata.
 #[async_trait::async_trait]
-pub trait MetaStore: MetaStoreReader {
+pub trait MetaStore: MetaStoreReader + FlightDiscoveryStore {
     /// Creates a new data connection for the given tenant.
     async fn create_data_connection(
         &self,

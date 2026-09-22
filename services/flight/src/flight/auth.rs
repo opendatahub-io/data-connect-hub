@@ -11,16 +11,21 @@ use tower::{Layer, Service};
 use tracing::{debug, warn};
 
 const HEALTH_PATH_PREFIX: &str = "/grpc.health.v1.Health/";
+const DO_ACTION_PATH: &str = "/arrow.flight.protocol.FlightService/DoAction";
 const BEARER_PREFIX: &str = "Bearer ";
 
 #[derive(Clone)]
 pub struct AuthLayer {
     auth_service: Arc<KubeAuthClient>,
+    discovery_service_account: String,
 }
 
 impl AuthLayer {
-    pub fn new(auth_service: Arc<KubeAuthClient>) -> Self {
-        Self { auth_service }
+    pub fn new(auth_service: Arc<KubeAuthClient>, discovery_service_account: String) -> Self {
+        Self {
+            auth_service,
+            discovery_service_account,
+        }
     }
 }
 
@@ -31,6 +36,7 @@ impl<S> Layer<S> for AuthLayer {
         AuthMiddleware {
             inner,
             auth_service: self.auth_service.clone(),
+            discovery_service_account: self.discovery_service_account.clone(),
         }
     }
 }
@@ -39,6 +45,7 @@ impl<S> Layer<S> for AuthLayer {
 pub struct AuthMiddleware<S> {
     inner: S,
     auth_service: Arc<KubeAuthClient>,
+    discovery_service_account: String,
 }
 
 impl<S, ReqBody, ResBody> Service<http::Request<ReqBody>> for AuthMiddleware<S>
@@ -61,6 +68,7 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
         let auth_service = self.auth_service.clone();
+        let discovery_service_account = self.discovery_service_account.clone();
 
         Box::pin(async move {
             let path = req.uri().path();
@@ -78,19 +86,12 @@ where
                 },
             };
 
-            let tenant_id = match req
+            let tenant_id = req
                 .headers()
                 .get(X_TENANT_ID)
                 .and_then(|v| v.to_str().ok())
                 .filter(|value| !value.is_empty())
-            {
-                Some(value) => value.to_string(),
-                None => {
-                    return Ok(grpc_error_response(Status::permission_denied(
-                        "x-tenant-id header is required",
-                    )));
-                },
-            };
+                .map(str::to_string);
 
             let auth_info = match auth_service.authenticate(&token).await {
                 Ok(info) => info,
@@ -99,7 +100,15 @@ where
                 },
             };
 
-            if let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await {
+            if tenant_id.is_none() && (path != DO_ACTION_PATH || auth_info.username != discovery_service_account) {
+                return Ok(grpc_error_response(Status::permission_denied(
+                    "x-tenant-id header is required",
+                )));
+            }
+
+            if let Some(tenant_id) = tenant_id
+                && let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await
+            {
                 return Ok(grpc_error_response(auth_error_to_status(&e)));
             }
 

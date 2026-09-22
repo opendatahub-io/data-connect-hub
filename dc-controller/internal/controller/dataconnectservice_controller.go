@@ -76,8 +76,11 @@ const (
 	envOTLPInsecure    = "OTEL_EXPORTER_OTLP_INSECURE"
 	envOTLPCertificate = "OTEL_EXPORTER_OTLP_CERTIFICATE"
 
-	kindDeployment = "Deployment"
-	kindConfigMap  = "ConfigMap"
+	kindDeployment         = "Deployment"
+	kindConfigMap          = "ConfigMap"
+	kindService            = "Service"
+	kindServiceAccount     = "ServiceAccount"
+	kindClusterRoleBinding = "ClusterRoleBinding"
 
 	valueTrue  = "true"
 	valueFalse = "false"
@@ -166,13 +169,14 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;list;watch;create;update;patch;delete;post;put
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types;flight-services,verbs=get;list;watch;create;update;patch;delete;post;put
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
@@ -352,11 +356,17 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
 ) error {
-	basePath := filepath.Join(r.ManifestsPath, "base")
+	manifestPath := filepath.Join(r.ManifestsPath, "base")
+	if r.openShiftMonitoringAvailable(ctx) {
+		manifestPath = filepath.Join(r.ManifestsPath, "overlays", "openshift")
+	}
 
 	gw := r.resolveGateway(cr, platCfg)
 	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
-	flightPatches := buildServicePatches(nameFlightService, cr.Spec.FlightService)
+	var flightPatches []kustypes.Patch
+	if cr.Spec.FlightService != nil {
+		flightPatches = buildServicePatches(nameFlightService, &cr.Spec.FlightService.ServiceOverrides)
+	}
 	gwPatches := buildGatewayPatches(&gw)
 
 	patches := make([]kustypes.Patch, 0, len(restPatches)+len(flightPatches)+len(gwPatches))
@@ -364,7 +374,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	patches = append(patches, flightPatches...)
 	patches = append(patches, gwPatches...)
 
-	resources, err := renderKustomization(basePath, patches, nil)
+	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
@@ -372,12 +382,17 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, nameRestService, r.RestImage)
 	setDeploymentImage(resources, nameKubeRbacProxy, r.KubeRbacProxyImage)
 
+	resources = renderFlightService(resources, cr.Name)
+
 	setDeploymentImage(resources, nameFlightService, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace)
-	if err := setConfigMapFlightConnectorSettings(resources, cr.Spec.FlightService); err != nil {
-		return fmt.Errorf("setting flight-service connector configuration: %w", err)
+	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightServiceResourceName(cr.Name))
+	if cr.Spec.FlightService != nil {
+		if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
+			return fmt.Errorf("setting flight-service connector configuration: %w", err)
+		}
 	}
 
 	if traceVars := traceEnv(cr.Spec.Trace); len(traceVars) > 0 {
@@ -394,9 +409,35 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateDeploymentWithConfigHash(resources, nameFlightService, nameFlightService+"-config")
+	annotateFlightDeploymentsWithConfigHash(resources)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
+}
+
+// openShiftMonitoringAvailable reports whether this is an OpenShift cluster on
+// which the prometheus-operator ServiceMonitor API is served, i.e. whether the
+// overlays/openshift manifests can be applied. Detection goes through discovery
+// rather than the platform ConfigMap because Distribution defaults to
+// "Standalone" when that ConfigMap is absent, which would silently drop metrics.
+func (r *DataConnectServiceReconciler) openShiftMonitoringAvailable(ctx context.Context) bool {
+	return r.kindServed(ctx, "config.openshift.io", "v1", "ClusterVersion") &&
+		r.kindServed(ctx, "monitoring.coreos.com", "v1", "ServiceMonitor")
+}
+
+// kindServed reports whether the cluster serves the given group/version/kind.
+// The version is pinned rather than left to discovery so that the check matches
+// the apiVersion of the manifests that will be applied. The RESTMapper reloads
+// discovery for the group on a miss, so a CRD installed after start-up is picked
+// up on a later reconcile.
+func (r *DataConnectServiceReconciler) kindServed(ctx context.Context, group, version, kind string) bool {
+	_, err := r.RESTMapper().RESTMapping(schema.GroupKind{Group: group, Kind: kind}, version)
+	if err == nil {
+		return true
+	}
+	if !meta.IsNoMatchError(err) {
+		logf.FromContext(ctx).Error(err, "checking API availability", "group", group, "version", version, "kind", kind)
+	}
+	return false
 }
 
 // ensureInitDataConnectionTypes reads connection type definitions from the

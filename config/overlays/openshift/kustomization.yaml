@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Base plus the resources that only apply to OpenShift clusters running the
+# prometheus-operator APIs. The controller renders this root instead of base/
+# when both are detected; see openShiftMonitoringAvailable in the dc-controller.
+resources:
+  - ../../base
+  - monitoring

@@ -1,0 +1,21 @@
+type: object
+required: [name, namespace, external_url, internal_url, status]
+properties:
+  name:
+    type: string
+    description: Name of the Flight service
+    example: flight-service
+  namespace:
+    type: string
+    description: Kubernetes namespace where the Flight service runs
+    example: dch-services
+  external_url:
+    type: string
+    description: Externally reachable URL of the Flight service
+    example: "grpcs://flight.apps.example.com:443"
+  internal_url:
+    type: string
+    description: Cluster-internal URL of the Flight service
+    example: "grpcs://flight-service.dch-services.svc:50051"
+  status:
+    $ref: "FlightServiceStatus.yaml"

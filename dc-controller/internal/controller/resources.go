@@ -48,14 +48,22 @@ import (
 
 // --- Kustomize rendering ---
 
-func renderKustomization(diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
+// renderKustomization builds the kustomization at diskPath. The whole of
+// rootPath is staged in memory first, not just diskPath, so that a kustomization
+// may reference resources outside its own directory (overlays/openshift pulls in
+// ../../base). rootPath must contain diskPath.
+func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
 	absPath, err := filepath.Abs(diskPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path %s: %w", diskPath, err)
 	}
+	absRoot, err := filepath.Abs(rootPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolving root %s: %w", rootPath, err)
+	}
 
 	memFS := filesys.MakeFsInMemory()
-	if err := copyDirToMemFS(absPath, memFS); err != nil {
+	if err := copyDirToMemFS(absRoot, memFS); err != nil {
 		return nil, fmt.Errorf("copying manifests to memory: %w", err)
 	}
 
@@ -241,6 +249,61 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 	return patches
 }
 
+func flightServiceResourceName(crName string) string {
+	return crName + "-flight"
+}
+
+func renderFlightService(resources []*unstructured.Unstructured, crName string) []*unstructured.Unstructured {
+	serviceName := flightServiceResourceName(crName)
+	for _, obj := range resources {
+		if isFlightServiceResource(obj) {
+			renameFlightServiceResource(obj, serviceName)
+			continue
+		}
+		if obj.GetKind() == "HTTPRoute" {
+			obj.SetName(crName + "-route")
+			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
+		}
+	}
+	return resources
+}
+
+func isFlightServiceResource(obj *unstructured.Unstructured) bool {
+	name := obj.GetName()
+	switch obj.GetKind() {
+	case kindDeployment, kindService, kindConfigMap, kindServiceAccount, "NetworkPolicy":
+		return strings.Contains(name, nameFlightService)
+	case kindClusterRoleBinding:
+		return strings.HasSuffix(name, "flight-auth-delegator")
+	default:
+		return false
+	}
+}
+
+func renameFlightServiceResource(obj *unstructured.Unstructured, serviceName string) {
+	content := replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
+	obj.Object = content
+	if obj.GetKind() == kindClusterRoleBinding {
+		obj.SetName(strings.Replace(obj.GetName(), "flight-auth-delegator", serviceName+"-auth-delegator", 1))
+	}
+}
+
+func replaceStringValue(value any, old, new string) any {
+	switch value := value.(type) {
+	case string:
+		return strings.ReplaceAll(value, old, new)
+	case map[string]any:
+		for key, child := range value {
+			value[key] = replaceStringValue(child, old, new)
+		}
+	case []any:
+		for i, child := range value {
+			value[i] = replaceStringValue(child, old, new)
+		}
+	}
+	return value
+}
+
 func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -255,7 +318,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 			if !ok {
 				continue
 			}
-			if name, ok := container["name"].(string); ok && name == containerName {
+			if name, ok := container["name"].(string); ok && (name == containerName || strings.HasPrefix(name, containerName+"-")) {
 				container["image"] = image
 				containers[i] = container
 			}
@@ -264,10 +327,10 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 	}
 }
 
-func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace string) {
+func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) {
 	var flightSvcName string
 	for _, obj := range resources {
-		if obj.GetKind() == "Service" && strings.HasSuffix(obj.GetName(), nameFlightService) {
+		if obj.GetKind() == "Service" && strings.HasSuffix(obj.GetName(), serviceName) {
 			flightSvcName = obj.GetName()
 			break
 		}
@@ -450,6 +513,41 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 	return vars
 }
 
+func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace string) {
+	var restServiceAccount string
+	for _, obj := range resources {
+		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
+			restServiceAccount = obj.GetName()
+			break
+		}
+	}
+	if restServiceAccount == "" {
+		return
+	}
+
+	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		toml := data["config.toml"]
+		if !strings.Contains(toml, "[auth]") {
+			continue
+		}
+		data["config.toml"] = strings.Replace(
+			toml,
+			"[auth]\n",
+			fmt.Sprintf("[auth]\ndiscovery_service_account = %q\n", identity),
+			1,
+		)
+		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+	}
+}
+
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
 	if gw == nil {
 		return nil
@@ -479,10 +577,10 @@ spec:
 // creating the Deployment first produces pods without imagePullSecrets.
 func resourcePriority(kind string) int {
 	switch kind {
-	case "ServiceAccount":
+	case kindServiceAccount:
 		return 0
 	case "ConfigMap", "Secret", "Service", "NetworkPolicy",
-		"ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding":
+		"ClusterRole", kindClusterRoleBinding, "Role", "RoleBinding":
 		return 1
 	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
 		return 2
@@ -506,7 +604,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 	for _, obj := range resources {
 		obj.SetNamespace(namespace)
 
-		if obj.GetKind() == "ClusterRoleBinding" {
+		if obj.GetKind() == kindClusterRoleBinding {
 			patchClusterRoleBindingSubjects(obj, namespace)
 		}
 
@@ -630,7 +728,7 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 		if !ok {
 			continue
 		}
-		if kind, _ := sub["kind"].(string); kind == "ServiceAccount" {
+		if kind, _ := sub["kind"].(string); kind == kindServiceAccount {
 			sub["namespace"] = namespace
 			subjects[i] = sub
 		}
@@ -640,6 +738,7 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 
 func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) bool {
 	const key = "token_review_audiences"
+	updated := false
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
@@ -694,9 +793,9 @@ func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []s
 
 		data["config.toml"] = strings.Join(result, "\n")
 		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
-		return true
+		updated = true
 	}
-	return false
+	return updated
 }
 
 func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {
@@ -775,6 +874,16 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, de
 		}
 		ann["dataconnecthub/config-hash"] = configHash
 		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
+	}
+}
+
+func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured) {
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) || !strings.HasSuffix(obj.GetName(), "-config") {
+			continue
+		}
+		serviceName := strings.TrimSuffix(obj.GetName(), "-config")
+		annotateDeploymentWithConfigHash(resources, serviceName, obj.GetName())
 	}
 }
 
