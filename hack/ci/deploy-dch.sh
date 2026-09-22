@@ -87,6 +87,10 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 done
 
+kubectl create configmap dch-rest-service-ca -n "$CI_CONTROLLER_NAMESPACE" \
+    --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_REST_SERVICE_NAME}-tls.crt" \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
 # Flight service CA configmap (rest-to-flight mTLS)
 kubectl create configmap dch-flight-service-ca -n "$CI_SVC_NAMESPACE" \
     --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_FLIGHT_SERVICE_NAME}-tls.crt" \
@@ -112,7 +116,9 @@ helm upgrade --install dc-controller "$CI_REPO_ROOT/dc-controller/charts" \
     --set "controllerManager.image.tag=${controller_tag}" \
     --set "relatedImages.flightService=${CI_FLIGHT_IMAGE}" \
     --set "relatedImages.restService=${CI_REST_IMAGE}" \
-    --set "relatedImages.kubeRbacProxy=${CI_KUBE_RBAC_PROXY_IMAGE}"
+    --set "relatedImages.kubeRbacProxy=${CI_KUBE_RBAC_PROXY_IMAGE}" \
+    --set serviceCA.enabled=true \
+    --set serviceCA.configMapName=dch-rest-service-ca
 
 kubectl rollout status deployment/dc-controller-manager -n "$CI_CONTROLLER_NAMESPACE" --timeout=300s
 

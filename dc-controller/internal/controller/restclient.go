@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -37,6 +39,7 @@ import (
 const (
 	maxResponseBodyBytes = 1 << 20 // 1 MiB
 	saTokenPath          = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	serviceCABundlePath  = "/var/run/secrets/openshift-service-ca/service-ca.crt"
 )
 
 var (
@@ -128,6 +131,10 @@ type httpConnectionTypeClient struct {
 }
 
 func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
+	return newHTTPClientWithServiceCAPath(resolver, serviceCABundlePath)
+}
+
+func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool) *httpConnectionTypeClient {
 	return &httpConnectionTypeClient{
 		resolveURL: resolver,
 		tokenPath:  saTokenPath,
@@ -135,12 +142,71 @@ func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					InsecureSkipVerify: true, //nolint:gosec // in-cluster service communication
-					NextProtos:         []string{"http/1.1"},
+					RootCAs: roots,
 				},
+				ForceAttemptHTTP2: true,
 			},
 		},
 	}
+}
+
+func newHTTPClientWithServiceCAPath(resolver URLResolver, caPath string) *httpConnectionTypeClient {
+	transport := &reloadableServiceCATransport{
+		base: &http.Transport{
+			TLSClientConfig:   &tls.Config{},
+			ForceAttemptHTTP2: true,
+		},
+		caPath: caPath,
+	}
+	return &httpConnectionTypeClient{
+		resolveURL: resolver,
+		tokenPath:  saTokenPath,
+		httpClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: transport,
+		},
+	}
+}
+
+type reloadableServiceCATransport struct {
+	base   *http.Transport
+	caPath string
+
+	mu       sync.Mutex
+	current  *http.Transport
+	caBundle []byte
+}
+
+func (t *reloadableServiceCATransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	data, _ := os.ReadFile(t.caPath)
+
+	t.mu.Lock()
+	if t.current == nil || !bytes.Equal(t.caBundle, data) {
+		transport := t.base.Clone()
+		transport.TLSClientConfig = t.base.TLSClientConfig.Clone()
+		transport.TLSClientConfig.RootCAs = rootCAs(data)
+		old := t.current
+		t.current = transport
+		t.caBundle = append(t.caBundle[:0], data...)
+		if old != nil {
+			old.CloseIdleConnections()
+		}
+	}
+	transport := t.current
+	t.mu.Unlock()
+
+	return transport.RoundTrip(request)
+}
+
+func rootCAs(serviceCA []byte) *x509.CertPool {
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if len(serviceCA) > 0 {
+		roots.AppendCertsFromPEM(serviceCA)
+	}
+	return roots
 }
 
 // NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
