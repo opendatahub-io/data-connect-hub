@@ -32,12 +32,12 @@ func TestResolveAppliesTLSProfileAccordingToAdherence(t *testing.T) {
 		{
 			name:           "strict adherence uses the cluster profile",
 			adherence:      configv1.TLSAdherencePolicyStrictAllComponents,
-			wantMinVersion: cryptotls.VersionTLS10,
+			wantMinVersion: cryptotls.VersionTLS12,
 		},
 		{
 			name:           "unknown adherence is strict",
 			adherence:      configv1.TLSAdherencePolicy("FuturePolicy"),
-			wantMinVersion: cryptotls.VersionTLS10,
+			wantMinVersion: cryptotls.VersionTLS12,
 		},
 	}
 
@@ -46,7 +46,7 @@ func TestResolveAppliesTLSProfileAccordingToAdherence(t *testing.T) {
 			apiServer := &configv1.APIServer{
 				ObjectMeta: metav1.ObjectMeta{Name: apiServerName},
 				Spec: configv1.APIServerSpec{
-					TLSSecurityProfile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType},
+					TLSSecurityProfile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileIntermediateType},
 					TLSAdherence:       test.adherence,
 				},
 			}
@@ -55,8 +55,8 @@ func TestResolveAppliesTLSProfileAccordingToAdherence(t *testing.T) {
 			if err != nil {
 				t.Fatalf("resolve() returned an error: %v", err)
 			}
-			if !reflect.DeepEqual(result.ProfileSpec, *configv1.TLSProfiles[configv1.TLSProfileOldType]) {
-				t.Fatalf("ProfileSpec = %#v, want the observed Old profile", result.ProfileSpec)
+			if !reflect.DeepEqual(result.ProfileSpec, intermediateProfile()) {
+				t.Fatalf("ProfileSpec = %#v, want the Intermediate profile", result.ProfileSpec)
 			}
 			if result.AdherencePolicy != test.adherence {
 				t.Fatalf("AdherencePolicy = %q, want %q", result.AdherencePolicy, test.adherence)
@@ -111,8 +111,34 @@ func TestTLSOptsAppliesConfiguredGroups(t *testing.T) {
 	}
 }
 
-func TestTLSOptsMapsGoSupportedOldProfileCiphers(t *testing.T) {
-	options, err := tlsOpts(*configv1.TLSProfiles[configv1.TLSProfileOldType])
+func TestResolveOldProfileFallsBackUnderNonStrictAdherence(t *testing.T) {
+	apiServer := &configv1.APIServer{
+		ObjectMeta: metav1.ObjectMeta{Name: apiServerName},
+		Spec: configv1.APIServerSpec{
+			TLSSecurityProfile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType},
+			TLSAdherence:       configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly,
+		},
+	}
+
+	result, err := resolve(context.Background(), newTLSClient(t, apiServer))
+	if err != nil {
+		t.Fatalf("resolve() returned an error: %v", err)
+	}
+	if !reflect.DeepEqual(result.ProfileSpec, intermediateProfile()) {
+		t.Fatalf("ProfileSpec = %#v, want Intermediate fallback", result.ProfileSpec)
+	}
+
+	config := &cryptotls.Config{}
+	for _, option := range result.TLSOpts {
+		option(config)
+	}
+	if config.MinVersion != 0 {
+		t.Fatalf("MinVersion = %d, want the legacy default 0", config.MinVersion)
+	}
+}
+
+func TestTLSOptsMapsGoSupportedCiphers(t *testing.T) {
+	options, err := tlsOpts(*configv1.TLSProfiles[configv1.TLSProfileIntermediateType])
 	if err != nil {
 		t.Fatalf("tlsOpts() returned an error: %v", err)
 	}
@@ -132,18 +158,6 @@ func TestTLSOptsMapsGoSupportedOldProfileCiphers(t *testing.T) {
 		cryptotls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
 		cryptotls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 		cryptotls.TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256,
-		cryptotls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA256,
-		cryptotls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA256,
-		cryptotls.TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA,
-		cryptotls.TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA,
-		cryptotls.TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA,
-		cryptotls.TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA,
-		cryptotls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-		cryptotls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-		cryptotls.TLS_RSA_WITH_AES_128_CBC_SHA256,
-		cryptotls.TLS_RSA_WITH_AES_128_CBC_SHA,
-		cryptotls.TLS_RSA_WITH_AES_256_CBC_SHA,
-		cryptotls.TLS_RSA_WITH_3DES_EDE_CBC_SHA,
 	}
 	if !reflect.DeepEqual(config.CipherSuites, want) {
 		t.Fatalf("CipherSuites = %v, want %v", config.CipherSuites, want)
@@ -211,6 +225,10 @@ func TestResolveRejectsMalformedStrictProfiles(t *testing.T) {
 					MinTLSVersion: configv1.TLSProtocolVersion("VersionTLS99"),
 				}},
 			},
+		},
+		{
+			name:    "old profile rejected",
+			profile: &configv1.TLSSecurityProfile{Type: configv1.TLSProfileOldType},
 		},
 		{
 			name:    "unknown profile type",

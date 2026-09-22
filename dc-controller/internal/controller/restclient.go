@@ -142,7 +142,8 @@ func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool) *httpC
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{
-					RootCAs: roots,
+					MinVersion: tls.VersionTLS12,
+					RootCAs:    roots,
 				},
 				ForceAttemptHTTP2: true,
 			},
@@ -153,7 +154,7 @@ func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool) *httpC
 func newHTTPClientWithServiceCAPath(resolver URLResolver, caPath string) *httpConnectionTypeClient {
 	transport := &reloadableServiceCATransport{
 		base: &http.Transport{
-			TLSClientConfig:   &tls.Config{},
+			TLSClientConfig:   &tls.Config{MinVersion: tls.VersionTLS12},
 			ForceAttemptHTTP2: true,
 		},
 		caPath: caPath,

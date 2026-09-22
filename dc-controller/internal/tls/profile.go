@@ -121,7 +121,7 @@ func profileSpec(profile *configv1.TLSSecurityProfile) (configv1.TLSProfileSpec,
 			return configv1.TLSProfileSpec{}, fmt.Errorf("custom TLS security profile is missing its Custom settings")
 		}
 		return profile.Custom.TLSProfileSpec, nil
-	case configv1.TLSProfileModernType, configv1.TLSProfileOldType:
+	case configv1.TLSProfileModernType:
 		return *configv1.TLSProfiles[profile.Type], nil
 	case configv1.TLSProfileIntermediateType:
 		return intermediateProfile(), nil
