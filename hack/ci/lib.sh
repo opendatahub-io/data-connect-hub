@@ -82,6 +82,7 @@ CI_ENABLED_CONNECTORS="${CI_ENABLED_CONNECTORS:-postgres sqlite s3 elasticsearch
 CI_DISABLED_CONNECTORS="${CI_DISABLED_CONNECTORS:-}"
 CI_SSL_ENABLED="${CI_SSL_ENABLED:-true}"
 
+
 # has_connector <name> — true if <name> is in CI_ENABLED_CONNECTORS.
 has_connector() { [[ " $CI_ENABLED_CONNECTORS " == *" $1 "* ]]; }
 
