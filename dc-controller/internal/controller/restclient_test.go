@@ -18,14 +18,86 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestHTTPClientVerifiesServiceCertificate(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	roots := x509.NewCertPool()
+	roots.AddCert(server.Certificate())
+	client := newHTTPClientWithRootCAs(func() (string, error) { return server.URL, nil }, roots)
+	if err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()); err != nil {
+		t.Fatalf("CreateConnectionType() returned an error: %v", err)
+	}
+}
+
+func TestHTTPClientRejectsUnknownServiceCertificate(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client := newHTTPClientWithRootCAs(func() (string, error) { return server.URL, nil }, x509.NewCertPool())
+	if err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()); err != ErrServiceUnavailable {
+		t.Fatalf("CreateConnectionType() error = %v, want ErrServiceUnavailable", err)
+	}
+}
+
+func TestHTTPClientDoesNotDisableVerificationOrALPN(t *testing.T) {
+	client := newHTTPClientWithRootCAs(func() (string, error) { return "http://localhost", nil }, x509.NewCertPool())
+	transport := client.httpClient.Transport.(*http.Transport)
+	if transport.TLSClientConfig.InsecureSkipVerify {
+		t.Fatal("InsecureSkipVerify is enabled")
+	}
+	if transport.TLSClientConfig.NextProtos != nil {
+		t.Fatalf("NextProtos = %v, want nil", transport.TLSClientConfig.NextProtos)
+	}
+	if !transport.ForceAttemptHTTP2 {
+		t.Fatal("ForceAttemptHTTP2 = false, want true")
+	}
+}
+
+func TestHTTPClientReloadsServiceCARotation(t *testing.T) {
+	caPath := filepath.Join(t.TempDir(), "service-ca.crt")
+	var serviceURL string
+	client := newHTTPClientWithServiceCAPath(func() (string, error) { return serviceURL, nil }, caPath)
+
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	serviceURL = server.URL
+	writeServiceCA(t, caPath, server.Certificate())
+	require.NoError(t, client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()))
+	server.Close()
+
+	rotatedServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer rotatedServer.Close()
+	serviceURL = rotatedServer.URL
+	writeServiceCA(t, caPath, rotatedServer.Certificate())
+	require.NoError(t, client.CreateConnectionType(context.Background(), "test-ns", testConnectionType()))
+}
+
+func writeServiceCA(t *testing.T, path string, certificate *x509.Certificate) {
+	t.Helper()
+	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw})
+	require.NoError(t, os.WriteFile(path, data, 0o600))
+}
 
 const (
 	testProvider   = "test"

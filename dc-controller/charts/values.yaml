@@ -18,3 +18,10 @@ relatedImages:
   kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable
 
 leaderElection: true
+
+serviceCA:
+  # Enable this for OpenShift installs. Non-OpenShift installs can rely on
+  # the system trust store or provide their own CA through the environment.
+  enabled: false
+  configMapName: openshift-service-ca.crt
+  mountPath: /var/run/secrets/openshift-service-ca
