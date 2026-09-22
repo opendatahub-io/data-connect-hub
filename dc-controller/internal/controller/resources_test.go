@@ -32,12 +32,15 @@ const (
 	testSQLiteConnector              = "sqlite"
 	testTOMLEnabledKey               = "enabled"
 	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
+	testKindKey                      = "kind"
+	testMetadataKey                  = "metadata"
+	testNameKey                      = "name"
 )
 
 func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"kind": "ConfigMap",
-		"metadata": map[string]any{
+		testKindKey: kindConfigMap,
+		testMetadataKey: map[string]any{
 			"labels": map[string]any{
 				"app.kubernetes.io/name": "flight-service",
 			},
@@ -94,7 +97,7 @@ enabled = true
 		t.Run(tt.name, func(t *testing.T) {
 			configMap := flightServiceConfigMap(tt.configTOML)
 
-			if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, &dchv1alpha1.ServiceOverrides{
+			if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
 				Connectors: []dchv1alpha1.ConnectorConfig{{Name: tt.connectorName, Enabled: tt.enabled}},
 			}); err != nil {
 				t.Fatal(err)
@@ -138,7 +141,7 @@ connection_timeout_secs = 20
 `
 	configMap := flightServiceConfigMap(configTOML)
 
-	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, &dchv1alpha1.ServiceOverrides{
+	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
 		Connectors: []dchv1alpha1.ConnectorConfig{
 			{Name: testSQLiteConnector, Enabled: &enabled, ConnectionTimeout: timeout},
 			{Name: "neo4j", Enabled: &enabled},
@@ -235,5 +238,51 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 				t.Errorf("rendered ServiceMonitors = %d, want %d", serviceMonitors, want)
 			}
 		})
+	}
+}
+
+func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
+	configMap := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindConfigMap,
+		testMetadataKey: map[string]any{
+			testNameKey: "dch-default-dcs-flight-config",
+		},
+		"data": map[string]any{
+			"config.toml": "[connectors.uri]\nenabled = false\n",
+		},
+	}}
+	deployment := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: "Deployment",
+		testMetadataKey: map[string]any{
+			testNameKey: "dch-default-dcs-flight",
+		},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"spec": map[string]any{
+					"containers": []any{
+						map[string]any{
+							testNameKey: "default-dcs-flight",
+							"image":     "localhost/dch-flight:test",
+						},
+					},
+				},
+			},
+		},
+	}}
+
+	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight")
+
+	annotations, found, err := unstructured.NestedStringMap(
+		deployment.Object,
+		"spec",
+		"template",
+		testMetadataKey,
+		"annotations",
+	)
+	if err != nil || !found {
+		t.Fatalf("expected Flight Deployment template annotations, found=%v err=%v", found, err)
+	}
+	if annotations["dataconnecthub/config-hash"] == "" {
+		t.Fatal("expected dataconnecthub/config-hash annotation on Flight Deployment")
 	}
 }

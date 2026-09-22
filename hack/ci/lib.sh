@@ -22,13 +22,16 @@ CI_GATEWAY_NAME="${CI_GATEWAY_NAME:-dch-gateway}"
 CI_GATEWAY_NAMESPACE="${CI_GATEWAY_NAMESPACE:-dch}"
 CI_GATEWAY_LOCAL_PORT="${CI_GATEWAY_LOCAL_PORT:-18443}"
 
-# Service names
-CI_FLIGHT_SERVICE_NAME="${CI_FLIGHT_SERVICE_NAME:-dch-flight-service}"
-CI_REST_SERVICE_NAME="${CI_REST_SERVICE_NAME:-dch-rest-service}"
+# DataConnectService CR name (must be set before flight service names)
 CI_DCS_CR_NAME="${CI_DCS_CR_NAME:-default-dcs}"
 
+# Service names — flight names are derived from the CR name to match
+# the controller's renderFlightService renaming (flight-service → {crName}-flight).
+CI_FLIGHT_SERVICE_NAME="${CI_FLIGHT_SERVICE_NAME:-dch-${CI_DCS_CR_NAME}-flight}"
+CI_REST_SERVICE_NAME="${CI_REST_SERVICE_NAME:-dch-rest-service}"
+
 # Service accounts
-CI_FLIGHT_SA_NAME="${CI_FLIGHT_SA_NAME:-dch-flight-service-sa}"
+CI_FLIGHT_SA_NAME="${CI_FLIGHT_SA_NAME:-dch-${CI_DCS_CR_NAME}-flight-sa}"
 CI_REST_SA_NAME="${CI_REST_SA_NAME:-dch-rest-service-sa}"
 CI_SA_TOKEN_AUDIENCE="${CI_SA_TOKEN_AUDIENCE:-https://kubernetes.default.svc}"
 

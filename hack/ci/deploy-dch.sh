@@ -79,7 +79,6 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
         -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
         -days 365 2>/dev/null
 
-    # Secret names match what the controller expects: rest-service-tls / flight-service-tls
     tls_secret_name="${svc#dch-}-tls"
     kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
         --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
@@ -183,12 +182,13 @@ metadata:
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: flight-service
+    app.kubernetes.io/name: ${CI_DCS_CR_NAME}-flight
   ports:
   - port: 9090
     targetPort: 9090
     nodePort: ${CI_FLIGHT_METRICS_NODE_PORT}
 EOF
+
 
 # ===================================================================
 # Tenant data sources for E2E connectors

@@ -37,9 +37,12 @@ import (
 )
 
 const (
-	maxResponseBodyBytes = 1 << 20 // 1 MiB
-	saTokenPath          = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-	serviceCABundlePath  = "/var/run/secrets/openshift-service-ca/service-ca.crt"
+	maxResponseBodyBytes    = 1 << 20 // 1 MiB
+	saTokenPath             = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+	serviceCABundlePath     = "/var/run/secrets/openshift-service-ca/service-ca.crt"
+	connectionTypesResource = "connection-types"
+	connectionsResource     = "connections"
+	flightsResource         = "flights"
 )
 
 var (
@@ -57,6 +60,24 @@ type ConnectionTypeClient interface {
 type ConnectionMigrationClient interface {
 	ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
 	CreateConnection(ctx context.Context, tenantID string, conn Connection) error
+}
+
+// FlightServiceClient abstracts REST calls for flight service registration.
+type FlightServiceClient interface {
+	RegisterFlightService(ctx context.Context, tenantID string, fs FlightServiceRegistration) error
+}
+
+// FlightServiceRegistration is the payload for POST /flights.
+type FlightServiceRegistration struct {
+	Name        string              `json:"name"`
+	Namespace   string              `json:"namespace"`
+	ExternalURL string              `json:"external_url"`
+	InternalURL string              `json:"internal_url"`
+	Status      FlightServiceStatus `json:"status"`
+}
+
+type FlightServiceStatus struct {
+	Ready bool `json:"ready"`
 }
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
@@ -222,8 +243,19 @@ func NewHTTPMigrationClient(resolver URLResolver) ConnectionMigrationClient {
 	return newHTTPClient(resolver)
 }
 
+// NewHTTPFlightServiceClient creates a FlightServiceClient that registers
+// flight services through the REST service.
+func NewHTTPFlightServiceClient(resolver URLResolver) FlightServiceClient {
+	return newHTTPClient(resolver)
+}
+
 func (c *httpConnectionTypeClient) baseURL() (string, error) {
 	return c.resolveURL()
+}
+
+func restDataURL(baseURL, resource string) string {
+	return strings.TrimRight(baseURL, "/") +
+		fmt.Sprintf("/api/%s/data/%s", dchv1alpha1.SchemeGroupVersion.Version, resource)
 }
 
 func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
@@ -237,7 +269,7 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 		return fmt.Errorf("marshaling connection type: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1alpha1/data/connection-types", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, restDataURL(url, connectionTypesResource), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -269,7 +301,7 @@ func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tena
 		return nil, ErrServiceUnavailable
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url+"/api/v1alpha1/data/connection-types", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, restDataURL(url, connectionTypesResource), nil)
 	if err != nil {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
@@ -308,7 +340,7 @@ func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantI
 		return fmt.Errorf("marshaling connection: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/v1alpha1/data/connections", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, restDataURL(url, connectionsResource), bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("creating request: %w", err)
 	}
@@ -331,6 +363,50 @@ func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantI
 	}
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+func (c *httpConnectionTypeClient) RegisterFlightService(ctx context.Context, tenantID string, fs FlightServiceRegistration) error {
+	url, err := c.baseURL()
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+
+	body, err := json.Marshal(fs)
+	if err != nil {
+		return fmt.Errorf("marshaling flight service: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, restDataURL(url, flightsResource), bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	c.setHeaders(req, tenantID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+	if resp.StatusCode == http.StatusConflict {
+		return ErrConflict
+	}
+	if resp.StatusCode >= 500 {
+		return ErrServiceUnavailable
+	}
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+
+	// connectors_already_exists means the flight service (or one with the
+	// same connectors) is already registered — treat as idempotent success.
+	if resp.StatusCode == http.StatusBadRequest && bytes.Contains(respBody, []byte("connectors_already_exists")) {
+		return ErrConflict
+	}
+
 	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
 }
 
