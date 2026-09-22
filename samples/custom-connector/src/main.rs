@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
 
     let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
 
-    start_server(builder, &auth, service, addr).await?;
+    let server_result = start_server(builder, &auth, service, addr).await;
     tracing::info!("Custom connector Flight service stopped");
 
     if let Some(provider) = tracer_provider
@@ -55,5 +55,5 @@ async fn main() -> Result<()> {
         tracing::warn!(error = %e, "Failed to flush traces on shutdown");
     }
 
-    Ok(())
+    server_result
 }

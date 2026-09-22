@@ -217,7 +217,7 @@ async fn main() -> Result<()> {
         config.global_connection_types.tenant_id.clone(),
     ));
 
-    HttpServer::new(move || {
+    let server = HttpServer::new(move || {
         let service = service.clone();
         let cors = Cors::default()
             .allow_any_origin()
@@ -234,8 +234,9 @@ async fn main() -> Result<()> {
             .configure(move |cfg| api_routes(cfg, service))
     })
     .bind((config.server.address.clone(), config.server.port))?
-    .run()
-    .await?;
+    .run();
+
+    let server_result = server.await;
 
     if let Some(provider) = tracer_provider
         && let Err(e) = provider.shutdown()
@@ -243,6 +244,7 @@ async fn main() -> Result<()> {
         tracing::warn!(error = %e, "Failed to flush traces on shutdown");
     }
 
+    server_result?;
     Ok(())
 }
 
