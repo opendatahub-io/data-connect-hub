@@ -23,12 +23,12 @@ CI_GATEWAY_NAMESPACE="${CI_GATEWAY_NAMESPACE:-dch}"
 CI_GATEWAY_LOCAL_PORT="${CI_GATEWAY_LOCAL_PORT:-18443}"
 
 # Service names
-CI_FLIGHT_SERVICE_NAME="${CI_FLIGHT_SERVICE_NAME:-dch-flight-service}"
+CI_FLIGHT_SERVICE_NAME="${CI_FLIGHT_SERVICE_NAME:-dch-default-dcs-flight}"
 CI_REST_SERVICE_NAME="${CI_REST_SERVICE_NAME:-dch-rest-service}"
 CI_DCS_CR_NAME="${CI_DCS_CR_NAME:-default-dcs}"
 
 # Service accounts
-CI_FLIGHT_SA_NAME="${CI_FLIGHT_SA_NAME:-dch-flight-service-sa}"
+CI_FLIGHT_SA_NAME="${CI_FLIGHT_SA_NAME:-dch-default-dcs-flight-sa}"
 CI_REST_SA_NAME="${CI_REST_SA_NAME:-dch-rest-service-sa}"
 CI_SA_TOKEN_AUDIENCE="${CI_SA_TOKEN_AUDIENCE:-https://kubernetes.default.svc}"
 

@@ -79,7 +79,7 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
         -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
         -days 365 2>/dev/null
 
-    # Secret names match what the controller expects: rest-service-tls / flight-service-tls
+    # Secret names match the CR-derived service names used by the controller.
     tls_secret_name="${svc#dch-}-tls"
     kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
         --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
@@ -88,7 +88,7 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
 done
 
 # Flight service CA configmap (rest-to-flight mTLS)
-kubectl create configmap dch-flight-service-ca -n "$CI_SVC_NAMESPACE" \
+kubectl create configmap "${CI_FLIGHT_SERVICE_NAME}-ca" -n "$CI_SVC_NAMESPACE" \
     --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_FLIGHT_SERVICE_NAME}-tls.crt" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
