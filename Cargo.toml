@@ -89,6 +89,7 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "grpc-tonic",
     "trace",
     "tls-aws-lc",
+    "tls-roots",
     # Without this the exporter's own error logging is compiled out, so a
     # failing OTLP connection is completely silent.
     "internal-logs",

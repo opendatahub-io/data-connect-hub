@@ -1,5 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
+use commons::utils::{TraceConfig, log_trace_exporter};
 use flight_service::flight::DataIngestionService;
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::{CommandLineArgs, configure_metrics, configure_tls, load_config, start_server};
@@ -21,7 +22,10 @@ async fn main() -> Result<()> {
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
-    commons::utils::init_tracing(args.json_logs);
+
+    let trace = TraceConfig::from_env();
+    let tracer_provider = commons::utils::init_tracing("custom-connector", args.json_logs, &trace)?;
+    log_trace_exporter(&trace);
 
     tracing::info!("Starting custom connector Flight service");
 
@@ -44,5 +48,12 @@ async fn main() -> Result<()> {
 
     start_server(builder, &auth, service, addr).await?;
     tracing::info!("Custom connector Flight service stopped");
+
+    if let Some(provider) = tracer_provider
+        && let Err(e) = provider.shutdown()
+    {
+        tracing::warn!(error = %e, "Failed to flush traces on shutdown");
+    }
+
     Ok(())
 }

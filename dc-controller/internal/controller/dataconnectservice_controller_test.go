@@ -844,3 +844,80 @@ var _ = Describe("setDeploymentEnv", func() {
 		Expect(setDeploymentEnv([]*unstructured.Unstructured{deploy}, []corev1.EnvVar{endpoint}, nameRestService)).To(BeFalse())
 	})
 })
+
+Describe("reconcileTraceEnv", func() {
+	It("removes stale OTLP env vars when trace config is cleared", func() {
+		staleInsecure := corev1.EnvVar{Name: envOTLPInsecure, Value: valueTrue}
+		staleCert := corev1.EnvVar{Name: envOTLPCertificate, Value: "/old/ca.crt"}
+		deploy := newDeployment(corev1.Container{
+			Name: nameRestService,
+			Env:  []corev1.EnvVar{staleInsecure, staleCert},
+		})
+
+		// Clear trace config (nil)
+		Expect(reconcileTraceEnv([]*unstructured.Unstructured{deploy}, nil, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).To(BeEmpty())
+	})
+
+	It("removes stale OTLP env vars when trace fields are unset", func() {
+		existing := corev1.EnvVar{Name: "RUST_LOG", Value: "info"}
+		staleEndpoint := corev1.EnvVar{Name: envOTLPEndpoint, Value: "http://old:4317"}
+		staleInsecure := corev1.EnvVar{Name: envOTLPInsecure, Value: valueTrue}
+		deploy := newDeployment(corev1.Container{
+			Name: nameRestService,
+			Env:  []corev1.EnvVar{existing, staleEndpoint, staleInsecure},
+		})
+
+		// Only set exporter, insecure is unset
+		trace := &dchv1alpha1.Trace{Exporter: testOTLPEndpoint}
+		Expect(reconcileTraceEnv([]*unstructured.Unstructured{deploy}, trace, nameRestService)).To(BeTrue())
+
+		// Should preserve non-OTLP env var, remove stale insecure, set new endpoint
+		Expect(envOf(deploy, nameRestService)).To(Equal([]corev1.EnvVar{
+			existing,
+			{Name: envOTLPEndpoint, Value: testOTLPEndpoint},
+		}))
+	})
+
+	It("sets all trace env vars when fully configured", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestService})
+		trace := &dchv1alpha1.Trace{
+			Exporter:    testOTLPEndpoint,
+			Insecure:    ptr.To(false),
+			Certificate: "/etc/tls/ca.crt",
+		}
+
+		Expect(reconcileTraceEnv([]*unstructured.Unstructured{deploy}, trace, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).To(ConsistOf(
+			corev1.EnvVar{Name: envOTLPEndpoint, Value: testOTLPEndpoint},
+			corev1.EnvVar{Name: envOTLPInsecure, Value: valueFalse},
+			corev1.EnvVar{Name: envOTLPCertificate, Value: "/etc/tls/ca.crt"},
+		))
+	})
+
+	It("preserves non-OTLP env vars", func() {
+		existing := []corev1.EnvVar{
+			{Name: "RUST_LOG", Value: "debug"},
+			{Name: "DATABASE_URL", Value: "postgres://..."},
+		}
+		deploy := newDeployment(corev1.Container{Name: nameRestService, Env: existing})
+		trace := &dchv1alpha1.Trace{Exporter: testOTLPEndpoint}
+
+		Expect(reconcileTraceEnv([]*unstructured.Unstructured{deploy}, trace, nameRestService)).To(BeTrue())
+		env := envOf(deploy, nameRestService)
+		Expect(env).To(ContainElements(existing))
+		Expect(env).To(ContainElement(corev1.EnvVar{Name: envOTLPEndpoint, Value: testOTLPEndpoint}))
+	})
+
+	It("only touches named containers", func() {
+		deploy := newDeployment(
+			corev1.Container{Name: nameRestService},
+			corev1.Container{Name: nameKubeRbacProxy},
+		)
+		trace := &dchv1alpha1.Trace{Exporter: testOTLPEndpoint}
+
+		Expect(reconcileTraceEnv([]*unstructured.Unstructured{deploy}, trace, nameRestService)).To(BeTrue())
+		Expect(envOf(deploy, nameRestService)).NotTo(BeEmpty())
+		Expect(envOf(deploy, nameKubeRbacProxy)).To(BeEmpty())
+	})
+})

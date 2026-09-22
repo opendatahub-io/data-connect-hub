@@ -395,10 +395,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		}
 	}
 
-	if traceVars := traceEnv(cr.Spec.Trace); len(traceVars) > 0 {
-		if !setDeploymentEnv(resources, traceVars, nameRestService, nameFlightService) {
-			logf.FromContext(ctx).Info("trace specified but no service container found in rendered manifests")
-		}
+	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, nameFlightService) {
+		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
 	}
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)

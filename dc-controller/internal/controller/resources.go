@@ -435,6 +435,83 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 	}
 }
 
+// reconcileTraceEnv reconciles OTLP trace environment variables in deployments,
+// removing stale variables and setting current ones. This ensures that clearing
+// trace.insecure or trace.certificate from the CR actually removes the env vars
+// from the deployment, preventing stale security-sensitive configuration.
+func reconcileTraceEnv(resources []*unstructured.Unstructured, trace *dchv1alpha1.Trace, containerNames ...string) bool {
+	wanted := make(map[string]bool, len(containerNames))
+	for _, name := range containerNames {
+		wanted[name] = true
+	}
+
+	// Build the desired env var set
+	desiredVars := traceEnv(trace)
+	desiredMap := make(map[string]string, len(desiredVars))
+	for _, v := range desiredVars {
+		desiredMap[v.Name] = v.Value
+	}
+
+	// All OTLP env vars that must be reconciled
+	otlpVars := map[string]bool{
+		envOTLPEndpoint:    true,
+		envOTLPInsecure:    true,
+		envOTLPCertificate: true,
+	}
+
+	updated := false
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		changed := false
+		for i, c := range containers {
+			container, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name, _ := container["name"].(string); !wanted[name] {
+				continue
+			}
+
+			env, _ := container["env"].([]any)
+			var newEnv []any
+
+			// Remove all OTLP env vars, preserve others
+			for _, e := range env {
+				existing, ok := e.(map[string]any)
+				if !ok {
+					newEnv = append(newEnv, e)
+					continue
+				}
+				if n, _ := existing["name"].(string); !otlpVars[n] {
+					newEnv = append(newEnv, e)
+				}
+			}
+
+			// Add back the desired OTLP env vars
+			for name, value := range desiredMap {
+				newEnv = append(newEnv, map[string]any{"name": name, "value": value})
+			}
+
+			if len(newEnv) != len(env) || len(desiredMap) > 0 {
+				container["env"] = newEnv
+				containers[i] = container
+				changed = true
+			}
+		}
+		if changed {
+			_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+			updated = true
+		}
+	}
+	return updated
+}
+
 // setDeploymentEnv sets the given environment variables on the named
 // containers, overwriting any value the base manifest already declares for the
 // same name and appending the rest. It reports whether any container matched.
