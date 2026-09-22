@@ -10,7 +10,7 @@ set -euo pipefail
 
 PG_URL=""
 NAMESPACE=""
-PG_IMAGE=""
+PG_IMAGE="docker.io/library/postgres:16"
 CA_CERT_PATH=""     # Optional path to a CA certificate file. When PG_URL uses
                     # sslmode=verify-ca/verify-full, it is base64-encoded and made
                     # available inside the seed pod (decoded to a file, then exposed to

@@ -3,16 +3,19 @@
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
+kind_config_file="${CI_TEMP_DIR}/kind-config.yaml"
+gateway_tls_secret="${CI_GATEWAY_NAME}-tls"
+
 # ---------------------------------------------------------------------------
 # Kind cluster
 # ---------------------------------------------------------------------------
 
-echo "=== Creating kind cluster: ${KIND_CLUSTER_NAME} ==="
+echo "=== Creating kind cluster: ${CI_KIND_CLUSTER_NAME} ==="
 
-cat > "${TEMP_DIR}/kind-config.yaml" <<EOF
+cat > "$kind_config_file" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
-name: ${KIND_CLUSTER_NAME}
+name: ${CI_KIND_CLUSTER_NAME}
 kubeadmConfigPatches:
   - |
     kind: ClusterConfiguration
@@ -22,22 +25,22 @@ kubeadmConfigPatches:
 nodes:
 - role: control-plane
   extraPortMappings:
-  - containerPort: ${GATEWAY_NODE_PORT}
-    hostPort: ${GATEWAY_LOCAL_PORT}
+  - containerPort: ${CI_GATEWAY_NODE_PORT}
+    hostPort: ${CI_GATEWAY_LOCAL_PORT}
     protocol: TCP
-  - containerPort: ${METRICS_NODE_PORT}
-    hostPort: ${FLIGHT_METRICS_PORT}
+  - containerPort: ${CI_FLIGHT_METRICS_NODE_PORT}
+    hostPort: ${CI_FLIGHT_METRICS_LOCAL_PORT}
     protocol: TCP
 EOF
 
-kind create cluster --name "$KIND_CLUSTER_NAME" --config "${TEMP_DIR}/kind-config.yaml"
+kind create cluster --name "$CI_KIND_CLUSTER_NAME" --config "$kind_config_file"
 
 # ---------------------------------------------------------------------------
 # Namespaces
 # ---------------------------------------------------------------------------
 
 echo "=== Creating namespaces ==="
-for ns in "$SVC_NAMESPACE" "$CONTROLLER_NAMESPACE" "$GATEWAY_NAMESPACE" "$TENANT_NAMESPACE" "$NO_ACCESS_NAMESPACE"; do
+for ns in "$CI_SVC_NAMESPACE" "$CI_CONTROLLER_NAMESPACE" "$CI_GATEWAY_NAMESPACE" "$CI_TENANT_NAMESPACE" "$CI_NO_ACCESS_NAMESPACE"; do
     kubectl create ns "$ns" 2>/dev/null || true
 done
 
@@ -66,27 +69,26 @@ kubectl rollout status deployment/istiod -n istio-system --timeout=300s
 
 echo "=== Creating Gateway ==="
 
-GATEWAY_TLS_SECRET="${GATEWAY_NAME}-tls"
 openssl req -x509 -nodes -newkey rsa:2048 \
-    -keyout "${TEMP_DIR}/gateway-tls.key" \
-    -out "${TEMP_DIR}/gateway-tls.crt" \
-    -subj "/CN=${GATEWAY_NAME}.${GATEWAY_NAMESPACE}.svc" \
+    -keyout "${CI_TEMP_DIR}/gateway-tls.key" \
+    -out "${CI_TEMP_DIR}/gateway-tls.crt" \
+    -subj "/CN=${CI_GATEWAY_NAME}.${CI_GATEWAY_NAMESPACE}.svc" \
     -addext "basicConstraints=critical,CA:FALSE" \
     -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
     -addext "extendedKeyUsage=serverAuth" \
-    -addext "subjectAltName=DNS:${GATEWAY_NAME}.${GATEWAY_NAMESPACE}.svc,DNS:${GATEWAY_NAME}.${GATEWAY_NAMESPACE}.svc.cluster.local,DNS:${GATEWAY_NAME}" \
+    -addext "subjectAltName=DNS:${CI_GATEWAY_NAME}.${CI_GATEWAY_NAMESPACE}.svc,DNS:${CI_GATEWAY_NAME}.${CI_GATEWAY_NAMESPACE}.svc.cluster.local,DNS:${CI_GATEWAY_NAME}" \
     -days 365 2>/dev/null
 
-kubectl create secret tls "$GATEWAY_TLS_SECRET" -n "$GATEWAY_NAMESPACE" \
-    --cert="${TEMP_DIR}/gateway-tls.crt" \
-    --key="${TEMP_DIR}/gateway-tls.key" \
+kubectl create secret tls "$gateway_tls_secret" -n "$CI_GATEWAY_NAMESPACE" \
+    --cert="${CI_TEMP_DIR}/gateway-tls.crt" \
+    --key="${CI_TEMP_DIR}/gateway-tls.key" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-kubectl apply -n "$GATEWAY_NAMESPACE" -f - <<EOF
+kubectl apply -n "$CI_GATEWAY_NAMESPACE" -f - <<EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: ${GATEWAY_NAME}-options
+  name: ${CI_GATEWAY_NAME}-options
 data:
   deployment: |
     spec:
@@ -103,18 +105,18 @@ data:
                   memory: 256Mi
 EOF
 
-kubectl apply -n "$GATEWAY_NAMESPACE" -f - <<EOF
+kubectl apply -n "$CI_GATEWAY_NAMESPACE" -f - <<EOF
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: ${GATEWAY_NAME}
+  name: ${CI_GATEWAY_NAME}
 spec:
   gatewayClassName: istio
   infrastructure:
     parametersRef:
       group: ""
       kind: ConfigMap
-      name: ${GATEWAY_NAME}-options
+      name: ${CI_GATEWAY_NAME}-options
   listeners:
     - name: http
       port: 80
@@ -130,7 +132,7 @@ spec:
         certificateRefs:
           - kind: Secret
             group: ""
-            name: ${GATEWAY_TLS_SECRET}
+            name: ${gateway_tls_secret}
       allowedRoutes:
         namespaces:
           from: All
@@ -140,13 +142,13 @@ EOF
 # DestinationRules — Istio originates TLS to backend services
 # ---------------------------------------------------------------------------
 
-kubectl apply -n "$SVC_NAMESPACE" -f - <<EOF
+kubectl apply -n "$CI_SVC_NAMESPACE" -f - <<EOF
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: ${REST_SERVICE_NAME}-tls
+  name: ${CI_REST_SERVICE_NAME}-tls
 spec:
-  host: ${REST_SERVICE_NAME}.${SVC_NAMESPACE}.svc.cluster.local
+  host: ${CI_REST_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
   trafficPolicy:
     portLevelSettings:
       - port:
@@ -158,9 +160,9 @@ spec:
 apiVersion: networking.istio.io/v1
 kind: DestinationRule
 metadata:
-  name: ${FLIGHT_SERVICE_NAME}-tls
+  name: ${CI_FLIGHT_SERVICE_NAME}-tls
 spec:
-  host: ${FLIGHT_SERVICE_NAME}.${SVC_NAMESPACE}.svc.cluster.local
+  host: ${CI_FLIGHT_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
   trafficPolicy:
     portLevelSettings:
       - port:
@@ -170,18 +172,18 @@ spec:
           insecureSkipVerify: true
 EOF
 
-rm -f "${TEMP_DIR}/gateway-tls.key" "${TEMP_DIR}/gateway-tls.crt"
+rm -f "${CI_TEMP_DIR}/gateway-tls.key" "${CI_TEMP_DIR}/gateway-tls.crt"
 
 # ---------------------------------------------------------------------------
 # Patch gateway service to use fixed NodePort (mapped via extraPortMappings)
 # ---------------------------------------------------------------------------
 
 echo "=== Patching gateway NodePort ==="
-until kubectl get svc "${GATEWAY_NAME}-istio" -n "$GATEWAY_NAMESPACE" >/dev/null 2>&1; do
+until kubectl get svc "${CI_GATEWAY_NAME}-istio" -n "$CI_GATEWAY_NAMESPACE" >/dev/null 2>&1; do
     sleep 1
 done
 # The Istio gateway service ports are: [0]=15021 (status), [1]=80 (http), [2]=443 (https)
-kubectl patch svc "${GATEWAY_NAME}-istio" -n "$GATEWAY_NAMESPACE" --type='json' \
-    -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/2/nodePort\",\"value\":${GATEWAY_NODE_PORT}}]"
+kubectl patch svc "${CI_GATEWAY_NAME}-istio" -n "$CI_GATEWAY_NAMESPACE" --type='json' \
+    -p="[{\"op\":\"replace\",\"path\":\"/spec/ports/2/nodePort\",\"value\":${CI_GATEWAY_NODE_PORT}}]"
 
 echo "=== Kind cluster ready ==="

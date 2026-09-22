@@ -18,9 +18,9 @@ class TestDisabledConnector:
         create_connection,
         uri_secret: str | None,
     ) -> None:
-        disabled_connector = os.getenv("E2E_DISABLED_CONNECTOR")
+        disabled_connector = os.getenv("DCH_DISABLED_CONNECTORS")
         if not disabled_connector:
-            pytest.skip("E2E_DISABLED_CONNECTOR is empty")
+            pytest.skip("DCH_DISABLED_CONNECTORS is empty")
         if not uri_secret:
             pytest.skip("DCH_URI_SECRET not set")
 

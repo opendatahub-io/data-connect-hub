@@ -66,7 +66,7 @@ Options:
   -d DATABASE         database name               (default: testdb)
   -i IMAGE            postgres image              (default: docker.io/library/postgres:16)
   -t TIMEOUT          rollout timeout             (default: 300s)
-  -s, --ssl           enable SSL/TLS and require TLS
+  --ssl               enable SSL/TLS and require TLS
   --ssl-cert FILE     server certificate (PEM)
   --ssl-key FILE      server private key (PEM)
   --ssl-ca FILE       CA certificate (PEM)
@@ -159,7 +159,7 @@ while [[ $# -gt 0 ]]; do
             TIMEOUT="$2"
             shift 2
             ;;
-        -s|--ssl)
+        --ssl)
             SSL_ENABLED=true
             shift
             ;;
@@ -659,17 +659,17 @@ if [[ "$SSL_ENABLED" == "true" ]]; then
     echo ""
     echo "  TLS is REQUIRED for TCP connections."
 
-    echo ""
-    echo "  TLS connection:"
-    echo "    postgresql://${USERNAME}:${PASSWORD}@${HOST}:5432/${DATABASE}?sslmode=require"
-
     if [[ "$HAS_CA" == "true" ]]; then
         echo ""
         echo "  Extract CA:"
         echo "    kubectl get secret ${RELEASE}-tls -n ${NAMESPACE} -o jsonpath='{.data.ca\\.crt}' | base64 -d > ca.crt"
 
         echo ""
-        echo "  TLS connection with certificate verification:"
+        echo "  TLS connection (certificate verification):"
         echo "    postgresql://${USERNAME}:${PASSWORD}@${HOST}:5432/${DATABASE}?sslmode=verify-full&sslrootcert=ca.crt"
+    else
+        echo ""
+        echo "  TLS connection (encryption without certificate verification):"
+        echo "    postgresql://${USERNAME}:${PASSWORD}@${HOST}:5432/${DATABASE}?sslmode=require"
     fi
 fi

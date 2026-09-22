@@ -70,6 +70,9 @@ http-body-util = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 opendal = { version = "0.58", features = ["services-s3"] }
+opendal-http-transport-reqwest = { version = "0.58", default-features = false, features = ["rustls"] }
+# OpenDAL 0.58's reqwest transport uses reqwest 0.13.
+reqwest-opendal = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "stream"] }
 parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
 arrow-csv = "59.1"
 arrow-json = "59.1"
