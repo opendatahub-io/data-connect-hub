@@ -6,8 +6,5 @@ extend-exclude = [
 ]
 
 [default.extend-words]
-# W3C Trace Context standard example identifiers (used in tests and docs)
-"4bf92f3577b34da6a3ce929d0e0e4736" = "4bf92f3577b34da6a3ce929d0e0e4736"
-"00f067aa0ba902b7" = "00f067aa0ba902b7"
-"cf074c0ce4848df25f2bbb780e430dd4" = "cf074c0ce4848df25f2bbb780e430dd4"
-"5887c0c28877c40b" = "5887c0c28877c40b"
+# Allow "ba" in hex trace IDs (W3C Trace Context standard uses example ID with "ba")
+ba = "ba"
