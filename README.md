@@ -119,6 +119,12 @@ port = 8080
 
 [global-connection-types]
 tenant-id = "default"
+
+# Optional: Prometheus metrics on http://<address>:<port>/metrics
+[metrics]
+enabled = false
+address = "0.0.0.0"
+port = 9090
 ```
 
 **`.local/flight-config.toml`**

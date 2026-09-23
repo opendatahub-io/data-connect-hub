@@ -465,6 +465,8 @@ EOF
 
     [[ -n "${DCH_FLIGHT_METRICS_URL:-}" ]] && \
         echo "DCH_FLIGHT_METRICS_URL=${DCH_FLIGHT_METRICS_URL}" >> "$ENV_FILE"
+    [[ -n "${DCH_REST_METRICS_URL:-}" ]] && \
+        echo "DCH_REST_METRICS_URL=${DCH_REST_METRICS_URL}" >> "$ENV_FILE"
 
     if [[ "$E2E_S3_ENABLED" == "true" ]]; then
         cat >> "$ENV_FILE" <<EOF

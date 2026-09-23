@@ -66,6 +66,11 @@ def flight_metrics_url() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def rest_metrics_url() -> str | None:
+    return os.environ.get("DCH_REST_METRICS_URL") or None
+
+
+@pytest.fixture(scope="session")
 def tenant_id() -> str:
     return os.environ.get("DCH_TENANT_ID", "e2e-test")
 

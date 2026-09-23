@@ -237,6 +237,26 @@ spec:
     nodePort: ${CI_FLIGHT_METRICS_NODE_PORT}
 EOF
 
+# ===================================================================
+# REST metrics NodePort (mapped to localhost via kind extraPortMappings)
+# ===================================================================
+
+echo "=== Creating REST metrics NodePort service ==="
+kubectl apply -n "$CI_SVC_NAMESPACE" -f - <<EOF
+apiVersion: v1
+kind: Service
+metadata:
+  name: rest-metrics-nodeport
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: rest-service
+  ports:
+  - port: 9090
+    targetPort: 9090
+    nodePort: ${CI_REST_METRICS_NODE_PORT}
+EOF
+
 
 # ===================================================================
 # Tenant data sources for E2E connectors

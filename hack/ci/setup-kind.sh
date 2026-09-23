@@ -31,6 +31,9 @@ nodes:
   - containerPort: ${CI_FLIGHT_METRICS_NODE_PORT}
     hostPort: ${CI_FLIGHT_METRICS_LOCAL_PORT}
     protocol: TCP
+  - containerPort: ${CI_REST_METRICS_NODE_PORT}
+    hostPort: ${CI_REST_METRICS_LOCAL_PORT}
+    protocol: TCP
 EOF
 
 kind create cluster --name "$CI_KIND_CLUSTER_NAME" --config "$kind_config_file"

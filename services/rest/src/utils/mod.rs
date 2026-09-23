@@ -18,6 +18,34 @@ pub struct FlightService {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct MetricsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_metrics_address")]
+    pub address: String,
+    #[serde(default = "default_metrics_port")]
+    pub port: u16,
+}
+
+fn default_metrics_address() -> String {
+    "0.0.0.0".to_string()
+}
+
+fn default_metrics_port() -> u16 {
+    9090
+}
+
+impl Default for MetricsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            address: default_metrics_address(),
+            port: default_metrics_port(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
@@ -25,6 +53,8 @@ pub struct ServerConfig {
     pub global_connection_types: GlobalConnectionTypes,
     #[serde(rename = "flight-service")]
     pub flight_service: FlightService,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 pub fn default_secret_labels() -> HashMap<String, String> {
@@ -52,6 +82,11 @@ mod tests {
 
             [flight-service]
             ca-cert = "/etc/tls/flight/ca.crt"
+
+            [metrics]
+            enabled = true
+            address = "127.0.0.2"
+            port = 9191
         "#;
 
         let config = Config::builder()
@@ -66,6 +101,17 @@ mod tests {
             server_config.flight_service.ca_cert,
             Some("/etc/tls/flight/ca.crt".to_string())
         );
+        assert!(server_config.metrics.enabled);
+        assert_eq!(server_config.metrics.address, "127.0.0.2");
+        assert_eq!(server_config.metrics.port, 9191);
+    }
+
+    #[test]
+    fn test_metrics_config_defaults() {
+        let metrics = MetricsConfig::default();
+        assert!(!metrics.enabled);
+        assert_eq!(metrics.address, "0.0.0.0");
+        assert_eq!(metrics.port, 9090);
     }
 
     #[test]

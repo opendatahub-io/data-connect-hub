@@ -19,7 +19,8 @@ DCH_NS=dch   # namespace where DCH services run
 oc get route -n openshift-ingress data-science-gateway -o jsonpath='{.spec.host}'   # RHOAI
 # oc get route -n opendatahub odh-gateway -o jsonpath='{.spec.host}'                # ODH
 
-kubectl port-forward -n $DCH_NS svc/dch-flight-service 19090:9090 &  # metrics (optional)
+kubectl port-forward -n $DCH_NS svc/dch-flight-service 19090:9090 &  # Flight metrics (optional)
+kubectl port-forward -n $DCH_NS svc/dch-rest-service 19091:9090 &    # REST metrics (optional)
 
 # 2. Copy the example config and fill in your values
 cp e2e/env.example e2e/env.local

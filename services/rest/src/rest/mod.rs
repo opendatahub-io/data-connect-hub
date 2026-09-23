@@ -1,5 +1,6 @@
 pub mod endpoints;
 pub mod errors;
+pub mod metrics;
 pub mod middleware;
 
 pub const API_VERSION: &str = "v1alpha1";
