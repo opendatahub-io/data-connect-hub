@@ -204,8 +204,11 @@ mod tests {
     use http::HeaderMap;
     use http::header::HeaderValue;
 
+    // W3C Trace Context standard example identifiers
+    // typos:disable
     const TRACE_ID: &str = "4bf92f3577b34da6a3ce929d0e0e4736";
     const SPAN_ID: &str = "00f067aa0ba902b7";
+    // typos:enable
 
     #[test]
     fn test_split_grpc_path_service_and_method() {
