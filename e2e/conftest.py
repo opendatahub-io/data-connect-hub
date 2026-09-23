@@ -16,12 +16,13 @@ from __future__ import annotations
 
 import contextlib
 import os
+import subprocess
 import uuid
 from pathlib import Path
 
 import httpx
 import pytest
-from data_connect_hub import CredentialsRef, DataConnectClient
+from data_connect_hub import CredentialField, CredentialsRef, DataConnectClient, InlineCredentials
 from data_connect_hub.client import _build_urls
 
 # ---------------------------------------------------------------------------
@@ -213,6 +214,15 @@ def _unique_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def _delete_secret(namespace: str, name: str) -> None:
+    subprocess.run(
+        ["kubectl", "delete", "secret", name, "--namespace", namespace, "--ignore-not-found"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 @pytest.fixture()
 def create_connection_type(rest_client: DataConnectClient):
     """Factory: creates connection types, deletes them after the test."""
@@ -223,11 +233,13 @@ def create_connection_type(rest_client: DataConnectClient):
         name: str | None = None,
         provider: str = "postgres",
         description: str | None = "e2e test connection type",
+        credentials_fields: list[CredentialField] | None = None,
     ):
         ct = rest_client.create_connection_type(
             name=name or _unique_name("e2e-ct"),
             provider=provider,
             description=description,
+            credentials_fields=credentials_fields,
         )
         created_ids.append(ct.id)
         return ct
@@ -240,9 +252,10 @@ def create_connection_type(rest_client: DataConnectClient):
 
 
 @pytest.fixture()
-def create_connection(rest_client: DataConnectClient):
+def create_connection(rest_client: DataConnectClient, tenant_id: str):
     """Factory: creates connections, deletes them after the test."""
     created_ids: list[str] = []
+    inline_secret_names: list[str] = []
 
     def _factory(
         *,
@@ -250,6 +263,7 @@ def create_connection(rest_client: DataConnectClient):
         connection_type_id: str,
         data_format: str = "tabular",
         credentials_ref=None,
+        credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
     ):
         conn = rest_client.create_connection(
@@ -257,9 +271,12 @@ def create_connection(rest_client: DataConnectClient):
             connection_type_id=connection_type_id,
             data_format=data_format,
             credentials_ref=credentials_ref,
+            credentials=credentials,
             properties=properties,
         )
         created_ids.append(conn.id)
+        if credentials is not None:
+            inline_secret_names.append(credentials.secret)
         return conn
 
     yield _factory
@@ -267,6 +284,9 @@ def create_connection(rest_client: DataConnectClient):
     for conn_id in reversed(created_ids):
         with contextlib.suppress(Exception):
             rest_client.delete_connection(conn_id)
+
+    for secret_name in reversed(inline_secret_names):
+        _delete_secret(tenant_id, secret_name)
 
 
 # ---------------------------------------------------------------------------
