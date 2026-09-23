@@ -51,14 +51,14 @@ async fn build_graph(
 ) -> Result<Graph, ConnectorError> {
     let uri = credentials
         .get(KEY_URI)
-        .ok_or_else(|| ConnectorError::ConnectionError("NEO4J_URI is required".to_string()))?;
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?;
     let username = credentials
         .get(KEY_USERNAME)
         .cloned()
         .unwrap_or_else(|| "neo4j".to_string());
     let password = credentials
         .get(KEY_PASSWORD)
-        .ok_or_else(|| ConnectorError::ConnectionError("NEO4J_PASSWORD is required".to_string()))?;
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_PASSWORD}' credential is required")))?;
     let database = credentials
         .get(KEY_DATABASE)
         .cloned()

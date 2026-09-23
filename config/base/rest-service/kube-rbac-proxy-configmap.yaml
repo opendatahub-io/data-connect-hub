@@ -105,11 +105,26 @@ data:
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: create
+        - path: /api/v1alpha1/data/flights
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{.FromHeader}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: flight-services
+                    verb: create
         - path: /api/v1alpha1/data/flights/*
           mappings:
-            - methods: [post,patch,delete]
+            - methods: [patch, delete]
               resources:
-                - resourceAttributes:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
                     namespace: "{{.FromHeader}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: flight-services

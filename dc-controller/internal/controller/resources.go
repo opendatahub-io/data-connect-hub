@@ -253,6 +253,10 @@ func flightServiceResourceName(crName string) string {
 	return crName + "-flight"
 }
 
+func httpRouteResourceName(crName string) string {
+	return crName + "-route"
+}
+
 func renderFlightService(resources []*unstructured.Unstructured, crName string) []*unstructured.Unstructured {
 	serviceName := flightServiceResourceName(crName)
 	for _, obj := range resources {
@@ -261,7 +265,7 @@ func renderFlightService(resources []*unstructured.Unstructured, crName string) 
 			continue
 		}
 		if obj.GetKind() == "HTTPRoute" {
-			obj.SetName(crName + "-route")
+			obj.SetName(httpRouteResourceName(crName))
 			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
 		}
 	}
@@ -271,7 +275,13 @@ func renderFlightService(resources []*unstructured.Unstructured, crName string) 
 func isFlightServiceResource(obj *unstructured.Unstructured) bool {
 	name := obj.GetName()
 	switch obj.GetKind() {
-	case kindDeployment, kindService, kindConfigMap, kindServiceAccount, "NetworkPolicy":
+	case kindConfigMap:
+		// The REST service mounts the flight-service-ca ConfigMap, so its
+		// name contains "flight-service" even though it is not a Flight
+		// service resource. Use the app label to distinguish the Flight
+		// ConfigMap from the REST-owned CA ConfigMap.
+		return obj.GetLabels()["app.kubernetes.io/name"] == nameFlightService
+	case kindDeployment, kindService, kindServiceAccount, "NetworkPolicy":
 		return strings.Contains(name, nameFlightService)
 	case kindClusterRoleBinding:
 		return strings.HasSuffix(name, "flight-auth-delegator")
@@ -358,13 +368,13 @@ func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, na
 	}
 }
 
-func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, overrides *dchv1alpha1.ServiceOverrides) error {
+func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, flightName string, overrides *dchv1alpha1.ServiceOverrides) error {
 	if overrides == nil || len(overrides.Connectors) == 0 {
 		return nil
 	}
 
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || obj.GetLabels()["app.kubernetes.io/name"] != nameFlightService {
+		if obj.GetKind() != kindConfigMap || obj.GetLabels()["app.kubernetes.io/name"] != flightName {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
@@ -402,6 +412,20 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 					return fmt.Errorf("connector %s connectionTimeout must be a positive whole number of seconds", connector.Name)
 				}
 				section["connection_timeout_secs"] = int64(duration / time.Second)
+			}
+			if connector.RequestTimeout != nil {
+				duration := connector.RequestTimeout.Duration
+				if duration <= 0 || duration%time.Second != 0 {
+					return fmt.Errorf("connector %s requestTimeout must be a positive whole number of seconds", connector.Name)
+				}
+				section["request_timeout_secs"] = int64(duration / time.Second)
+			}
+			if connector.ReadTimeout != nil {
+				duration := connector.ReadTimeout.Duration
+				if duration <= 0 || duration%time.Second != 0 {
+					return fmt.Errorf("connector %s readTimeout must be a positive whole number of seconds", connector.Name)
+				}
+				section["read_timeout_secs"] = int64(duration / time.Second)
 			}
 		}
 
@@ -590,7 +614,7 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 	return vars
 }
 
-func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace string) {
+func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) {
 	var restServiceAccount string
 	for _, obj := range resources {
 		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
@@ -604,7 +628,7 @@ func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured,
 
 	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
@@ -656,7 +680,7 @@ func resourcePriority(kind string) int {
 	switch kind {
 	case kindServiceAccount:
 		return 0
-	case "ConfigMap", "Secret", "Service", "NetworkPolicy",
+	case kindConfigMap, "Secret", "Service", "NetworkPolicy",
 		"ClusterRole", kindClusterRoleBinding, "Role", "RoleBinding":
 		return 1
 	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
@@ -906,7 +930,7 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 	}
 }
 
-func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, deploymentContainer, configMapSuffix string) {
+func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, containerName, configMapSuffix string) {
 	var configHash string
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap || !strings.HasSuffix(obj.GetName(), configMapSuffix) {
@@ -936,7 +960,7 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, de
 		hasContainer := false
 		for _, c := range containers {
 			if container, ok := c.(map[string]any); ok {
-				if name, _ := container["name"].(string); name == deploymentContainer {
+				if name, _ := container["name"].(string); name == containerName {
 					hasContainer = true
 					break
 				}
@@ -954,13 +978,12 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, de
 	}
 }
 
-func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured) {
+func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured, flightName string) {
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), nameFlightService) || !strings.HasSuffix(obj.GetName(), "-config") {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) || !strings.HasSuffix(obj.GetName(), "-config") {
 			continue
 		}
-		serviceName := strings.TrimSuffix(obj.GetName(), "-config")
-		annotateDeploymentWithConfigHash(resources, serviceName, obj.GetName())
+		annotateDeploymentWithConfigHash(resources, flightName, obj.GetName())
 	}
 }
 

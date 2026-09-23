@@ -27,6 +27,31 @@ kind load docker-image "$CI_FLIGHT_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_REST_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_CONTROLLER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 
+assert_deployment_image() {
+    local deployment="$1"
+    local namespace="$2"
+    local container="$3"
+    local expected_image="$4"
+    local actual_image
+
+    if ! actual_image="$(kubectl get deployment "$deployment" -n "$namespace" \
+        -o "jsonpath={.spec.template.spec.containers[?(@.name=='${container}')].image}" 2>/dev/null)"; then
+        echo "ERROR: failed to inspect image for deployment/${deployment} in namespace ${namespace}" >&2
+        kubectl get deployment "$deployment" -n "$namespace" -o yaml 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ "$actual_image" != "$expected_image" ]]; then
+        echo "ERROR: deployment/${deployment} container ${container} uses '${actual_image}', expected '${expected_image}'" >&2
+        kubectl get deployment "$deployment" -n "$namespace" \
+            -o 'jsonpath={range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' \
+            2>/dev/null || true
+        return 1
+    fi
+
+    echo "Verified deployment/${deployment} container ${container} uses ${expected_image}"
+}
+
 # ===================================================================
 # System PostgreSQL
 # ===================================================================
@@ -79,7 +104,6 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
         -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
         -days 365 2>/dev/null
 
-    # Secret names match what the controller expects: rest-service-tls / flight-service-tls
     tls_secret_name="${svc#dch-}-tls"
     kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
         --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
@@ -170,6 +194,23 @@ kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESP
 kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl get po -n "$CI_SVC_NAMESPACE"
 
+echo "=== Verifying DCH deployment images ==="
+assert_deployment_image \
+    "dc-controller-manager" \
+    "$CI_CONTROLLER_NAMESPACE" \
+    "manager" \
+    "$CI_CONTROLLER_IMAGE"
+assert_deployment_image \
+    "$CI_FLIGHT_SERVICE_NAME" \
+    "$CI_SVC_NAMESPACE" \
+    "${CI_DCS_CR_NAME}-flight" \
+    "$CI_FLIGHT_IMAGE"
+assert_deployment_image \
+    "$CI_REST_SERVICE_NAME" \
+    "$CI_SVC_NAMESPACE" \
+    "rest-service" \
+    "$CI_REST_IMAGE"
+
 # ===================================================================
 # Flight metrics NodePort (mapped to localhost via kind extraPortMappings)
 # ===================================================================
@@ -183,12 +224,13 @@ metadata:
 spec:
   type: NodePort
   selector:
-    app.kubernetes.io/name: flight-service
+    app.kubernetes.io/name: ${CI_DCS_CR_NAME}-flight
   ports:
   - port: 9090
     targetPort: 9090
     nodePort: ${CI_FLIGHT_METRICS_NODE_PORT}
 EOF
+
 
 # ===================================================================
 # Tenant data sources for E2E connectors

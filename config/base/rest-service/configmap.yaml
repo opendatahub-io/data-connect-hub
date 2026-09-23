@@ -21,4 +21,5 @@ data:
     port = 9090
 
     [flight-service]
+    address = "flight-service"
     ca-cert = "/etc/tls/flight/ca.crt"

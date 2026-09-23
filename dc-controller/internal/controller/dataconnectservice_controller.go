@@ -103,11 +103,12 @@ var BuildVersion = "dev"
 // DataConnectServiceReconciler reconciles a DataConnectService object
 type DataConnectServiceReconciler struct {
 	client.Client
-	Scheme             *runtime.Scheme
-	ManifestsPath      string
-	RestImage          string
-	FlightImage        string
-	KubeRbacProxyImage string
+	Scheme              *runtime.Scheme
+	ManifestsPath       string
+	RestImage           string
+	FlightImage         string
+	KubeRbacProxyImage  string
+	FlightServiceClient FlightServiceClient
 }
 
 type platformConfig struct {
@@ -273,6 +274,16 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
+	// Phase 5: Register flight service instances
+	if err := r.registerFlightService(ctx, &cr); err != nil {
+		log.Error(err, "failed to register flight service")
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightRegistrationError", err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightRegistrationError", err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
+		})
+	}
+
 	// All ready
 	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
@@ -388,10 +399,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	setDeploymentImage(resources, flightContainerName, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace)
+	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName)
 	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName)
 	if cr.Spec.FlightService != nil {
-		if err := setConfigMapFlightConnectorSettings(resources, &cr.Spec.FlightService.ServiceOverrides); err != nil {
+		if err := setConfigMapFlightConnectorSettings(resources, flightContainerName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
@@ -408,9 +419,41 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateFlightDeploymentsWithConfigHash(resources)
+	annotateFlightDeploymentsWithConfigHash(resources, flightContainerName)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
+}
+
+func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {
+	if r.FlightServiceClient == nil {
+		return nil
+	}
+	log := logf.FromContext(ctx)
+	flightName := flightServiceResourceName(cr.Name)
+	flightFQDN := fmt.Sprintf("dch-%s.%s.svc", flightName, cr.Namespace)
+	internalURL := fmt.Sprintf("https://%s:8443", flightFQDN)
+
+	fs := FlightServiceRegistration{
+		Name:        flightName,
+		Namespace:   cr.Namespace,
+		ExternalURL: internalURL,
+		InternalURL: internalURL,
+		Status:      FlightServiceStatus{Ready: true},
+	}
+
+	if err := r.FlightServiceClient.RegisterFlightService(ctx, cr.Namespace, fs); err != nil {
+		if errors.Is(err, ErrConflict) {
+			log.V(1).Info("flight service already registered", "name", flightName)
+			return nil
+		}
+		if errors.Is(err, ErrServiceUnavailable) {
+			log.Info("REST service unavailable for flight registration, requeuing", "name", flightName)
+			return err
+		}
+		return fmt.Errorf("registering flight service %s: %w", flightName, err)
+	}
+	log.Info("registered flight service", "name", flightName)
+	return nil
 }
 
 // openShiftMonitoringAvailable reports whether this is an OpenShift cluster on
@@ -652,7 +695,7 @@ func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alph
 
 func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
 	gw := r.resolveGateway(cr, platCfg)
-	cr.Status.HttpRoute = nameDataConnectHub
+	cr.Status.HttpRoute = httpRouteResourceName(cr.Name)
 	cr.Status.Gateway = &dchv1alpha1.Gateway{
 		Name:      gw.Name,
 		Namespace: gw.Namespace,
