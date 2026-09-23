@@ -683,7 +683,7 @@ func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alph
 
 func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
 	gw := r.resolveGateway(cr, platCfg)
-	cr.Status.HttpRoute = nameDataConnectHub
+	cr.Status.HttpRoute = httpRouteResourceName(cr.Name)
 	cr.Status.Gateway = &dchv1alpha1.Gateway{
 		Name:      gw.Name,
 		Namespace: gw.Namespace,

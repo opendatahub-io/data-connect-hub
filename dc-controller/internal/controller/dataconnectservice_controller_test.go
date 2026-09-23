@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 
@@ -200,6 +201,10 @@ var _ = Describe("DataConnectService Controller", func() {
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
 			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(testFlightImage))
+
+			restConfig := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService + "-config", Namespace: targetNamespace}, restConfig)).To(Succeed())
+			Expect(restConfig.Data["config.toml"]).To(ContainSubstring(fmt.Sprintf("address = %q", flightResourceName+"."+targetNamespace+".svc")))
 		})
 
 		It("should create services for rest and flight", func() {
@@ -226,6 +231,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(cr.Status.Releases).To(HaveLen(2))
 			Expect(cr.Status.Releases[0].Name).To(Equal("rest-service"))
 			Expect(cr.Status.Releases[1].Name).To(Equal("flight-service"))
+			Expect(cr.Status.HttpRoute).To(Equal(httpRouteResourceName(resourceName)))
 		})
 
 		It("should only set Ready when all deployments are available", func() {

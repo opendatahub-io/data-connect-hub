@@ -252,6 +252,10 @@ func flightServiceResourceName(crName string) string {
 	return crName + "-flight"
 }
 
+func httpRouteResourceName(crName string) string {
+	return crName + "-route"
+}
+
 func renderFlightService(resources []*unstructured.Unstructured, crName string) []*unstructured.Unstructured {
 	serviceName := flightServiceResourceName(crName)
 	for _, obj := range resources {
@@ -260,7 +264,7 @@ func renderFlightService(resources []*unstructured.Unstructured, crName string) 
 			continue
 		}
 		if obj.GetKind() == "HTTPRoute" {
-			obj.SetName(crName + "-route")
+			obj.SetName(httpRouteResourceName(crName))
 			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
 		}
 	}
