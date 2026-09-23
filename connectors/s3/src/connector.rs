@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::format::{self, FileFormat};
 use arrow::array::BinaryArray;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -11,6 +10,7 @@ use commons::api::connector::{BinaryQuery, CredentialsResolver};
 use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput, TableInfo};
 use commons::api::errors::ConnectorError;
 use commons::utils::config::ConnectorConfig;
+use format_readers::FileFormat;
 use futures::TryStreamExt;
 use moka::future::Cache;
 use opendal::{EntryMode, HttpTransporter, OperationContext, Operator, Reader, layers::TimeoutLayer, services::S3};
@@ -122,6 +122,36 @@ fn map_opendal_error(e: opendal::Error, context: &str, path: &str) -> ConnectorE
     }
 }
 
+const MAX_JSON_BYTES: u64 = 128 * 1024 * 1024;
+
+async fn read_json_checked(operator: &Operator, path: &str) -> Result<Vec<u8>, ConnectorError> {
+    let reader = operator
+        .reader(path)
+        .await
+        .map_err(|e| map_opendal_error(e, "Failed to create reader for", path))?;
+
+    let mut stream = reader
+        .into_stream(..)
+        .await
+        .map_err(|e| map_opendal_error(e, "Failed to open stream for", path))?;
+
+    let mut bytes = Vec::new();
+    while let Some(buf) = stream
+        .try_next()
+        .await
+        .map_err(|e| map_opendal_error(e, "Failed to read", path))?
+    {
+        let chunk = buf.to_bytes();
+        if bytes.len() as u64 + chunk.len() as u64 > MAX_JSON_BYTES {
+            return Err(ConnectorError::IOError(format!(
+                "JSON file too large (limit {MAX_JSON_BYTES} bytes)"
+            )));
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    Ok(bytes)
+}
+
 const PROVIDER: &str = "s3";
 
 #[async_trait::async_trait]
@@ -198,12 +228,15 @@ impl DataReader for S3Reader {
     #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let format = self.detect_format(query)?;
-        let reader = self.make_reader(query).await?;
 
         let schema = match format {
-            FileFormat::Parquet => format::read_parquet_schema(reader).await?,
-            FileFormat::Csv => format::read_csv_schema(reader).await?,
-            FileFormat::JsonLines => format::read_jsonl_schema(reader).await?,
+            FileFormat::Parquet => format_readers::read_parquet_schema(self.make_reader(query).await?).await?,
+            FileFormat::Csv => format_readers::read_csv_schema(self.make_reader(query).await?).await?,
+            FileFormat::JsonLines => format_readers::read_jsonl_schema(self.make_reader(query).await?).await?,
+            FileFormat::Json => {
+                let data = read_json_checked(&self.operator, query).await?;
+                format_readers::read_json_schema(&data, None)?
+            },
         };
 
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
@@ -217,15 +250,19 @@ impl DataReader for S3Reader {
         match format {
             FileFormat::Parquet => {
                 let reader = self.make_reader(&view.query).await?;
-                format::read_parquet_batches(reader, batch_size).await
+                format_readers::read_parquet_batches(reader, batch_size).await
             },
             FileFormat::Csv => {
                 let reader = self.make_reader(&view.query).await?;
-                format::read_csv_batches(reader, &view.schema, batch_size).await
+                format_readers::read_csv_batches(reader, &view.schema, batch_size).await
             },
             FileFormat::JsonLines => {
                 let reader = self.make_reader(&view.query).await?;
-                format::read_jsonl_batches(reader, &view.schema, batch_size).await
+                format_readers::read_jsonl_batches(reader, &view.schema, batch_size).await
+            },
+            FileFormat::Json => {
+                let data = read_json_checked(&self.operator, &view.query).await?;
+                format_readers::read_json_batches(data, view.schema.clone(), batch_size, None)
             },
         }
     }
@@ -302,7 +339,7 @@ impl DataReader for S3Reader {
             .into_iter()
             .filter(|e| e.metadata().mode() == EntryMode::FILE)
             .map(|e| e.path().to_string())
-            .filter(|p| FileFormat::detect(p, self.format_hint.as_deref()).is_ok())
+            .filter(|p| self.detect_format(p).is_ok())
             .collect();
 
         let mut tables = Vec::new();
@@ -313,7 +350,8 @@ impl DataReader for S3Reader {
                 continue;
             }
 
-            let table_schema = if include_schema {
+            let is_json = matches!(self.detect_format(path), Ok(FileFormat::Json));
+            let table_schema = if include_schema && !is_json {
                 match self.schema(path).await {
                     Ok(state) => state.schema.as_ref().clone(),
                     Err(e) => {
@@ -460,6 +498,7 @@ mod tests {
         assert_eq!(reader.detect_format("data/file.csv").unwrap(), FileFormat::Csv);
         assert_eq!(reader.detect_format("data/file.jsonl").unwrap(), FileFormat::JsonLines);
         assert_eq!(reader.detect_format("data/file.ndjson").unwrap(), FileFormat::JsonLines);
+        assert_eq!(reader.detect_format("data/file.json").unwrap(), FileFormat::Json);
     }
 
     #[test]
@@ -480,6 +519,13 @@ mod tests {
             reader.detect_format("data/no-extension").unwrap(),
             FileFormat::JsonLines
         );
+
+        let reader = S3Reader {
+            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
+            format_hint: Some("json".to_string()),
+            config: ConnectorConfig::default(),
+        };
+        assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Json);
     }
 
     #[test]

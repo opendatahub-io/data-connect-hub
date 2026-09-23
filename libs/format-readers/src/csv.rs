@@ -82,6 +82,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_csv_no_trailing_newline() {
+        let csv_data = b"id,name,score\n1,alice,95.5\n2,bob,87.0\n3,charlie,92.3";
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("score", DataType::Float64, true),
+        ]));
+
+        let reader = memory_reader(csv_data).await;
+        let batches: Vec<_> = read_csv_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 3);
+
+        let names = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(names.value(2), "charlie");
+    }
+
+    #[tokio::test]
     async fn test_csv_schema_from_file() {
         let reader = testdata_reader("sample.csv");
         let schema = read_csv_schema(reader).await.unwrap();

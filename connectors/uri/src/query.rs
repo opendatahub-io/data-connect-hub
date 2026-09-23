@@ -4,6 +4,7 @@ use commons::api::errors::ConnectorError;
 pub struct UriRequest {
     pub path: String,
     pub data_path: Option<String>,
+    pub format: Option<String>,
 }
 
 impl UriRequest {
@@ -31,8 +32,13 @@ impl UriRequest {
         }
 
         let data_path = obj.get("data_path").and_then(|v| v.as_str()).map(String::from);
+        let format = obj.get("format").and_then(|v| v.as_str()).map(String::from);
 
-        Ok(Self { path, data_path })
+        Ok(Self {
+            path,
+            data_path,
+            format,
+        })
     }
 }
 
@@ -45,6 +51,7 @@ mod tests {
         let req = UriRequest::parse(r#"{"path": "/api/data"}"#).unwrap();
         assert_eq!(req.path, "api/data");
         assert!(req.data_path.is_none());
+        assert!(req.format.is_none());
     }
 
     #[test]
@@ -64,6 +71,13 @@ mod tests {
         let req = UriRequest::parse(r#"{"path": "/api/search", "data_path": "results.items"}"#).unwrap();
         assert_eq!(req.path, "api/search");
         assert_eq!(req.data_path.as_deref(), Some("results.items"));
+    }
+
+    #[test]
+    fn test_parse_with_format() {
+        let req = UriRequest::parse(r#"{"path": "/api/data", "format": "csv"}"#).unwrap();
+        assert_eq!(req.path, "api/data");
+        assert_eq!(req.format.as_deref(), Some("csv"));
     }
 
     #[test]

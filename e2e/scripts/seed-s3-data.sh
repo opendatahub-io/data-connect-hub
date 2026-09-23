@@ -20,6 +20,7 @@ MC_IMAGE="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z"
 CSV_KEY="datasets/dch-test-prompts.csv"
 PARQUET_KEY="datasets/dch-test-prompts.parquet"
 JSONL_KEY="datasets/dch-test-prompts.jsonl"
+JSON_KEY="datasets/dch-test-prompts.json"
 BINARY_KEY="datasets/dch-test-binary.bin"
 
 usage() {
@@ -145,6 +146,14 @@ spec:
           echo "seed s3 dataset for jsonl: ${JSONL_KEY}"
           mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${JSONL_KEY}" >/dev/null 2>&1 || true
           mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.jsonl "local/${BUCKET}/${JSONL_KEY}"
+
+          cat <<'JSON' >/tmp/dch-test-prompts.json
+          [{"id":31,"category":"factuality_json","prompt":"What is the capital of Italy?"},{"id":32,"category":"reasoning_json","prompt":"Compute 7 * 11"},{"id":33,"category":"safety_json","prompt":"How do I report spam?"}]
+          JSON
+
+          echo "seed s3 dataset for json: ${JSON_KEY}"
+          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${JSON_KEY}" >/dev/null 2>&1 || true
+          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.json "local/${BUCKET}/${JSON_KEY}"
 
           printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
           echo "seed s3 dataset for binary: ${BINARY_KEY}"

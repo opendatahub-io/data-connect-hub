@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# Install a fixed HTTPS nginx server and seed JSON/binary data for URI e2e tests.
+# Install a fixed HTTPS nginx server and seed test data for URI e2e tests.
+# Serves JSON, CSV, JSONL, Parquet, and binary files with correct Content-Types.
 #
 # Usage:
 #   e2e/scripts/seed-uri-data.sh -n <namespace> [-r <release>]
 #
+# Requires: kubectl, openssl, python3 with pyarrow (for Parquet generation).
 # The script generates a short-lived test CA and server certificate. The CA is
 # stored in <release>-tls-ca/ca.crt for the URI connector credential secret.
 
@@ -41,6 +43,9 @@ done
 [[ -n "$NAMESPACE" ]] || { usage >&2; exit 1; }
 command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
 command -v openssl >/dev/null || { echo "error: openssl not found" >&2; exit 1; }
+
+PYTHON="${PYTHON:-python3}"
+"$PYTHON" -c "import pyarrow" 2>/dev/null || { echo "error: pyarrow not found; set PYTHON to a venv python that has pyarrow" >&2; exit 1; }
 
 CERT_TMPDIR=$(mktemp -d)
 cleanup() {
@@ -84,6 +89,19 @@ openssl x509 -req \
 
 printf 'binary-test-data-for-e2e\n' > "$CERT_TMPDIR/binary.dat"
 
+echo "Generating Parquet test data..."
+"$PYTHON" - "$CERT_TMPDIR/cities.parquet" <<'PY' || { echo "error: failed to generate parquet data" >&2; exit 1; }
+import sys
+import pyarrow as pa, pyarrow.parquet as pq
+table = pa.table({
+    'active': [True, True, True, True, False],
+    'country': ['Japan', 'United Kingdom', 'France', 'United States', 'Germany'],
+    'name': ['Tokyo', 'London', 'Paris', 'New York', 'Berlin'],
+    'population': pa.array([13960000, 8982000, 2161000, 8336000, 3645000], type=pa.int64()),
+})
+pq.write_table(table, sys.argv[1])
+PY
+
 kubectl create secret tls "$RELEASE-tls" \
     -n "$NAMESPACE" \
     --cert="$CERT_TMPDIR/server.crt" \
@@ -99,10 +117,30 @@ kubectl create configmap "$RELEASE-data" \
     --from-literal='cities.json=[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]' \
     --from-literal='nested.json={"status":"ok","data":{"items":[{"name":"Tokyo","country":"Japan","population":13960000,"active":true},{"name":"London","country":"United Kingdom","population":8982000,"active":true},{"name":"Paris","country":"France","population":2161000,"active":true},{"name":"New York","country":"United States","population":8336000,"active":true},{"name":"Berlin","country":"Germany","population":3645000,"active":false}]}}' \
     --from-literal='empty.json=[]' \
+    --from-literal='cities.csv=name,country,population,active
+Tokyo,Japan,13960000,true
+London,United Kingdom,8982000,true
+Paris,France,2161000,true
+New York,United States,8336000,true
+Berlin,Germany,3645000,false' \
+    --from-literal='cities.jsonl={"name":"Tokyo","country":"Japan","population":13960000,"active":true}
+{"name":"London","country":"United Kingdom","population":8982000,"active":true}
+{"name":"Paris","country":"France","population":2161000,"active":true}
+{"name":"New York","country":"United States","population":8336000,"active":true}
+{"name":"Berlin","country":"Germany","population":3645000,"active":false}' \
+    --from-file="cities.parquet=$CERT_TMPDIR/cities.parquet" \
     --from-file="binary.dat=$CERT_TMPDIR/binary.dat" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 NGINX_CONFIG=$(cat <<EOF
+types {
+    application/json              json;
+    text/csv                      csv;
+    application/x-ndjson          jsonl;
+    application/vnd.apache.parquet parquet;
+    application/octet-stream      bin dat;
+}
+
 server {
     listen 8443 ssl;
     root /data;

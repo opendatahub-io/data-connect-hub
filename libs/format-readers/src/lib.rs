@@ -1,4 +1,5 @@
 mod csv;
+mod json;
 mod jsonl;
 mod parquet;
 
@@ -8,6 +9,10 @@ use futures::TryStreamExt;
 use opendal::Reader;
 
 pub use csv::{read_csv_batches, read_csv_schema};
+pub use json::{
+    extract_rows, infer_arrow_type, infer_schema, json_values_to_array, read_json_batches, read_json_schema,
+    resolve_data_path, rows_to_record_batch,
+};
 pub use jsonl::{read_jsonl_batches, read_jsonl_schema};
 pub use parquet::{read_parquet_batches, read_parquet_schema};
 
@@ -59,12 +64,20 @@ async fn decode_stream(reader: Reader, mut decoder: Decoder, format: &str) -> Qu
                         .flush()
                         .map_err(|e| ConnectorError::IOError(format!("{format} flush error: {e}")))? {
                         yield batch;
+                    } else {
+                        break;
                     }
                 } else {
                     offset += consumed;
                 }
             }
         }
+
+        // Signal EOF so the decoder can finalize any partial record
+        // (e.g. a CSV row without a trailing newline).
+        decoder
+            .decode(&[])
+            .map_err(|e| ConnectorError::IOError(format!("{format} decode error: {e}")))?;
 
         if let Some(batch) = decoder
             .flush()
@@ -106,31 +119,73 @@ pub enum FileFormat {
     Parquet,
     Csv,
     JsonLines,
+    Json,
 }
 
 impl FileFormat {
     pub fn detect(path: &str, properties: Option<&str>) -> Result<Self, ConnectorError> {
         if let Some(fmt) = properties {
-            return match fmt.to_lowercase().as_str() {
-                "parquet" => Ok(FileFormat::Parquet),
-                "csv" => Ok(FileFormat::Csv),
-                "jsonl" | "ndjson" | "jsonlines" => Ok(FileFormat::JsonLines),
-                other => Err(ConnectorError::InvalidRequest(format!("Unsupported format: {other}"))),
-            };
+            return Self::from_format_str(fmt);
         }
 
-        let lower = path.to_lowercase();
+        let path_only = path.split('?').next().unwrap_or(path);
+        let lower = path_only.to_lowercase();
         if lower.ends_with(".parquet") {
             Ok(FileFormat::Parquet)
         } else if lower.ends_with(".csv") {
             Ok(FileFormat::Csv)
         } else if lower.ends_with(".jsonl") || lower.ends_with(".ndjson") || lower.ends_with(".jsonlines") {
             Ok(FileFormat::JsonLines)
+        } else if lower.ends_with(".json") {
+            Ok(FileFormat::Json)
         } else {
             Err(ConnectorError::InvalidRequest(format!(
                 "Cannot detect format for path: {path}. Set 'format' in connection properties."
             )))
         }
+    }
+
+    pub fn from_format_str(fmt: &str) -> Result<Self, ConnectorError> {
+        match fmt.to_lowercase().as_str() {
+            "parquet" => Ok(FileFormat::Parquet),
+            "csv" => Ok(FileFormat::Csv),
+            "jsonl" | "ndjson" | "jsonlines" => Ok(FileFormat::JsonLines),
+            "json" => Ok(FileFormat::Json),
+            other => Err(ConnectorError::InvalidRequest(format!("Unsupported format: {other}"))),
+        }
+    }
+
+    pub fn from_content_type(content_type: &str) -> Result<Self, ConnectorError> {
+        let media_type = content_type
+            .parse::<mime::Mime>()
+            .map_err(|e| ConnectorError::InvalidRequest(format!("Invalid Content-Type '{content_type}': {e}")))?;
+
+        // Structured +json suffix applies regardless of top-level type
+        // (e.g. application/problem+json, text/example+json).
+        if media_type.suffix() == Some(mime::JSON) {
+            return Ok(FileFormat::Json);
+        }
+
+        if media_type.type_() == mime::TEXT && media_type.subtype() == "csv" {
+            return Ok(FileFormat::Csv);
+        }
+
+        if media_type.type_() == mime::APPLICATION {
+            let sub = media_type.subtype().as_str();
+            if sub == "json" {
+                return Ok(FileFormat::Json);
+            }
+            if sub == "x-ndjson" || sub == "ndjson" || sub == "jsonl" || sub == "jsonlines" || sub == "x-jsonlines" {
+                return Ok(FileFormat::JsonLines);
+            }
+            if sub == "vnd.apache.parquet" || sub == "x-parquet" {
+                return Ok(FileFormat::Parquet);
+            }
+        }
+
+        Err(ConnectorError::InvalidRequest(format!(
+            "Cannot determine format from Content-Type '{content_type}'"
+        )))
     }
 }
 
@@ -157,6 +212,7 @@ mod tests {
             FileFormat::detect("anything", Some("jsonlines")).unwrap(),
             FileFormat::JsonLines
         );
+        assert_eq!(FileFormat::detect("anything", Some("json")).unwrap(), FileFormat::Json);
         assert_eq!(
             FileFormat::detect("anything", Some("Parquet")).unwrap(),
             FileFormat::Parquet
@@ -182,6 +238,7 @@ mod tests {
             FileFormat::detect("data/train.jsonlines", None).unwrap(),
             FileFormat::JsonLines
         );
+        assert_eq!(FileFormat::detect("data/train.json", None).unwrap(), FileFormat::Json);
         assert_eq!(
             FileFormat::detect("data/train.PARQUET", None).unwrap(),
             FileFormat::Parquet
@@ -189,14 +246,97 @@ mod tests {
     }
 
     #[test]
+    fn test_detect_format_with_query_params() {
+        assert_eq!(
+            FileFormat::detect("data/file.csv?download=1", None).unwrap(),
+            FileFormat::Csv
+        );
+        assert_eq!(
+            FileFormat::detect("/api/export.parquet?token=abc", None).unwrap(),
+            FileFormat::Parquet
+        );
+        assert_eq!(
+            FileFormat::detect("data.jsonl?v=2&fmt=raw", None).unwrap(),
+            FileFormat::JsonLines
+        );
+    }
+
+    #[test]
     fn test_detect_format_unknown() {
-        let result = FileFormat::detect("data/train.json", None);
+        let result = FileFormat::detect("data/train.txt", None);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_detect_format_unsupported_property() {
-        let result = FileFormat::detect("anything", Some("json"));
+        let result = FileFormat::detect("anything", Some("xml"));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_from_content_type_json() {
+        assert_eq!(
+            FileFormat::from_content_type("application/json").unwrap(),
+            FileFormat::Json
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/json; charset=utf-8").unwrap(),
+            FileFormat::Json
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/problem+json").unwrap(),
+            FileFormat::Json
+        );
+        assert_eq!(
+            FileFormat::from_content_type("text/example+json").unwrap(),
+            FileFormat::Json
+        );
+    }
+
+    #[test]
+    fn test_from_content_type_csv() {
+        assert_eq!(FileFormat::from_content_type("text/csv").unwrap(), FileFormat::Csv);
+        assert_eq!(
+            FileFormat::from_content_type("text/csv; charset=utf-8").unwrap(),
+            FileFormat::Csv
+        );
+    }
+
+    #[test]
+    fn test_from_content_type_jsonl() {
+        assert_eq!(
+            FileFormat::from_content_type("application/x-ndjson").unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/ndjson").unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/jsonl").unwrap(),
+            FileFormat::JsonLines
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/jsonlines").unwrap(),
+            FileFormat::JsonLines
+        );
+    }
+
+    #[test]
+    fn test_from_content_type_parquet() {
+        assert_eq!(
+            FileFormat::from_content_type("application/vnd.apache.parquet").unwrap(),
+            FileFormat::Parquet
+        );
+        assert_eq!(
+            FileFormat::from_content_type("application/x-parquet").unwrap(),
+            FileFormat::Parquet
+        );
+    }
+
+    #[test]
+    fn test_from_content_type_unknown() {
+        assert!(FileFormat::from_content_type("text/plain").is_err());
+        assert!(FileFormat::from_content_type("application/octet-stream").is_err());
     }
 }

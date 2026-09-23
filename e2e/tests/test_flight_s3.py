@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import pyarrow as pa
 import pytest
-
 from data_connect_hub import DataConnectClient
 
 
@@ -51,3 +50,16 @@ class TestFlightS3:
         rows = table.to_pydict()
         assert rows["id"] == [21, 22, 23]
         assert rows["category"] == ["factuality_jsonl", "reasoning_jsonl", "safety_jsonl"]
+
+    def test_json_query(
+        self, dch_client: DataConnectClient, s3_flight_connection: str, s3_json_query: str | None
+    ) -> None:
+        if not s3_json_query:
+            pytest.skip("DCH_S3_JSON_QUERY not set")
+        table = dch_client.read(s3_json_query, s3_flight_connection)
+        assert isinstance(table, pa.Table)
+        assert table.num_rows == 3
+        assert set(table.column_names) >= {"id", "category", "prompt"}
+        rows = table.to_pydict()
+        assert rows["id"] == [31, 32, 33]
+        assert rows["category"] == ["factuality_json", "reasoning_json", "safety_json"]

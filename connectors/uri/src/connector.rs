@@ -3,18 +3,15 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::query::UriRequest;
-use crate::types;
-use arrow::array::{
-    ArrayRef, BinaryArray, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array,
-    StringArray, TimestampMillisecondArray,
-};
-use arrow::datatypes::{DataType as ArrowDataType, Field, Schema, TimeUnit};
+use arrow::array::BinaryArray;
+use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connector::CredentialsResolver;
 use commons::api::connector::{BinaryQuery, DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
 use commons::utils::config::ConnectorConfig;
+use format_readers::FileFormat;
 use moka::future::Cache;
 
 const KEY_URI: &str = "URI";
@@ -165,45 +162,45 @@ impl FlightConnector for UriConnector {
     }
 }
 
-// The Flight protocol calls schema() then read() within a single do_get;
-// cached_response avoids a redundant HTTP round-trip for that pair.
-// A separate get_flight_info call creates its own reader and will issue
-// an additional request — this is inherent to the Flight two-phase flow
-// and affects all connectors equally.
 struct UriReader {
     client: UriClient,
-    cached_response: tokio::sync::Mutex<Option<serde_json::Value>>,
+    cached_response: tokio::sync::Mutex<Option<CachedResponse>>,
+}
+
+struct CachedResponse {
+    format: FileFormat,
+    bytes: bytes::Bytes,
 }
 
 const MAX_RESPONSE_BYTES: u64 = 128 * 1024 * 1024;
 
-#[derive(Debug, PartialEq, Eq)]
-enum ResponseFormat {
-    Json,
-}
-
-fn response_format(content_type: Option<&reqwest::header::HeaderValue>) -> Result<ResponseFormat, ConnectorError> {
-    let content_type = content_type
-        .ok_or_else(|| ConnectorError::ConnectionError("HTTP response is missing Content-Type header".to_string()))?;
-    let content_type = content_type
-        .to_str()
-        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid HTTP Content-Type header: {e}")))?;
-    let media_type = content_type
-        .parse::<mime::Mime>()
-        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid HTTP Content-Type '{content_type}': {e}")))?;
-
-    if (media_type.type_() == mime::APPLICATION && media_type.subtype() == mime::JSON)
-        || media_type.suffix() == Some(mime::JSON)
-    {
-        Ok(ResponseFormat::Json)
-    } else {
-        Err(ConnectorError::ConnectionError(format!(
-            "Unsupported HTTP response Content-Type '{content_type}'"
-        )))
+fn detect_format(
+    content_type: Option<&reqwest::header::HeaderValue>,
+    request: &UriRequest,
+) -> Result<FileFormat, ConnectorError> {
+    if let Some(fmt) = &request.format {
+        return FileFormat::from_format_str(fmt);
     }
+
+    if let Some(ct) = content_type {
+        let ct_str = ct
+            .to_str()
+            .map_err(|e| ConnectorError::ConnectionError(format!("Invalid HTTP Content-Type header: {e}")))?;
+        if let Ok(format) = FileFormat::from_content_type(ct_str) {
+            return Ok(format);
+        }
+    }
+
+    if let Ok(format) = FileFormat::detect(&request.path, None) {
+        return Ok(format);
+    }
+
+    Err(ConnectorError::ConnectionError(
+        "Cannot determine response format. Set 'format' in query or ensure the server returns a recognized Content-Type header.".to_string(),
+    ))
 }
 
-async fn fetch(client: &UriClient, request: &UriRequest) -> Result<serde_json::Value, ConnectorError> {
+async fn fetch_response(client: &UriClient, request: &UriRequest) -> Result<CachedResponse, ConnectorError> {
     let response = client
         .request(reqwest::Method::GET, &request.path)?
         .send()
@@ -218,14 +215,8 @@ async fn fetch(client: &UriClient, request: &UriRequest) -> Result<serde_json::V
         )));
     }
 
-    let format = response_format(response.headers().get(reqwest::header::CONTENT_TYPE))?;
+    let format = detect_format(response.headers().get(reqwest::header::CONTENT_TYPE), request)?;
 
-    match format {
-        ResponseFormat::Json => fetch_json(response).await,
-    }
-}
-
-async fn fetch_json(response: reqwest::Response) -> Result<serde_json::Value, ConnectorError> {
     if let Some(len) = response.content_length()
         && len > MAX_RESPONSE_BYTES
     {
@@ -246,8 +237,18 @@ async fn fetch_json(response: reqwest::Response) -> Result<serde_json::Value, Co
         )));
     }
 
-    serde_json::from_slice(&bytes)
-        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to parse JSON response: {e}")))
+    Ok(CachedResponse { format, bytes })
+}
+
+async fn bytes_to_opendal_reader(data: bytes::Bytes) -> Result<opendal::Reader, ConnectorError> {
+    let op = opendal::Operator::new(opendal::services::Memory::default())
+        .map_err(|e| ConnectorError::IOError(format!("Failed to create memory operator: {e}")))?;
+    op.write("data", data)
+        .await
+        .map_err(|e| ConnectorError::IOError(format!("Failed to buffer response: {e}")))?;
+    op.reader("data")
+        .await
+        .map_err(|e| ConnectorError::IOError(format!("Failed to create reader: {e}")))
 }
 
 #[async_trait::async_trait]
@@ -259,15 +260,25 @@ impl DataReader for UriReader {
     #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER))]
     async fn schema(&self, query: &str) -> Result<Arc<Query>, ConnectorError> {
         let request = UriRequest::parse(query)?;
-        let response_json = fetch(&self.client, &request).await?;
-        let rows = types::extract_rows(&response_json, request.data_path.as_deref())?;
+        let cached = fetch_response(&self.client, &request).await?;
 
-        if rows.is_empty() {
-            return Err(ConnectorError::NoDataError);
-        }
+        let schema = match cached.format {
+            FileFormat::Json => format_readers::read_json_schema(&cached.bytes, request.data_path.as_deref())?,
+            FileFormat::Csv => {
+                let reader = bytes_to_opendal_reader(cached.bytes.clone()).await?;
+                format_readers::read_csv_schema(reader).await?
+            },
+            FileFormat::JsonLines => {
+                let reader = bytes_to_opendal_reader(cached.bytes.clone()).await?;
+                format_readers::read_jsonl_schema(reader).await?
+            },
+            FileFormat::Parquet => {
+                let reader = bytes_to_opendal_reader(cached.bytes.clone()).await?;
+                format_readers::read_parquet_schema(reader).await?
+            },
+        };
 
-        let schema = types::infer_schema(rows);
-        *self.cached_response.lock().await = Some(response_json);
+        *self.cached_response.lock().await = Some(cached);
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
@@ -279,20 +290,28 @@ impl DataReader for UriReader {
         let batch_size = options.batch_size;
         let cached = self.cached_response.lock().await.take();
 
-        let stream = async_stream::try_stream! {
-            let response_json = match cached {
-                Some(json) => json,
-                None => fetch(&client, &request).await?,
-            };
-            let rows = types::extract_rows(&response_json, request.data_path.as_deref())?;
-
-            for chunk in rows.chunks(batch_size) {
-                let batch = rows_to_record_batch(&schema, chunk)?;
-                yield batch;
-            }
+        let resp = match cached {
+            Some(c) => c,
+            None => fetch_response(&client, &request).await?,
         };
 
-        Ok(Box::pin(stream))
+        match resp.format {
+            FileFormat::Json => {
+                format_readers::read_json_batches(resp.bytes.to_vec(), schema, batch_size, request.data_path.as_deref())
+            },
+            FileFormat::Csv => {
+                let reader = bytes_to_opendal_reader(resp.bytes).await?;
+                format_readers::read_csv_batches(reader, &schema, batch_size).await
+            },
+            FileFormat::JsonLines => {
+                let reader = bytes_to_opendal_reader(resp.bytes).await?;
+                format_readers::read_jsonl_batches(reader, &schema, batch_size).await
+            },
+            FileFormat::Parquet => {
+                let reader = bytes_to_opendal_reader(resp.bytes).await?;
+                format_readers::read_parquet_batches(reader, batch_size).await
+            },
+        }
     }
 
     #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
@@ -319,9 +338,6 @@ impl DataReader for UriReader {
 
     #[tracing::instrument(skip_all, fields(connector.provider = PROVIDER, storage.object.path = %query.path))]
     async fn read_binary(&self, query: Arc<BinaryQuery>) -> QueryOutput {
-        // Disable the total request deadline — binary downloads can be
-        // arbitrarily large.  The client-level read_timeout still guards
-        // against stalled connections (it resets on each received chunk).
         let response = self
             .client
             .request(reqwest::Method::GET, &query.path)?
@@ -380,109 +396,9 @@ impl DataReader for UriReader {
     }
 }
 
-fn rows_to_record_batch(schema: &Arc<Schema>, rows: &[serde_json::Value]) -> Result<RecordBatch, ConnectorError> {
-    let arrays: Vec<ArrayRef> = schema
-        .fields()
-        .iter()
-        .map(|field| {
-            let values: Vec<Option<&serde_json::Value>> = rows
-                .iter()
-                .map(|row| row.get(field.name()).filter(|v| !v.is_null()))
-                .collect();
-            json_values_to_array(field.data_type(), &values)
-        })
-        .collect::<Result<_, _>>()?;
-
-    RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
-}
-
-fn json_values_to_array(
-    data_type: &ArrowDataType,
-    values: &[Option<&serde_json::Value>],
-) -> Result<ArrayRef, ConnectorError> {
-    match data_type {
-        ArrowDataType::Boolean => {
-            let arr: BooleanArray = values.iter().map(|v| v.and_then(|v| v.as_bool())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int8 => {
-            let arr: Int8Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i8))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int16 => {
-            let arr: Int16Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i16))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int32 => {
-            let arr: Int32Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i32))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int64 => {
-            let arr: Int64Array = values.iter().map(|v| v.and_then(|v| v.as_i64())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Float32 => {
-            let arr: Float32Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_f64()).map(|n| n as f32))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Float64 => {
-            let arr: Float64Array = values.iter().map(|v| v.and_then(|v| v.as_f64())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Timestamp(TimeUnit::Millisecond, _) => {
-            let arr: TimestampMillisecondArray = values
-                .iter()
-                .map(|v| {
-                    v.and_then(|v| {
-                        v.as_i64().or_else(|| {
-                            v.as_str().and_then(|s| {
-                                chrono::DateTime::parse_from_rfc3339(s)
-                                    .ok()
-                                    .map(|dt| dt.timestamp_millis())
-                                    .or_else(|| {
-                                        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                                            .ok()
-                                            .map(|dt| dt.and_utc().timestamp_millis())
-                                    })
-                            })
-                        })
-                    })
-                })
-                .collect();
-            Ok(Arc::new(arr.with_timezone("UTC")))
-        },
-        _ => {
-            let arr: StringArray = values
-                .iter()
-                .map(|v| {
-                    v.map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                })
-                .collect();
-            Ok(Arc::new(arr))
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::Array;
-    use arrow::datatypes::Field;
     use reqwest::header::HeaderValue;
 
     #[test]
@@ -544,28 +460,101 @@ mod tests {
     }
 
     #[test]
-    fn test_json_content_type_accepts_json_with_parameters() {
-        let content_type = HeaderValue::from_static("application/json; charset=utf-8");
-        assert!(matches!(response_format(Some(&content_type)), Ok(ResponseFormat::Json)));
+    fn test_detect_format_from_content_type_json() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/json; charset=utf-8");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Json);
     }
 
     #[test]
-    fn test_json_content_type_accepts_json_suffix() {
-        let content_type = HeaderValue::from_static("application/problem+json");
-        assert!(matches!(response_format(Some(&content_type)), Ok(ResponseFormat::Json)));
+    fn test_detect_format_from_content_type_json_suffix() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/problem+json");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Json);
     }
 
     #[test]
-    fn test_json_content_type_rejects_non_json() {
-        let content_type = HeaderValue::from_static("text/csv");
-        let err = response_format(Some(&content_type)).unwrap_err();
-        assert!(err.to_string().contains("Unsupported HTTP response Content-Type"));
+    fn test_detect_format_from_content_type_csv() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("text/csv");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Csv);
     }
 
     #[test]
-    fn test_json_content_type_requires_header() {
-        let err = response_format(None).unwrap_err();
-        assert!(err.to_string().contains("HTTP response is missing Content-Type header"));
+    fn test_detect_format_from_content_type_ndjson() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/x-ndjson");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::JsonLines);
+    }
+
+    #[test]
+    fn test_detect_format_from_content_type_parquet() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/vnd.apache.parquet");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Parquet);
+    }
+
+    #[test]
+    fn test_detect_format_explicit_overrides_content_type() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: Some("csv".to_string()),
+        };
+        let ct = HeaderValue::from_static("application/json");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Csv);
+    }
+
+    #[test]
+    fn test_detect_format_falls_back_to_path_extension() {
+        let request = UriRequest {
+            path: "data/file.parquet".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/octet-stream");
+        assert_eq!(detect_format(Some(&ct), &request).unwrap(), FileFormat::Parquet);
+    }
+
+    #[test]
+    fn test_detect_format_no_content_type_uses_path() {
+        let request = UriRequest {
+            path: "data/file.csv".to_string(),
+            data_path: None,
+            format: None,
+        };
+        assert_eq!(detect_format(None, &request).unwrap(), FileFormat::Csv);
+    }
+
+    #[test]
+    fn test_detect_format_fails_when_ambiguous() {
+        let request = UriRequest {
+            path: "api/data".to_string(),
+            data_path: None,
+            format: None,
+        };
+        let ct = HeaderValue::from_static("application/octet-stream");
+        assert!(detect_format(Some(&ct), &request).is_err());
     }
 
     #[test]
@@ -628,120 +617,5 @@ mod tests {
             .request(reqwest::Method::GET, "http://example.com/admin")
             .unwrap_err();
         assert!(err.to_string().contains("escape the base URI"));
-    }
-
-    #[test]
-    fn test_json_values_to_array_boolean() {
-        let v_true = serde_json::json!(true);
-        let v_false = serde_json::json!(false);
-        let vals = vec![Some(&v_true), None, Some(&v_false)];
-        let arr = json_values_to_array(&ArrowDataType::Boolean, &vals).unwrap();
-        let bool_arr = arr.as_any().downcast_ref::<BooleanArray>().unwrap();
-        assert_eq!(bool_arr.len(), 3);
-        assert!(bool_arr.value(0));
-        assert!(bool_arr.is_null(1));
-        assert!(!bool_arr.value(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_int64() {
-        let v1 = serde_json::json!(42);
-        let v2 = serde_json::json!(99);
-        let vals = vec![Some(&v1), Some(&v2), None];
-        let arr = json_values_to_array(&ArrowDataType::Int64, &vals).unwrap();
-        let int_arr = arr.as_any().downcast_ref::<Int64Array>().unwrap();
-        assert_eq!(int_arr.value(0), 42);
-        assert_eq!(int_arr.value(1), 99);
-        assert!(int_arr.is_null(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_float64() {
-        let v = serde_json::json!(1.23);
-        let vals = vec![Some(&v), None];
-        let arr = json_values_to_array(&ArrowDataType::Float64, &vals).unwrap();
-        let f_arr = arr.as_any().downcast_ref::<Float64Array>().unwrap();
-        assert!((f_arr.value(0) - 1.23).abs() < f64::EPSILON);
-        assert!(f_arr.is_null(1));
-    }
-
-    #[test]
-    fn test_json_values_to_array_utf8_fallback() {
-        let v_str = serde_json::json!("hello");
-        let v_obj = serde_json::json!({"nested": true});
-        let vals = vec![Some(&v_str), Some(&v_obj), None];
-        let arr = json_values_to_array(&ArrowDataType::Utf8, &vals).unwrap();
-        let str_arr = arr.as_any().downcast_ref::<StringArray>().unwrap();
-        assert_eq!(str_arr.value(0), "hello");
-        assert_eq!(str_arr.value(1), r#"{"nested":true}"#);
-        assert!(str_arr.is_null(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_timestamp_epoch() {
-        let v = serde_json::json!(1700000000000_i64);
-        let vals = vec![Some(&v), None];
-        let arr = json_values_to_array(
-            &ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
-            &vals,
-        )
-        .unwrap();
-        let ts_arr = arr.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
-        assert_eq!(ts_arr.value(0), 1700000000000);
-        assert!(ts_arr.is_null(1));
-    }
-
-    #[test]
-    fn test_json_values_to_array_timestamp_iso() {
-        let v = serde_json::json!("2023-11-14T22:13:20.000Z");
-        let vals = vec![Some(&v)];
-        let arr = json_values_to_array(
-            &ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
-            &vals,
-        )
-        .unwrap();
-        let ts_arr = arr.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
-        assert_eq!(ts_arr.value(0), 1700000000000);
-    }
-
-    #[test]
-    fn test_rows_to_record_batch() {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("name", ArrowDataType::Utf8, true),
-            Field::new("value", ArrowDataType::Int64, true),
-        ]));
-        let rows = vec![
-            serde_json::json!({"name": "a", "value": 1}),
-            serde_json::json!({"name": "b", "value": 2}),
-        ];
-        let batch = rows_to_record_batch(&schema, &rows).unwrap();
-        assert_eq!(batch.num_rows(), 2);
-        assert_eq!(batch.num_columns(), 2);
-
-        let name_arr = batch.column(0).as_any().downcast_ref::<StringArray>().unwrap();
-        assert_eq!(name_arr.value(0), "a");
-        assert_eq!(name_arr.value(1), "b");
-
-        let val_arr = batch.column(1).as_any().downcast_ref::<Int64Array>().unwrap();
-        assert_eq!(val_arr.value(0), 1);
-        assert_eq!(val_arr.value(1), 2);
-    }
-
-    #[test]
-    fn test_rows_to_record_batch_with_nulls() {
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("name", ArrowDataType::Utf8, true),
-            Field::new("value", ArrowDataType::Int64, true),
-        ]));
-        let rows = vec![
-            serde_json::json!({"name": "a"}),
-            serde_json::json!({"name": "b", "value": null}),
-        ];
-        let batch = rows_to_record_batch(&schema, &rows).unwrap();
-        assert_eq!(batch.num_rows(), 2);
-
-        let val_arr = batch.column(1).as_any().downcast_ref::<Int64Array>().unwrap();
-        assert!(val_arr.is_null(0));
-        assert!(val_arr.is_null(1));
     }
 }

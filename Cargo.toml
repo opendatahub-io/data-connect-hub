@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "libs/commons",
+    "libs/format-readers",
     "libs/kube-utils",
     "libs/pg-meta-store",
     "connectors/postgres",
@@ -31,6 +32,7 @@ elasticsearch-connector = { path = "connectors/elasticsearch" }
 neo4j-connector = { path = "connectors/neo4j" }
 uri-connector = { path = "connectors/uri" }
 neo4rs = "0.8"
+format-readers = { path = "libs/format-readers" }
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
 flight-service = { path = "services/flight", default-features = false }

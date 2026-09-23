@@ -1721,6 +1721,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "format-readers"
+version = "0.1.0"
+dependencies = [
+ "arrow",
+ "arrow-csv",
+ "arrow-json",
+ "async-stream",
+ "bytes",
+ "chrono",
+ "commons",
+ "futures",
+ "mime",
+ "opendal",
+ "parquet",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "fs_extra"
 version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4487,17 +4506,15 @@ name = "s3-connector"
 version = "0.1.0"
 dependencies = [
  "arrow",
- "arrow-csv",
- "arrow-json",
  "async-stream",
  "async-trait",
  "bytes",
  "commons",
+ "format-readers",
  "futures",
  "moka",
  "opendal",
  "opendal-http-transport-reqwest",
- "parquet",
  "reqwest 0.13.5",
  "tokio",
  "tracing",
@@ -5673,11 +5690,14 @@ dependencies = [
  "arrow",
  "async-stream",
  "async-trait",
+ "bytes",
  "chrono",
  "commons",
+ "format-readers",
  "futures",
  "mime",
  "moka",
+ "opendal",
  "reqwest 0.12.28",
  "serde",
  "serde_json",

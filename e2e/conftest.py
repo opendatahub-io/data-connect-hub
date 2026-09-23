@@ -125,6 +125,11 @@ def s3_jsonl_query() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def s3_json_query() -> str | None:
+    return os.environ.get("DCH_S3_JSON_QUERY") or None
+
+
+@pytest.fixture(scope="session")
 def s3_binary_path() -> str | None:
     return os.environ.get("DCH_S3_BINARY_PATH") or None
 

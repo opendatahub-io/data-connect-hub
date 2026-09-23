@@ -334,7 +334,7 @@ setup_uri_server_and_secret() {
     E2E_URI_ENABLED="false"
     [[ "$DCH_TENANT_URI_DEPLOY_SERVER" == "true" ]] || return 0
 
-    bash "$SCRIPT_DIR/scripts/seed-uri-data.sh" \
+    PYTHON="$VENV_PYTHON" bash "$SCRIPT_DIR/scripts/seed-uri-data.sh" \
         -n "$DCH_TENANT_ID" -r "$URI_SERVER_NAME"
 
     local uri_ca_cert
@@ -470,6 +470,7 @@ DCH_S3_SECRET=${S3_SECRET}
 DCH_S3_CSV_QUERY=datasets/dch-test-prompts.csv
 DCH_S3_PARQUET_QUERY=datasets/dch-test-prompts.parquet
 DCH_S3_JSONL_QUERY=datasets/dch-test-prompts.jsonl
+DCH_S3_JSON_QUERY=datasets/dch-test-prompts.json
 DCH_S3_BINARY_PATH=datasets/dch-test-binary.bin
 EOF
     fi

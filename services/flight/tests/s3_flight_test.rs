@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{Array, BinaryArray, Float64Array, Int32Array, StringArray};
+use arrow::array::{Array, BinaryArray, Float64Array, Int32Array, Int64Array, StringArray};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
@@ -373,6 +373,49 @@ async fn test_flight_s3_read_csv() {
 
     let names = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
     assert_eq!(names.value(0), "alice");
+}
+
+#[tokio::test]
+async fn test_flight_s3_read_json() {
+    let json_bytes = br#"[
+        {"id": 31, "category": "factuality_json", "prompt": "What is the capital of Italy?"},
+        {"id": 32, "category": "reasoning_json", "prompt": "Compute 7 * 11"},
+        {"id": 33, "category": "safety_json", "prompt": "How do I report spam?"}
+    ]"#;
+    let op = setup_memory_operator("data/test.json", json_bytes.to_vec()).await;
+
+    let url = start_flight_server(
+        S3TestMetaStore {
+            format: DataFormat::Tabular,
+        },
+        op,
+    )
+    .await;
+
+    let mut client = flight_client(&url).await;
+
+    let flight_info = client.execute("data/test.json".to_string(), None).await.unwrap();
+
+    let ticket = flight_info.endpoint[0].ticket.clone().unwrap();
+    let stream = client.do_get(ticket).await.unwrap();
+    let batches: Vec<_> = stream.try_collect().await.unwrap();
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    assert_eq!(total_rows, 3);
+
+    let batch = &batches[0];
+    let id_column = batch.schema().index_of("id").unwrap();
+    let ids = batch.column(id_column).as_any().downcast_ref::<Int64Array>().unwrap();
+    assert_eq!(ids.values(), &[31, 32, 33]);
+
+    let category_column = batch.schema().index_of("category").unwrap();
+    let categories = batch
+        .column(category_column)
+        .as_any()
+        .downcast_ref::<StringArray>()
+        .unwrap();
+    assert_eq!(categories.value(0), "factuality_json");
+    assert_eq!(categories.value(2), "safety_json");
 }
 
 #[tokio::test]
