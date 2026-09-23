@@ -1,7 +1,7 @@
 
 ## DCH Trace
 ### Prerequisites
-- Redhat Tempo Operator
+- Red Hat Tempo Operator
 - TempoMonolithic resource. An example TempoMonolithic:
   ```
   kubectl apply -n redhat-ods-monitoring -f - <<'EOF'
