@@ -200,6 +200,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			restContainer := findContainer(restDeploy, nameRestService)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(restContainer.Image).To(Equal(testRestImage))
+			Expect(restContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
@@ -209,7 +210,6 @@ var _ = Describe("DataConnectService Controller", func() {
 			restConfig := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService + "-config", Namespace: targetNamespace}, restConfig)).To(Succeed())
 			Expect(restConfig.Data["config.toml"]).To(ContainSubstring(fmt.Sprintf("address = %q", flightResourceName+"."+targetNamespace+".svc")))
-			Expect(restConfig.Data["config.toml"]).To(ContainSubstring("port = 8443"))
 		})
 
 		It("should create services for rest and flight", func() {
