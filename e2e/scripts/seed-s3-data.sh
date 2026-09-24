@@ -105,6 +105,9 @@ spec:
     - name: mc
       image: ${MC_IMAGE}
       imagePullPolicy: IfNotPresent
+      env:
+        - name: HOME
+          value: /tmp
       command:
         - /bin/sh
         - -ceu
