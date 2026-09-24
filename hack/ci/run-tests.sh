@@ -44,29 +44,30 @@ EOF
 fi
 
 if has_connector s3; then
-    tenant_s3_endpoint="http://${CI_TENANT_MINIO_RELEASE}.${CI_TENANT_NAMESPACE}.svc:9000"
+    tenant_s3_endpoint="http://${CI_TENANT_S3_RELEASE}.${CI_TENANT_NAMESPACE}.svc:9000"
     tenant_s3_ca_cert=""
     if [[ "$CI_SSL_ENABLED" == "true" ]]; then
-        tenant_s3_endpoint="https://${CI_TENANT_MINIO_RELEASE}.${CI_TENANT_NAMESPACE}.svc:9000"
-        tenant_s3_ca_cert="${CI_TEMP_DIR}/dch-tenant-minio-ca.crt"
-        kubectl get secret "${CI_TENANT_MINIO_RELEASE}-tls" -n "$CI_TENANT_NAMESPACE" \
+        tenant_s3_endpoint="https://${CI_TENANT_S3_RELEASE}.${CI_TENANT_NAMESPACE}.svc:9000"
+        tenant_s3_ca_cert="${CI_TEMP_DIR}/dch-tenant-seaweedfs-ca.crt"
+        kubectl get secret "${CI_TENANT_S3_RELEASE}-tls" -n "$CI_TENANT_NAMESPACE" \
             -o jsonpath='{.data.ca\.crt}' | base64 -d > "$tenant_s3_ca_cert" || {
-            echo "ERROR: failed to retrieve MinIO CA certificate" >&2
+            echo "ERROR: failed to retrieve SeaweedFS CA certificate" >&2
             exit 1
         }
         [[ -s "$tenant_s3_ca_cert" ]] || {
-            echo "ERROR: MinIO CA certificate is empty" >&2
+            echo "ERROR: SeaweedFS CA certificate is empty" >&2
             exit 1
         }
     fi
     cat >> "$e2e_env_file" <<EOF
 #### AWS S3 ####
-AWS_ACCESS_KEY_ID=${CI_TENANT_MINIO_ROOT_USER}
-AWS_SECRET_ACCESS_KEY=${CI_TENANT_MINIO_ROOT_PASSWORD}
-AWS_S3_BUCKET=${CI_TENANT_MINIO_BUCKET}
+AWS_ACCESS_KEY_ID=${CI_TENANT_S3_ACCESS_KEY}
+AWS_SECRET_ACCESS_KEY=${CI_TENANT_S3_SECRET_KEY}
+AWS_S3_BUCKET=${CI_TENANT_S3_BUCKET}
 AWS_DEFAULT_REGION=us-east-1
 AWS_S3_ENDPOINT=${tenant_s3_endpoint}
 AWS_S3_CA_CERT=${tenant_s3_ca_cert}
+DCH_S3_SEED_IMAGE=${CI_TENANT_S3_CLIENT_IMAGE}
 DCH_S3_SEED_DATASET=true
 EOF
 fi
@@ -167,8 +168,7 @@ DCH_TENANT_URI_DEPLOY_SERVER=true
 EOF
 fi
 
-echo "E2E config:"
-cat "$e2e_env_file"
+echo "E2E config generated: ${e2e_env_file}"
 
 # ===================================================================
 # Run tests

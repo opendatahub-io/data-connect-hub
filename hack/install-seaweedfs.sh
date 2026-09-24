@@ -1,32 +1,24 @@
 #!/usr/bin/env bash
-# Install MinIO using a simple Kubernetes Deployment + Service.
-# Optionally creates an initial bucket via a one-off mc pod.
+# Install SeaweedFS as a single-node S3-compatible object store.
 #
-# The data is intentionally ephemeral (emptyDir), making this suitable
-# for E2E/integration tests.
+# This script installs the SeaweedFS S3-compatible test backend.
+# The data is intentionally ephemeral (emptyDir), making this suitable for
+# E2E/integration tests. Requested buckets are created through the S3 API by
+# a short-lived AWS CLI pod after SeaweedFS becomes ready.
 #
 # Usage:
-#   hack/install-minio.sh -n dch-tenant -p secretpass
-#   hack/install-minio.sh -n dch-tenant -p secretpass -b my-bucket -m minio/mc:latest
-#   hack/install-minio.sh -n dch-tenant -p secretpass --ssl
-#
-# With user-provided certificates:
-#   hack/install-minio.sh \
-#       -n dch-tenant \
-#       -p secretpass \
-#       --ssl \
-#       --ssl-cert server.crt \
-#       --ssl-key server.key \
-#       --ssl-ca ca.crt
+#   hack/install-seaweedfs.sh -n dch-tenant -p secretpass
+#   hack/install-seaweedfs.sh -n dch-tenant -p secretpass -b my-bucket
+#   hack/install-seaweedfs.sh -n dch-tenant -p secretpass --ssl
 #
 # Options:
-#   -n NAMESPACE     target namespace           (default: minio)
-#   -r RELEASE       release / resource name    (default: minio)
-#   -u USER          root user name             (default: minioadmin)
-#   -p PASSWORD      root password              (required)
-#   -b BUCKET        bucket to create           (optional)
-#   -i IMAGE         MinIO server image         (default: quay.io/minio/minio:latest)
-#   -m MC_IMAGE      MinIO client image         (required if -b is specified)
+#   -n NAMESPACE     target namespace           (default: seaweedfs)
+#   -r RELEASE       release / resource name    (default: seaweedfs)
+#   -u USER          S3 access key              (default: s3admin)
+#   -p PASSWORD      S3 secret key              (required)
+#   -b BUCKET        bucket(s) to create        (optional)
+#   -i IMAGE         SeaweedFS image            (default: docker.io/chrislusf/seaweedfs:3.99)
+#   -m IMAGE         S3 client image            (default: docker.io/amazon/aws-cli:2.31.0)
 #   -t TIMEOUT       rollout timeout            (default: 300s)
 #   --ssl            enable SSL/TLS and require TLS
 #   --ssl-cert FILE  server certificate (PEM)
@@ -35,28 +27,20 @@
 #   -h, --help       show this help
 #
 # SSL:
-#   --ssl
-#       Enable MinIO SSL/TLS and REQUIRE TLS for all TCP connections.
-#
-#   --ssl without --ssl-cert/--ssl-key
-#       Automatically generates a self-signed CA and server certificate.
-#
-#   --ssl-cert + --ssl-key
-#       Use a user-provided server certificate and private key.
-#
-#   --ssl-ca
-#       Optional CA certificate for client-side server certificate verification.
+#   --ssl without --ssl-cert/--ssl-key automatically generates a self-signed
+#   CA and server certificate. SeaweedFS serves HTTPS on the S3 port when the
+#   certificate and key flags are supplied.
 #
 set -euo pipefail
 
-NAMESPACE="minio"
-RELEASE="minio"
-USERNAME="minioadmin"
+NAMESPACE="seaweedfs"
+RELEASE="seaweedfs"
+USERNAME="s3admin"
 # NOTE: no default password — the caller MUST supply -p.
 PASSWORD=""
 BUCKET=""
-IMAGE="quay.io/minio/minio:latest"
-MC_IMAGE=""
+IMAGE="docker.io/chrislusf/seaweedfs:3.99"
+CLIENT_IMAGE="docker.io/amazon/aws-cli:2.31.0"
 TIMEOUT="300s"
 
 SSL_ENABLED=false
@@ -76,13 +60,13 @@ usage() {
 Usage: $0 [OPTIONS]
 
 Options:
-  -n NAMESPACE     target namespace           (default: minio)
-  -r RELEASE       release / resource name    (default: minio)
-  -u USER          root user name             (default: minioadmin)
-  -p PASSWORD      root password              (required)
-  -b BUCKET        bucket to create           (optional)
-  -i IMAGE         MinIO server image         (default: quay.io/minio/minio:latest)
-  -m MC_IMAGE      MinIO client image         (required if -b is specified)
+  -n NAMESPACE     target namespace           (default: seaweedfs)
+  -r RELEASE       release / resource name    (default: seaweedfs)
+  -u USER          S3 access key              (default: s3admin)
+  -p PASSWORD      S3 secret key              (required)
+  -b BUCKET        bucket(s) to create        (optional)
+  -i IMAGE         SeaweedFS image            (default: docker.io/chrislusf/seaweedfs:3.99)
+  -m IMAGE         S3 client image            (default: docker.io/amazon/aws-cli:2.31.0)
   -t TIMEOUT       rollout timeout            (default: 300s)
   --ssl            enable SSL/TLS and require TLS
   --ssl-cert FILE  server certificate (PEM)
@@ -91,17 +75,11 @@ Options:
   -h, --help       show this help
 
 SSL:
-  --ssl
-      Enable MinIO SSL/TLS and REQUIRE TLS for all TCP connections.
-
   --ssl without --ssl-cert/--ssl-key
       Automatically generates a self-signed CA and server certificate.
 
   --ssl-cert + --ssl-key
       Use a user-provided server certificate and private key.
-
-  --ssl-ca
-      Optional CA certificate for client-side server certificate verification.
 
 Examples:
   $0 -p secretpass
@@ -121,7 +99,7 @@ while [[ $# -gt 0 ]]; do
         -p)            require_arg "$@"; PASSWORD="$2"; shift 2 ;;
         -b)            require_arg "$@"; BUCKET="$2"; shift 2 ;;
         -i)            require_arg "$@"; IMAGE="$2"; shift 2 ;;
-        -m)            require_arg "$@"; MC_IMAGE="$2"; shift 2 ;;
+        -m)            require_arg "$@"; CLIENT_IMAGE="$2"; shift 2 ;;
         -t)            require_arg "$@"; TIMEOUT="$2"; shift 2 ;;
         --ssl)         SSL_ENABLED=true; shift ;;
         --ssl-cert)    require_arg "$@"; SSL_CERT="$2"; shift 2 ;;
@@ -134,12 +112,6 @@ done
 
 if [[ -z "${PASSWORD:-}" ]]; then
     echo "error: password is required; supply it with -p" >&2
-    usage
-    exit 1
-fi
-
-if [[ -n "$BUCKET" && -z "$MC_IMAGE" ]]; then
-    echo "error: -m MC_IMAGE is required when -b BUCKET is specified" >&2
     usage
     exit 1
 fi
@@ -175,7 +147,7 @@ fi
 # ---------------------------------------------------------------------------
 
 CERT_TMPDIR=""
-MINIO_SCHEME="http"
+S3_SCHEME="http"
 PROBE_SCHEME="HTTP"
 
 if [[ "$SSL_ENABLED" == "true" ]]; then
@@ -200,7 +172,7 @@ if [[ "$SSL_ENABLED" == "true" ]]; then
             -newkey rsa:2048 \
             -keyout "$CERT_TMPDIR/ca.key" \
             -out "$CERT_TMPDIR/ca.crt" \
-            -subj "/CN=MinIO Test CA" \
+            -subj "/CN=SeaweedFS Test CA" \
             2>/dev/null
 
         openssl req \
@@ -251,7 +223,7 @@ EOF
         }
     fi
 
-    MINIO_SCHEME="https"
+    S3_SCHEME="https"
     PROBE_SCHEME="HTTPS"
 fi
 
@@ -290,12 +262,15 @@ fi
 # ---------------------------------------------------------------------------
 
 kubectl delete deployment "$RELEASE" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+# Remove the old console port from an existing Service. SeaweedFS exposes
+# one S3 endpoint.
+kubectl delete service "$RELEASE" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
 # ---------------------------------------------------------------------------
-# Deploy MinIO
+# Deploy SeaweedFS
 # ---------------------------------------------------------------------------
 
-echo "Installing MinIO (namespace=${NAMESPACE}, release=${RELEASE})"
+echo "Installing SeaweedFS (namespace=${NAMESPACE}, release=${RELEASE})"
 
 generate_manifest() {
     cat <<EOF
@@ -304,18 +279,15 @@ kind: Service
 metadata:
   name: ${RELEASE}
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: seaweedfs
     app.kubernetes.io/instance: ${RELEASE}
 spec:
   ports:
-    - name: api
+    - name: s3
       port: 9000
       targetPort: 9000
-    - name: console
-      port: 9001
-      targetPort: 9001
   selector:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: seaweedfs
     app.kubernetes.io/instance: ${RELEASE}
 ---
 apiVersion: apps/v1
@@ -323,57 +295,58 @@ kind: Deployment
 metadata:
   name: ${RELEASE}
   labels:
-    app.kubernetes.io/name: minio
+    app.kubernetes.io/name: seaweedfs
     app.kubernetes.io/instance: ${RELEASE}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app.kubernetes.io/name: minio
+      app.kubernetes.io/name: seaweedfs
       app.kubernetes.io/instance: ${RELEASE}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: minio
+        app.kubernetes.io/name: seaweedfs
         app.kubernetes.io/instance: ${RELEASE}
     spec:
       containers:
-        - name: minio
+        - name: seaweedfs
           image: ${IMAGE}
           imagePullPolicy: IfNotPresent
-          command:
-            - minio
+          args:
             - server
-            - /data
-            - --console-address
-            - ":9001"
+            - -filer
+            - -s3
+            - -ip.bind=0.0.0.0
+            - -s3.port=9000
 EOF
 
     if [[ "$SSL_ENABLED" == "true" ]]; then
         cat <<EOF
-            - --certs-dir
-            - /etc/minio/certs
+            - -s3.cert.file=/etc/seaweedfs/certs/public.crt
+            - -s3.key.file=/etc/seaweedfs/certs/private.key
 EOF
     fi
 
     cat <<EOF
           env:
-            - name: MINIO_ROOT_USER
+            - name: AWS_ACCESS_KEY_ID
               value: "${USERNAME}"
-            - name: MINIO_ROOT_PASSWORD
+            - name: AWS_SECRET_ACCESS_KEY
               value: "${PASSWORD}"
+EOF
+
+    cat <<EOF
           ports:
             - containerPort: 9000
-              name: api
-            - containerPort: 9001
-              name: console
+              name: s3
           resources:
             requests:
               memory: "256Mi"
               cpu: "250m"
           readinessProbe:
             httpGet:
-              path: /minio/health/ready
+              path: /healthz
               port: 9000
               scheme: ${PROBE_SCHEME}
             initialDelaySeconds: 5
@@ -382,7 +355,7 @@ EOF
             failureThreshold: 12
           livenessProbe:
             httpGet:
-              path: /minio/health/live
+              path: /healthz
               port: 9000
               scheme: ${PROBE_SCHEME}
             initialDelaySeconds: 10
@@ -397,7 +370,7 @@ EOF
     if [[ "$SSL_ENABLED" == "true" ]]; then
         cat <<EOF
             - name: tls-certs
-              mountPath: /etc/minio/certs
+              mountPath: /etc/seaweedfs/certs
               readOnly: true
 EOF
     fi
@@ -430,7 +403,7 @@ generate_manifest | kubectl apply -n "$NAMESPACE" -f - >/dev/null
 
 if ! kubectl rollout status deployment/"$RELEASE" -n "$NAMESPACE" --timeout="$TIMEOUT"; then
     echo ""
-    echo "MinIO failed to become Ready."
+    echo "SeaweedFS failed to become Ready."
     kubectl get pods -n "$NAMESPACE" -l "app.kubernetes.io/instance=${RELEASE}" -o wide || true
     echo ""
     kubectl logs -n "$NAMESPACE" -l "app.kubernetes.io/instance=${RELEASE}" --tail=50 || true
@@ -438,41 +411,55 @@ if ! kubectl rollout status deployment/"$RELEASE" -n "$NAMESPACE" --timeout="$TI
 fi
 
 # ---------------------------------------------------------------------------
-# Create bucket (optional)
+# Create buckets (optional)
 # ---------------------------------------------------------------------------
 
 if [[ -n "$BUCKET" ]]; then
-    echo "Creating bucket '${BUCKET}' via mc"
+    echo "Creating S3 bucket(s) '${BUCKET}'"
 
-    INIT_POD="minio-init-bucket"
+    INIT_POD="${RELEASE}-init-bucket"
     kubectl delete pod "$INIT_POD" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
-    # The one-off bootstrap client uses --insecure for TLS because the
-    # generated CA is not installed in the mc image's trust store. The CA is
-    # still retained in the Kubernetes secret for normal client verification.
-    MC_TLS_ARGS=""
+    S3_CLIENT_TLS_ARGS=""
     if [[ "$SSL_ENABLED" == "true" ]]; then
-        MC_TLS_ARGS="--insecure"
+        # The generated CA is not installed in the AWS CLI image. The CA is
+        # retained in the Kubernetes secret for normal client verification.
+        S3_CLIENT_TLS_ARGS="--no-verify-ssl"
     fi
 
     kubectl run "$INIT_POD" -n "$NAMESPACE" \
-        --image="$MC_IMAGE" \
+        --image="$CLIENT_IMAGE" \
         --image-pull-policy=IfNotPresent \
         --restart=Never \
-        --command -- sh -c "
-            mc ${MC_TLS_ARGS} alias set myminio ${MINIO_SCHEME}://${RELEASE}:9000 '${USERNAME}' '${PASSWORD}'
-            mc ${MC_TLS_ARGS} mb myminio/${BUCKET} --ignore-existing
+        --env="AWS_ACCESS_KEY_ID=${USERNAME}" \
+        --env="AWS_SECRET_ACCESS_KEY=${PASSWORD}" \
+        --env="AWS_DEFAULT_REGION=us-east-1" \
+        --env="AWS_S3_ADDRESSING_STYLE=path" \
+        --command -- /bin/sh -ceu "
+            ready=0
+            for i in \$(seq 1 60); do
+              if aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api list-buckets >/dev/null 2>&1; then
+                ready=1
+                break
+              fi
+              sleep 2
+            done
+            [ \"\$ready\" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
+            for bucket in ${BUCKET//,/ }; do
+              aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api create-bucket --bucket \"\$bucket\" >/dev/null 2>&1 ||
+                aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api head-bucket --bucket \"\$bucket\"
+            done
         "
 
     kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
         "pod/$INIT_POD" -n "$NAMESPACE" --timeout=120s || {
         kubectl logs "$INIT_POD" -n "$NAMESPACE" --tail=20 || true
-        echo "error: bucket creation failed" >&2
+        echo "error: S3 bucket creation failed" >&2
         exit 1
     }
     kubectl delete pod "$INIT_POD" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
-    echo "Bucket '${BUCKET}' created"
+    echo "S3 bucket(s) '${BUCKET}' created"
 fi
 
 # ---------------------------------------------------------------------------
@@ -482,18 +469,17 @@ fi
 HOST="${RELEASE}.${NAMESPACE}.svc"
 
 echo ""
-echo "MinIO is ready"
+echo "SeaweedFS is ready"
 echo "  namespace: ${NAMESPACE}"
 echo "  release:   ${RELEASE}"
-echo "  endpoint:  ${MINIO_SCHEME}://${HOST}:9000"
-echo "  console:   ${MINIO_SCHEME}://${HOST}:9001"
+echo "  endpoint:  ${S3_SCHEME}://${HOST}:9000"
 echo "  user:      ${USERNAME}"
 echo "  ssl:       ${SSL_ENABLED}"
-[[ -n "$BUCKET" ]] && echo "  bucket:    ${BUCKET}"
+[[ -n "$BUCKET" ]] && echo "  bucket(s): ${BUCKET}"
 
 if [[ "$SSL_ENABLED" == "true" ]]; then
     echo ""
-    echo "  TLS is REQUIRED for MinIO API and console connections."
+    echo "  TLS is REQUIRED for S3 connections."
 
     if [[ -n "$SSL_CA" ]]; then
         echo ""

@@ -63,6 +63,7 @@ DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
 
 # AWS S3 connector
 DCH_S3_SEED_DATASET="${DCH_S3_SEED_DATASET:-false}"
+DCH_S3_SEED_IMAGE="${DCH_S3_SEED_IMAGE:-docker.io/amazon/aws-cli:2.31.0}"
 
 # Elasticsearch connector
 DCH_TENANT_ES_NAMESPACE="${DCH_TENANT_ES_NAMESPACE:-$DCH_TENANT_ID}"
@@ -389,6 +390,7 @@ seed_s3_data() {
         -S "$AWS_SECRET_ACCESS_KEY"
     )
     [[ -n "${AWS_S3_CA_CERT:-}" ]] && args+=(-c "$AWS_S3_CA_CERT")
+    [[ -n "${DCH_S3_SEED_IMAGE:-}" ]] && args+=(-i "$DCH_S3_SEED_IMAGE")
 
     PYTHON="$VENV_PYTHON" bash "$(dirname "$0")/scripts/seed-s3-data.sh" "${args[@]}"
 }

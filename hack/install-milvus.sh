@@ -29,10 +29,23 @@
 #
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 NAMESPACE="milvus"
 RELEASE="milvus"
 CHART_VERSION="5.0.25"
 TIMEOUT="300s"
+
+# Milvus uses an S3-compatible object store for its internal data. Deploy a
+# dedicated SeaweedFS instance instead of enabling the chart's MinIO subchart.
+SEAWEEDFS_IMAGE="${SEAWEEDFS_IMAGE:-docker.io/chrislusf/seaweedfs:3.99}"
+MILVUS_S3_CLIENT_IMAGE="${MILVUS_S3_CLIENT_IMAGE:-docker.io/amazon/aws-cli:2.31.0}"
+MILVUS_S3_RELEASE="${MILVUS_S3_RELEASE:-}"
+MILVUS_S3_ACCESS_KEY="${MILVUS_S3_ACCESS_KEY:-milvus-s3}"
+MILVUS_S3_SECRET_KEY="${MILVUS_S3_SECRET_KEY:-milvus-s3-password}"
+MILVUS_S3_BUCKET="${MILVUS_S3_BUCKET:-milvus-bucket}"
+MILVUS_S3_PORT="9000"
+MILVUS_S3_HOST=""
 
 TLS_ENABLED="false"
 TLS_CERT=""
@@ -65,6 +78,9 @@ while [[ $# -gt 0 ]]; do
         *)             echo "error: unknown option: $1" >&2; usage; exit 1 ;;
     esac
 done
+
+MILVUS_S3_RELEASE="${MILVUS_S3_RELEASE:-${RELEASE}-s3}"
+MILVUS_S3_HOST="${MILVUS_S3_RELEASE}.${NAMESPACE}.svc.cluster.local"
 
 command -v helm >/dev/null || { echo "error: helm not found" >&2; exit 1; }
 command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; }
@@ -198,6 +214,18 @@ EOF
     TLS_OPTS=(-f "${CERT_DIR}/values-tls.yaml")
 fi
 
+# Deploy the S3-compatible object store before Milvus so the externalS3
+# endpoint and bucket are available when Milvus starts.
+echo "Installing SeaweedFS for Milvus object storage"
+bash "$SCRIPT_DIR/install-seaweedfs.sh" \
+    -n "$NAMESPACE" \
+    -r "$MILVUS_S3_RELEASE" \
+    -u "$MILVUS_S3_ACCESS_KEY" \
+    -p "$MILVUS_S3_SECRET_KEY" \
+    -b "$MILVUS_S3_BUCKET" \
+    -i "$SEAWEEDFS_IMAGE" \
+    -m "$MILVUS_S3_CLIENT_IMAGE"
+
 # Detect OpenShift vs vanilla Kubernetes
 SECURITY_OPTS=()
 if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
@@ -206,47 +234,49 @@ if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q ro
         --set etcd.containerSecurityContext.runAsUser=null
         --set etcd.containerSecurityContext.runAsNonRoot=true
         --set etcd.podSecurityContext.fsGroup=null
-        --set minio.podSecurityContext.fsGroup=null
-        --set minio.containerSecurityContext.runAsUser=null
-        --set minio.containerSecurityContext.runAsNonRoot=true
     )
 fi
 
 helm repo add milvus https://zilliztech.github.io/milvus-helm/ >/dev/null 2>&1 || true
 helm repo update milvus >/dev/null 2>&1
 
-if helm status "$RELEASE" -n "$NAMESPACE" >/dev/null 2>&1; then
-    echo "Milvus Helm release '${RELEASE}' already exists in namespace '${NAMESPACE}'"
-else
-    echo "Installing Milvus standalone via Helm (namespace=${NAMESPACE}, release=${RELEASE}, chart=${CHART_VERSION})"
-    helm_install_args=(
-        "$RELEASE" milvus/milvus
-        -n "$NAMESPACE"
-        --version "$CHART_VERSION"
-        --set cluster.enabled=false
-        --set streaming.messageQueue=rocksmq
-        --set pulsarv3.enabled=false
-        --set etcd.replicaCount=1
-        --set minio.mode=standalone
-        --set minio.image.repository=quay.io/minio/minio
-        --set minio.image.tag=RELEASE.2025-04-03T14-56-28Z
-        --set minio.resources.requests.memory=512Mi
-        --set standalone.resources.requests.memory=512Mi
-        --set standalone.resources.requests.cpu=200m
-    )
-    if ((${#SECURITY_OPTS[@]})); then
-        helm_install_args+=("${SECURITY_OPTS[@]}")
-    fi
-    if ((${#TLS_OPTS[@]})); then
-        helm_install_args+=("${TLS_OPTS[@]}")
-    fi
-    helm_install_args+=(--wait "--timeout=$TIMEOUT")
-
-    helm install "${helm_install_args[@]}" || {
-        echo "error: failed to install Milvus in namespace '${NAMESPACE}'" >&2
-        exit 1
-    }
+echo "Installing Milvus standalone via Helm (namespace=${NAMESPACE}, release=${RELEASE}, chart=${CHART_VERSION})"
+helm_install_args=(
+    "$RELEASE" milvus/milvus
+    -n "$NAMESPACE"
+    --version "$CHART_VERSION"
+    --set cluster.enabled=false
+    --set streaming.messageQueue=rocksmq
+    --set pulsarv3.enabled=false
+    --set etcd.replicaCount=1
+    --set minio.enabled=false
+    --set externalS3.enabled=true
+    --set externalS3.host="$MILVUS_S3_HOST"
+    --set externalS3.port="$MILVUS_S3_PORT"
+    --set-string externalS3.accessKey="$MILVUS_S3_ACCESS_KEY"
+    --set-string externalS3.secretKey="$MILVUS_S3_SECRET_KEY"
+    --set externalS3.useSSL=false
+    --set externalS3.bucketName="$MILVUS_S3_BUCKET"
+    --set externalS3.rootPath=file
+    --set externalS3.useIAM=false
+    --set externalS3.cloudProvider=aws
+    --set externalS3.region=us-east-1
+    --set externalS3.useVirtualHost=false
+    --set standalone.resources.requests.memory=512Mi
+    --set standalone.resources.requests.cpu=200m
+)
+if ((${#SECURITY_OPTS[@]})); then
+    helm_install_args+=("${SECURITY_OPTS[@]}")
 fi
+if ((${#TLS_OPTS[@]})); then
+    helm_install_args+=("${TLS_OPTS[@]}")
+fi
+helm_install_args+=(--wait "--timeout=$TIMEOUT")
+
+helm upgrade --install "${helm_install_args[@]}" || {
+    echo "error: failed to install or upgrade Milvus in namespace '${NAMESPACE}'" >&2
+    exit 1
+}
 
 if [[ "$TLS_ENABLED" == "true" ]]; then
     # The chart hardcodes the first service targetPort to the named 19530

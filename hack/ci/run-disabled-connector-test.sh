@@ -35,7 +35,32 @@ kubectl get "dataconnectservices.dataconnecthub.opendatahub.io/${CI_DCS_CR_NAME}
     -n "$CI_SVC_NAMESPACE" \
     -o yaml
 
-echo "=== Verifying Flight Service config.toml ==="
+# The single-node Kind cluster cannot temporarily run both the old and new
+# one-replica Flight deployments during a rolling update. Use Recreate for
+# this test rollout so Kubernetes stops the old pod before starting the new one.
+kubectl patch deployment "$CI_FLIGHT_SERVICE_NAME" \
+    -n "$CI_SVC_NAMESPACE" \
+    --type=merge \
+    -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+
+if ! kubectl wait \
+    --for=jsonpath='{.status.phase}'=Ready \
+    "dataconnectservices.dataconnecthub.opendatahub.io/${CI_DCS_CR_NAME}" \
+    -n "$CI_SVC_NAMESPACE" \
+    --timeout=180s; then
+    kubectl get "dataconnectservices.dataconnecthub.opendatahub.io/${CI_DCS_CR_NAME}" \
+        -n "$CI_SVC_NAMESPACE" \
+        -o yaml || true
+    echo "ERROR: DataConnectService did not become Ready after disabling URI" >&2
+    exit 1
+fi
+
+echo "=== Waiting for Flight Service rollout ==="
+kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" \
+    -n "$CI_SVC_NAMESPACE" \
+    --timeout=180s
+
+echo "=== Verifying Flight Service config.toml after Ready ==="
 config_toml=$(kubectl get "configmap/${CI_FLIGHT_SERVICE_NAME}-config" \
     -n "$CI_SVC_NAMESPACE" \
     -o jsonpath='{.data.config\.toml}')
@@ -54,23 +79,6 @@ if connector.get("enabled") is not False:
 
 print(f"Verified [connectors.{connector_name}].enabled = false")
 PY
-
-if ! kubectl wait \
-    --for=jsonpath='{.status.phase}'=Ready \
-    "dataconnectservices.dataconnecthub.opendatahub.io/${CI_DCS_CR_NAME}" \
-    -n "$CI_SVC_NAMESPACE" \
-    --timeout=180s; then
-    kubectl get "dataconnectservices.dataconnecthub.opendatahub.io/${CI_DCS_CR_NAME}" \
-        -n "$CI_SVC_NAMESPACE" \
-        -o yaml || true
-    echo "ERROR: DataConnectService did not become Ready after disabling URI" >&2
-    exit 1
-fi
-
-echo "=== Waiting for Flight Service rollout ==="
-kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" \
-    -n "$CI_SVC_NAMESPACE" \
-    --timeout=180s
 
 echo "=== Running disabled connector E2E test ==="
 DCH_DISABLED_CONNECTORS="$CI_DISABLED_CONNECTORS" \

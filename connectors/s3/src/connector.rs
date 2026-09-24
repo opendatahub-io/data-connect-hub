@@ -474,7 +474,7 @@ mod tests {
     #[test]
     fn test_build_operator_with_endpoint() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
-        creds.insert(KEY_ENDPOINT.to_string(), "http://minio:9000".to_string());
+        creds.insert(KEY_ENDPOINT.to_string(), "http://seaweedfs:9000".to_string());
         let result = build_operator(&creds, Duration::from_secs(10));
         assert!(result.is_ok());
     }

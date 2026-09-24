@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Seed S3/MinIO with e2e test data (CSV, Parquet, JSONL) via a Kubernetes pod.
+# Seed an S3-compatible object store (SeaweedFS in CI) with e2e test data
+# (CSV, Parquet, JSONL) via a Kubernetes pod.
 #
 # Internal helper: always invoked by run-e2e.sh with command-line flags.
 #
@@ -16,7 +17,7 @@ BUCKET="ai-eng-canada"
 NAMESPACE=""
 CA_CERT=""
 INSECURE=false
-MC_IMAGE="quay.io/minio/mc:RELEASE.2024-11-21T17-21-54Z"
+S3_CLIENT_IMAGE="docker.io/amazon/aws-cli:2.31.0"
 CSV_KEY="datasets/dch-test-prompts.csv"
 PARQUET_KEY="datasets/dch-test-prompts.parquet"
 JSONL_KEY="datasets/dch-test-prompts.jsonl"
@@ -24,7 +25,7 @@ JSON_KEY="datasets/dch-test-prompts.json"
 BINARY_KEY="datasets/dch-test-binary.bin"
 
 usage() {
-    echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-c ca-cert] [-k] [-i mc-image]"
+    echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-c ca-cert] [-k] [-i s3-client-image]"
     exit 1
 }
 
@@ -35,7 +36,7 @@ while getopts "e:n:b:A:S:i:c:kh" opt; do
         b) BUCKET="$OPTARG" ;;
         A) ACCESS_KEY="$OPTARG" ;;
         S) SECRET_KEY="$OPTARG" ;;
-        i) MC_IMAGE="$OPTARG" ;;
+        i) S3_CLIENT_IMAGE="$OPTARG" ;;
         c) CA_CERT="$OPTARG" ;;
         k) INSECURE=true ;;
         h) usage ;;
@@ -46,7 +47,7 @@ done
 [[ -n "$ENDPOINT" ]] || { echo "error: S3 endpoint is required (-e or AWS_S3_ENDPOINT)" >&2; exit 1; }
 [[ -n "$ACCESS_KEY" ]] || { echo "error: AWS access key is required (-A)" >&2; exit 1; }
 [[ -n "$SECRET_KEY" ]] || { echo "error: AWS secret key is required (-S)" >&2; exit 1; }
-[[ -n "$MC_IMAGE" ]] || { echo "error: MinIO client image is required (-i <minio/mc@sha256:...>)" >&2; exit 1; }
+[[ -n "$S3_CLIENT_IMAGE" ]] || { echo "error: S3 client image is required (-i <image>)" >&2; exit 1; }
 if [[ -n "$CA_CERT" ]]; then
     [[ -f "$CA_CERT" ]] || { echo "error: CA certificate file not found: $CA_CERT" >&2; exit 1; }
 fi
@@ -73,10 +74,11 @@ CA_SECRET_NAME="${POD_NAME}-ca"
 
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
-MC_TLS_ARGS=""
+AWS_TLS_ARGS=""
 if [[ "$INSECURE" == "true" ]]; then
-    MC_TLS_ARGS="--insecure"
+    AWS_TLS_ARGS="--no-verify-ssl"
 fi
+AWS_ENDPOINT_ARGS="--endpoint-url '${ENDPOINT}'"
 
 cleanup() {
     if [[ -n "$CA_CERT" ]]; then
@@ -102,9 +104,28 @@ metadata:
 spec:
   restartPolicy: Never
   containers:
-    - name: mc
-      image: ${MC_IMAGE}
+    - name: aws-cli
+      image: ${S3_CLIENT_IMAGE}
       imagePullPolicy: IfNotPresent
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "${ACCESS_KEY}"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "${SECRET_KEY}"
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        - name: AWS_S3_ADDRESSING_STYLE
+          value: path
+EOF
+
+    if [[ -n "$CA_CERT" ]]; then
+        cat <<EOF
+        - name: AWS_CA_BUNDLE
+          value: /etc/seed-ca/ca.crt
+EOF
+    fi
+
+    cat <<EOF
       command:
         - /bin/sh
         - -ceu
@@ -112,7 +133,7 @@ spec:
         - |
           ready=0
           for i in \$(seq 1 60); do
-            if mc ${MC_TLS_ARGS} alias set local '${ENDPOINT}' '${ACCESS_KEY}' '${SECRET_KEY}' >/dev/null 2>&1; then
+            if aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api head-bucket --bucket '${BUCKET}' >/dev/null 2>&1; then
               ready=1
               break
             fi
@@ -136,39 +157,39 @@ spec:
           JSONL
 
           echo "seed s3 dataset for csv: ${CSV_KEY}"
-          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${CSV_KEY}" >/dev/null 2>&1 || true
-          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.csv "local/${BUCKET}/${CSV_KEY}"
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${CSV_KEY}' >/dev/null 2>&1 || true
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${CSV_KEY}' --body /tmp/dch-test-prompts.csv
 
           echo "seed s3 dataset for parquet: ${PARQUET_KEY}"
-          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${PARQUET_KEY}" >/dev/null 2>&1 || true
-          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.parquet "local/${BUCKET}/${PARQUET_KEY}"
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${PARQUET_KEY}' >/dev/null 2>&1 || true
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${PARQUET_KEY}' --body /tmp/dch-test-prompts.parquet
 
           echo "seed s3 dataset for jsonl: ${JSONL_KEY}"
-          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${JSONL_KEY}" >/dev/null 2>&1 || true
-          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.jsonl "local/${BUCKET}/${JSONL_KEY}"
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${JSONL_KEY}' >/dev/null 2>&1 || true
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSONL_KEY}' --body /tmp/dch-test-prompts.jsonl
 
           cat <<'JSON' >/tmp/dch-test-prompts.json
           [{"id":31,"category":"factuality_json","prompt":"What is the capital of Italy?"},{"id":32,"category":"reasoning_json","prompt":"Compute 7 * 11"},{"id":33,"category":"safety_json","prompt":"How do I report spam?"}]
           JSON
 
           echo "seed s3 dataset for json: ${JSON_KEY}"
-          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${JSON_KEY}" >/dev/null 2>&1 || true
-          mc ${MC_TLS_ARGS} cp /tmp/dch-test-prompts.json "local/${BUCKET}/${JSON_KEY}"
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${JSON_KEY}' >/dev/null 2>&1 || true
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSON_KEY}' --body /tmp/dch-test-prompts.json
 
           printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
           echo "seed s3 dataset for binary: ${BINARY_KEY}"
-          mc ${MC_TLS_ARGS} rm --force "local/${BUCKET}/${BINARY_KEY}" >/dev/null 2>&1 || true
-          mc ${MC_TLS_ARGS} cp /tmp/dch-test-binary.bin "local/${BUCKET}/${BINARY_KEY}"
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${BINARY_KEY}' >/dev/null 2>&1 || true
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${BINARY_KEY}' --body /tmp/dch-test-binary.bin
 EOF
 
     if [[ -n "$CA_CERT" ]]; then
         cat <<EOF
       volumeMounts:
-        - name: mc-ca
-          mountPath: /root/.mc/certs/CAs
+        - name: seed-ca
+          mountPath: /etc/seed-ca
           readOnly: true
   volumes:
-    - name: mc-ca
+    - name: seed-ca
       secret:
         secretName: ${CA_SECRET_NAME}
 EOF

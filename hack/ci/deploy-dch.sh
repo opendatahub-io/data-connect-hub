@@ -16,6 +16,12 @@ echo "--- Building rest-service ---"
 docker build -t "$CI_REST_IMAGE" -f "$CI_REPO_ROOT/services/rest/Containerfile.konflux" "$CI_REPO_ROOT"
 
 echo "--- Building dc-controller ---"
+sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
+    "$CI_REPO_ROOT/config/base/flight-service/deployment.yaml"
+rm -f "$CI_REPO_ROOT/config/base/flight-service/deployment.yaml.bak"
+sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
+    "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml"
+rm -f "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml.bak"
 docker build -t "$CI_CONTROLLER_IMAGE" -f "$CI_REPO_ROOT/dc-controller/Containerfile.konflux" "$CI_REPO_ROOT"
 
 # ===================================================================
@@ -273,20 +279,20 @@ if has_connector milvus; then
 fi
 
 if has_connector s3; then
-    echo "=== Deploying tenant MinIO (S3) ==="
-    minio_args=(
+    echo "=== Deploying tenant SeaweedFS (S3) ==="
+    s3_args=(
         -n "$CI_TENANT_NAMESPACE"
-        -r "$CI_TENANT_MINIO_RELEASE"
-        -u "$CI_TENANT_MINIO_ROOT_USER"
-        -p "$CI_TENANT_MINIO_ROOT_PASSWORD"
-        -b "$CI_TENANT_MINIO_BUCKET"
-        -i "$CI_TENANT_MINIO_IMAGE"
-        -m "$CI_TENANT_MINIO_MC_IMAGE"
+        -r "$CI_TENANT_S3_RELEASE"
+        -u "$CI_TENANT_S3_ACCESS_KEY"
+        -p "$CI_TENANT_S3_SECRET_KEY"
+        -b "$CI_TENANT_S3_BUCKET"
+        -i "$CI_TENANT_S3_IMAGE"
+        -m "$CI_TENANT_S3_CLIENT_IMAGE"
     )
     if [[ "$CI_SSL_ENABLED" == "true" ]]; then
-        minio_args+=(--ssl)
+        s3_args+=(--ssl)
     fi
-    bash "$CI_REPO_ROOT/hack/install-minio.sh" "${minio_args[@]}"
+    bash "$CI_REPO_ROOT/hack/install-seaweedfs.sh" "${s3_args[@]}"
 fi
 
 echo "=== Deployment complete ==="
