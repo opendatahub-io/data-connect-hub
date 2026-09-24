@@ -209,6 +209,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			restConfig := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService + "-config", Namespace: targetNamespace}, restConfig)).To(Succeed())
 			Expect(restConfig.Data["config.toml"]).To(ContainSubstring(fmt.Sprintf("address = %q", flightResourceName+"."+targetNamespace+".svc")))
+			Expect(restConfig.Data["config.toml"]).To(ContainSubstring("port = 8443"))
 		})
 
 		It("should create services for rest and flight", func() {
