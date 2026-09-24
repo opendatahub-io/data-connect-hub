@@ -8,7 +8,11 @@
 --     updated_at            string    — ISO 8601 last-update timestamp
 --   resource                object    — DataConnection
 --     name                  string    — human-readable connection name
---     data_connection_type_id string  — references data_connection_types metadata.id
+--     data_connection_type_id string  — references data_connection_types metadata.id.
+--                                       Not a database-level foreign key: the
+--                                       reference is enforced in the meta store, which
+--                                       validates it on write and refuses to delete a
+--                                       type that connections still reference.
 --     format                string    — data format (e.g. "tabular")
 --     admin                 object    — admin metadata
 --       secret_ref          string    — name of the secret holding credentials
@@ -21,6 +25,9 @@ CREATE INDEX IF NOT EXISTS idx_data_connections_tenant ON data_connections ((dat
 CREATE INDEX IF NOT EXISTS idx_data_connections_name ON data_connections ((data->'resource'->>'name'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connections_name_tenant ON data_connections ((data->'resource'->>'name'), (data->'metadata'->>'tenant_id'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_data_connections_id ON data_connections ((data->'metadata'->>'id'));
+
+-- Supports the referencing-connection count that guards connection type deletion.
+CREATE INDEX IF NOT EXISTS idx_data_connections_type_id ON data_connections ((data->'resource'->>'data_connection_type_id'));
 
 -- Stores DataConnectionTypeResource records as JSONB documents.
 -- Each type defines a provider (e.g. "postgres", "sqlite") and the

@@ -119,6 +119,19 @@ impl PgMetaStore {
     }
 }
 
+// connection_type_in_use_message renders the error returned when a connection type
+// cannot be deleted because connections still reference it. Only the number of
+// referencing connections is disclosed: a global connection type may be referenced
+// from tenants the caller cannot otherwise see.
+fn connection_type_in_use_message(uid: &str, count: i64) -> String {
+    let subject = if count == 1 {
+        "1 connection still references it".to_string()
+    } else {
+        format!("{count} connections still reference it")
+    };
+    format!("cannot delete connection type '{uid}': {subject}; delete the connections first")
+}
+
 // deserialize_connection_type deserializes a single stored connection type JSON blob,
 // returning the parsed resource or None if it is malformed. A blob that fails to
 // deserialize is logged and skipped so a single malformed row does not abort the
@@ -849,13 +862,70 @@ impl MetaStore for PgMetaStore {
         resource.id = %uid,
         )
     )]
+    // Refuses to delete a connection type while connections still reference it,
+    // which would leave those connections pointing at a type that no longer exists.
+    //
+    // Locking the type row before counting is what makes the check race-free.
+    // create_data_connection and update_data_connection both take FOR SHARE on the
+    // row of the type they are about to reference, in the same transaction as the
+    // write, so FOR UPDATE here is mutually exclusive with them:
+    //
+    //   - a create that commits first is visible to the count below, which then
+    //     refuses the delete;
+    //   - a create that arrives while this transaction holds the lock blocks, and
+    //     once this transaction commits its FOR SHARE matches no row, so it fails
+    //     validation with "connection type not found" instead of writing an orphan.
+    //
+    // The count therefore has to run inside this transaction and after the lock.
+    // It relies on READ COMMITTED (the default): each statement takes a fresh
+    // snapshot, so the count sees connections committed while we waited on the lock.
     async fn delete_data_connection_type(&self, tenant_id: &str, uid: &str) -> Result<(), MetaStoreError> {
+        let mut tx = self.pool.begin().await.map_err(|e| {
+            error!("failed to begin transaction: {e}");
+            MetaStoreError::Query("failed to delete connection type".to_string())
+        })?;
+
+        sqlx::query(
+            "SELECT 1 FROM data_connection_types \
+             WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2 FOR UPDATE",
+        )
+        .bind(uid)
+        .bind(tenant_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| match e {
+            sqlx::Error::RowNotFound => MetaStoreError::ResourceNotFound(format!("connection type '{uid}' not found")),
+            e => {
+                error!("failed to lock connection type '{uid}' for delete: {e}");
+                MetaStoreError::Query("failed to delete connection type".to_string())
+            },
+        })?;
+
+        // Deliberately not filtered by tenant. A global connection type is visible to
+        // every tenant, so the connections referencing it may live in any of them;
+        // scoping this to the caller's tenant would let a global type be deleted out
+        // from under other tenants' connections.
+        let count: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM data_connections WHERE data->'resource'->>'data_connection_type_id' = $1",
+        )
+        .bind(uid)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| {
+            error!("failed to count connections referencing connection type '{uid}': {e}");
+            MetaStoreError::Query("failed to delete connection type".to_string())
+        })?;
+
+        if count > 0 {
+            return Err(MetaStoreError::Conflict(connection_type_in_use_message(uid, count)));
+        }
+
         let result = sqlx::query(
             "DELETE FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND data->'metadata'->>'tenant_id' = $2",
         )
         .bind(uid)
         .bind(tenant_id)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .map_err(|e| {
             error!("failed to delete connection type '{uid}': {e}");
@@ -867,6 +937,11 @@ impl MetaStore for PgMetaStore {
                 "connection type '{uid}' not found"
             )));
         }
+
+        tx.commit().await.map_err(|e| {
+            error!("failed to commit transaction: {e}");
+            MetaStoreError::Query("failed to delete connection type".to_string())
+        })?;
 
         Ok(())
     }
@@ -1147,6 +1222,28 @@ mod tests {
 
         let good = deserialize_connection_type(valid_connection_type_json("good-1", None), "global");
         assert_eq!(good.unwrap().metadata.id, "good-1");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_singular() {
+        let msg = connection_type_in_use_message("ct-1", 1);
+        assert!(msg.contains("ct-1"), "got: {msg}");
+        assert!(msg.contains("1 connection still references it"), "got: {msg}");
+        assert!(msg.contains("delete the connections first"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_plural() {
+        let msg = connection_type_in_use_message("ct-1", 3);
+        assert!(msg.contains("3 connections still reference it"), "got: {msg}");
+    }
+
+    #[test]
+    fn test_connection_type_in_use_message_discloses_no_connection_names() {
+        // The count alone: a global connection type may be referenced from tenants
+        // the caller cannot otherwise see.
+        let msg = connection_type_in_use_message("ct-1", 2);
+        assert!(!msg.contains('('), "expected no name list, got: {msg}");
     }
 
     #[test]

@@ -602,6 +602,7 @@
       "delete": {
         "operationId": "deleteConnectionType",
         "summary": "Delete a connection type",
+        "description": "Deletes a connection type. The request is rejected with 409 Conflict if any connection still references the type; delete those connections first. Only the number of referencing connections is reported, since a global connection type may be referenced from other tenants.\n",
         "tags": [
           "connection-types"
         ],
@@ -620,6 +621,9 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
           }
         }
       }
