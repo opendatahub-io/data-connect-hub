@@ -2,23 +2,23 @@ name: Milvus
 provider: milvus
 description: Milvus vector database
 credentials_fields:
-  - name: MILVUS_URI
+  - name: URI
     label: URI
     description: Milvus server URI
     required: true
     type: string
-  - name: MILVUS_TOKEN
+  - name: TOKEN
     label: Token
     description: Milvus authentication token
     required: false
     type: string
-  - name: MILVUS_DATABASE
+  - name: DATABASE
     label: Database
     description: Milvus database name
     required: false
     type: string
     default_value: default
-  - name: MILVUS_CA_CERT
+  - name: CA_CERT
     label: CA Certificate
     description: CA certificate for TLS verification
     required: false

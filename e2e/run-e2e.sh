@@ -225,16 +225,16 @@ setup_milvus_secret() {
     E2E_MILVUS_ENABLED="false"
     if [[ -n "${DCH_TENANT_MILVUS_URI:-}" ]]; then
         local -a args=(
-            --from-literal="MILVUS_URI=${DCH_TENANT_MILVUS_URI}"
+            --from-literal="URI=${DCH_TENANT_MILVUS_URI}"
         )
-        [[ -n "${DCH_TENANT_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="MILVUS_TOKEN=${DCH_TENANT_MILVUS_TOKEN}")
-        [[ -n "${DCH_TENANT_MILVUS_DATABASE:-}" ]] && args+=(--from-literal="MILVUS_DATABASE=${DCH_TENANT_MILVUS_DATABASE}")
+        [[ -n "${DCH_TENANT_MILVUS_TOKEN:-}" ]] && args+=(--from-literal="TOKEN=${DCH_TENANT_MILVUS_TOKEN}")
+        [[ -n "${DCH_TENANT_MILVUS_DATABASE:-}" ]] && args+=(--from-literal="DATABASE=${DCH_TENANT_MILVUS_DATABASE}")
         if [[ -n "${DCH_TENANT_MILVUS_CA_CERT:-}" ]]; then
             [[ -f "$DCH_TENANT_MILVUS_CA_CERT" ]] || {
                 echo "ERROR: Milvus CA cert file not found: $DCH_TENANT_MILVUS_CA_CERT" >&2
                 exit 1
             }
-            args+=(--from-file="MILVUS_CA_CERT=${DCH_TENANT_MILVUS_CA_CERT}")
+            args+=(--from-file="CA_CERT=${DCH_TENANT_MILVUS_CA_CERT}")
         fi
         kubectl create secret generic "$MILVUS_SECRET" \
             -n "$DCH_TENANT_ID" \
@@ -247,9 +247,9 @@ setup_milvus_secret() {
 setup_es_basic_secret() {
     E2E_ES_BASIC_ENABLED="false"
     if [[ -n "${DCH_TENANT_ES_URI:-}" ]]; then
-        local -a args=(--from-literal="ES_URI=${DCH_TENANT_ES_URI}")
-        [[ -n "${DCH_TENANT_ES_USERNAME:-}" ]] && args+=(--from-literal="ES_USERNAME=${DCH_TENANT_ES_USERNAME}")
-        [[ -n "${DCH_TENANT_ES_PASSWORD:-}" ]] && args+=(--from-literal="ES_PASSWORD=${DCH_TENANT_ES_PASSWORD}")
+        local -a args=(--from-literal="URI=${DCH_TENANT_ES_URI}")
+        [[ -n "${DCH_TENANT_ES_USERNAME:-}" ]] && args+=(--from-literal="USERNAME=${DCH_TENANT_ES_USERNAME}")
+        [[ -n "${DCH_TENANT_ES_PASSWORD:-}" ]] && args+=(--from-literal="PASSWORD=${DCH_TENANT_ES_PASSWORD}")
 
         local ca_cert_path="${DCH_TENANT_ES_CA_CERT:-}"
         if [[ -n "$ca_cert_path" ]]; then
@@ -257,7 +257,7 @@ setup_es_basic_secret() {
                 echo "ERROR: Elasticsearch CA cert file not found: $ca_cert_path" >&2
                 exit 1
             }
-            args+=(--from-file="ES_CA_CERT=${ca_cert_path}")
+            args+=(--from-file="CA_CERT=${ca_cert_path}")
         fi
 
         kubectl create secret generic "$ES_BASIC_SECRET" \
@@ -292,8 +292,8 @@ setup_es_apikey_secret() {
     encoded_api_key=$(echo "$api_key_json" | python3 -c "import sys,json; print(json.load(sys.stdin)['encoded'])" 2>/dev/null) || return 0
 
     local -a args=(
-        --from-literal="ES_URI=${DCH_TENANT_ES_URI}"
-        --from-literal="ES_API_KEY=${encoded_api_key}"
+        --from-literal="URI=${DCH_TENANT_ES_URI}"
+        --from-literal="API_KEY=${encoded_api_key}"
     )
     local ca_cert_path="${DCH_TENANT_ES_CA_CERT:-}"
     if [[ -n "$ca_cert_path" ]]; then
@@ -301,7 +301,7 @@ setup_es_apikey_secret() {
             echo "ERROR: Elasticsearch CA cert file not found: $ca_cert_path" >&2
             exit 1
         }
-        args+=(--from-file="ES_CA_CERT=${ca_cert_path}")
+        args+=(--from-file="CA_CERT=${ca_cert_path}")
     fi
 
     kubectl create secret generic "$ES_APIKEY_SECRET" \
@@ -315,13 +315,13 @@ setup_neo4j_secret() {
     E2E_NEO4J_ENABLED="false"
     if [[ -n "${DCH_TENANT_NEO4J_URI:-}" ]]; then
         local -a args=(
-            --from-literal="NEO4J_URI=${DCH_TENANT_NEO4J_URI}"
-            --from-literal="NEO4J_USERNAME=${DCH_TENANT_NEO4J_USERNAME}"
-            --from-literal="NEO4J_PASSWORD=${DCH_TENANT_NEO4J_PASSWORD}"
+            --from-literal="URI=${DCH_TENANT_NEO4J_URI}"
+            --from-literal="USERNAME=${DCH_TENANT_NEO4J_USERNAME}"
+            --from-literal="PASSWORD=${DCH_TENANT_NEO4J_PASSWORD}"
         )
-        [[ -n "${DCH_TENANT_NEO4J_DATABASE:-}" ]] && args+=(--from-literal="NEO4J_DATABASE=${DCH_TENANT_NEO4J_DATABASE}")
+        [[ -n "${DCH_TENANT_NEO4J_DATABASE:-}" ]] && args+=(--from-literal="DATABASE=${DCH_TENANT_NEO4J_DATABASE}")
         if [[ -n "${DCH_TENANT_NEO4J_CA_CERT:-}" ]]; then
-            args+=(--from-file="NEO4J_CA_CERT=${DCH_TENANT_NEO4J_CA_CERT}")
+            args+=(--from-file="CA_CERT=${DCH_TENANT_NEO4J_CA_CERT}")
         fi
         kubectl create secret generic "$NEO4J_SECRET" \
             -n "$DCH_TENANT_ID" \

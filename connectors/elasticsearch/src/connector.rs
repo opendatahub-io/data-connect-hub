@@ -18,11 +18,11 @@ use moka::future::Cache;
 use crate::query::EsRequestInput;
 use crate::types;
 
-const KEY_URI: &str = "ES_URI";
-const KEY_USERNAME: &str = "ES_USERNAME";
-const KEY_PASSWORD: &str = "ES_PASSWORD";
-const KEY_API_KEY: &str = "ES_API_KEY";
-const KEY_CA_CERT: &str = "ES_CA_CERT";
+const KEY_URI: &str = "URI";
+const KEY_USERNAME: &str = "USERNAME";
+const KEY_PASSWORD: &str = "PASSWORD";
+const KEY_API_KEY: &str = "API_KEY";
+const KEY_CA_CERT: &str = "CA_CERT";
 
 #[derive(Clone)]
 struct EsClient {
