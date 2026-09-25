@@ -3,7 +3,7 @@ use actix_web::dev::{ServiceRequest, ServiceResponse};
 use actix_web::middleware::Next;
 use actix_web::{App, Error, HttpResponse, HttpServer, http::header, web};
 use metrics::{Unit, counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use std::net::{SocketAddr, TcpListener};
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
@@ -13,6 +13,7 @@ const REST_REQUESTS_TOTAL: &str = "dch_rest_requests_total";
 const REST_REQUEST_DURATION_SECONDS: &str = "dch_rest_request_duration_seconds";
 const REST_REQUESTS_ACTIVE: &str = "dch_rest_requests_active";
 const UNMATCHED_ROUTE: &str = "unmatched";
+const REQUEST_DURATION_BUCKETS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 static METRICS_DESCRIBED: OnceLock<()> = OnceLock::new();
@@ -23,6 +24,11 @@ pub fn install_prometheus_recorder() -> anyhow::Result<()> {
     }
 
     let handle = PrometheusBuilder::new()
+        .set_buckets_for_metric(
+            Matcher::Full(REST_REQUEST_DURATION_SECONDS.to_owned()),
+            REQUEST_DURATION_BUCKETS,
+        )
+        .map_err(|error| anyhow::anyhow!("invalid REST request duration buckets: {error}"))?
         .install_recorder()
         .map_err(|e| anyhow::anyhow!("failed to install Prometheus recorder: {e}"))?;
 
@@ -253,6 +259,8 @@ mod tests {
             )
             .is_some()
         );
+        assert!(body.contains(&format!("# TYPE {REST_REQUEST_DURATION_SECONDS} histogram")));
+        assert!(body.contains(&format!("{REST_REQUEST_DURATION_SECONDS}_bucket{{")));
         assert!(body.contains("# TYPE dch_rest_requests_active gauge"));
         assert!(!body.contains("private-id"));
 
