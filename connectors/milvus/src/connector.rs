@@ -16,10 +16,10 @@ use moka::future::Cache;
 
 use crate::query::{MilvusOperation, MilvusRequestInput};
 
-const KEY_URI: &str = "MILVUS_URI";
-const KEY_TOKEN: &str = "MILVUS_TOKEN";
-const KEY_DATABASE: &str = "MILVUS_DATABASE";
-const KEY_CA_CERT: &str = "MILVUS_CA_CERT";
+const KEY_URI: &str = "URI";
+const KEY_TOKEN: &str = "TOKEN";
+const KEY_DATABASE: &str = "DATABASE";
+const KEY_CA_CERT: &str = "CA_CERT";
 
 #[derive(Clone)]
 struct MilvusClient {

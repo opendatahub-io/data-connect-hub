@@ -18,6 +18,13 @@ EXPECTED_OOB_CONNECTION_TYPES = {
     "URI": "uri",
 }
 
+EXPECTED_CREDENTIAL_FIELDS = {
+    "ElasticSearch": {"URI", "USERNAME", "PASSWORD", "CA_CERT", "API_KEY"},
+    "HuggingFace": {"URI", "TOKEN"},
+    "Milvus": {"URI", "TOKEN", "DATABASE", "CA_CERT"},
+    "Neo4j": {"URI", "USERNAME", "PASSWORD", "DATABASE", "CA_CERT"},
+}
+
 
 class TestRestConnectionType:
     def test_oob_connection_types_are_registered(self, rest_client: DataConnectClient) -> None:
@@ -39,6 +46,10 @@ class TestRestConnectionType:
             assert matching_types[0].provider == provider
 
         by_name = {connection_type.name: connection_type for connection_type in listed_types}
+        for name, expected_fields in EXPECTED_CREDENTIAL_FIELDS.items():
+            actual_fields = {field.name for field in by_name[name].credentials_fields}
+            assert actual_fields == expected_fields
+
         postgres_schema = {(field.name, field.required, field.type) for field in by_name["Postgres"].credentials_fields}
         pgvector_schema = {(field.name, field.required, field.type) for field in by_name["PGVector"].credentials_fields}
         assert pgvector_schema == postgres_schema

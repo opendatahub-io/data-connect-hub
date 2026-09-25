@@ -2,27 +2,27 @@ name: ElasticSearch
 provider: elasticsearch
 description: Elasticsearch search and analytics engine
 credentials_fields:
-  - name: ES_URI
+  - name: URI
     label: URI
     description: Elasticsearch server URI
     required: true
     type: string
-  - name: ES_USERNAME
+  - name: USERNAME
     label: Username
     description: Elasticsearch username
     required: false
     type: string
-  - name: ES_PASSWORD
+  - name: PASSWORD
     label: Password
     description: Elasticsearch password
     required: false
     type: string
-  - name: ES_CA_CERT
+  - name: CA_CERT
     label: CA Certificate
     description: CA certificate for TLS verification
     required: false
     type: string
-  - name: ES_API_KEY
+  - name: API_KEY
     label: API Key
     description: Elasticsearch API key (alternative to username/password)
     required: false

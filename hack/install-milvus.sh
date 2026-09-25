@@ -176,7 +176,7 @@ SSLCNF
 
     echo "TLS secret '${RELEASE}-milvus-tls' created in namespace '${NAMESPACE}'"
     if [[ -n "$TLS_CA" ]]; then
-        echo "CA certificate (use as MILVUS_CA_CERT):"
+        echo "CA certificate (use as CA_CERT):"
         cat "$TLS_CA"
     fi
 
@@ -300,5 +300,5 @@ kubectl wait --for=condition=Ready \
 
 echo "Milvus is ready (namespace=${NAMESPACE}, release=${RELEASE})"
 if [[ "$TLS_ENABLED" == "true" ]]; then
-    echo "TLS is enabled — use https:// in MILVUS_URI and set MILVUS_CA_CERT to the CA certificate above"
+    echo "TLS is enabled — use https:// in URI and set CA_CERT to the CA certificate above"
 fi

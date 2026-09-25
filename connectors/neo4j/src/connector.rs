@@ -21,11 +21,11 @@ use tempfile::NamedTempFile;
 
 use crate::types;
 
-const KEY_URI: &str = "NEO4J_URI";
-const KEY_USERNAME: &str = "NEO4J_USERNAME";
-const KEY_PASSWORD: &str = "NEO4J_PASSWORD";
-const KEY_DATABASE: &str = "NEO4J_DATABASE";
-const KEY_CA_CERT: &str = "NEO4J_CA_CERT";
+const KEY_URI: &str = "URI";
+const KEY_USERNAME: &str = "USERNAME";
+const KEY_PASSWORD: &str = "PASSWORD";
+const KEY_DATABASE: &str = "DATABASE";
+const KEY_CA_CERT: &str = "CA_CERT";
 
 pub struct Neo4jConnector {
     graphs: Cache<String, Graph>,
@@ -71,8 +71,8 @@ async fn build_graph(
     //   * `neo4j+ssc://` -> TLS; neo4rs 0.8 still verifies the server
     //                       certificate
     // The connector does not force a scheme here; the operator supplies the
-    // appropriate `NEO4J_URI`. For a private/custom CA, use `neo4j+s` and
-    // provide it through `NEO4J_CA_CERT`.
+    // appropriate `URI`. For a private/custom CA, use `neo4j+s` and
+    // provide it through `CA_CERT`.
     let mut builder = neo4rs::ConfigBuilder::default()
         .uri(uri)
         .user(&username)
