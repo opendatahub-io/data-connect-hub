@@ -16,6 +16,8 @@ A connector is a data-source integration that enables Data Connect Hub to connec
 
 A connection type defines the credentials and configuration required to connect to a specific data source.
 
+> **Note**: In the table below, **Provider** identifies the Data Connect Hub connector used by each connection type. See the Connector table above for supported connectors.
+
 | Connection Type | Source | Provider | Credentials Fields | Notes |
 | --- | --- | --- | --- | --- |
 | [ElasticSearch](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/connection-types/elasticsearch.yaml) | Built-in | `elasticsearch` | • `ES_URI`<br>• `ES_USERNAME`<br>• `ES_PASSWORD`<br>• `ES_CA_CERT`<br>• `ES_API_KEY` | — |
@@ -25,6 +27,6 @@ A connection type defines the credentials and configuration required to connect 
 | [PGVector](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/connection-types/pgvector.yaml) | Built-in | `postgres` | • `URI`<br>• `CA_CERT` | — |
 | [Postgres](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/connection-types/postgres.yaml) | Built-in | `postgres` | • `URI`<br>• `CA_CERT` | — |
 | [URI](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/connection-types/uri.yaml) | Built-in | `uri` | • `URI`<br>• `TOKEN`<br>• `USERNAME`<br>• `PASSWORD`<br>• `CA_CERT` | — |
-| `s3` | Imported from RHOAI | `s3` | • `AWS_ACCESS_KEY_ID`<br>• `AWS_SECRET_ACCESS_KEY`<br>• `AWS_S3_ENDPOINT`<br>• `AWS_DEFAULT_REGION`<br>• `AWS_S3_BUCKET` | — |
-| `oci-v1` | Imported from RHOAI | `oci-v1` | • `ACCESS_TYPE`<br>• `OCI_HOST` | No matching DCH connector is currently available. |
-| `uri-v1` | Imported from RHOAI | `uri-v1` | • `URI` | No matching DCH connector is currently available. |
+| [s3](https://github.com/opendatahub-io/odh-dashboard/blob/main/manifests/base/connection-types/s3.yaml) | Imported from RHOAI | `s3` | • `AWS_ACCESS_KEY_ID`<br>• `AWS_SECRET_ACCESS_KEY`<br>• `AWS_S3_ENDPOINT`<br>• `AWS_DEFAULT_REGION`<br>• `AWS_S3_BUCKET` | — |
+| [oci-v1](https://github.com/opendatahub-io/odh-dashboard/blob/main/manifests/base/connection-types/oci-v1.yaml) | Imported from RHOAI | `oci-v1` | • `ACCESS_TYPE`<br>• `OCI_HOST` | No matching DCH connector is currently available. |
+| [uri-v1](https://github.com/opendatahub-io/odh-dashboard/blob/main/manifests/base/connection-types/uri-v1.yaml) | Imported from RHOAI | `uri-v1` | • `URI` | No matching DCH connector is currently available. |
