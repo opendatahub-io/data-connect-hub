@@ -3,16 +3,16 @@ use k8s_openapi::api::authorization::v1::{ResourceAttributes, SubjectAccessRevie
 use kube::api::PostParams;
 use kube::{Api, Client};
 use moka::future::Cache;
-use sha2::{Digest, Sha256};
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 use tracing::{debug, warn};
 
-fn hash_token(token: &str) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(token.as_bytes());
-    format!("{:x}", hasher.finalize())
+fn hash_token(token: &str) -> i64 {
+    let mut hasher = DefaultHasher::new();
+    token.hash(&mut hasher);
+    hasher.finish() as i64
 }
 
 #[derive(Error, Debug, Clone)]
@@ -38,7 +38,7 @@ pub struct AuthInfo {
 pub struct KubeAuthClient {
     client: Client,
     token_review_audiences: Vec<String>,
-    token_cache: Cache<String, Result<AuthInfo, AuthError>>,
+    token_cache: Cache<i64, Result<AuthInfo, AuthError>>,
     sar_cache: Cache<String, bool>,
 }
 
