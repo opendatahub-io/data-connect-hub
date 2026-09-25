@@ -115,6 +115,7 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 
 	servicePortFound := false
 	containerPortFound := false
+	const metricsPortName = "metrics"
 	for _, node := range nodes {
 		var object struct {
 			Kind     string `yaml:"kind"`
@@ -150,7 +151,7 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 		switch object.Kind {
 		case "Service":
 			for _, port := range object.Spec.Ports {
-				if port.Name == "metrics" && port.Port == 9090 && port.TargetPort == "metrics" {
+				if port.Name == metricsPortName && port.Port == 9090 && port.TargetPort == metricsPortName {
 					servicePortFound = true
 				}
 			}
@@ -160,7 +161,7 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 					continue
 				}
 				for _, port := range container.Ports {
-					if port.Name == "metrics" && port.ContainerPort == 9090 {
+					if port.Name == metricsPortName && port.ContainerPort == 9090 {
 						containerPortFound = true
 					}
 				}
