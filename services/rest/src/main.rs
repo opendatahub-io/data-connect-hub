@@ -5,6 +5,7 @@ use clap::Parser;
 use crate::rest::API_VERSION;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
+use crate::rest::metrics::{install_prometheus_recorder, observe_http_request, spawn_metrics_server};
 use crate::rest::middleware::{trace_request, validate_headers};
 use crate::state::ApiService;
 use crate::utils::ServerConfig;
@@ -217,6 +218,19 @@ async fn main() -> Result<()> {
         config.global_connection_types.tenant_id.clone(),
     ));
 
+    let metrics_enabled = config.metrics.enabled;
+    if metrics_enabled {
+        tracing::info!(
+            "Prometheus metrics enabled on {}:{}",
+            config.metrics.address,
+            config.metrics.port
+        );
+        install_prometheus_recorder()?;
+        spawn_metrics_server(config.metrics.address.clone(), config.metrics.port)?;
+    } else {
+        tracing::info!("Prometheus metrics disabled");
+    }
+
     let server = HttpServer::new(move || {
         let service = service.clone();
         let cors = Cors::default()
@@ -227,6 +241,10 @@ async fn main() -> Result<()> {
 
         App::new()
             .wrap(cors)
+            .wrap(middleware::Condition::new(
+                metrics_enabled,
+                middleware::from_fn(observe_http_request),
+            ))
             .app_data(web::Data::from(service.clone()))
             .app_data(json_config())
             .app_data(query_config())

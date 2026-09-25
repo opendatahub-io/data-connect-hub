@@ -92,6 +92,91 @@ func TestServiceMonitorOnlyInOpenShiftOverlay(t *testing.T) {
 	}
 }
 
+func TestRestServiceExposesMetricsPort(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate manifest test")
+	}
+	configRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "config"))
+
+	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), filepath.Join(configRoot, "base"))
+	if err != nil {
+		t.Fatalf("rendering base manifests: %v", err)
+	}
+	rendered, err := resMap.AsYaml()
+	if err != nil {
+		t.Fatalf("serializing base manifests: %v", err)
+	}
+	nodes, err := (&kio.ByteReader{Reader: strings.NewReader(string(rendered))}).Read()
+	if err != nil {
+		t.Fatalf("parsing base manifests: %v", err)
+	}
+
+	servicePortFound := false
+	containerPortFound := false
+	const metricsPortName = "metrics"
+	for _, node := range nodes {
+		var object struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Ports []struct {
+					Name       string `yaml:"name"`
+					Port       int    `yaml:"port"`
+					TargetPort string `yaml:"targetPort"`
+				} `yaml:"ports"`
+				Template struct {
+					Spec struct {
+						Containers []struct {
+							Name  string `yaml:"name"`
+							Ports []struct {
+								Name          string `yaml:"name"`
+								ContainerPort int    `yaml:"containerPort"`
+							} `yaml:"ports"`
+						} `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(node.MustString()), &object); err != nil {
+			t.Fatalf("parsing rendered resource: %v", err)
+		}
+		if object.Metadata.Name != "dch-rest-service" {
+			continue
+		}
+
+		switch object.Kind {
+		case "Service":
+			for _, port := range object.Spec.Ports {
+				if port.Name == metricsPortName && port.Port == 9090 && port.TargetPort == metricsPortName {
+					servicePortFound = true
+				}
+			}
+		case "Deployment":
+			for _, container := range object.Spec.Template.Spec.Containers {
+				if container.Name != "rest-service" {
+					continue
+				}
+				for _, port := range container.Ports {
+					if port.Name == metricsPortName && port.ContainerPort == 9090 {
+						containerPortFound = true
+					}
+				}
+			}
+		}
+	}
+
+	if !servicePortFound {
+		t.Error("rendered REST Service does not expose metrics port 9090")
+	}
+	if !containerPortFound {
+		t.Error("rendered REST Deployment does not declare metrics container port 9090")
+	}
+}
+
 // renderKinds renders the kustomization at path and returns the names of every
 // rendered resource of the given kind.
 func renderKinds(t *testing.T, path, kind string) []string {

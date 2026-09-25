@@ -1,6 +1,6 @@
 use actix_web::{App, HttpResponse, HttpServer, http::header, web};
 use metrics::{Unit, counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
-use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
+use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
 use std::net::SocketAddr;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -9,6 +9,7 @@ use tracing::{error, info};
 const FLIGHT_REQUESTS_TOTAL: &str = "dch_flight_requests_total";
 const FLIGHT_REQUEST_DURATION_SECONDS: &str = "dch_flight_request_duration_seconds";
 const FLIGHT_REQUESTS_ACTIVE: &str = "dch_flight_requests_active";
+const REQUEST_DURATION_BUCKETS: &[f64] = &[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
 
 static PROMETHEUS_HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 static METRICS_DESCRIBED: OnceLock<()> = OnceLock::new();
@@ -19,6 +20,11 @@ pub fn install_prometheus_recorder() -> anyhow::Result<()> {
     }
 
     let handle = PrometheusBuilder::new()
+        .set_buckets_for_metric(
+            Matcher::Full(FLIGHT_REQUEST_DURATION_SECONDS.to_owned()),
+            REQUEST_DURATION_BUCKETS,
+        )
+        .map_err(|error| anyhow::anyhow!("invalid Flight request duration buckets: {error}"))?
         .install_recorder()
         .map_err(|e| anyhow::anyhow!("failed to install Prometheus recorder: {e}"))?;
 
@@ -128,4 +134,19 @@ pub fn spawn_metrics_server(address: String, port: u16) {
             }
         });
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn duration_metric_uses_histogram_buckets() {
+        install_prometheus_recorder().unwrap();
+        observe_rpc("test", "test", "OK", Duration::from_secs(1));
+
+        let body = render_prometheus().unwrap();
+        assert!(body.contains(&format!("# TYPE {FLIGHT_REQUEST_DURATION_SECONDS} histogram")));
+        assert!(body.contains(&format!("{FLIGHT_REQUEST_DURATION_SECONDS}_bucket{{")));
+    }
 }

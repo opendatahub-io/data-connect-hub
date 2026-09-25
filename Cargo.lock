@@ -4280,6 +4280,8 @@ dependencies = [
  "futures",
  "json-patch",
  "kube-utils",
+ "metrics",
+ "metrics-exporter-prometheus",
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
