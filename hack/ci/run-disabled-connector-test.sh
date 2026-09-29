@@ -83,6 +83,6 @@ PY
 echo "=== Running disabled connector E2E test ==="
 DCH_DISABLED_CONNECTORS="$CI_DISABLED_CONNECTORS" \
     "$CI_REPO_ROOT/e2e/.venv/bin/pytest" \
-    "$CI_REPO_ROOT/e2e/ci_tests/test_disabled_connector.py" \
+    "$CI_REPO_ROOT/e2e/scenarios/test_disabled_connector.py" \
     -v \
     -s

@@ -37,14 +37,11 @@ To pass extra pytest arguments:
 ./e2e/run-e2e.sh e2e/env.local --tb=short -x
 ```
 
-## 3. Configuration
+## 3. Important Files and Directories
 
-See `env.example` for all available settings. Required fields:
-
-| Variable | Description |
-|----------|-------------|
-| `DCH_SERVICE_NAMESPACE` | Namespace where DCH services run |
-| `DCH_GATEWAY_ENDPOINT` | Gateway host or host:port serving REST and Flight (e.g. `dch.apps.example.com`) |
-
-Set `DCH_GATEWAY_AUTH_REQUIRED=true` when the endpoint is an authenticated RHOAI or ODH platform Gateway. Leave it
-`false` for direct service and port-forward testing, where health checks remain anonymous.
+| Path | Purpose |
+|------|---------|
+| `e2e/env.example` | Template for required and optional E2E settings. |
+| `e2e/run-e2e.sh` | Installs test dependencies, prepares the E2E environment, and runs the default suite. |
+| `e2e/tests/` | Default E2E suite, run by `e2e/run-e2e.sh`. |
+| `e2e/scenarios/` | Optional deployment-state or operational scenarios. Not run by `e2e/run-e2e.sh`; run separately after preparing prerequisites with `e2e/.venv/bin/pytest e2e/scenarios/ -v`. |
