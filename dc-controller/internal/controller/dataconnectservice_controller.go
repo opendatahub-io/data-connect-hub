@@ -80,7 +80,16 @@ const (
 	kindConfigMap          = "ConfigMap"
 	kindService            = "Service"
 	kindServiceAccount     = "ServiceAccount"
+	kindSecret             = "Secret"
+	kindNetworkPolicy      = "NetworkPolicy"
+	kindHTTPRoute          = "HTTPRoute"
+	kindClusterRole        = "ClusterRole"
 	kindClusterRoleBinding = "ClusterRoleBinding"
+	kindRole               = "Role"
+	kindRoleBinding        = "RoleBinding"
+	kindStatefulSet        = "StatefulSet"
+	kindDaemonSet          = "DaemonSet"
+	kindJob                = "Job"
 
 	valueTrue  = "true"
 	valueFalse = "false"
@@ -91,8 +100,11 @@ const (
 
 	finalizerName = "dataconnecthub.opendatahub.io/finalizer"
 
-	managedByLabel      = "dataconnecthub.opendatahub.io/managed-by"
-	managedByDCHService = "dataconnectservice"
+	labelManagedBy       = "dataconnecthub.opendatahub.io/managed-by"
+	managedByDCHService  = "dataconnectservice"
+	labelAppName         = "app.kubernetes.io/name"
+	annotationSpecHash   = "dataconnecthub/spec-hash"
+	annotationConfigHash = "dataconnecthub/config-hash"
 
 	releasePlatform = "platform"
 )
@@ -643,7 +655,7 @@ func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.
 	var cleanupErr error
 
 	var clusterRoles rbacv1.ClusterRoleList
-	if err := r.List(ctx, &clusterRoles, client.MatchingLabels{managedByLabel: managedByDCHService}); err != nil {
+	if err := r.List(ctx, &clusterRoles, client.MatchingLabels{labelManagedBy: managedByDCHService}); err != nil {
 		return fmt.Errorf("listing DCH ClusterRoles for cleanup: %w", err)
 	} else {
 		for i := range clusterRoles.Items {
@@ -658,7 +670,7 @@ func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.
 	}
 
 	var clusterRoleBindings rbacv1.ClusterRoleBindingList
-	if err := r.List(ctx, &clusterRoleBindings, client.MatchingLabels{managedByLabel: managedByDCHService}); err != nil {
+	if err := r.List(ctx, &clusterRoleBindings, client.MatchingLabels{labelManagedBy: managedByDCHService}); err != nil {
 		return fmt.Errorf("listing DCH ClusterRoleBindings for cleanup: %w", err)
 	} else {
 		for i := range clusterRoleBindings.Items {
@@ -806,7 +818,7 @@ func (r *DataConnectServiceReconciler) pendingDeployments(ctx context.Context, n
 	deployList := &appsv1.DeploymentList{}
 	if err := r.List(ctx, deployList,
 		client.InNamespace(namespace),
-		client.MatchingLabels{managedByLabel: managedByDCHService},
+		client.MatchingLabels{labelManagedBy: managedByDCHService},
 	); err != nil {
 		return nil, fmt.Errorf("listing managed deployments: %w", err)
 	}

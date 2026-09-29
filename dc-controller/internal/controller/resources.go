@@ -264,7 +264,7 @@ func renderFlightService(resources []*unstructured.Unstructured, crName string) 
 			renameFlightServiceResource(obj, serviceName)
 			continue
 		}
-		if obj.GetKind() == "HTTPRoute" {
+		if obj.GetKind() == kindHTTPRoute {
 			obj.SetName(httpRouteResourceName(crName))
 			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
 		}
@@ -280,8 +280,8 @@ func isFlightServiceResource(obj *unstructured.Unstructured) bool {
 		// name contains "flight-service" even though it is not a Flight
 		// service resource. Use the app label to distinguish the Flight
 		// ConfigMap from the REST-owned CA ConfigMap.
-		return obj.GetLabels()["app.kubernetes.io/name"] == nameFlightService
-	case kindDeployment, kindService, kindServiceAccount, "NetworkPolicy":
+		return obj.GetLabels()[labelAppName] == nameFlightService
+	case kindDeployment, kindService, kindServiceAccount, kindNetworkPolicy:
 		return strings.Contains(name, nameFlightService)
 	case kindClusterRoleBinding:
 		return strings.HasSuffix(name, "flight-auth-delegator")
@@ -340,7 +340,7 @@ func setDeploymentImage(resources []*unstructured.Unstructured, containerName, i
 func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) {
 	var flightSvcName string
 	for _, obj := range resources {
-		if obj.GetKind() == "Service" && strings.HasSuffix(obj.GetName(), serviceName) {
+		if obj.GetKind() == kindService && strings.HasSuffix(obj.GetName(), serviceName) {
 			flightSvcName = obj.GetName()
 			break
 		}
@@ -374,7 +374,7 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 	}
 
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || obj.GetLabels()["app.kubernetes.io/name"] != flightName {
+		if obj.GetKind() != kindConfigMap || obj.GetLabels()[labelAppName] != flightName {
 			continue
 		}
 		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
@@ -680,10 +680,10 @@ func resourcePriority(kind string) int {
 	switch kind {
 	case kindServiceAccount:
 		return 0
-	case kindConfigMap, "Secret", "Service", "NetworkPolicy",
-		"ClusterRole", kindClusterRoleBinding, "Role", "RoleBinding":
+	case kindConfigMap, kindSecret, kindService, kindNetworkPolicy,
+		kindClusterRole, kindClusterRoleBinding, kindRole, kindRoleBinding:
 		return 1
-	case kindDeployment, "StatefulSet", "DaemonSet", "Job":
+	case kindDeployment, kindStatefulSet, kindDaemonSet, kindJob:
 		return 2
 	default:
 		return 3
@@ -713,7 +713,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 		if labels == nil {
 			labels = map[string]string{}
 		}
-		labels[managedByLabel] = managedByDCHService
+		labels[labelManagedBy] = managedByDCHService
 		obj.SetLabels(labels)
 
 		if err := controllerutil.SetControllerReference(cr, obj, r.Scheme); err != nil {
@@ -725,7 +725,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 		if ann == nil {
 			ann = map[string]string{}
 		}
-		ann["dataconnecthub/spec-hash"] = desiredHash
+		ann[annotationSpecHash] = desiredHash
 		obj.SetAnnotations(ann)
 
 		existing := &unstructured.Unstructured{}
@@ -748,7 +748,7 @@ func (r *DataConnectServiceReconciler) applyResources(
 
 		existingHash := ""
 		if existingAnn := existing.GetAnnotations(); existingAnn != nil {
-			existingHash = existingAnn["dataconnecthub/spec-hash"]
+			existingHash = existingAnn[annotationSpecHash]
 		}
 		if existingHash == desiredHash {
 			if !hasControllerOwner(existing, cr.GetUID()) {
@@ -973,7 +973,7 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, co
 		if ann == nil {
 			ann = map[string]string{}
 		}
-		ann["dataconnecthub/config-hash"] = configHash
+		ann[annotationConfigHash] = configHash
 		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
 	}
 }
