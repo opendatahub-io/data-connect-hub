@@ -398,29 +398,36 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	patches = append(patches, flightPatches...)
 	patches = append(patches, gwPatches...)
 
+	flightInstanceName := flightInstanceName(cr.Name)
+	flightResourceName := resourceNamePrefix + flightInstanceName
+
 	paramsEnvOverrides := map[string]string{
-		RelatedImageRestService:   r.RestImage,
-		RelatedImageFlightService: r.FlightImage,
-		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
+		ParamRestImage:           r.RestImage,
+		ParamFlightImage:         r.FlightImage,
+		ParamKubeRbacProxyImage:  r.KubeRbacProxyImage,
+		ParamFlightResourceName:  flightResourceName,
+		ParamFlightInstanceName:  flightInstanceName,
+		ParamFlightConfigName:    flightResourceName + "-config",
+		ParamFlightSAName:        flightResourceName + "-sa",
+		ParamFlightCRBName:       flightResourceName + "-auth-delegator",
+		ParamFlightTLSName:       flightInstanceName + "-tls",
+		ParamFlightHTTPRouteName: httpRouteResourceName(cr.Name),
 	}
 	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil, paramsEnvOverrides)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	resources = renderFlightService(resources, cr.Name)
-	flightContainerName := flightServiceResourceName(cr.Name)
-
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName)
+	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName)
+	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightResourceName)
 	if cr.Spec.FlightService != nil {
-		if err := setConfigMapFlightConnectorSettings(resources, flightContainerName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
+		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
 
-	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, flightContainerName) {
+	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, nameFlightService) {
 		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
 	}
 
@@ -432,7 +439,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateFlightDeploymentsWithConfigHash(resources, flightContainerName)
+	annotateFlightDeploymentsWithConfigHash(resources, flightInstanceName, nameFlightService)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
@@ -442,12 +449,12 @@ func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context
 		return nil
 	}
 	log := logf.FromContext(ctx)
-	flightName := flightServiceResourceName(cr.Name)
-	flightFQDN := fmt.Sprintf("dch-%s.%s.svc", flightName, cr.Namespace)
+	flightInstance := flightInstanceName(cr.Name)
+	flightFQDN := fmt.Sprintf("%s%s.%s.svc", resourceNamePrefix, flightInstance, cr.Namespace)
 	internalURL := fmt.Sprintf("https://%s:8443", flightFQDN)
 
 	fs := FlightServiceRegistration{
-		Name:        flightName,
+		Name:        flightInstance,
 		Namespace:   cr.Namespace,
 		ExternalURL: internalURL,
 		InternalURL: internalURL,
@@ -456,16 +463,16 @@ func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context
 
 	if err := r.FlightServiceClient.RegisterFlightService(ctx, cr.Namespace, fs); err != nil {
 		if errors.Is(err, ErrConflict) {
-			log.V(1).Info("flight service already registered", "name", flightName)
+			log.V(1).Info("flight service already registered", "name", flightInstance)
 			return nil
 		}
 		if errors.Is(err, ErrServiceUnavailable) {
-			log.Info("REST service unavailable for flight registration, requeuing", "name", flightName)
+			log.Info("REST service unavailable for flight registration, requeuing", "name", flightInstance)
 			return err
 		}
-		return fmt.Errorf("registering flight service %s: %w", flightName, err)
+		return fmt.Errorf("registering flight service %s: %w", flightInstance, err)
 	}
-	log.Info("registered flight service", "name", flightName)
+	log.Info("registered flight service", "name", flightInstance)
 	return nil
 }
 

@@ -42,6 +42,8 @@ const (
 	testNameKey                      = "name"
 	testRestImageParam               = "REST_IMAGE"
 	testFlightImageParam             = "FLIGHT_IMAGE"
+	testDataKey                      = "data"
+	testConfigTOMLKey                = "config.toml"
 )
 
 func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
@@ -52,8 +54,8 @@ func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
 				"app.kubernetes.io/name": "flight-service",
 			},
 		},
-		"data": map[string]any{
-			"config.toml": configTOML,
+		testDataKey: map[string]any{
+			testConfigTOMLKey: configTOML,
 		},
 	}}
 }
@@ -110,12 +112,12 @@ enabled = true
 				t.Fatal(err)
 			}
 
-			data, found, err := unstructured.NestedStringMap(configMap.Object, "data")
+			data, found, err := unstructured.NestedStringMap(configMap.Object, testDataKey)
 			if err != nil || !found {
 				t.Fatalf("expected ConfigMap data, found=%v err=%v", found, err)
 			}
-			if !strings.Contains(data["config.toml"], tt.expected) {
-				t.Fatalf("expected %s, got:\n%s", tt.expected, data["config.toml"])
+			if !strings.Contains(data[testConfigTOMLKey], tt.expected) {
+				t.Fatalf("expected %s, got:\n%s", tt.expected, data[testConfigTOMLKey])
 			}
 		})
 	}
@@ -165,12 +167,12 @@ connection_timeout_secs = 20
 		t.Fatal(err)
 	}
 
-	data, found, err := unstructured.NestedStringMap(configMap.Object, "data")
+	data, found, err := unstructured.NestedStringMap(configMap.Object, testDataKey)
 	if err != nil || !found {
 		t.Fatalf("expected ConfigMap data, found=%v err=%v", found, err)
 	}
 	var updated map[string]any
-	if err := toml.Unmarshal([]byte(data["config.toml"]), &updated); err != nil {
+	if err := toml.Unmarshal([]byte(data[testConfigTOMLKey]), &updated); err != nil {
 		t.Fatalf("expected valid updated TOML: %v", err)
 	}
 	connectors, ok := updated["connectors"].(map[string]any)
@@ -267,9 +269,9 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 	}
 
 	imageParams := map[string]string{
-		RelatedImageRestService:   "registry.example.com/dch/rest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		RelatedImageFlightService: "registry.example.com/dch/flight@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		RelatedImageKubeRbacProxy: "registry.example.com/dch/kube-rbac-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+		ParamRestImage:          "registry.example.com/dch/rest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		ParamFlightImage:        "registry.example.com/dch/flight@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		ParamKubeRbacProxyImage: "registry.example.com/dch/kube-rbac-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 	}
 	paths := []struct {
 		name string
@@ -287,9 +289,9 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 			}
 
 			wantImages := map[string]string{
-				nameRestService:   imageParams[RelatedImageRestService],
-				nameFlightService: imageParams[RelatedImageFlightService],
-				nameKubeRbacProxy: imageParams[RelatedImageKubeRbacProxy],
+				nameRestService:   imageParams[ParamRestImage],
+				nameFlightService: imageParams[ParamFlightImage],
+				nameKubeRbacProxy: imageParams[ParamKubeRbacProxyImage],
 			}
 			for containerName, wantImage := range wantImages {
 				gotImage, found := renderedContainerImage(resources, containerName)
@@ -438,14 +440,77 @@ func TestMergeParamsEnvRejectsUnknownKeyWithoutWriting(t *testing.T) {
 	}
 }
 
+func configMapWithTOML(configTOML string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		testKindKey:     kindConfigMap,
+		testMetadataKey: map[string]any{},
+		testDataKey: map[string]any{
+			testConfigTOMLKey: configTOML,
+		},
+	}}
+}
+
+func TestSetConfigMapGlobalNamespace(t *testing.T) {
+	flightCM := configMapWithTOML(`[global-connection-types]
+tenant-id = "opendatahub"
+
+[connectors.default]
+enabled = true
+`)
+	restCM := configMapWithTOML(`[global-connection-types]
+tenant-id = "opendatahub"
+
+[flight-service]
+address = "flight-service"
+`)
+	noTenantCM := configMapWithTOML(`[server]
+port = 8080
+`)
+
+	setConfigMapGlobalNamespace([]*unstructured.Unstructured{flightCM, restCM, noTenantCM}, "my-namespace")
+
+	for _, tt := range []struct {
+		name string
+		cm   *unstructured.Unstructured
+		want string
+	}{
+		{"flight", flightCM, "my-namespace"},
+		{"rest", restCM, "my-namespace"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			data, _, _ := unstructured.NestedStringMap(tt.cm.Object, testDataKey)
+			var config map[string]any
+			if err := toml.Unmarshal([]byte(data[testConfigTOMLKey]), &config); err != nil {
+				t.Fatal(err)
+			}
+			gct, ok := config["global-connection-types"].(map[string]any)
+			if !ok {
+				t.Fatal("missing [global-connection-types] section")
+			}
+			if gct["tenant-id"] != tt.want {
+				t.Errorf("tenant-id = %q, want %q", gct["tenant-id"], tt.want)
+			}
+		})
+	}
+
+	// ConfigMap without [global-connection-types] should be unchanged.
+	data, _, _ := unstructured.NestedStringMap(noTenantCM.Object, testDataKey)
+	if strings.Contains(data[testConfigTOMLKey], "my-namespace") {
+		t.Error("ConfigMap without global-connection-types should not be modified")
+	}
+}
+
 func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 	configMap := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
 			testNameKey: "dch-default-dcs-flight-config",
+			"labels": map[string]any{
+				labelAppName: "default-dcs-flight",
+			},
 		},
-		"data": map[string]any{
-			"config.toml": "[connectors.uri]\nenabled = false\n",
+		testDataKey: map[string]any{
+			testConfigTOMLKey: "[connectors.uri]\nenabled = false\n",
 		},
 	}}
 	deployment := &unstructured.Unstructured{Object: map[string]any{
@@ -458,7 +523,7 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 				"spec": map[string]any{
 					"containers": []any{
 						map[string]any{
-							testNameKey: "default-dcs-flight",
+							testNameKey: nameFlightService,
 							"image":     "localhost/dch-flight:test",
 						},
 					},
@@ -467,7 +532,7 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 		},
 	}}
 
-	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight")
+	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight", nameFlightService)
 
 	annotations, found, err := unstructured.NestedStringMap(
 		deployment.Object,

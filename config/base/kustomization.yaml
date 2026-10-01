@@ -47,16 +47,6 @@ replacements:
     - spec.template.spec.containers.[name=kube-rbac-proxy].image
 - source:
     kind: ServiceAccount
-    name: flight-service-sa
-    fieldPath: metadata.name
-  targets:
-  - select:
-      kind: ClusterRoleBinding
-      name: flight-auth-delegator
-    fieldPaths:
-    - subjects.[name=flight-service-sa].name
-- source:
-    kind: ServiceAccount
     name: rest-service-sa
     fieldPath: metadata.name
   targets:
@@ -65,3 +55,83 @@ replacements:
       name: kube-rbac-proxy-auth-review
     fieldPaths:
     - subjects.[name=rest-service-sa].name
+# Flight resource name replacements — overwrite the metadata.name
+# that namePrefix set with the controller-supplied dynamic name.
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_RESOURCE_NAME
+  targets:
+  - select: { kind: Deployment, name: flight-service }
+    fieldPaths: [metadata.name]
+  - select: { kind: Service, name: flight-service }
+    fieldPaths: [metadata.name]
+  - select: { kind: NetworkPolicy, name: flight-service }
+    fieldPaths: [metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_CONFIG_NAME
+  targets:
+  - select: { kind: ConfigMap, name: flight-service-config }
+    fieldPaths: [metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_SA_NAME
+  targets:
+  - select: { kind: ServiceAccount, name: flight-service-sa }
+    fieldPaths: [metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_CRB_NAME
+  targets:
+  - select: { kind: ClusterRoleBinding, name: flight-auth-delegator }
+    fieldPaths: [metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_HTTPROUTE_NAME
+  targets:
+  - select: { kind: HTTPRoute, name: data-connect-hub }
+    fieldPaths: [metadata.name]
+# Flight instance identifier replacements — labels and selectors.
+# Must come after image replacements above (which use [name=flight-service]).
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_INSTANCE_NAME
+  targets:
+  - select: { kind: Deployment, name: flight-service }
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/name]
+    - spec.selector.matchLabels.[app.kubernetes.io/name]
+    - spec.template.metadata.labels.[app.kubernetes.io/name]
+  - select: { kind: Service, name: flight-service }
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/name]
+    - spec.selector.[app.kubernetes.io/name]
+  - select: { kind: NetworkPolicy, name: flight-service }
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/name]
+    - spec.podSelector.matchLabels.[app.kubernetes.io/name]
+  - select: { kind: ConfigMap, name: flight-service-config }
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/name]
+  - select: { kind: ServiceAccount, name: flight-service-sa }
+    fieldPaths:
+    - metadata.labels.[app.kubernetes.io/name]
+# Flight TLS secret name replacements — the TLS secret is externally
+# generated, so FixBackReferences cannot track it.
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.FLIGHT_TLS_NAME
+  targets:
+  - select: { kind: Service, name: flight-service }
+    fieldPaths:
+    - metadata.annotations.[service.beta.openshift.io/serving-cert-secret-name]
+  - select: { kind: Deployment, name: flight-service }
+    fieldPaths:
+    - spec.template.spec.volumes.[name=tls].secret.secretName
