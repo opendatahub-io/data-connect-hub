@@ -93,6 +93,7 @@ async fn read_sample(reader: Reader) -> Result<Vec<u8>, ConnectorError> {
         .map_err(|e| ConnectorError::IOError(format!("Failed to open stream: {e}")))?;
 
     let mut buf = Vec::new();
+    let mut hit_limit = false;
     while let Some(chunk) = buf_stream
         .try_next()
         .await
@@ -100,11 +101,15 @@ async fn read_sample(reader: Reader) -> Result<Vec<u8>, ConnectorError> {
     {
         buf.extend_from_slice(&chunk.to_bytes());
         if buf.len() >= MAX_SCHEMA_SAMPLE {
+            hit_limit = true;
             break;
         }
     }
 
-    if let Some(pos) = buf.iter().rposition(|&b| b == b'\n') {
+    // Only truncate to the last complete line when we stopped due to the
+    // sample-size limit — the trailing bytes may be a partial row.  When
+    // the stream was fully consumed (natural EOF) every byte is valid.
+    if hit_limit && let Some(pos) = buf.iter().rposition(|&b| b == b'\n') {
         buf.truncate(pos + 1);
     }
 

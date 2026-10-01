@@ -29,7 +29,7 @@ pub async fn read_csv_batches(reader: Reader, schema: &Arc<Schema>, batch_size: 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Float64Array, Int32Array, StringArray};
+    use arrow::array::{Array, Float64Array, Int32Array, StringArray};
     use arrow::datatypes::{DataType, Field};
     use futures::TryStreamExt;
     use opendal::{Operator, services::Fs, services::Memory};
@@ -38,6 +38,12 @@ mod tests {
         let op = Operator::new(Memory::default()).unwrap();
         op.write("test.csv", data.to_vec()).await.unwrap();
         op.reader("test.csv").await.unwrap()
+    }
+
+    async fn chunked_reader(data: &[u8], chunk_size: usize) -> Reader {
+        let op = Operator::new(Memory::default()).unwrap();
+        op.write("test.csv", data.to_vec()).await.unwrap();
+        op.reader_with("test.csv").chunk(chunk_size).await.unwrap()
     }
 
     #[tokio::test]
@@ -82,6 +88,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_csv_schema_no_trailing_newline() {
+        // The last row (no trailing newline) contains "not_a_number", which
+        // forces `id` to be inferred as Utf8 instead of Int64.  If
+        // read_sample dropped the last row, id would be inferred as Int64.
+        let csv_data = b"id\n1\nnot_a_number";
+        let reader = memory_reader(csv_data).await;
+        let schema = read_csv_schema(reader).await.unwrap();
+        assert_eq!(schema.fields().len(), 1);
+        assert_eq!(*schema.field_with_name("id").unwrap().data_type(), DataType::Utf8);
+    }
+
+    #[tokio::test]
+    async fn test_csv_malformed_line_no_trailing_newline() {
+        let csv_data = b"id\n1\nnot_an_int";
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, false)]));
+        let reader = memory_reader(csv_data).await;
+        let result: Result<Vec<_>, _> = read_csv_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await;
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
     async fn test_csv_no_trailing_newline() {
         let csv_data = b"id,name,score\n1,alice,95.5\n2,bob,87.0\n3,charlie,92.3";
 
@@ -101,8 +132,83 @@ mod tests {
         let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
         assert_eq!(total_rows, 3);
 
+        let last_batch = batches.last().unwrap();
+        let names = last_batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(names.value(names.len() - 1), "charlie");
+    }
+
+    #[tokio::test]
+    async fn test_csv_record_split_across_chunks() {
+        // "id,name,score\n1,alice,95.5\n2,bob,87.0\n" is 40 bytes.
+        // chunk_size=10 forces records to be split across multiple chunks.
+        let csv_data = b"id,name,score\n1,alice,95.5\n2,bob,87.0\n";
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, true),
+            Field::new("name", DataType::Utf8, true),
+            Field::new("score", DataType::Float64, true),
+        ]));
+
+        let reader = chunked_reader(csv_data, 10).await;
+        let batches: Vec<_> = read_csv_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 2);
+
+        let last_batch = batches.last().unwrap();
+        let names = last_batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
+        assert_eq!(names.value(names.len() - 1), "bob");
+    }
+
+    #[tokio::test]
+    async fn test_csv_single_row_no_trailing_newline() {
+        let csv_data = b"id,name\n1,alice";
+
+        let reader = memory_reader(csv_data).await;
+        let schema = read_csv_schema(reader).await.unwrap();
+        assert_eq!(schema.fields().len(), 2);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("id", DataType::Int32, true),
+            Field::new("name", DataType::Utf8, true),
+        ]));
+        let reader = memory_reader(csv_data).await;
+        let batches: Vec<_> = read_csv_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 1);
+
         let names = batches[0].column(1).as_any().downcast_ref::<StringArray>().unwrap();
-        assert_eq!(names.value(2), "charlie");
+        assert_eq!(names.value(0), "alice");
+    }
+
+    #[tokio::test]
+    async fn test_csv_empty_input() {
+        let schema = Arc::new(Schema::new(vec![Field::new("id", DataType::Int32, true)]));
+        let reader = memory_reader(b"").await;
+        let batches: Vec<_> = read_csv_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 0);
+    }
+
+    #[tokio::test]
+    async fn test_csv_only_newlines() {
+        let reader = memory_reader(b"\n\n").await;
+        let schema = read_csv_schema(reader).await.unwrap();
+        assert_eq!(schema.fields().len(), 0);
     }
 
     #[tokio::test]
