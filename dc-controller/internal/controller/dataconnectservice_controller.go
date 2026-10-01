@@ -398,18 +398,18 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	patches = append(patches, flightPatches...)
 	patches = append(patches, gwPatches...)
 
-	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil)
+	paramsEnvOverrides := map[string]string{
+		RelatedImageRestService:   r.RestImage,
+		RelatedImageFlightService: r.FlightImage,
+		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
+	}
+	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil, paramsEnvOverrides)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	setDeploymentImage(resources, nameRestService, r.RestImage)
-	setDeploymentImage(resources, nameKubeRbacProxy, r.KubeRbacProxyImage)
-
 	resources = renderFlightService(resources, cr.Name)
 	flightContainerName := flightServiceResourceName(cr.Name)
-
-	setDeploymentImage(resources, flightContainerName, r.FlightImage)
 
 	setConfigMapGlobalNamespace(resources, cr.Namespace)
 	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName)

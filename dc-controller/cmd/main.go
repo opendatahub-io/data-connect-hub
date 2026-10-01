@@ -208,9 +208,9 @@ func main() {
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
 		ManifestsPath:       manifestsPath,
-		RestImage:           requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"),
-		FlightImage:         requiredEnv("RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"),
-		KubeRbacProxyImage:  requiredEnv("RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"),
+		RestImage:           requiredEnv(controller.RelatedImageRestService),
+		FlightImage:         requiredEnv(controller.RelatedImageFlightService),
+		KubeRbacProxyImage:  requiredEnv(controller.RelatedImageKubeRbacProxy),
 		FlightServiceClient: controller.NewHTTPFlightServiceClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")

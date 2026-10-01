@@ -17,6 +17,8 @@ limitations under the License.
 package controller
 
 import (
+	"bufio"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,6 +28,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 const (
@@ -37,6 +40,8 @@ const (
 	testKindKey                      = "kind"
 	testMetadataKey                  = "metadata"
 	testNameKey                      = "name"
+	testRestImageParam               = "REST_IMAGE"
+	testFlightImageParam             = "FLIGHT_IMAGE"
 )
 
 func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
@@ -224,7 +229,7 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil)
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, nil)
 			if err != nil {
 				t.Fatalf("rendering %s: %v", tt.path, err)
 			}
@@ -250,6 +255,186 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 				t.Errorf("rendered ServiceMonitors = %d, want %d", serviceMonitors, want)
 			}
 		})
+	}
+}
+
+func TestRenderKustomizationImageParams(t *testing.T) {
+	manifestsPath := filepath.Join("..", "..", "..", "config")
+	paramsPath := filepath.Join(manifestsPath, "base", "params.env")
+	originalParams, err := os.ReadFile(paramsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	imageParams := map[string]string{
+		RelatedImageRestService:   "registry.example.com/dch/rest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		RelatedImageFlightService: "registry.example.com/dch/flight@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+		RelatedImageKubeRbacProxy: "registry.example.com/dch/kube-rbac-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+	}
+	paths := []struct {
+		name string
+		path string
+	}{
+		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift")},
+	}
+
+	for _, tt := range paths {
+		t.Run(tt.name, func(t *testing.T) {
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, imageParams)
+			if err != nil {
+				t.Fatalf("rendering %s: %v", tt.path, err)
+			}
+
+			wantImages := map[string]string{
+				nameRestService:   imageParams[RelatedImageRestService],
+				nameFlightService: imageParams[RelatedImageFlightService],
+				nameKubeRbacProxy: imageParams[RelatedImageKubeRbacProxy],
+			}
+			for containerName, wantImage := range wantImages {
+				gotImage, found := renderedContainerImage(resources, containerName)
+				if !found {
+					t.Errorf("container %q not found in rendered Deployments", containerName)
+					continue
+				}
+				if gotImage != wantImage {
+					t.Errorf("container %q image = %q, want %q", containerName, gotImage, wantImage)
+				}
+			}
+		})
+	}
+
+	updatedParams, err := os.ReadFile(paramsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updatedParams) != string(originalParams) {
+		t.Fatal("rendering changed the source params.env on disk")
+	}
+}
+
+func renderedContainerImage(resources []*unstructured.Unstructured, containerName string) (string, bool) {
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, err := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if err != nil || !found {
+			continue
+		}
+		for _, raw := range containers {
+			container, ok := raw.(map[string]any)
+			if !ok || container["name"] != containerName {
+				continue
+			}
+			image, _ := container["image"].(string)
+			return image, true
+		}
+	}
+	return "", false
+}
+
+func TestMergeParamsEnvPreservesExistingParams(t *testing.T) {
+	fs := filesys.MakeFsInMemory()
+	path := filepath.Join("/manifests", "params.env")
+	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	original := "# defaults\nREST_IMAGE=old:tag\nKEEP=preserved\nFLIGHT_IMAGE=old-flight@sha256:old\n"
+	if err := fs.WriteFile(path, []byte(original)); err != nil {
+		t.Fatal(err)
+	}
+
+	overrides := map[string]string{
+		testRestImageParam:   "registry.example.com/rest@sha256:abc=def",
+		testFlightImageParam: "registry.example.com/flight@sha256:123",
+	}
+	if err := mergeParamsEnv(fs, path, overrides); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := fs.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotParams := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(string(got)))
+	for scanner.Scan() {
+		key, value, ok := strings.Cut(scanner.Text(), "=")
+		if ok {
+			gotParams[key] = value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	wantParams := map[string]string{
+		testRestImageParam:   overrides[testRestImageParam],
+		testFlightImageParam: overrides[testFlightImageParam],
+		"KEEP":               "preserved",
+	}
+	if len(gotParams) != len(wantParams) {
+		t.Fatalf("params.env entries = %#v, want %#v", gotParams, wantParams)
+	}
+	for key, want := range wantParams {
+		if gotParams[key] != want {
+			t.Errorf("params.env[%q] = %q, want %q", key, gotParams[key], want)
+		}
+	}
+}
+
+func TestMergeParamsEnvRejectsInvalidValuesWithoutWriting(t *testing.T) {
+	fs := filesys.MakeFsInMemory()
+	path := filepath.Join("/manifests", "params.env")
+	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	original := testRestImageParam + "=old:tag\n" + testFlightImageParam + "=old-flight:tag\n"
+	if err := fs.WriteFile(path, []byte(original)); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mergeParamsEnv(fs, path, map[string]string{
+		testRestImageParam:   "registry.example.com/rest:tag",
+		testFlightImageParam: "registry.example.com/flight\nmalicious=value",
+	})
+	if err == nil {
+		t.Fatal("expected error for a params.env value containing a newline")
+	}
+
+	got, readErr := fs.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Errorf("params.env changed after failed merge: %q", got)
+	}
+}
+
+func TestMergeParamsEnvRejectsUnknownKeyWithoutWriting(t *testing.T) {
+	fs := filesys.MakeFsInMemory()
+	path := filepath.Join("/manifests", "params.env")
+	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
+		t.Fatal(err)
+	}
+	original := "REST_IMAGE=old:tag\n"
+	if err := fs.WriteFile(path, []byte(original)); err != nil {
+		t.Fatal(err)
+	}
+
+	err := mergeParamsEnv(fs, path, map[string]string{
+		"UNKNOWN_IMAGE": "registry.example.com/unknown:tag",
+	})
+	if err == nil {
+		t.Fatal("expected error for an override key not present in params.env")
+	}
+
+	got, readErr := fs.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Errorf("params.env changed after failed merge: %q", got)
 	}
 }
 

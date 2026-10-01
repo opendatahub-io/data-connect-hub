@@ -17,6 +17,7 @@ limitations under the License.
 package controller
 
 import (
+	"bufio"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -48,11 +49,21 @@ import (
 
 // --- Kustomize rendering ---
 
+const (
+	// RelatedImageRestService is the env var and params.env key for the REST image.
+	RelatedImageRestService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
+	// RelatedImageFlightService is the env var and params.env key for the Flight image.
+	RelatedImageFlightService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE"
+	// RelatedImageKubeRbacProxy is the env var and params.env key for the kube-rbac-proxy image.
+	RelatedImageKubeRbacProxy = "RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE"
+)
+
 // renderKustomization builds the kustomization at diskPath. The whole of
 // rootPath is staged in memory first, not just diskPath, so that a kustomization
 // may reference resources outside its own directory (overlays/openshift pulls in
-// ../../base). rootPath must contain diskPath.
-func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, images []kustypes.Image) ([]*unstructured.Unstructured, error) {
+// ../../base). rootPath must contain diskPath. params override values in the
+// staged base/params.env before Kustomize resolves replacements.
+func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, images []kustypes.Image, params map[string]string) ([]*unstructured.Unstructured, error) {
 	absPath, err := filepath.Abs(diskPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path %s: %w", diskPath, err)
@@ -65,6 +76,13 @@ func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, im
 	memFS := filesys.MakeFsInMemory()
 	if err := copyDirToMemFS(absRoot, memFS); err != nil {
 		return nil, fmt.Errorf("copying manifests to memory: %w", err)
+	}
+
+	if len(params) > 0 {
+		paramsPath := filepath.Join(absRoot, "base", "params.env")
+		if err := mergeParamsEnv(memFS, paramsPath, params); err != nil {
+			return nil, fmt.Errorf("merging Kustomize params: %w", err)
+		}
 	}
 
 	if len(patches) > 0 || len(images) > 0 {
@@ -117,6 +135,50 @@ func copyDirToMemFS(srcRoot string, memFS filesys.FileSystem) error {
 		}
 		return memFS.WriteFile(path, data)
 	})
+}
+
+// mergeParamsEnv overlays values onto the staged params.env and writes the
+// merged entries back. The source file on disk remains untouched.
+func mergeParamsEnv(fs filesys.FileSystem, path string, overrides map[string]string) error {
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	params := make(map[string]string)
+	scanner := bufio.NewScanner(strings.NewReader(string(data)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if ok {
+			params[strings.TrimSpace(key)] = value
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("reading %s: %w", path, err)
+	}
+
+	for key, value := range overrides {
+		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\r\n") {
+			return fmt.Errorf("invalid params.env value for key %q", key)
+		}
+		if _, ok := params[key]; !ok {
+			return fmt.Errorf("params.env key %q not found in %s", key, path)
+		}
+		params[key] = value
+	}
+
+	lines := make([]string, 0, len(params))
+	for key, value := range params {
+		lines = append(lines, key+"="+value)
+	}
+	if err := fs.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n")); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
 }
 
 func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Patch, images []kustypes.Image) error {
@@ -312,29 +374,6 @@ func replaceStringValue(value any, old, new string) any {
 		}
 	}
 	return value
-}
-
-func setDeploymentImage(resources []*unstructured.Unstructured, containerName, image string) {
-	for _, obj := range resources {
-		if obj.GetKind() != kindDeployment {
-			continue
-		}
-		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
-		if !found {
-			continue
-		}
-		for i, c := range containers {
-			container, ok := c.(map[string]any)
-			if !ok {
-				continue
-			}
-			if name, ok := container["name"].(string); ok && (name == containerName || strings.HasPrefix(name, containerName+"-")) {
-				container["image"] = image
-				containers[i] = container
-			}
-		}
-		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
-	}
 }
 
 func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) {
