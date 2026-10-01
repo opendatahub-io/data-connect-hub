@@ -8,6 +8,9 @@ use opendal::Reader;
 
 pub async fn read_jsonl_schema(reader: Reader) -> Result<Schema, ConnectorError> {
     let buf = super::read_sample(reader).await?;
+    if buf.is_empty() {
+        return Err(ConnectorError::NoDataError);
+    }
     let cursor = std::io::BufReader::new(Cursor::new(buf));
     let (schema, _) = arrow_json::reader::infer_json_schema(cursor, None)
         .map_err(|e| ConnectorError::IOError(format!("Failed to infer JSONL schema: {e}")))?;
@@ -17,6 +20,7 @@ pub async fn read_jsonl_schema(reader: Reader) -> Result<Schema, ConnectorError>
 pub async fn read_jsonl_batches(reader: Reader, schema: &Arc<Schema>, batch_size: usize) -> QueryOutput {
     let decoder = arrow_json::ReaderBuilder::new(schema.clone())
         .with_batch_size(batch_size)
+        .with_coerce_primitive(true)
         .build_decoder()
         .map_err(|e| ConnectorError::IOError(format!("Failed to build JSONL decoder: {e}")))?;
 
@@ -114,8 +118,8 @@ mod tests {
     #[tokio::test]
     async fn test_jsonl_empty_input() {
         let reader = memory_reader(b"").await;
-        let schema = read_jsonl_schema(reader).await.unwrap();
-        assert_eq!(schema.fields().len(), 0);
+        let result = read_jsonl_schema(reader).await;
+        assert!(matches!(result, Err(ConnectorError::NoDataError)));
     }
 
     #[tokio::test]
@@ -128,6 +132,33 @@ mod tests {
             .try_collect()
             .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_jsonl_mixed_type_coerced_to_string() {
+        let jsonl = b"{\"value\":42}\n{\"value\":\"text\"}\n";
+        let reader = memory_reader(jsonl).await;
+        let schema = read_jsonl_schema(reader).await.unwrap();
+        assert_eq!(*schema.field_with_name("value").unwrap().data_type(), DataType::Utf8);
+
+        let schema = Arc::new(schema);
+        let reader = memory_reader(jsonl).await;
+        let batches: Vec<_> = read_jsonl_batches(reader, &schema, 1024)
+            .await
+            .unwrap()
+            .try_collect()
+            .await
+            .unwrap();
+        assert_eq!(batches[0].num_rows(), 2);
+
+        let arr = batches[0]
+            .column_by_name("value")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<StringArray>()
+            .unwrap();
+        assert_eq!(arr.value(0), "42");
+        assert_eq!(arr.value(1), "text");
     }
 
     fn testdata_reader(filename: &str) -> Reader {

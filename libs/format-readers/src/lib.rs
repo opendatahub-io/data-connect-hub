@@ -9,10 +9,7 @@ use futures::TryStreamExt;
 use opendal::Reader;
 
 pub use csv::{read_csv_batches, read_csv_schema};
-pub use json::{
-    extract_rows, infer_arrow_type, infer_schema, json_values_to_array, read_json_batches, read_json_schema,
-    resolve_data_path, rows_to_record_batch,
-};
+pub use json::{read_json_batches, read_json_schema};
 pub use jsonl::{read_jsonl_batches, read_jsonl_schema};
 pub use parquet::{read_parquet_batches, read_parquet_schema};
 

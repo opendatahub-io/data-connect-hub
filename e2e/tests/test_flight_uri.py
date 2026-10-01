@@ -45,12 +45,12 @@ class TestFlightUriJson:
         rows = table.to_pydict()
         assert set(rows["name"]) == CITIES
 
-    def test_json_schema_fields_sorted(self, dch_client: DataConnectClient, uri_flight_connection: str) -> None:
-        """Verify schema fields are sorted alphabetically."""
+    def test_json_schema_fields_present(self, dch_client: DataConnectClient, uri_flight_connection: str) -> None:
+        """Verify all expected schema fields are present."""
         query = json.dumps({"path": "/api/cities.json"})
         table = dch_client.read(query, uri_flight_connection)
         assert isinstance(table, pa.Table)
-        assert table.column_names == sorted(table.column_names)
+        assert set(table.column_names) == {"name", "country", "population", "active"}
 
     def test_json_type_inference(self, dch_client: DataConnectClient, uri_flight_connection: str) -> None:
         """Verify JSON types are correctly mapped to Arrow types."""
