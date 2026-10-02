@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -376,7 +375,7 @@ func replaceStringValue(value any, old, new string) any {
 	return value
 }
 
-func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) {
+func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) error {
 	var flightSvcName string
 	for _, obj := range resources {
 		if obj.GetKind() == kindService && strings.HasSuffix(obj.GetName(), serviceName) {
@@ -385,26 +384,30 @@ func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, na
 		}
 	}
 	if flightSvcName == "" {
-		return
+		return nil
 	}
 	fqdn := fmt.Sprintf("%s.%s.svc", flightSvcName, namespace)
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
+		}
+		if config == nil {
 			continue
 		}
-		toml, ok := data["config.toml"]
-		if !ok || !strings.Contains(toml, "[flight-service]") {
+		flightService, ok := config["flight-service"].(map[string]any)
+		if !ok || flightService["address"] != nameFlightService {
 			continue
 		}
-		data["config.toml"] = strings.ReplaceAll(toml,
-			`address = "flight-service"`,
-			fmt.Sprintf(`address = "%s"`, fqdn))
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		flightService["address"] = fqdn
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
+		}
 	}
+	return nil
 }
 
 func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, flightName string, overrides *dchv1alpha1.ServiceOverrides) error {
@@ -416,17 +419,12 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 		if obj.GetKind() != kindConfigMap || obj.GetLabels()[labelAppName] != flightName {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
-			continue
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("parsing flight-service ConfigMap %q: %w", obj.GetName(), err)
 		}
-		tomlText, ok := data["config.toml"]
-		if !ok {
+		if config == nil {
 			continue
-		}
-		var config map[string]any
-		if err := toml.Unmarshal([]byte(tomlText), &config); err != nil {
-			return fmt.Errorf("parsing flight-service config.toml: %w", err)
 		}
 		connectors, ok := config["connectors"].(map[string]any)
 		if !ok {
@@ -468,34 +466,35 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 			}
 		}
 
-		updatedTOML, err := toml.Marshal(config)
-		if err != nil {
-			return fmt.Errorf("marshaling flight-service config.toml: %w", err)
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
 		}
-		data["config.toml"] = string(updatedTOML)
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 	}
 	return nil
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) {
+func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) error {
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
+		}
+		if config == nil {
 			continue
 		}
-		toml, ok := data["config.toml"]
-		if !ok || !strings.Contains(toml, "tenant-id") {
+		globalConnectionTypes, ok := config["global-connection-types"].(map[string]any)
+		if !ok || globalConnectionTypes["tenant-id"] != "opendatahub" {
 			continue
 		}
-		data["config.toml"] = strings.ReplaceAll(toml,
-			`tenant-id = "opendatahub"`,
-			fmt.Sprintf(`tenant-id = "%s"`, namespace))
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		globalConnectionTypes["tenant-id"] = namespace
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
+		}
 	}
+	return nil
 }
 
 // reconcileTraceEnv reconciles OTLP trace environment variables in deployments,
@@ -653,7 +652,7 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 	return vars
 }
 
-func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) {
+func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) error {
 	var restServiceAccount string
 	for _, obj := range resources {
 		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
@@ -662,7 +661,7 @@ func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured,
 		}
 	}
 	if restServiceAccount == "" {
-		return
+		return nil
 	}
 
 	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
@@ -670,22 +669,23 @@ func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured,
 		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("flight-service ConfigMap %q: %w", obj.GetName(), err)
+		}
+		if config == nil {
 			continue
 		}
-		toml := data["config.toml"]
-		if !strings.Contains(toml, "[auth]") {
+		auth, ok := config["auth"].(map[string]any)
+		if !ok {
 			continue
 		}
-		data["config.toml"] = strings.Replace(
-			toml,
-			"[auth]\n",
-			fmt.Sprintf("[auth]\ndiscovery_service_account = %q\n", identity),
-			1,
-		)
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
+		auth["discovery_service_account"] = identity
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
+		}
 	}
+	return nil
 }
 
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
@@ -876,66 +876,30 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
 }
 
-func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) bool {
-	const key = "token_review_audiences"
+func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) (bool, error) {
 	updated := false
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
 		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return false, fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
+		}
+		if config == nil {
 			continue
 		}
-		toml, ok := data["config.toml"]
-		if !ok || !strings.Contains(toml, "[auth]") {
+		auth, ok := config["auth"].(map[string]any)
+		if !ok {
 			continue
 		}
-
-		quoted := make([]string, len(audiences))
-		for i, a := range audiences {
-			quoted[i] = fmt.Sprintf("%q", a)
+		auth["token_review_audiences"] = audiences
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return false, fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
 		}
-		audienceLine := fmt.Sprintf("%s = [%s]", key, strings.Join(quoted, ", "))
-
-		replaced := false
-		var result []string
-		for line := range strings.SplitSeq(toml, "\n") {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, key) && (len(trimmed) == len(key) || trimmed[len(key)] == ' ' || trimmed[len(key)] == '=') {
-				result = append(result, audienceLine)
-				replaced = true
-			} else {
-				result = append(result, line)
-			}
-		}
-
-		if !replaced {
-			var inserted []string
-			inAuth := false
-			done := false
-			for _, line := range result {
-				trimmed := strings.TrimSpace(line)
-				if trimmed == "[auth]" {
-					inAuth = true
-				}
-				if inAuth && !done && trimmed != "[auth]" && (strings.HasPrefix(trimmed, "[") || trimmed == "") {
-					inserted = append(inserted, audienceLine)
-					done = true
-				}
-				inserted = append(inserted, line)
-			}
-			if inAuth && !done {
-				inserted = append(inserted, audienceLine)
-			}
-			result = inserted
-		}
-
-		data["config.toml"] = strings.Join(result, "\n")
-		_ = unstructured.SetNestedStringMap(obj.Object, data, "data")
 		updated = true
 	}
-	return updated
+	return updated, nil
 }
 
 func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {

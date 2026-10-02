@@ -18,12 +18,12 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"path/filepath"
 	"slices"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	toml "github.com/pelletier/go-toml/v2"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -209,7 +209,11 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			restConfig := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService + "-config", Namespace: targetNamespace}, restConfig)).To(Succeed())
-			Expect(restConfig.Data["config.toml"]).To(ContainSubstring(fmt.Sprintf("address = %q", flightResourceName+"."+targetNamespace+".svc")))
+			var restConfigTOML map[string]any
+			Expect(toml.Unmarshal([]byte(restConfig.Data["config.toml"]), &restConfigTOML)).To(Succeed())
+			flightService, ok := restConfigTOML["flight-service"].(map[string]any)
+			Expect(ok).To(BeTrue(), "expected [flight-service] section in REST config")
+			Expect(flightService["address"]).To(Equal(flightResourceName + "." + targetNamespace + ".svc"))
 		})
 
 		It("should create services for rest and flight", func() {
@@ -389,8 +393,11 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			cm := &corev1.ConfigMap{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
-			toml := cm.Data["config.toml"]
-			Expect(toml).To(ContainSubstring(`token_review_audiences = ["https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id"]`))
+			var flightConfigTOML map[string]any
+			Expect(toml.Unmarshal([]byte(cm.Data["config.toml"]), &flightConfigTOML)).To(Succeed())
+			auth, ok := flightConfigTOML["auth"].(map[string]any)
+			Expect(ok).To(BeTrue(), "expected [auth] section in flight config")
+			Expect(auth["token_review_audiences"]).To(Equal([]any{"https://rh-oidc.s3.us-east-1.amazonaws.com/test-cluster-id"}))
 		})
 
 		It("should add --auth-token-audiences to kube-rbac-proxy", func() {

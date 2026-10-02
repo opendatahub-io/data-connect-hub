@@ -411,9 +411,15 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	resources = renderFlightService(resources, cr.Name)
 	flightContainerName := flightServiceResourceName(cr.Name)
 
-	setConfigMapGlobalNamespace(resources, cr.Namespace)
-	setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName)
-	setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName)
+	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
+		return fmt.Errorf("setting config namespace: %w", err)
+	}
+	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName); err != nil {
+		return fmt.Errorf("setting discovery service account: %w", err)
+	}
+	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName); err != nil {
+		return fmt.Errorf("setting flight service address: %w", err)
+	}
 	if cr.Spec.FlightService != nil {
 		if err := setConfigMapFlightConnectorSettings(resources, flightContainerName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
@@ -426,7 +432,11 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
 	if len(audiences) > 0 {
-		if !setConfigMapAudiences(resources, audiences) {
+		updated, err := setConfigMapAudiences(resources, audiences)
+		if err != nil {
+			return fmt.Errorf("setting token review audiences: %w", err)
+		}
+		if !updated {
 			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
 		}
 		setKubeRbacProxyAudiences(resources, audiences)
