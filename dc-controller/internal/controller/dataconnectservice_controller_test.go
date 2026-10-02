@@ -50,9 +50,8 @@ var _ = Describe("DataConnectService Controller", func() {
 		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
 
 		// Kustomize adds this prefix to all resource names.
-		np                  = "dch-"
-		flightResourceName  = np + resourceName + "-flight"
-		flightContainerName = resourceName + "-flight"
+		np                 = "dch-"
+		flightResourceName = np + resourceName + "-flight"
 	)
 
 	ctx := context.Background()
@@ -197,7 +196,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			restDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			restContainer := findContainer(restDeploy, nameRestService)
+			restContainer := findContainer(restDeploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(restContainer.Image).To(Equal(testRestImage))
 			Expect(restContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
@@ -205,6 +204,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
+			Expect(findContainer(flightDeploy, nameFlightServiceContainer)).NotTo(BeNil())
 			Expect(flightDeploy.Spec.Template.Spec.Containers[0].Image).To(Equal(testFlightImage))
 
 			restConfig := &corev1.ConfigMap{}
@@ -335,7 +335,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
-			restContainer := findContainer(deploy, nameRestService)
+			restContainer := findContainer(deploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(*deploy.Spec.Replicas).To(Equal(int32(3)))
 		})
@@ -345,7 +345,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
-			restContainer := findContainer(deploy, nameRestService)
+			restContainer := findContainer(deploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(restContainer.Resources.Requests.Cpu().String()).To(Equal("200m"))
 		})
@@ -357,7 +357,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
 
 			envNames := make(map[string]string)
-			restContainer := findContainer(deploy, nameRestService)
+			restContainer := findContainer(deploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			for _, e := range restContainer.Env {
 				envNames[e.Name] = e.Value
@@ -448,7 +448,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			// Check rest-service
 			restDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			restContainer := findContainer(restDeploy, nameRestService)
+			restContainer := findContainer(restDeploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(restContainer.Env).To(ContainElements(
 				corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
@@ -459,7 +459,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			// Check flight-service
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-			flightContainer := findContainer(flightDeploy, flightContainerName)
+			flightContainer := findContainer(flightDeploy, nameFlightServiceContainer)
 			Expect(flightContainer).NotTo(BeNil())
 			Expect(flightContainer.Env).To(ContainElements(
 				corev1.EnvVar{Name: envOTLPEndpoint, Value: exporter},
@@ -505,7 +505,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			// Check rest-service
 			restDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, restDeploy)).To(Succeed())
-			restContainer := findContainer(restDeploy, nameRestService)
+			restContainer := findContainer(restDeploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			for _, e := range restContainer.Env {
 				Expect(e.Name).NotTo(HavePrefix("OTEL_"))
@@ -514,7 +514,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			// Check flight-service
 			flightDeploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName, Namespace: targetNamespace}, flightDeploy)).To(Succeed())
-			flightContainer := findContainer(flightDeploy, flightContainerName)
+			flightContainer := findContainer(flightDeploy, nameFlightServiceContainer)
 			Expect(flightContainer).NotTo(BeNil())
 			for _, e := range flightContainer.Env {
 				Expect(e.Name).NotTo(HavePrefix("OTEL_"))

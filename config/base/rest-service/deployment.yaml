@@ -69,7 +69,7 @@ spec:
               scheme: HTTPS
             initialDelaySeconds: 5
             periodSeconds: 15
-        - name: rest-service
+        - name: rest-server
           image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
           imagePullPolicy: Always
           securityContext:

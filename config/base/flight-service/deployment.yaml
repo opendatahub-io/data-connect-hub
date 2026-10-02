@@ -23,7 +23,7 @@ spec:
         seccompProfile:
           type: RuntimeDefault
       containers:
-        - name: flight-service
+        - name: flight-server
           image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
           imagePullPolicy: IfNotPresent
           securityContext:

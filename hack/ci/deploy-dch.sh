@@ -209,12 +209,12 @@ assert_deployment_image \
 assert_deployment_image \
     "$CI_FLIGHT_SERVICE_NAME" \
     "$CI_SVC_NAMESPACE" \
-    "${CI_DCS_CR_NAME}-flight" \
+    "flight-server" \
     "$CI_FLIGHT_IMAGE"
 assert_deployment_image \
     "$CI_REST_SERVICE_NAME" \
     "$CI_SVC_NAMESPACE" \
-    "rest-service" \
+    "rest-server" \
     "$CI_REST_IMAGE"
 
 # ===================================================================

@@ -26,6 +26,7 @@ import (
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 	"github.com/pelletier/go-toml/v2"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
@@ -365,6 +366,24 @@ func TestSetConfigMapAudiencesRejectsInvalidTOML(t *testing.T) {
 	}
 }
 
+func TestBuildServicePatchesUseSeparateDeploymentAndContainerNames(t *testing.T) {
+	patches := buildServicePatches(nameFlightService, nameFlightServiceContainer, &dchv1alpha1.ServiceOverrides{
+		Env: []corev1.EnvVar{{Name: "CUSTOM_VAR", Value: "custom-value"}},
+	})
+	if len(patches) != 1 {
+		t.Fatalf("patch count = %d, want 1", len(patches))
+	}
+	if got := patches[0].Target.Name; got != nameFlightService {
+		t.Errorf("patch target Deployment = %q, want %q", got, nameFlightService)
+	}
+	if !strings.Contains(patches[0].Patch, "metadata:\n  name: "+nameFlightService+"\n") {
+		t.Errorf("patch does not target Deployment %q:\n%s", nameFlightService, patches[0].Patch)
+	}
+	if !strings.Contains(patches[0].Patch, "- name: "+nameFlightServiceContainer+"\n") {
+		t.Errorf("patch does not target container %q:\n%s", nameFlightServiceContainer, patches[0].Patch)
+	}
+}
+
 // TestRenderKustomizationManifestRoots renders each root the controller may
 // build, through the in-memory staging that production uses, so that a
 // kustomization reaching outside its own directory is caught here.
@@ -440,9 +459,9 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 			}
 
 			wantImages := map[string]string{
-				nameRestService:   imageParams[RelatedImageRestService],
-				nameFlightService: imageParams[RelatedImageFlightService],
-				nameKubeRbacProxy: imageParams[RelatedImageKubeRbacProxy],
+				nameRestServiceContainer:   imageParams[RelatedImageRestService],
+				nameFlightServiceContainer: imageParams[RelatedImageFlightService],
+				nameKubeRbacProxy:          imageParams[RelatedImageKubeRbacProxy],
 			}
 			for containerName, wantImage := range wantImages {
 				gotImage, found := renderedContainerImage(resources, containerName)
@@ -611,7 +630,7 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 				"spec": map[string]any{
 					"containers": []any{
 						map[string]any{
-							testNameKey: "default-dcs-flight",
+							testNameKey: nameFlightServiceContainer,
 							"image":     "localhost/dch-flight:test",
 						},
 					},
@@ -620,7 +639,7 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 		},
 	}}
 
-	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight")
+	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight", nameFlightServiceContainer)
 
 	annotations, found, err := unstructured.NestedStringMap(
 		deployment.Object,

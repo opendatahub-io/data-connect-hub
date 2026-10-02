@@ -21,7 +21,7 @@ patches:
   #       template:
   #         spec:
   #           containers:
-  #             - name: rest-service
+  #             - name: rest-server
   #               env:
   #                 - name: RUST_LOG
   #                   value: debug
@@ -38,7 +38,7 @@ patches:
   #       template:
   #         spec:
   #           containers:
-  #             - name: flight-service
+  #             - name: flight-server
   #               env:
   #                 - name: RUST_LOG
   #                   value: debug

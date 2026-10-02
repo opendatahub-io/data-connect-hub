@@ -65,11 +65,13 @@ const (
 	requeueOnError         = 30 * time.Second
 	requeueWhenReady       = 5 * time.Minute
 
-	nameRestService    = "rest-service"
-	nameFlightService  = "flight-service"
-	nameDataConnectHub = "data-connect-hub"
-	nameDatabaseConfig = "dch-database-config"
-	nameKubeRbacProxy  = "kube-rbac-proxy"
+	nameRestService            = "rest-service"
+	nameRestServiceContainer   = "rest-server"
+	nameFlightService          = "flight-service"
+	nameFlightServiceContainer = "flight-server"
+	nameDataConnectHub         = "data-connect-hub"
+	nameDatabaseConfig         = "dch-database-config"
+	nameKubeRbacProxy          = "kube-rbac-proxy"
 
 	// OTLP exporter environment variables carrying spec.trace to the service containers.
 	envOTLPEndpoint    = "OTEL_EXPORTER_OTLP_ENDPOINT"
@@ -386,10 +388,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	}
 
 	gw := r.resolveGateway(cr, platCfg)
-	restPatches := buildServicePatches(nameRestService, cr.Spec.RestService)
+	restPatches := buildServicePatches(nameRestService, nameRestServiceContainer, cr.Spec.RestService)
 	var flightPatches []kustypes.Patch
 	if cr.Spec.FlightService != nil {
-		flightPatches = buildServicePatches(nameFlightService, &cr.Spec.FlightService.ServiceOverrides)
+		flightPatches = buildServicePatches(nameFlightService, nameFlightServiceContainer, &cr.Spec.FlightService.ServiceOverrides)
 	}
 	gwPatches := buildGatewayPatches(&gw)
 
@@ -409,24 +411,24 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	}
 
 	resources = renderFlightService(resources, cr.Name)
-	flightContainerName := flightServiceResourceName(cr.Name)
+	flightInstanceName := flightServiceResourceName(cr.Name)
 
 	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
 		return fmt.Errorf("setting config namespace: %w", err)
 	}
-	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightContainerName); err != nil {
+	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
 		return fmt.Errorf("setting discovery service account: %w", err)
 	}
-	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightContainerName); err != nil {
+	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightInstanceName); err != nil {
 		return fmt.Errorf("setting flight service address: %w", err)
 	}
 	if cr.Spec.FlightService != nil {
-		if err := setConfigMapFlightConnectorSettings(resources, flightContainerName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
+		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
 
-	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestService, flightContainerName) {
+	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestServiceContainer, nameFlightServiceContainer) {
 		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
 	}
 
@@ -442,7 +444,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateFlightDeploymentsWithConfigHash(resources, flightContainerName)
+	annotateFlightDeploymentsWithConfigHash(resources, flightInstanceName, nameFlightServiceContainer)
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }

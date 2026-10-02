@@ -227,7 +227,7 @@ func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Pa
 
 // --- CR overrides → kustomize patches ---
 
-func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) []kustypes.Patch {
+func buildServicePatches(deploymentName, containerName string, overrides *dchv1alpha1.ServiceOverrides) []kustypes.Patch {
 	if overrides == nil {
 		return nil
 	}
@@ -246,7 +246,7 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 			resYAML, err := sigyaml.JSONToYAML(resBytes)
 			if err == nil {
 				patchParts = append(patchParts, fmt.Sprintf("spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          resources:\n%s",
-					name, indent(string(resYAML), 12)))
+					containerName, indent(string(resYAML), 12)))
 			}
 		}
 	}
@@ -257,7 +257,7 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 			envYAML, err := sigyaml.JSONToYAML(envBytes)
 			if err == nil {
 				patchParts = append(patchParts, fmt.Sprintf("spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          env:\n%s",
-					name, indent(string(envYAML), 12)))
+					containerName, indent(string(envYAML), 12)))
 			}
 		}
 	}
@@ -268,7 +268,7 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 			envFromYAML, err := sigyaml.JSONToYAML(envFromBytes)
 			if err == nil {
 				patchParts = append(patchParts, fmt.Sprintf("spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          envFrom:\n%s",
-					name, indent(string(envFromYAML), 12)))
+					containerName, indent(string(envFromYAML), 12)))
 			}
 		}
 	}
@@ -279,7 +279,7 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 			vmYAML, err := sigyaml.JSONToYAML(vmBytes)
 			if err == nil {
 				patchParts = append(patchParts, fmt.Sprintf("spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          volumeMounts:\n%s",
-					name, indent(string(vmYAML), 12)))
+					containerName, indent(string(vmYAML), 12)))
 			}
 		}
 	}
@@ -300,10 +300,10 @@ func buildServicePatches(name string, overrides *dchv1alpha1.ServiceOverrides) [
 			Target: &kustypes.Selector{
 				ResId: resid.ResId{
 					Gvk:  resid.Gvk{Group: "apps", Version: "v1", Kind: kindDeployment},
-					Name: name,
+					Name: deploymentName,
 				},
 			},
-			Patch: fmt.Sprintf("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: %s\n%s", name, part),
+			Patch: fmt.Sprintf("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: %s\n%s", deploymentName, part),
 		})
 	}
 
@@ -981,12 +981,12 @@ func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, co
 	}
 }
 
-func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured, flightName string) {
+func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured, flightInstanceName, containerName string) {
 	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) || !strings.HasSuffix(obj.GetName(), "-config") {
+		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightInstanceName) || !strings.HasSuffix(obj.GetName(), "-config") {
 			continue
 		}
-		annotateDeploymentWithConfigHash(resources, flightName, obj.GetName())
+		annotateDeploymentWithConfigHash(resources, containerName, obj.GetName())
 	}
 }
 

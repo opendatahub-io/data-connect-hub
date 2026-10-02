@@ -157,7 +157,7 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 			}
 		case "Deployment":
 			for _, container := range object.Spec.Template.Spec.Containers {
-				if container.Name != "rest-service" {
+				if container.Name != "rest-server" {
 					continue
 				}
 				for _, port := range container.Ports {

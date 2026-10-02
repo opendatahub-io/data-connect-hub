@@ -24,7 +24,7 @@ replacements:
       kind: Deployment
       name: rest-service
     fieldPaths:
-    - spec.template.spec.containers.[name=rest-service].image
+    - spec.template.spec.containers.[name=rest-server].image
 - source:
     kind: ConfigMap
     name: params
@@ -34,7 +34,7 @@ replacements:
       kind: Deployment
       name: flight-service
     fieldPaths:
-    - spec.template.spec.containers.[name=flight-service].image
+    - spec.template.spec.containers.[name=flight-server].image
 - source:
     kind: ConfigMap
     name: params

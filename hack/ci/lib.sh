@@ -25,8 +25,8 @@ CI_GATEWAY_LOCAL_PORT="${CI_GATEWAY_LOCAL_PORT:-18443}"
 # DataConnectService CR name (must be set before flight service names)
 CI_DCS_CR_NAME="${CI_DCS_CR_NAME:-default-dcs}"
 
-# Service names — flight names are derived from the CR name to match
-# the controller's renderFlightService renaming (flight-service → {crName}-flight).
+# Service names — Flight resource names are derived from the CR name by the
+# controller's renderFlightService renaming (flight-service → {crName}-flight).
 CI_FLIGHT_SERVICE_NAME="${CI_FLIGHT_SERVICE_NAME:-dch-${CI_DCS_CR_NAME}-flight}"
 CI_REST_SERVICE_NAME="${CI_REST_SERVICE_NAME:-dch-rest-service}"
 
