@@ -111,7 +111,7 @@ To grant a user access to a tenant's data, an admin must:
 
 ### REST service secret permissions
 
-The REST service also accesses Kubernetes secrets using its own ServiceAccount, independently of the caller's API permissions. The controller installs the predefined `dch-rest-secret-access` ClusterRole with `get`, `create`, `patch`, and `delete` on secrets. An admin must bind it to the REST ServiceAccount in each tenant namespace using a RoleBinding. The ClusterRole alone grants no access; DCH does not create a ClusterRoleBinding for it.
+The REST service also accesses Kubernetes secrets using its own ServiceAccount, independently of the caller's API permissions. The controller installs the predefined `dch-rest-service-secret-access` ClusterRole with `get`, `create`, `patch`, and `delete` on secrets. An admin must bind it to the REST ServiceAccount in each tenant namespace using a RoleBinding. The ClusterRole alone grants no access; DCH does not create a ClusterRoleBinding for it.
 
 | REST operation | Secret permissions required by the REST ServiceAccount |
 |---|---|
@@ -129,12 +129,12 @@ Save the following as `rest-secret-rbac.yaml`, replace the namespace and Service
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: dch-rest-secret-access
+  name: dch-rest-service-secret-access
   namespace: team-alpha
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: dch-rest-secret-access
+  name: dch-rest-service-secret-access
 subjects:
   - kind: ServiceAccount
     name: dch-rest-service-sa
@@ -191,7 +191,7 @@ TENANT_NAMESPACE=team-alpha
 DCH_REST_SA=$(kubectl get deployment "$DCH_REST_DEPLOYMENT" \
   -n "$DCH_NAMESPACE" -o jsonpath='{.spec.template.spec.serviceAccountName}')
 
-kubectl get clusterrole dch-rest-secret-access
+kubectl get clusterrole dch-rest-service-secret-access
 
 kubectl logs -n "$DCH_NAMESPACE" "deployment/$DCH_REST_DEPLOYMENT" \
   -c rest-service --since=30m --tail=100
@@ -212,4 +212,4 @@ Creating a connection with `credentials_ref` stores metadata without reading or 
 
 ### E2E tests pass, but another tenant cannot create connections
 
-`e2e/run-e2e.sh` explicitly binds the predefined `dch-rest-secret-access` ClusterRole to REST in `DCH_TENANT_ID` before running tests, including when `DCH_AUTH_TOKEN` is supplied. This RoleBinding does not apply to other namespaces. Provision each new tenant's service RBAC as well as its users' API permissions.
+`e2e/run-e2e.sh` explicitly binds the predefined `dch-rest-service-secret-access` ClusterRole to REST in `DCH_TENANT_ID` before running tests, including when `DCH_AUTH_TOKEN` is supplied. This RoleBinding does not apply to other namespaces. Provision each new tenant's service RBAC as well as its users' API permissions.
