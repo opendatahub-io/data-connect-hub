@@ -23,7 +23,7 @@ roleRef:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rest-secret-access
+  name: rest-service-secret-access
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
