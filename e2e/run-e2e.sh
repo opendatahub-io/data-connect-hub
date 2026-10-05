@@ -115,13 +115,9 @@ setup_user_rbac() {
             --clusterrole=dch-read-write \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
         # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
-        kubectl create role e2e-user-export-secret \
-            -n "$DCH_TENANT_ID" \
-            --verb=create --resource=secrets \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         kubectl create rolebinding e2e-user-export-secret-rb \
             -n "$DCH_TENANT_ID" \
-            --role=e2e-user-export-secret \
+            --clusterrole=dch-secret-export \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
