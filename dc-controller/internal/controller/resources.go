@@ -849,7 +849,7 @@ func (r *DataConnectServiceReconciler) validateDatabaseSecret(ctx context.Contex
 		return fmt.Errorf("reading secret %s: %w", nameDatabaseConfig, err)
 	}
 
-	for _, k := range []string{"secret-config.toml"} {
+	for _, k := range []string{nameSecretConfigTOML} {
 		value, ok := secret.Data[k]
 		if !ok || strings.TrimSpace(string(value)) == "" {
 			return fmt.Errorf("secret %q is missing or has empty required key %q", nameDatabaseConfig, k)
@@ -933,61 +933,133 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 	}
 }
 
-func annotateDeploymentWithConfigHash(resources []*unstructured.Unstructured, containerName, configMapSuffix string) {
-	var configHash string
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.HasSuffix(obj.GetName(), configMapSuffix) {
-			continue
-		}
-		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
-		if !found {
-			continue
-		}
-		b, _ := json.Marshal(data)
-		h := sha256.Sum256(b)
-		configHash = hex.EncodeToString(h[:])[:16]
-		break
-	}
-	if configHash == "" {
-		return
-	}
-
+// annotateDeploymentsWithContentHash computes a combined hash of all
+// ConfigMap and Secret data mounted by each Deployment and stamps it
+// on the pod template annotation. A change to any mounted resource
+// produces a new hash, which triggers a rolling restart.
+//
+// ConfigMaps are looked up in the rendered resources first (desired
+// state); if absent or empty there, the live cluster copy is fetched
+// instead (needed for externally-populated ConfigMaps such as those
+// using service.beta.openshift.io/inject-cabundle).
+// Secrets are always fetched live because they are never part of the
+// rendered Kustomize output.
+func (r *DataConnectServiceReconciler) annotateDeploymentsWithContentHash(
+	ctx context.Context,
+	resources []*unstructured.Unstructured,
+	namespace string,
+) error {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
 			continue
 		}
-		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
-		if !found {
-			continue
+		hash, err := r.computeDeploymentContentHash(ctx, resources, namespace, obj)
+		if err != nil {
+			return fmt.Errorf("computing content hash for deployment %s: %w", obj.GetName(), err)
 		}
-		hasContainer := false
-		for _, c := range containers {
-			if container, ok := c.(map[string]any); ok {
-				if name, _ := container["name"].(string); name == containerName {
-					hasContainer = true
-					break
-				}
-			}
-		}
-		if !hasContainer {
+		if hash == "" {
 			continue
 		}
 		ann, _, _ := unstructured.NestedStringMap(obj.Object, "spec", "template", "metadata", "annotations")
 		if ann == nil {
 			ann = map[string]string{}
 		}
-		ann[annotationConfigHash] = configHash
+		ann[annotationConfigHash] = hash
 		_ = unstructured.SetNestedStringMap(obj.Object, ann, "spec", "template", "metadata", "annotations")
 	}
+	return nil
 }
 
-func annotateFlightDeploymentsWithConfigHash(resources []*unstructured.Unstructured, flightInstanceName, containerName string) {
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightInstanceName) || !strings.HasSuffix(obj.GetName(), "-config") {
+func (r *DataConnectServiceReconciler) computeDeploymentContentHash(
+	ctx context.Context,
+	resources []*unstructured.Unstructured,
+	namespace string,
+	deployment *unstructured.Unstructured,
+) (string, error) {
+	volumes, found, _ := unstructured.NestedSlice(deployment.Object, "spec", "template", "spec", "volumes")
+	if !found {
+		return "", nil
+	}
+
+	h := sha256.New()
+	hasContent := false
+
+	for _, v := range volumes {
+		vol, ok := v.(map[string]any)
+		if !ok {
 			continue
 		}
-		annotateDeploymentWithConfigHash(resources, containerName, obj.GetName())
+
+		if cm, ok := vol["configMap"].(map[string]any); ok {
+			name, _ := cm["name"].(string)
+			if name == "" {
+				continue
+			}
+			data := findRenderedConfigMapData(resources, name)
+			var binaryData map[string][]byte
+			if data == nil {
+				var liveCM corev1.ConfigMap
+				if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &liveCM); err != nil {
+					if apierrors.IsNotFound(err) {
+						continue
+					}
+					return "", err
+				}
+				data = liveCM.Data
+				binaryData = liveCM.BinaryData
+			}
+			if len(data) > 0 || len(binaryData) > 0 {
+				h.Write([]byte("configmap:"))
+				h.Write([]byte(name))
+				h.Write([]byte{0})
+				b, _ := json.Marshal(data)
+				h.Write(b)
+				bb, _ := json.Marshal(binaryData)
+				h.Write(bb)
+				hasContent = true
+			}
+		}
+
+		if sec, ok := vol["secret"].(map[string]any); ok {
+			name, _ := sec["secretName"].(string)
+			if name == "" {
+				continue
+			}
+			var liveSecret corev1.Secret
+			if err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: name}, &liveSecret); err != nil {
+				if apierrors.IsNotFound(err) {
+					continue
+				}
+				return "", err
+			}
+			if len(liveSecret.Data) > 0 {
+				b, _ := json.Marshal(liveSecret.Data)
+				h.Write([]byte("secret:"))
+				h.Write([]byte(name))
+				h.Write([]byte{0})
+				h.Write(b)
+				hasContent = true
+			}
+		}
 	}
+
+	if !hasContent {
+		return "", nil
+	}
+	return hex.EncodeToString(h.Sum(nil))[:16], nil
+}
+
+func findRenderedConfigMapData(resources []*unstructured.Unstructured, name string) map[string]string {
+	for _, obj := range resources {
+		if obj.GetKind() == kindConfigMap && obj.GetName() == name {
+			data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+			if found && len(data) > 0 {
+				return data
+			}
+			return nil
+		}
+	}
+	return nil
 }
 
 func indent(s string, spaces int) string {

@@ -167,7 +167,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			},
 			StringData: map[string]string{
 				"DATABASE_URL":       "postgresql://dch:testpass@postgres:5432/dataconnecthub",
-				"secret-config.toml": "[database]\nurl = \"postgresql://dch:testpass@postgres:5432/dataconnecthub\"\n",
+				nameSecretConfigTOML: "[database]\nurl = \"postgresql://dch:testpass@postgres:5432/dataconnecthub\"\n",
 			},
 		}
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())

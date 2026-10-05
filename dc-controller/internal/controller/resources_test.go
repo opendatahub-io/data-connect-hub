@@ -18,6 +18,7 @@ package controller
 
 import (
 	"bufio"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
@@ -45,6 +48,9 @@ const (
 	testConfigTOMLKey                = "config.toml"
 	testRestImageParam               = "REST_IMAGE"
 	testFlightImageParam             = "FLIGHT_IMAGE"
+	testSpecKey                      = "spec"
+	testNamespace                    = "test-ns"
+	testFlightServiceCA              = "flight-service-ca"
 )
 
 func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
@@ -610,28 +616,61 @@ func TestMergeParamsEnvRejectsUnknownKeyWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
+func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
+	s := runtime.NewScheme()
+	_ = corev1.AddToScheme(s)
+
+	tlsSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-dcs-flight-tls", Namespace: testNamespace},
+		Data:       map[string][]byte{"tls.crt": []byte("cert"), "tls.key": []byte("key")},
+	}
+	dbSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: testNamespace},
+		Data:       map[string][]byte{nameSecretConfigTOML: []byte("url=postgres://...")},
+	}
+
+	fakeClient := fake.NewClientBuilder().WithScheme(s).WithObjects(tlsSecret, dbSecret).Build()
+	r := &DataConnectServiceReconciler{Client: fakeClient}
+
 	configMap := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
-			testNameKey: "dch-default-dcs-flight-config",
+			testNameKey: "default-dcs-flight-config",
 		},
 		testDataKey: map[string]any{
 			testConfigTOMLKey: "[connectors.uri]\nenabled = false\n",
 		},
 	}}
 	deployment := &unstructured.Unstructured{Object: map[string]any{
-		testKindKey: "Deployment",
+		testKindKey: kindDeployment,
 		testMetadataKey: map[string]any{
-			testNameKey: "dch-default-dcs-flight",
+			testNameKey: "default-dcs-flight",
 		},
-		"spec": map[string]any{
+		testSpecKey: map[string]any{
 			"template": map[string]any{
-				"spec": map[string]any{
+				testSpecKey: map[string]any{
 					"containers": []any{
 						map[string]any{
 							testNameKey: nameFlightServiceContainer,
 							"image":     "localhost/dch-flight:test",
+						},
+					},
+					"volumes": []any{
+						map[string]any{
+							testNameKey: "config",
+							"configMap": map[string]any{testNameKey: "default-dcs-flight-config"},
+						},
+						map[string]any{
+							testNameKey: "tls",
+							"secret":    map[string]any{"secretName": "default-dcs-flight-tls"},
+						},
+						map[string]any{
+							testNameKey: "db-secret",
+							"secret":    map[string]any{"secretName": nameDatabaseConfig},
+						},
+						map[string]any{
+							testNameKey: "tmp",
+							"emptyDir":  map[string]any{},
 						},
 					},
 				},
@@ -639,19 +678,90 @@ func TestAnnotateFlightDeploymentsWithConfigHash(t *testing.T) {
 		},
 	}}
 
-	annotateFlightDeploymentsWithConfigHash([]*unstructured.Unstructured{configMap, deployment}, "default-dcs-flight", nameFlightServiceContainer)
+	resources := []*unstructured.Unstructured{configMap, deployment}
+	if err := r.annotateDeploymentsWithContentHash(context.Background(), resources, testNamespace); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	annotations, found, err := unstructured.NestedStringMap(
-		deployment.Object,
-		"spec",
-		"template",
-		testMetadataKey,
-		"annotations",
+		deployment.Object, testSpecKey, "template", testMetadataKey, "annotations",
 	)
 	if err != nil || !found {
-		t.Fatalf("expected Flight Deployment template annotations, found=%v err=%v", found, err)
+		t.Fatalf("expected deployment template annotations, found=%v err=%v", found, err)
 	}
-	if annotations["dataconnecthub/config-hash"] == "" {
-		t.Fatal("expected dataconnecthub/config-hash annotation on Flight Deployment")
+	hash1 := annotations[annotationConfigHash]
+	if hash1 == "" {
+		t.Fatal("expected dataconnecthub/config-hash annotation on deployment")
+	}
+
+	// Verify hash changes when secret data changes.
+	tlsSecret2 := tlsSecret.DeepCopy()
+	tlsSecret2.Data["tls.crt"] = []byte("rotated-cert")
+	fakeClient2 := fake.NewClientBuilder().WithScheme(s).WithObjects(tlsSecret2, dbSecret).Build()
+	r2 := &DataConnectServiceReconciler{Client: fakeClient2}
+
+	deployment2 := deployment.DeepCopy()
+	resources2 := []*unstructured.Unstructured{configMap, deployment2}
+	if err := r2.annotateDeploymentsWithContentHash(context.Background(), resources2, testNamespace); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	annotations2, _, _ := unstructured.NestedStringMap(
+		deployment2.Object, testSpecKey, "template", testMetadataKey, "annotations",
+	)
+	if annotations2[annotationConfigHash] == hash1 {
+		t.Fatal("expected hash to change when secret data changes")
+	}
+}
+
+func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.T) {
+	s := runtime.NewScheme()
+	_ = corev1.AddToScheme(s)
+
+	liveCA := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: testFlightServiceCA, Namespace: testNamespace},
+		Data:       map[string]string{"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----\n"},
+	}
+	fakeClient := fake.NewClientBuilder().WithScheme(s).WithObjects(liveCA).Build()
+	r := &DataConnectServiceReconciler{Client: fakeClient}
+
+	emptyCA := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindConfigMap,
+		testMetadataKey: map[string]any{
+			testNameKey: testFlightServiceCA,
+		},
+		testDataKey: map[string]any{},
+	}}
+	deployment := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindDeployment,
+		testMetadataKey: map[string]any{
+			testNameKey: nameRestService,
+		},
+		testSpecKey: map[string]any{
+			"template": map[string]any{
+				testSpecKey: map[string]any{
+					"containers": []any{
+						map[string]any{testNameKey: nameRestServiceContainer, "image": "test:latest"},
+					},
+					"volumes": []any{
+						map[string]any{
+							testNameKey: "flight-ca",
+							"configMap": map[string]any{testNameKey: testFlightServiceCA},
+						},
+					},
+				},
+			},
+		},
+	}}
+
+	resources := []*unstructured.Unstructured{emptyCA, deployment}
+	if err := r.annotateDeploymentsWithContentHash(context.Background(), resources, testNamespace); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	annotations, found, _ := unstructured.NestedStringMap(
+		deployment.Object, testSpecKey, "template", testMetadataKey, "annotations",
+	)
+	if !found || annotations[annotationConfigHash] == "" {
+		t.Fatal("expected hash annotation from live-fetched CA ConfigMap")
 	}
 }

@@ -16,6 +16,7 @@ spec:
         app.kubernetes.io/name: rest-service
         app.kubernetes.io/part-of: data-connect-hub
     spec:
+      terminationGracePeriodSeconds: 30
       serviceAccountName: rest-service-sa
       automountServiceAccountToken: true
       securityContext:
@@ -55,6 +56,10 @@ spec:
             - name: proxy-tls
               mountPath: /etc/tls/private
               readOnly: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "3"]
           readinessProbe:
             httpGet:
               path: /health
@@ -105,6 +110,10 @@ spec:
             - name: flight-ca
               mountPath: /etc/tls/flight
               readOnly: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "3"]
           readinessProbe:
             httpGet:
               path: /health

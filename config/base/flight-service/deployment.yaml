@@ -16,6 +16,7 @@ spec:
         app.kubernetes.io/name: flight-service
         app.kubernetes.io/part-of: data-connect-hub
     spec:
+      terminationGracePeriodSeconds: 30
       serviceAccountName: flight-service-sa
       automountServiceAccountToken: true
       securityContext:
@@ -61,6 +62,10 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+          lifecycle:
+            preStop:
+              exec:
+                command: ["sleep", "3"]
           readinessProbe:
             tcpSocket:
               port: grpc

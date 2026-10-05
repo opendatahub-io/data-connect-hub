@@ -59,7 +59,7 @@ const (
 	conditionTypeDegraded              = "Degraded"
 	conditionTypeGRPCGatewaySupported  = "GRPCGatewaySupported"
 
-	http2EnableAnnotation = "ingress.operator.openshift.io/default-enable-http2"
+	annotationHTTP2Enable = "ingress.operator.openshift.io/default-enable-http2"
 
 	requeueWaitingForReady = 10 * time.Second
 	requeueOnError         = 30 * time.Second
@@ -71,6 +71,7 @@ const (
 	nameFlightServiceContainer = "flight-server"
 	nameDataConnectHub         = "data-connect-hub"
 	nameDatabaseConfig         = "dch-database-config"
+	nameSecretConfigTOML       = "secret-config.toml"
 	nameKubeRbacProxy          = "kube-rbac-proxy"
 
 	// OTLP exporter environment variables carrying spec.trace to the service containers.
@@ -444,7 +445,9 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
-	annotateFlightDeploymentsWithConfigHash(resources, flightInstanceName, nameFlightServiceContainer)
+	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
+		return fmt.Errorf("annotating deployments with content hash: %w", err)
+	}
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)
 }
@@ -756,7 +759,7 @@ func (r *DataConnectServiceReconciler) checkGRPCGatewaySupport(ctx context.Conte
 	}
 	message := "gRPC (flight-service) traffic routed through an OpenShift Route requires HTTP/2, which OpenShift disables " +
 		"by default. A cluster-admin must enable it, e.g.: oc annotate ingresses.config/cluster " +
-		http2EnableAnnotation + "=true --overwrite. The Route also needs its own dedicated TLS certificate " +
+		annotationHTTP2Enable + "=true --overwrite. The Route also needs its own dedicated TLS certificate " +
 		"instead of the shared default one for ALPN to negotiate."
 	r.setCondition(cr, conditionTypeGRPCGatewaySupported, metav1.ConditionFalse, "HTTP2Disabled", message)
 	r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", message)
@@ -779,7 +782,7 @@ func (r *DataConnectServiceReconciler) http2Enabled(ctx context.Context) (enable
 	})
 	if err := r.Get(ctx, types.NamespacedName{Name: "cluster"}, clusterIngress); err == nil {
 		known = true
-		if clusterIngress.GetAnnotations()[http2EnableAnnotation] == valueTrue {
+		if clusterIngress.GetAnnotations()[annotationHTTP2Enable] == valueTrue {
 			return true, true
 		}
 	}
@@ -793,7 +796,7 @@ func (r *DataConnectServiceReconciler) http2Enabled(ctx context.Context) (enable
 	if err := r.List(ctx, controllers, client.InNamespace("openshift-ingress-operator")); err == nil {
 		known = true
 		for i := range controllers.Items {
-			if controllers.Items[i].GetAnnotations()[http2EnableAnnotation] == "true" {
+			if controllers.Items[i].GetAnnotations()[annotationHTTP2Enable] == "true" {
 				return true, true
 			}
 		}
@@ -878,6 +881,24 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 		return obj.GetName() == platformConfigName
 	})
 
+	// Watches:
+	//
+	// Owns() — controller-managed resources. The ownsPredicate filters on
+	// generation or label changes. ConfigMap data-only updates do NOT pass
+	// this predicate, but that is fine: controller-rendered ConfigMaps
+	// (flight-service-config, rest-service-config, etc.) are only modified
+	// during reconcile from Kustomize output, so their hash is computed
+	// from the rendered desired state in the same reconcile cycle.
+	//
+	// Watches(ConfigMap, isPlatformConfig) — the platform configuration
+	// ConfigMap (opendatahub-dataconnecthub-config). Not owned by the CR;
+	// changes to it may affect rendered manifests.
+	//
+	// Externally-managed Secrets (TLS serving-certs, database secret) and
+	// the CA-bundle ConfigMap (flight-service-ca, populated by OpenShift
+	// service-ca-operator) are NOT explicitly watched. Changes to these
+	// resources are detected on the next periodic reconcile (~5 min) via
+	// content-hash recomputation in annotateDeploymentsWithContentHash.
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&dchv1alpha1.DataConnectService{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(ownsPredicate)).
