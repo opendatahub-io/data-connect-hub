@@ -124,6 +124,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} -f Containerfile.konflux ..
 
+.PHONY: docker-build-e2e
+docker-build-e2e: ## Build the manager image for E2E tests with a public runtime base.
+	$(CONTAINER_TOOL) build --build-arg RUNTIME_BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal -t ${IMG} -f Containerfile.konflux ..
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}

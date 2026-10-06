@@ -1,3 +1,5 @@
+ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:8a842ac769de709143e4edeace516f2008dfdc431b64670ad3353fa323b44736
+
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:d91be7cea9f03a757d69ad7fcdfcd7849dba820110e7980d5e2a1f46ed06ea3b AS builder
 
 RUN microdnf install -y gcc pkgconf tar gzip unzip findutils ca-certificates curl-minimal \
@@ -37,7 +39,7 @@ COPY services/ ./services/
 RUN cargo build --release -p flight-service \
     && cp target/release/flight-service /usr/local/bin/flight-service
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:d91be7cea9f03a757d69ad7fcdfcd7849dba820110e7980d5e2a1f46ed06ea3b
+FROM ${RUNTIME_BASE_IMAGE}
 WORKDIR /
 
 RUN microdnf install -y ca-certificates \
