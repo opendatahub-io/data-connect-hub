@@ -81,4 +81,6 @@ pub enum SecretStoreError {
 pub enum DataConnectionTypeError {
     #[error("Required field {0} is missing")]
     MissingRequiredField(String),
+    #[error("Tag must not be empty or whitespace-only (index {0})")]
+    EmptyTag(usize),
 }

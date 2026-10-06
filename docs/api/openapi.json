@@ -1070,6 +1070,20 @@
             "items": {
               "$ref": "#/components/schemas/Field"
             }
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "description": "Arbitrary labels for categorising the connection type (e.g. \"domain: database\", \"engine: postgresql\").\n",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "example": [
+              "domain: database",
+              "engine: postgresql",
+              "access: sql"
+            ]
           }
         }
       },
@@ -1155,6 +1169,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Field"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "description": "Arbitrary labels for categorising the connection type.",
+            "items": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }

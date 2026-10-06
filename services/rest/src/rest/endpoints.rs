@@ -192,6 +192,10 @@ pub async fn create_connection_type(
         connection_type.name, connection_type.provider, ctx.tenant_id,
     );
 
+    connection_type
+        .validate_tags()
+        .map_err(|e| MetaStoreError::InvalidRequest(e.to_string()))?;
+
     let connection_type = service
         .meta_store
         .create_data_connection_type(ctx.tenant_id.as_str(), &connection_type)
@@ -216,7 +220,12 @@ pub async fn patch_connection_type(
         let mut value = serde_json::to_value(&ct)
             .map_err(|e| commons::api::errors::MetaStoreError::Serialization(e.to_string()))?;
         json_patch::merge(&mut value, &patch);
-        serde_json::from_value(value).map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))
+        let updated: DataConnectionType = serde_json::from_value(value)
+            .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
+        updated
+            .validate_tags()
+            .map_err(|e| commons::api::errors::MetaStoreError::InvalidRequest(e.to_string()))?;
+        Ok(updated)
     });
 
     let connection_type = service
@@ -613,6 +622,7 @@ mod tests {
                         provider: provider.to_string(),
                         description: Some(format!("{name} database connection")),
                         credentials_fields: vec![],
+                        tags: None,
                     },
                     status: Default::default(),
                 })
@@ -849,6 +859,7 @@ mod tests {
                     provider: "postgres".to_string(),
                     description: Some("PostgreSQL database connection".to_string()),
                     credentials_fields: vec![],
+                    tags: Some(vec!["domain: database".to_string()]),
                 };
                 let updated = update_fn(existing)?;
                 Ok(DataConnectionTypeResource {
@@ -898,6 +909,7 @@ mod tests {
                             provider: String::new(),
                             description: None,
                             credentials_fields: vec![],
+                            tags: None,
                         },
                         Default::default(),
                     )
@@ -1353,6 +1365,62 @@ mod tests {
     }
 
     #[actix_web::test]
+    async fn test_create_connection_type_with_tags() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connection-types"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "PostgreSQL",
+                "provider": "postgres",
+                "credentials_fields": [],
+                "tags": ["domain: database", "engine: postgresql", "access: sql"]
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["tags"][0], "domain: database");
+        assert_eq!(body["resource"]["tags"][1], "engine: postgresql");
+        assert_eq!(body["resource"]["tags"][2], "access: sql");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_type_rejects_empty_tag() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connection-types"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "PostgreSQL",
+                "provider": "postgres",
+                "credentials_fields": [],
+                "tags": ["valid", ""]
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_request");
+    }
+
+    #[actix_web::test]
     async fn test_create_connection_type_with_disabled_connector() {
         let app = test::init_service(
             App::new()
@@ -1492,6 +1560,77 @@ mod tests {
         assert_eq!(body["metadata"]["id"], "ct-1");
         assert_eq!(body["resource"]["name"], "MySQL");
         assert_eq!(body["resource"]["provider"], "postgres");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_type_add_tags() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connection-types/ct-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({
+                "tags": ["domain: database", "engine: postgresql"]
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["tags"][0], "domain: database");
+        assert_eq!(body["resource"]["tags"][1], "engine: postgresql");
+        assert_eq!(body["resource"]["name"], "PostgreSQL");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_type_rejects_empty_tag() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connection-types/ct-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({
+                "tags": ["ok", ""]
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_request");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_type_clear_tags() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connection-types/ct-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({
+                "tags": null
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert!(body["resource"].get("tags").is_none() || body["resource"]["tags"].is_null());
     }
 
     #[actix_web::test]

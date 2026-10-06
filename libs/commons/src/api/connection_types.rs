@@ -31,6 +31,8 @@ pub struct DataConnectionType {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     pub credentials_fields: Vec<Field>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
 }
 
 impl DataConnectionType {
@@ -38,6 +40,17 @@ impl DataConnectionType {
         for field in &self.credentials_fields {
             if field.required && !secret.contains_key(&field.name) {
                 return Err(DataConnectionTypeError::MissingRequiredField(field.name.clone()));
+            }
+        }
+        Ok(())
+    }
+
+    pub fn validate_tags(&self) -> Result<(), DataConnectionTypeError> {
+        if let Some(tags) = &self.tags {
+            for (i, tag) in tags.iter().enumerate() {
+                if tag.trim().is_empty() {
+                    return Err(DataConnectionTypeError::EmptyTag(i));
+                }
             }
         }
         Ok(())
@@ -86,6 +99,7 @@ mod tests {
                     enum_values: None,
                     default_value: None,
                 }],
+                tags: Some(vec!["domain: database".to_string(), "engine: postgresql".to_string()]),
             },
             status: DataConnectionTypeStatus::default(),
         }
@@ -104,12 +118,15 @@ mod tests {
         assert_eq!(json["resource"]["credentials_fields"][0]["name"], "url");
         assert_eq!(json["resource"]["credentials_fields"][0]["type"], "string");
         assert_eq!(json["resource"]["credentials_fields"][0]["required"], true);
+        assert_eq!(json["resource"]["tags"][0], "domain: database");
+        assert_eq!(json["resource"]["tags"][1], "engine: postgresql");
 
         let deserialized: DataConnectionTypeResource = serde_json::from_value(json).unwrap();
         assert_eq!(deserialized.metadata.id, res.metadata.id);
         assert_eq!(deserialized.resource.provider, res.resource.provider);
         assert_eq!(deserialized.resource.credentials_fields.len(), 1);
         assert_eq!(deserialized.resource.credentials_fields[0].d_type, "string");
+        assert_eq!(deserialized.resource.tags.as_ref().unwrap().len(), 2);
     }
 
     #[test]
@@ -133,6 +150,7 @@ mod tests {
 
         let res: DataConnectionTypeResource = serde_json::from_value(json).unwrap();
         assert!(res.resource.description.is_none());
+        assert!(res.resource.tags.is_none());
         assert!(res.resource.credentials_fields.is_empty());
     }
 
@@ -186,5 +204,97 @@ mod tests {
         assert_eq!(enums.len(), 2);
         assert_eq!(enums[0].value, "us-east-1");
         assert_eq!(enums[1].label, "EU West");
+    }
+
+    #[test]
+    fn test_data_connection_type_with_tags() {
+        let json = serde_json::json!({
+            "name": "PostgreSQL",
+            "provider": "postgres",
+            "credentials_fields": [],
+            "tags": ["domain: database", "engine: postgresql", "access: sql"]
+        });
+
+        let dct: DataConnectionType = serde_json::from_value(json).unwrap();
+        let tags = dct.tags.unwrap();
+        assert_eq!(tags.len(), 3);
+        assert_eq!(tags[0], "domain: database");
+        assert_eq!(tags[2], "access: sql");
+    }
+
+    #[test]
+    fn test_data_connection_type_tags_omitted_in_json_when_none() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        let json = serde_json::to_value(&dct).unwrap();
+        assert!(json.get("tags").is_none());
+    }
+
+    #[test]
+    fn test_data_connection_type_empty_tags() {
+        let json = serde_json::json!({
+            "name": "PostgreSQL",
+            "provider": "postgres",
+            "credentials_fields": [],
+            "tags": []
+        });
+
+        let dct: DataConnectionType = serde_json::from_value(json).unwrap();
+        assert!(dct.tags.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_validate_tags_rejects_empty_string() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: Some(vec!["valid".to_string(), "".to_string()]),
+        };
+        let err = dct.validate_tags().unwrap_err();
+        assert!(err.to_string().contains("index 1"));
+    }
+
+    #[test]
+    fn test_validate_tags_accepts_none() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        assert!(dct.validate_tags().is_ok());
+    }
+
+    #[test]
+    fn test_validate_tags_accepts_spaces_within() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: Some(vec!["has spaces".to_string(), " leading space".to_string()]),
+        };
+        assert!(dct.validate_tags().is_ok());
+    }
+
+    #[test]
+    fn test_validate_tags_rejects_whitespace_only() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: Some(vec!["valid".to_string(), "   ".to_string()]),
+        };
+        let err = dct.validate_tags().unwrap_err();
+        assert!(err.to_string().contains("index 1"));
     }
 }

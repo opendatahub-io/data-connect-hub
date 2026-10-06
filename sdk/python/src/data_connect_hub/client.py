@@ -287,12 +287,14 @@ class DataConnectClient:
         provider: str,
         description: str | None = None,
         credentials_fields: list[CredentialField] | None = None,
+        tags: list[str] | None = None,
     ) -> ConnectionType:
         req = CreateConnectionTypeRequest(
             name=name,
             provider=provider,
             description=description,
             credentials_fields=credentials_fields or [],
+            tags=tags,
         )
         return self._rest.create_connection_type(req)
 
@@ -304,9 +306,16 @@ class DataConnectClient:
         provider: str | None = None,
         description: str | _UnsetType | None = _UNSET,
         credentials_fields: list[CredentialField] | None = None,
+        tags: list[str] | _UnsetType | None = _UNSET,
     ) -> ConnectionType:
-        """Update a connection type; pass ``description=None`` to clear it."""
-        if name is None and provider is None and description is _UNSET and credentials_fields is None:
+        """Update a connection type; pass ``description=None`` or ``tags=None`` to clear them."""
+        if (
+            name is None
+            and provider is None
+            and description is _UNSET
+            and credentials_fields is None
+            and tags is _UNSET
+        ):
             raise DCHConfigError("at least one field must be provided for update")
 
         updates: dict[str, object] = {}
@@ -318,6 +327,8 @@ class DataConnectClient:
             updates["description"] = description
         if credentials_fields is not None:
             updates["credentials_fields"] = credentials_fields
+        if tags is not _UNSET:
+            updates["tags"] = tags
         req = UpdateConnectionTypeRequest.model_validate(updates)
         return self._rest.update_connection_type(type_id, req)
 

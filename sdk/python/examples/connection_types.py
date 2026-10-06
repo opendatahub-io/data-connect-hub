@@ -34,8 +34,9 @@ try:
         name="example-postgres",
         provider="postgres",
         description="PostgreSQL connector created by example",
+        tags=["domain: database", "engine: postgresql"],
     )
-    print(f"\nCreated type: {new_type.id} ({new_type.name})")
+    print(f"\nCreated type: {new_type.id} ({new_type.name}), tags={new_type.tags}")
 except DCHHTTPError as exc:
     print(f"\nFailed to create connection type: {exc}", file=sys.stderr)
     raise SystemExit(1) from None

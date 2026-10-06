@@ -419,6 +419,14 @@ class TestConnectionTypes:
             ),
         )
 
+    def test_update_sends_null_tags(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert json.loads(request.content) == {"tags": None}
+            return httpx.Response(200, json=SAMPLE_CONNECTION_TYPE_JSON)
+
+        client = _make_client(httpx.MockTransport(handler))
+        client.update_connection_type("ct-1", UpdateConnectionTypeRequest(tags=None))
+
     def test_delete(self) -> None:
         transport = _make_transport(
             assert_method="DELETE",

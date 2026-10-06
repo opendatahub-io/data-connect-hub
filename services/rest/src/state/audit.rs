@@ -434,6 +434,7 @@ mod tests {
                         default_value: None,
                     })
                     .collect(),
+                tags: None,
             },
             status: Default::default(),
         }

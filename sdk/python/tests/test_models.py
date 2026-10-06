@@ -323,3 +323,26 @@ class TestConnectionType:
         assert len(field.enum_values) == 2
         assert field.enum_values[0] == EnumValue(value="us-east-1", label="US East")
         assert field.enum_values[1].value == "eu-west-1"
+
+    def test_tags_present(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_TYPE_JSON,
+            "tags": ["domain: database", "engine: postgresql"],
+        }
+        ct = ConnectionType.model_validate(data)
+        assert ct.tags == ["domain: database", "engine: postgresql"]
+
+    def test_tags_absent(self) -> None:
+        ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_JSON)
+        assert ct.tags is None
+
+    def test_tags_from_wrapped_json(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+            "resource": {
+                **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON["resource"],
+                "tags": ["domain: database"],
+            },
+        }
+        ct = ConnectionType.model_validate(data)
+        assert ct.tags == ["domain: database"]

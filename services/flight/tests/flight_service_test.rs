@@ -101,6 +101,7 @@ impl MetaStoreReader for TestMetaStore {
                     enum_values: None,
                     default_value: None,
                 }],
+                tags: None,
             },
             status: Default::default(),
         })

@@ -14,3 +14,10 @@ properties:
     type: array
     items:
       $ref: "Field.yaml"
+  tags:
+    type: array
+    nullable: true
+    description: Arbitrary labels for categorising the connection type.
+    items:
+      type: string
+      minLength: 1

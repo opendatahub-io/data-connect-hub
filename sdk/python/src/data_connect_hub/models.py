@@ -140,6 +140,7 @@ class ConnectionType(BaseModel):
     created_at: datetime | None = None
     updated_at: datetime | None = None
     credentials_fields: list[CredentialField] = Field(default_factory=list)
+    tags: list[str] | None = None
     status: ConnectionTypeStatus = Field(default_factory=ConnectionTypeStatus)
 
     @model_validator(mode="before")
@@ -158,6 +159,7 @@ class CreateConnectionTypeRequest(BaseModel):
     provider: str
     description: str | None = None
     credentials_fields: list[CredentialField] = Field(default_factory=list)
+    tags: list[str] | None = None
 
 
 class UpdateConnectionTypeRequest(BaseModel):
@@ -165,3 +167,4 @@ class UpdateConnectionTypeRequest(BaseModel):
     provider: str | None = None
     description: str | None = None
     credentials_fields: list[CredentialField] | None = None
+    tags: list[str] | None = None

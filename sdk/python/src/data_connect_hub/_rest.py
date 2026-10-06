@@ -382,7 +382,7 @@ class RestClient:
         patch = {
             field: value
             for field, value in request.model_dump(exclude_unset=True).items()
-            if value is not None or field == "description"
+            if value is not None or field in ("description", "tags")
         }
         resp = self._request(
             "PATCH",
