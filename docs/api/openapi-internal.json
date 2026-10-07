@@ -1188,6 +1188,12 @@
             "description": "The name of the connection type. This name is unique for connection types of this tenant.",
             "example": "PostgreSQL"
           },
+          "label": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional display label for the connection type. When present the UI should render this instead of the short ``name``.\n",
+            "example": "S3 compatible object storage"
+          },
           "provider": {
             "type": "string",
             "example": "postgres"
@@ -1288,6 +1294,10 @@
         "properties": {
           "name": {
             "type": "string"
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
           },
           "provider": {
             "type": "string"

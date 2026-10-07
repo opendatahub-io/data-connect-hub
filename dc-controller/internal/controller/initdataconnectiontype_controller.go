@@ -134,9 +134,11 @@ func specToConnectionType(spec *dchv1alpha1.InitDataConnectionTypeSpec) Connecti
 
 	return ConnectionType{
 		Name:              spec.Name,
+		Label:             spec.Label,
 		Provider:          spec.Provider,
 		Description:       spec.Description,
 		CredentialsFields: fields,
+		Tags:              spec.Tags,
 	}
 }
 

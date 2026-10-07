@@ -5,6 +5,9 @@ description: >
 properties:
   name:
     type: string
+  label:
+    type: string
+    nullable: true
   provider:
     type: string
   description:

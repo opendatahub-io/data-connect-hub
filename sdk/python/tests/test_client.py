@@ -184,6 +184,28 @@ class TestEmptyUpdateGuards:
         request = client._rest.update_connection_type.call_args[0][1]
         assert request.model_dump(exclude_unset=True) == {"tags": ["domain: database"]}
 
+    def test_update_connection_type_label_to_null(self) -> None:
+        from data_connect_hub.models import ConnectionType
+
+        connection_type = ConnectionType(id="ct-1", name="postgres", provider="postgres")
+        client = DataConnectClient("localhost")
+        client._rest.update_connection_type = MagicMock(return_value=connection_type)  # type: ignore[method-assign]
+
+        client.update_connection_type("ct-1", label=None)
+        request = client._rest.update_connection_type.call_args[0][1]
+        assert request.model_dump(exclude_unset=True) == {"label": None}
+
+    def test_update_connection_type_label_with_value(self) -> None:
+        from data_connect_hub.models import ConnectionType
+
+        connection_type = ConnectionType(id="ct-1", name="postgres", provider="postgres")
+        client = DataConnectClient("localhost")
+        client._rest.update_connection_type = MagicMock(return_value=connection_type)  # type: ignore[method-assign]
+
+        client.update_connection_type("ct-1", label="PostgreSQL Database")
+        request = client._rest.update_connection_type.call_args[0][1]
+        assert request.model_dump(exclude_unset=True) == {"label": "PostgreSQL Database"}
+
     def test_invalid_credential_test_request_is_sanitized(self) -> None:
         client = DataConnectClient("localhost")
         with pytest.raises(DCHConfigError, match="invalid credential test request") as exc_info:

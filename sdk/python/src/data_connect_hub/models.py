@@ -134,6 +134,7 @@ class ConnectionTypeStatus(BaseModel):
 class ConnectionType(BaseModel):
     id: str
     name: str
+    label: str | None = None
     provider: str
     description: str | None = None
     tenant_id: str = ""
@@ -156,6 +157,7 @@ class ConnectionType(BaseModel):
 
 class CreateConnectionTypeRequest(BaseModel):
     name: str
+    label: str | None = None
     provider: str
     description: str | None = None
     credentials_fields: list[CredentialField] = Field(default_factory=list)
@@ -164,6 +166,7 @@ class CreateConnectionTypeRequest(BaseModel):
 
 class UpdateConnectionTypeRequest(BaseModel):
     name: str | None = None
+    label: str | None = None
     provider: str | None = None
     description: str | None = None
     credentials_fields: list[CredentialField] | None = None

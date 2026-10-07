@@ -193,6 +193,9 @@ pub async fn create_connection_type(
     );
 
     connection_type
+        .validate_label()
+        .map_err(|e| MetaStoreError::InvalidRequest(e.to_string()))?;
+    connection_type
         .validate_tags()
         .map_err(|e| MetaStoreError::InvalidRequest(e.to_string()))?;
 
@@ -222,6 +225,9 @@ pub async fn patch_connection_type(
         json_patch::merge(&mut value, &patch);
         let updated: DataConnectionType = serde_json::from_value(value)
             .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
+        updated
+            .validate_label()
+            .map_err(|e| commons::api::errors::MetaStoreError::InvalidRequest(e.to_string()))?;
         updated
             .validate_tags()
             .map_err(|e| commons::api::errors::MetaStoreError::InvalidRequest(e.to_string()))?;
@@ -619,6 +625,7 @@ mod tests {
                     },
                     resource: DataConnectionType {
                         name: name.to_string(),
+                        label: None,
                         provider: provider.to_string(),
                         description: Some(format!("{name} database connection")),
                         credentials_fields: vec![],
@@ -856,6 +863,7 @@ mod tests {
             if tenant_id == "test-tenant" && uid == "ct-1" {
                 let existing = DataConnectionType {
                     name: "PostgreSQL".to_string(),
+                    label: Some("PostgreSQL Database".to_string()),
                     provider: "postgres".to_string(),
                     description: Some("PostgreSQL database connection".to_string()),
                     credentials_fields: vec![],
@@ -906,6 +914,7 @@ mod tests {
                         },
                         DataConnectionType {
                             name: String::new(),
+                            label: None,
                             provider: String::new(),
                             description: None,
                             credentials_fields: vec![],
@@ -1391,6 +1400,61 @@ mod tests {
         assert_eq!(body["resource"]["tags"][0], "domain: database");
         assert_eq!(body["resource"]["tags"][1], "engine: postgresql");
         assert_eq!(body["resource"]["tags"][2], "access: sql");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_type_with_label() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connection-types"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "s3",
+                "label": "S3 compatible object storage",
+                "provider": "s3",
+                "credentials_fields": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["name"], "s3");
+        assert_eq!(body["resource"]["label"], "S3 compatible object storage");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_type_rejects_empty_label() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connection-types"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "name": "PostgreSQL",
+                "label": "   ",
+                "provider": "postgres",
+                "credentials_fields": []
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 400);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "invalid_request");
     }
 
     #[actix_web::test]

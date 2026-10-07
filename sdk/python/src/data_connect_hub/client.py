@@ -285,12 +285,14 @@ class DataConnectClient:
         *,
         name: str,
         provider: str,
+        label: str | None = None,
         description: str | None = None,
         credentials_fields: list[CredentialField] | None = None,
         tags: list[str] | None = None,
     ) -> ConnectionType:
         req = CreateConnectionTypeRequest(
             name=name,
+            label=label,
             provider=provider,
             description=description,
             credentials_fields=credentials_fields or [],
@@ -303,14 +305,16 @@ class DataConnectClient:
         type_id: str,
         *,
         name: str | None = None,
+        label: str | _UnsetType | None = _UNSET,
         provider: str | None = None,
         description: str | _UnsetType | None = _UNSET,
         credentials_fields: list[CredentialField] | None = None,
         tags: list[str] | _UnsetType | None = _UNSET,
     ) -> ConnectionType:
-        """Update a connection type; pass ``description=None`` or ``tags=None`` to clear them."""
+        """Update a connection type; pass ``description=None``, ``label=None``, or ``tags=None`` to clear them."""
         if (
             name is None
+            and label is _UNSET
             and provider is None
             and description is _UNSET
             and credentials_fields is None
@@ -321,6 +325,8 @@ class DataConnectClient:
         updates: dict[str, object] = {}
         if name is not None:
             updates["name"] = name
+        if label is not _UNSET:
+            updates["label"] = label
         if provider is not None:
             updates["provider"] = provider
         if description is not _UNSET:

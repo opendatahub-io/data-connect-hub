@@ -569,9 +569,11 @@ func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context
 
 type connectionTypeFile struct {
 	Name              string                   `json:"name"`
+	Label             string                   `json:"label"`
 	Provider          string                   `json:"provider"`
 	Description       string                   `json:"description"`
 	CredentialsFields []connectionTypeFieldDef `json:"credentials_fields"`
+	Tags              []string                 `json:"tags"`
 }
 
 type connectionTypeFieldDef struct {
@@ -603,6 +605,10 @@ func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec
 		Name:              f.Name,
 		Provider:          f.Provider,
 		CredentialsFields: fields,
+		Tags:              f.Tags,
+	}
+	if f.Label != "" {
+		spec.Label = &f.Label
 	}
 	if f.Description != "" {
 		spec.Description = &f.Description

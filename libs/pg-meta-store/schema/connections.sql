@@ -55,6 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_data_connections_type_id ON data_connections ((da
 --             value         string          — stored value
 --             label         string          — display label
 --         default_value     string | null   — optional default
+--     label                 string | null   — optional display label
 --     tags                  array | null    — optional free-form labels
 CREATE TABLE IF NOT EXISTS data_connection_types (
     data JSONB NOT NULL

@@ -346,3 +346,26 @@ class TestConnectionType:
         }
         ct = ConnectionType.model_validate(data)
         assert ct.tags == ["domain: database"]
+
+    def test_label_present(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_TYPE_JSON,
+            "label": "PostgreSQL Database",
+        }
+        ct = ConnectionType.model_validate(data)
+        assert ct.label == "PostgreSQL Database"
+
+    def test_label_absent(self) -> None:
+        ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_JSON)
+        assert ct.label is None
+
+    def test_label_from_wrapped_json(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
+            "resource": {
+                **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON["resource"],
+                "label": "PostgreSQL Database",
+            },
+        }
+        ct = ConnectionType.model_validate(data)
+        assert ct.label == "PostgreSQL Database"

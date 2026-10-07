@@ -27,6 +27,8 @@ pub struct Field {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DataConnectionType {
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
     pub provider: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -45,11 +47,26 @@ impl DataConnectionType {
         Ok(())
     }
 
+    pub fn validate_label(&self) -> Result<(), DataConnectionTypeError> {
+        if let Some(label) = &self.label
+            && label.trim().is_empty()
+        {
+            return Err(DataConnectionTypeError::EmptyValue {
+                field: "label",
+                index: None,
+            });
+        }
+        Ok(())
+    }
+
     pub fn validate_tags(&self) -> Result<(), DataConnectionTypeError> {
         if let Some(tags) = &self.tags {
             for (i, tag) in tags.iter().enumerate() {
                 if tag.trim().is_empty() {
-                    return Err(DataConnectionTypeError::EmptyTag(i));
+                    return Err(DataConnectionTypeError::EmptyValue {
+                        field: "tag",
+                        index: Some(i),
+                    });
                 }
             }
         }
@@ -88,6 +105,7 @@ mod tests {
             },
             resource: DataConnectionType {
                 name: "PostgreSQL".to_string(),
+                label: Some("PostgreSQL Database".to_string()),
                 provider: "postgres".to_string(),
                 description: Some("PostgreSQL database connection".to_string()),
                 credentials_fields: vec![Field {
@@ -113,6 +131,7 @@ mod tests {
         assert_eq!(json["metadata"]["id"], "dct-001");
         assert_eq!(json["metadata"]["tenant_id"], "tenant-1");
         assert_eq!(json["resource"]["name"], "PostgreSQL");
+        assert_eq!(json["resource"]["label"], "PostgreSQL Database");
         assert_eq!(json["resource"]["provider"], "postgres");
         assert_eq!(json["resource"]["description"], "PostgreSQL database connection");
         assert_eq!(json["resource"]["credentials_fields"][0]["name"], "url");
@@ -226,6 +245,7 @@ mod tests {
     fn test_data_connection_type_tags_omitted_in_json_when_none() {
         let dct = DataConnectionType {
             name: "PostgreSQL".to_string(),
+            label: None,
             provider: "postgres".to_string(),
             description: None,
             credentials_fields: vec![],
@@ -233,6 +253,7 @@ mod tests {
         };
         let json = serde_json::to_value(&dct).unwrap();
         assert!(json.get("tags").is_none());
+        assert!(json.get("label").is_none());
     }
 
     #[test]
@@ -249,9 +270,62 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_label_rejects_empty_string() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            label: Some("".to_string()),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        assert!(dct.validate_label().is_err());
+    }
+
+    #[test]
+    fn test_validate_label_rejects_whitespace_only() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            label: Some("   ".to_string()),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        assert!(dct.validate_label().is_err());
+    }
+
+    #[test]
+    fn test_validate_label_accepts_none() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            label: None,
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        assert!(dct.validate_label().is_ok());
+    }
+
+    #[test]
+    fn test_validate_label_accepts_valid() {
+        let dct = DataConnectionType {
+            name: "PostgreSQL".to_string(),
+            label: Some("PostgreSQL Database".to_string()),
+            provider: "postgres".to_string(),
+            description: None,
+            credentials_fields: vec![],
+            tags: None,
+        };
+        assert!(dct.validate_label().is_ok());
+    }
+
+    #[test]
     fn test_validate_tags_rejects_empty_string() {
         let dct = DataConnectionType {
             name: "PostgreSQL".to_string(),
+            label: None,
             provider: "postgres".to_string(),
             description: None,
             credentials_fields: vec![],
@@ -265,6 +339,7 @@ mod tests {
     fn test_validate_tags_accepts_none() {
         let dct = DataConnectionType {
             name: "PostgreSQL".to_string(),
+            label: None,
             provider: "postgres".to_string(),
             description: None,
             credentials_fields: vec![],
@@ -277,6 +352,7 @@ mod tests {
     fn test_validate_tags_accepts_spaces_within() {
         let dct = DataConnectionType {
             name: "PostgreSQL".to_string(),
+            label: None,
             provider: "postgres".to_string(),
             description: None,
             credentials_fields: vec![],
@@ -289,6 +365,7 @@ mod tests {
     fn test_validate_tags_rejects_whitespace_only() {
         let dct = DataConnectionType {
             name: "PostgreSQL".to_string(),
+            label: None,
             provider: "postgres".to_string(),
             description: None,
             credentials_fields: vec![],
