@@ -164,7 +164,7 @@ impl FlightConnector for UriConnector {
 
 struct UriReader {
     client: UriClient,
-    cached_response: tokio::sync::Mutex<Option<CachedResponse>>,
+    cached_response: tokio::sync::Mutex<Option<(String, CachedResponse)>>,
 }
 
 struct CachedResponse {
@@ -278,7 +278,7 @@ impl DataReader for UriReader {
             },
         };
 
-        *self.cached_response.lock().await = Some(cached);
+        *self.cached_response.lock().await = Some((query.to_owned(), cached));
         Ok(Arc::new(Query::new(query.to_owned(), Arc::new(schema))))
     }
 
@@ -288,7 +288,14 @@ impl DataReader for UriReader {
         let schema = view.schema.clone();
         let client = self.client.clone();
         let batch_size = options.batch_size;
-        let cached = self.cached_response.lock().await.take();
+        let cached = {
+            let mut guard = self.cached_response.lock().await;
+            if guard.as_ref().is_some_and(|(q, _)| *q == view.query) {
+                guard.take().map(|(_, c)| c)
+            } else {
+                None
+            }
+        };
 
         let resp = match cached {
             Some(c) => c,
@@ -617,5 +624,129 @@ mod tests {
             .request(reqwest::Method::GET, "http://example.com/admin")
             .unwrap_err();
         assert!(err.to_string().contains("escape the base URI"));
+    }
+
+    async fn spawn_json_server(files: Vec<(&str, &str)>) -> (u16, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let files: Vec<(String, Vec<u8>)> = files
+            .into_iter()
+            .map(|(k, v)| (k.to_owned(), v.as_bytes().to_vec()))
+            .collect();
+
+        let handle = tokio::spawn(async move {
+            loop {
+                let Ok((mut stream, _)) = listener.accept().await else {
+                    break;
+                };
+                let files = files.clone();
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buf = vec![0u8; 4096];
+                    let n = stream.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").trim_start_matches('/');
+
+                    if let Some((_, body)) = files.iter().find(|(k, _)| k == path) {
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes()).await;
+                        let _ = stream.write_all(body).await;
+                    } else {
+                        let _ = stream
+                            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                            .await;
+                    }
+                });
+            }
+        });
+
+        (port, handle)
+    }
+
+    fn make_uri_reader(port: u16) -> UriReader {
+        let creds = HashMap::from([(KEY_URI.to_string(), format!("http://127.0.0.1:{port}"))]);
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
+        UriReader {
+            client,
+            cached_response: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_uri_cache_populated_after_schema() {
+        let data = r#"[{"name":"Alice","age":30}]"#;
+        let (port, server) = spawn_json_server(vec![("data.json", data)]).await;
+        let reader = make_uri_reader(port);
+        let query = r#"{"path":"data.json"}"#;
+
+        reader.schema(query).await.unwrap();
+
+        let cache = reader.cached_response.lock().await;
+        let (cached_query, _) = cache.as_ref().expect("cache should be populated after schema()");
+        assert_eq!(cached_query, query);
+
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn test_uri_cache_hit_avoids_refetch() {
+        use futures::TryStreamExt;
+
+        let data = r#"[{"x":1},{"x":2}]"#;
+        let (port, server) = spawn_json_server(vec![("data.json", data)]).await;
+        let reader = make_uri_reader(port);
+        let query = r#"{"path":"data.json"}"#;
+
+        let view = reader.schema(query).await.unwrap();
+        assert!(reader.cached_response.lock().await.is_some());
+
+        server.abort();
+
+        let stream = reader.read_tabular(view, &QueryOptions::default()).await.unwrap();
+        let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+        assert_eq!(batches[0].num_rows(), 2);
+
+        assert!(
+            reader.cached_response.lock().await.is_none(),
+            "cache should be cleared after read_tabular()"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_uri_cache_mismatch_no_hit() {
+        use futures::TryStreamExt;
+
+        let data_a = r#"[{"v":1}]"#;
+        let data_b = r#"[{"v":2}]"#;
+        let (port, server) = spawn_json_server(vec![("a.json", data_a), ("b.json", data_b)]).await;
+        let reader = make_uri_reader(port);
+
+        let query_a = r#"{"path":"a.json"}"#;
+        reader.schema(query_a).await.unwrap();
+        assert_eq!(reader.cached_response.lock().await.as_ref().unwrap().0, query_a);
+
+        let query_b = r#"{"path":"b.json"}"#;
+        let schema_b = format_readers::read_json_schema(data_b.as_bytes(), None).unwrap();
+        let view_b = Arc::new(Query::new(query_b.to_string(), Arc::new(schema_b)));
+
+        let stream = reader.read_tabular(view_b, &QueryOptions::default()).await.unwrap();
+        let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+        let val = batches[0]
+            .column_by_name("v")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::Int64Array>()
+            .unwrap();
+        assert_eq!(val.value(0), 2, "data must come from b.json, not cached a.json");
+
+        assert!(
+            reader.cached_response.lock().await.is_some(),
+            "mismatched cache entry should not be cleared"
+        );
+
+        server.abort();
     }
 }

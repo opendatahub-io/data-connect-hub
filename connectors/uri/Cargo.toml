@@ -24,3 +24,6 @@ chrono = { workspace = true }
 reqwest = { workspace = true }
 mime = { workspace = true }
 url = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "io-util"] }
