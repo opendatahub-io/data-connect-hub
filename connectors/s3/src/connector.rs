@@ -71,6 +71,7 @@ fn build_http_transport(ca_cert: &str) -> Result<HttpTransporter, ConnectorError
 fn build_operator(
     credentials: &HashMap<String, String>,
     connection_timeout: Duration,
+    io_timeout: Duration,
 ) -> Result<Operator, ConnectorError> {
     let bucket = credentials
         .get(KEY_BUCKET)
@@ -109,7 +110,11 @@ fn build_operator(
         op = op.with_context(OperationContext::new().with_http_transport(transport));
     }
 
-    let op = op.layer(TimeoutLayer::new().with_timeout(connection_timeout));
+    let op = op.layer(
+        TimeoutLayer::new()
+            .with_timeout(connection_timeout)
+            .with_io_timeout(io_timeout),
+    );
     Ok(op)
 }
 
@@ -177,13 +182,14 @@ impl FlightConnector for S3Connector {
         credentials_resolver: &dyn CredentialsResolver,
     ) -> Result<Arc<dyn DataReader>, ConnectorError> {
         let connection_timeout = self.config.connection_timeout();
+        let io_timeout = self.config.read_timeout();
         let cache_key = data_connection.metadata.id.clone();
 
         let operator = self
             .operators
             .try_get_with(cache_key, async {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
-                build_operator(&credentials, connection_timeout)
+                build_operator(&credentials, connection_timeout, io_timeout)
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
@@ -445,7 +451,7 @@ mod tests {
     #[test]
     fn test_build_operator_success() {
         let creds = make_credentials();
-        let result = build_operator(&creds, Duration::from_secs(10));
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(30));
         assert!(result.is_ok());
     }
 
@@ -455,7 +461,7 @@ mod tests {
             (KEY_ACCESS_KEY_ID.to_string(), "key".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds, Duration::from_secs(10));
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_BUCKET));
     }
@@ -466,7 +472,7 @@ mod tests {
             (KEY_BUCKET.to_string(), "bucket".to_string()),
             (KEY_SECRET_ACCESS_KEY.to_string(), "secret".to_string()),
         ]);
-        let result = build_operator(&creds, Duration::from_secs(10));
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_ACCESS_KEY_ID));
     }
@@ -475,7 +481,7 @@ mod tests {
     fn test_build_operator_with_endpoint() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
         creds.insert(KEY_ENDPOINT.to_string(), "http://seaweedfs:9000".to_string());
-        let result = build_operator(&creds, Duration::from_secs(10));
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
         assert!(result.is_ok());
     }
 
@@ -483,14 +489,14 @@ mod tests {
     fn test_build_operator_rejects_invalid_ca_certificate() {
         let mut creds: HashMap<String, String> = (*make_credentials()).clone();
         creds.insert(KEY_CA_CERT.to_string(), "not a PEM certificate".to_string());
-        let result = build_operator(&creds, Duration::from_secs(10));
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
         assert!(result.unwrap_err().to_string().contains(KEY_CA_CERT));
     }
 
     #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: None,
             config: ConnectorConfig::default(),
         };
@@ -504,14 +510,14 @@ mod tests {
     #[test]
     fn test_s3_reader_detect_format_with_hint() {
         let reader = S3Reader {
-            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("parquet".to_string()),
             config: ConnectorConfig::default(),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
         let reader = S3Reader {
-            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("jsonl".to_string()),
             config: ConnectorConfig::default(),
         };
@@ -521,7 +527,7 @@ mod tests {
         );
 
         let reader = S3Reader {
-            operator: build_operator(&make_credentials(), Duration::from_secs(10)).unwrap(),
+            operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("json".to_string()),
             config: ConnectorConfig::default(),
         };
