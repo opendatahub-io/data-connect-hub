@@ -38,8 +38,20 @@ impl MilvusRequestInput {
             MilvusOperation::Query
         };
 
-        let limit = obj.get("limit").and_then(|v| v.as_i64());
-        let offset = obj.get("offset").and_then(|v| v.as_i64());
+        let limit = match obj.get("limit") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => Some(
+                v.as_i64()
+                    .ok_or_else(|| ConnectorError::InvalidRequest("'limit' must be an integer".to_string()))?,
+            ),
+        };
+        let offset = match obj.get("offset") {
+            None | Some(serde_json::Value::Null) => None,
+            Some(v) => Some(
+                v.as_i64()
+                    .ok_or_else(|| ConnectorError::InvalidRequest("'offset' must be an integer".to_string()))?,
+            ),
+        };
 
         Ok(Self {
             collection_name,
@@ -125,5 +137,37 @@ mod tests {
         let req = MilvusRequestInput::parse(json).unwrap();
         assert_eq!(req.body["customParam"], "value");
         assert_eq!(req.body["filter"], "price > 50");
+    }
+
+    #[test]
+    fn test_parse_string_limit_is_error() {
+        let json = r#"{"collectionName":"products","limit":"0"}"#;
+        assert!(MilvusRequestInput::parse(json).is_err());
+    }
+
+    #[test]
+    fn test_parse_float_limit_is_error() {
+        let json = r#"{"collectionName":"products","limit":0.5}"#;
+        assert!(MilvusRequestInput::parse(json).is_err());
+    }
+
+    #[test]
+    fn test_parse_string_offset_is_error() {
+        let json = r#"{"collectionName":"products","offset":"10"}"#;
+        assert!(MilvusRequestInput::parse(json).is_err());
+    }
+
+    #[test]
+    fn test_parse_null_limit_is_unlimited() {
+        let json = r#"{"collectionName":"products","limit":null}"#;
+        let req = MilvusRequestInput::parse(json).unwrap();
+        assert_eq!(req.limit, None);
+    }
+
+    #[test]
+    fn test_parse_null_offset_is_none() {
+        let json = r#"{"collectionName":"products","offset":null}"#;
+        let req = MilvusRequestInput::parse(json).unwrap();
+        assert_eq!(req.offset, None);
     }
 }
