@@ -241,12 +241,13 @@ impl MilvusReader {
     }
 
     fn read_query_paginated(&self, request: MilvusRequestInput, schema: Arc<Schema>, batch_size: usize) -> QueryOutput {
+        let client_limit = normalize_query_limit(request.limit)?;
+
         let client = self.client.clone();
         let page_size = batch_size as i64;
 
         let stream = async_stream::try_stream! {
             let client_offset = request.offset.unwrap_or(0);
-            let client_limit = request.limit;
             let mut fetched: i64 = 0;
 
             loop {
@@ -283,6 +284,16 @@ impl MilvusReader {
         };
 
         Ok(Box::pin(stream))
+    }
+}
+
+fn normalize_query_limit(limit: Option<i64>) -> Result<Option<i64>, ConnectorError> {
+    match limit {
+        Some(-1) | None => Ok(None),
+        Some(v) if v > 0 => Ok(Some(v)),
+        Some(v) => Err(ConnectorError::InvalidRequest(format!(
+            "Invalid limit value: {v}. Must be a positive integer or -1 for unlimited"
+        ))),
     }
 }
 
@@ -713,5 +724,41 @@ mod tests {
             "/v2/vectordb/entities/search"
         );
         assert_eq!(operation_endpoint(&MilvusOperation::Get), "/v2/vectordb/entities/get");
+    }
+
+    #[test]
+    fn test_normalize_query_limit_none_is_unlimited() {
+        assert_eq!(normalize_query_limit(None).unwrap(), None);
+    }
+
+    #[test]
+    fn test_normalize_query_limit_minus_one_is_unlimited() {
+        assert_eq!(normalize_query_limit(Some(-1)).unwrap(), None);
+    }
+
+    #[test]
+    fn test_normalize_query_limit_positive() {
+        assert_eq!(normalize_query_limit(Some(50)).unwrap(), Some(50));
+        assert_eq!(normalize_query_limit(Some(1)).unwrap(), Some(1));
+    }
+
+    #[test]
+    fn test_normalize_query_limit_small_positive() {
+        assert_eq!(normalize_query_limit(Some(3)).unwrap(), Some(3));
+    }
+
+    #[test]
+    fn test_normalize_query_limit_zero_is_error() {
+        let err = normalize_query_limit(Some(0)).unwrap_err();
+        assert!(matches!(err, ConnectorError::InvalidRequest(_)));
+    }
+
+    #[test]
+    fn test_normalize_query_limit_negative_is_error() {
+        let err = normalize_query_limit(Some(-2)).unwrap_err();
+        assert!(matches!(err, ConnectorError::InvalidRequest(_)));
+
+        let err = normalize_query_limit(Some(-100)).unwrap_err();
+        assert!(matches!(err, ConnectorError::InvalidRequest(_)));
     }
 }
