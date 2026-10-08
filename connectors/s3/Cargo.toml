@@ -23,3 +23,4 @@ reqwest-opendal = { workspace = true }
 
 [dev-dependencies]
 opendal = { workspace = true, features = ["services-fs"] }
+serde_json = { workspace = true }

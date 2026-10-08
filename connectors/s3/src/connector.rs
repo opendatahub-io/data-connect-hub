@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use arrow::array::BinaryArray;
@@ -210,6 +210,7 @@ impl FlightConnector for S3Connector {
             operator,
             format_hint,
             config: self.config,
+            json_cache: Mutex::new(None),
         }))
     }
 }
@@ -218,6 +219,7 @@ pub struct S3Reader {
     operator: Operator,
     format_hint: Option<String>,
     config: ConnectorConfig,
+    json_cache: Mutex<Option<(String, Vec<u8>)>>,
 }
 
 impl S3Reader {
@@ -252,7 +254,11 @@ impl DataReader for S3Reader {
             FileFormat::JsonLines => format_readers::read_jsonl_schema(self.make_reader(query).await?).await?,
             FileFormat::Json => {
                 let data = read_json_checked(&self.operator, query).await?;
-                format_readers::read_json_schema(&data, None)?
+                let schema = format_readers::read_json_schema(&data, None)?;
+                if let Ok(mut cache) = self.json_cache.lock() {
+                    *cache = Some((query.to_owned(), data));
+                }
+                schema
             },
         };
 
@@ -278,7 +284,19 @@ impl DataReader for S3Reader {
                 format_readers::read_jsonl_batches(reader, &view.schema, batch_size).await
             },
             FileFormat::Json => {
-                let data = read_json_checked(&self.operator, &view.query).await?;
+                let cached = if let Ok(mut c) = self.json_cache.lock() {
+                    if c.as_ref().is_some_and(|(p, _)| *p == view.query) {
+                        c.take().map(|(_, d)| d)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let data = match cached {
+                    Some(d) => d,
+                    None => read_json_checked(&self.operator, &view.query).await?,
+                };
                 format_readers::read_json_batches(data, view.schema.clone(), batch_size, None)
             },
         }
@@ -546,6 +564,7 @@ mod tests {
             operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: None,
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         assert_eq!(reader.detect_format("data/file.parquet").unwrap(), FileFormat::Parquet);
         assert_eq!(reader.detect_format("data/file.csv").unwrap(), FileFormat::Csv);
@@ -560,6 +579,7 @@ mod tests {
             operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("parquet".to_string()),
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Parquet);
 
@@ -567,6 +587,7 @@ mod tests {
             operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("jsonl".to_string()),
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         assert_eq!(
             reader.detect_format("data/no-extension").unwrap(),
@@ -577,6 +598,7 @@ mod tests {
             operator: build_operator(&make_credentials(), Duration::from_secs(10), Duration::from_secs(30)).unwrap(),
             format_hint: Some("json".to_string()),
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         assert_eq!(reader.detect_format("data/no-extension").unwrap(), FileFormat::Json);
     }
@@ -627,6 +649,7 @@ mod tests {
             operator: op,
             format_hint: None,
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         let query = Arc::new(BinaryQuery::new("data/model.bin".to_string()));
         assert!(reader.can_read_binary(query).await.is_ok());
@@ -639,6 +662,7 @@ mod tests {
             operator: op,
             format_hint: None,
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         let query = Arc::new(BinaryQuery::new("does/not/exist.bin".to_string()));
         assert!(reader.can_read_binary(query).await.is_err());
@@ -653,6 +677,7 @@ mod tests {
             operator: op,
             format_hint: None,
             config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
         };
         let query = Arc::new(BinaryQuery::new("test.bin".to_string()));
         let stream = reader.read_binary(query).await.unwrap();
@@ -669,5 +694,97 @@ mod tests {
             }
         }
         assert_eq!(result, data);
+    }
+
+    fn make_json_reader(op: Operator) -> S3Reader {
+        S3Reader {
+            operator: op,
+            format_hint: None,
+            config: ConnectorConfig::default(),
+            json_cache: Mutex::new(None),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_json_cache_populated_after_schema() {
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        let json_data = serde_json::to_vec(&serde_json::json!([
+            {"name": "Alice", "age": 30},
+            {"name": "Bob", "age": 25},
+        ]))
+        .unwrap();
+        op.write("data.json", json_data).await.unwrap();
+
+        let reader = make_json_reader(op);
+        reader.schema("data.json").await.unwrap();
+
+        let cache = reader.json_cache.lock().unwrap();
+        let (path, _) = cache.as_ref().expect("cache should be populated after schema()");
+        assert_eq!(path, "data.json");
+    }
+
+    #[tokio::test]
+    async fn test_json_cache_hit_avoids_redownload() {
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        let op2 = op.clone();
+        let json_data = serde_json::to_vec(&serde_json::json!([{"x": 1}, {"x": 2}])).unwrap();
+        op.write("data.json", json_data).await.unwrap();
+
+        let reader = make_json_reader(op);
+        let query = reader.schema("data.json").await.unwrap();
+        assert!(reader.json_cache.lock().unwrap().is_some());
+
+        // Delete the source file; read_tabular must still succeed via cache
+        op2.delete("data.json").await.unwrap();
+
+        let stream = reader.read_tabular(query, &QueryOptions::default()).await.unwrap();
+        let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+        assert_eq!(batches[0].num_rows(), 2);
+
+        assert!(
+            reader.json_cache.lock().unwrap().is_none(),
+            "cache should be cleared after read_tabular()"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_json_cache_path_mismatch_no_hit() {
+        let op = Operator::new(opendal::services::Memory::default()).unwrap();
+        op.write("a.json", serde_json::to_vec(&serde_json::json!([{"v": 1}])).unwrap())
+            .await
+            .unwrap();
+        op.write("b.json", serde_json::to_vec(&serde_json::json!([{"v": 2}])).unwrap())
+            .await
+            .unwrap();
+
+        let reader = make_json_reader(op);
+
+        // Cache holds a.json
+        reader.schema("a.json").await.unwrap();
+        assert_eq!(reader.json_cache.lock().unwrap().as_ref().unwrap().0, "a.json");
+
+        // read_tabular for b.json must not use cached a.json data
+        let query_b = Arc::new(Query::new(
+            "b.json".to_string(),
+            Arc::new(
+                format_readers::read_json_schema(&serde_json::to_vec(&serde_json::json!([{"v": 2}])).unwrap(), None)
+                    .unwrap(),
+            ),
+        ));
+        let stream = reader.read_tabular(query_b, &QueryOptions::default()).await.unwrap();
+        let batches: Vec<RecordBatch> = stream.try_collect().await.unwrap();
+        let val = batches[0]
+            .column_by_name("v")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<arrow::array::Int64Array>()
+            .unwrap();
+        assert_eq!(val.value(0), 2, "data must come from b.json, not cached a.json");
+
+        // Cache should still hold the stale a.json entry (not cleared on mismatch)
+        assert!(
+            reader.json_cache.lock().unwrap().is_some(),
+            "mismatched cache entry should not be cleared"
+        );
     }
 }
