@@ -151,6 +151,35 @@ type Trace struct {
 	Certificate string `json:"certificate,omitempty"`
 }
 
+// Vault configures the shared Vault client used by the REST and Flight services.
+// Connector credentials remain in Vault and are never stored in this resource.
+type Vault struct {
+	// address is the HTTPS URL of the Vault server.
+	// +required
+	Address string `json:"address"`
+
+	// role is the Vault Kubernetes authentication role used by both services.
+	// +required
+	Role string `json:"role"`
+
+	// kvMount is the KV v2 secrets engine mount. Defaults to "secret".
+	// +optional
+	KVMount string `json:"kvMount,omitempty"`
+
+	// authMount is the Kubernetes authentication mount. Defaults to "kubernetes".
+	// +optional
+	AuthMount string `json:"authMount,omitempty"`
+
+	// tenantPrefix scopes Vault credentials by DCH tenant. Defaults to "dch".
+	// +optional
+	TenantPrefix string `json:"tenantPrefix,omitempty"`
+
+	// caConfigMap selects a PEM CA certificate used to trust Vault. When omitted,
+	// the service containers use their system trust store.
+	// +optional
+	CAConfigMap *corev1.ConfigMapKeySelector `json:"caConfigMap,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
@@ -181,6 +210,11 @@ type DataConnectServiceSpec struct {
 	// When omitted, tracing is disabled.
 	// +optional
 	Trace *Trace `json:"trace,omitempty"`
+
+	// vault configures Vault-backed credentials for all connector types.
+	// When omitted, only Kubernetes Secret-backed credentials are available.
+	// +optional
+	Vault *Vault `json:"vault,omitempty"`
 }
 
 // Addresses identifies an address where the service is reachable

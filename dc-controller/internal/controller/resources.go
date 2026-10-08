@@ -497,6 +497,112 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 	return nil
 }
 
+func setConfigMapVaultConfig(
+	resources []*unstructured.Unstructured,
+	vault *dchv1alpha1.Vault,
+	serviceNames ...string,
+) error {
+	if vault == nil {
+		return nil
+	}
+	wanted := make(map[string]bool, len(serviceNames))
+	for _, name := range serviceNames {
+		wanted[name] = true
+	}
+	if vault.CAConfigMap != nil {
+		if err := addVaultCAMount(resources, vault.CAConfigMap, serviceNames...); err != nil {
+			return err
+		}
+	}
+
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || !wanted[obj.GetLabels()[labelAppName]] {
+			continue
+		}
+		data, found, _ := unstructured.NestedStringMap(obj.Object, "data")
+		if !found {
+			continue
+		}
+		config, _, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("parsing %s config.toml: %w", obj.GetName(), err)
+		}
+		if config == nil {
+			continue
+		}
+		settings := map[string]any{
+			"address": vault.Address,
+			"role":    vault.Role,
+		}
+		if vault.KVMount != "" {
+			settings["kv-mount"] = vault.KVMount
+		}
+		if vault.AuthMount != "" {
+			settings["auth-mount"] = vault.AuthMount
+		}
+		if vault.TenantPrefix != "" {
+			settings["tenant-prefix"] = vault.TenantPrefix
+		}
+		if vault.CAConfigMap != nil {
+			settings["ca-cert"] = "/etc/tls/vault/ca.crt"
+		}
+		config["vault"] = settings
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating %s config.toml: %w", obj.GetName(), err)
+		}
+	}
+	return nil
+}
+
+func addVaultCAMount(
+	resources []*unstructured.Unstructured,
+	selector *corev1.ConfigMapKeySelector,
+	serviceNames ...string,
+) error {
+	if selector.Name == "" || selector.Key == "" {
+		return fmt.Errorf("Vault CA ConfigMap name and key are required")
+	}
+	wanted := make(map[string]bool, len(serviceNames))
+	for _, name := range serviceNames {
+		wanted[name] = true
+	}
+
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment || !wanted[obj.GetLabels()[labelAppName]] {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		for index, container := range containers {
+			item, ok := container.(map[string]any)
+			name, _ := item["name"].(string)
+			if !ok || (name != nameRestServiceContainer && name != nameFlightServiceContainer) {
+				continue
+			}
+			mounts, _ := item["volumeMounts"].([]any)
+			mounts = append(mounts, map[string]any{
+				"name": "vault-ca", "mountPath": "/etc/tls/vault", "readOnly": true,
+			})
+			item["volumeMounts"] = mounts
+			containers[index] = item
+
+			volumes, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "volumes")
+			volumes = append(volumes, map[string]any{
+				"name": "vault-ca",
+				"configMap": map[string]any{
+					"name":  selector.Name,
+					"items": []any{map[string]any{"key": selector.Key, "path": "ca.crt"}},
+				},
+			})
+			_ = unstructured.SetNestedSlice(obj.Object, volumes, "spec", "template", "spec", "volumes")
+		}
+		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+	}
+	return nil
+}
+
 // reconcileTraceEnv reconciles OTLP trace environment variables in deployments,
 // removing stale variables and setting current ones. This ensures that clearing
 // trace.insecure or trace.certificate from the CR actually removes the env vars
@@ -1041,6 +1147,7 @@ func (r *DataConnectServiceReconciler) computeDeploymentContentHash(
 				hasContent = true
 			}
 		}
+
 	}
 
 	if !hasContent {

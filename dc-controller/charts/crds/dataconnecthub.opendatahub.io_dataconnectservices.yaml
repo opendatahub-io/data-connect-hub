@@ -4913,6 +4913,61 @@ spec:
                       exporter's default, which is to require TLS.
                     type: boolean
                 type: object
+              vault:
+                description: |-
+                  vault configures Vault-backed credentials for all connector types.
+                  When omitted, only Kubernetes Secret-backed credentials are available.
+                properties:
+                  address:
+                    description: address is the HTTPS URL of the Vault server.
+                    type: string
+                  authMount:
+                    description: authMount is the Kubernetes authentication mount.
+                      Defaults to "kubernetes".
+                    type: string
+                  caConfigMap:
+                    description: |-
+                      caConfigMap selects a PEM CA certificate used to trust Vault. When omitted,
+                      the service containers use their system trust store.
+                    properties:
+                      key:
+                        description: |-
+                          The key to select from the ConfigMap's Data field.
+                          Keys in the BinaryData field are not currently propagated to container env vars.
+                        type: string
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                      optional:
+                        description: Specify whether the ConfigMap or its key must
+                          be defined
+                        type: boolean
+                    required:
+                    - key
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  kvMount:
+                    description: kvMount is the KV v2 secrets engine mount. Defaults
+                      to "secret".
+                    type: string
+                  role:
+                    description: role is the Vault Kubernetes authentication role
+                      used by both services.
+                    type: string
+                  tenantPrefix:
+                    description: tenantPrefix scopes Vault credentials by DCH tenant.
+                      Defaults to "dch".
+                    type: string
+                required:
+                - address
+                - role
+                type: object
             type: object
           status:
             description: status defines the observed state of DataConnectService

@@ -62,6 +62,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: vault-token
+              mountPath: /var/run/secrets/vault
+              readOnly: true
           lifecycle:
             preStop:
               exec:
@@ -90,3 +93,10 @@ spec:
           emptyDir:
             medium: Memory
             sizeLimit: 10Mi
+        - name: vault-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  audience: vault
+                  expirationSeconds: 600
+                  path: token

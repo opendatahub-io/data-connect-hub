@@ -677,7 +677,6 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 			},
 		},
 	}}
-
 	resources := []*unstructured.Unstructured{configMap, deployment}
 	if err := r.annotateDeploymentsWithContentHash(context.Background(), resources, testNamespace); err != nil {
 		t.Fatalf("unexpected error: %v", err)

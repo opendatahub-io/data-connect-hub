@@ -9,3 +9,12 @@ metadata:
 spec:
   restService: {}
   flightService: {}
+  # vault:
+  #   address: https://vault.example:8200
+  #   role: dch
+  #   kvMount: secret
+  #   authMount: kubernetes
+  #   tenantPrefix: dch
+  #   caConfigMap:
+  #     name: vault-ca
+  #     key: ca.crt
