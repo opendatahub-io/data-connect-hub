@@ -53,6 +53,48 @@ pub async fn list_connections(
     Ok(HttpResponse::Ok().json(connections))
 }
 
+#[derive(Deserialize)]
+pub struct ConnectionLookupQuery {
+    secret_ref: String,
+}
+
+#[derive(Serialize)]
+struct ConnectionLookupResponse {
+    id: String,
+}
+
+pub async fn lookup_connection_id_by_secret(
+    service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
+    query: web::Query<ConnectionLookupQuery>,
+) -> Result<HttpResponse, RestErrorResponse> {
+    if query.secret_ref.trim().is_empty() {
+        return Err(ValidationError::MissingField("secret_ref".to_string()).into());
+    }
+
+    let connections = service.meta_store.get_data_connections(ctx.tenant_id.as_str()).await?;
+    let mut matches = connections
+        .items
+        .iter()
+        .filter(|connection| connection.resource.credentials_ref.secret == query.secret_ref);
+    let Some(connection) = matches.next() else {
+        return Err(MetaStoreError::ResourceNotFound(format!(
+            "No connection references Secret {:?}",
+            query.secret_ref
+        ))
+        .into());
+    };
+    if matches.next().is_some() {
+        return Err(
+            MetaStoreError::Conflict(format!("Multiple connections reference Secret {:?}", query.secret_ref)).into(),
+        );
+    }
+
+    Ok(HttpResponse::Ok().json(ConnectionLookupResponse {
+        id: connection.metadata.id.clone(),
+    }))
+}
+
 pub async fn get_connection(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
@@ -1020,6 +1062,7 @@ mod tests {
                 .wrap(middleware::from_fn(trace_request))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
+                .route("/connections/lookup", web::get().to(lookup_connection_id_by_secret))
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connections/{id}", web::patch().to(patch_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))
