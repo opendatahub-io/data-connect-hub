@@ -460,6 +460,9 @@ EOF
     [[ -n "${DCH_REST_METRICS_URL:-}" ]] && \
         echo "DCH_REST_METRICS_URL=${DCH_REST_METRICS_URL}" >> "$ENV_FILE"
 
+    [[ -n "${DCH_JAEGER_QUERY_URL:-}" ]] && \
+        echo "DCH_JAEGER_QUERY_URL=${DCH_JAEGER_QUERY_URL}" >> "$ENV_FILE"
+
     if [[ "$E2E_S3_ENABLED" == "true" ]]; then
         cat >> "$ENV_FILE" <<EOF
 DCH_S3_SECRET=${S3_SECRET}
