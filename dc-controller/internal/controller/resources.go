@@ -310,6 +310,14 @@ func buildServicePatches(deploymentName, containerName string, overrides *dchv1a
 	return patches
 }
 
+// renderedName returns the name a base-manifest resource renders with: the
+// base kustomization's "dch-" namePrefix applied to its base name. For
+// flight-service resources pass the instance name from
+// flightServiceResourceName, because renderFlightService renames them.
+func renderedName(baseName string) string {
+	return "dch-" + baseName
+}
+
 func flightServiceResourceName(crName string) string {
 	return crName + "-flight"
 }
@@ -375,123 +383,131 @@ func replaceStringValue(value any, old, new string) any {
 	return value
 }
 
-func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) error {
-	var flightSvcName string
+// findResource returns the rendered resource with the given kind and exact
+// name, or nil when absent.
+func findResource(resources []*unstructured.Unstructured, kind, name string) *unstructured.Unstructured {
 	for _, obj := range resources {
-		if obj.GetKind() == kindService && strings.HasSuffix(obj.GetName(), serviceName) {
-			flightSvcName = obj.GetName()
-			break
-		}
-	}
-	if flightSvcName == "" {
-		return nil
-	}
-	fqdn := fmt.Sprintf("%s.%s.svc", flightSvcName, namespace)
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		flightService, ok := config["flight-service"].(map[string]any)
-		if !ok || flightService["address"] != nameFlightService {
-			continue
-		}
-		flightService["address"] = fqdn
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
+		if obj.GetKind() == kind && obj.GetName() == name {
+			return obj
 		}
 	}
 	return nil
 }
 
-func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, flightName string, overrides *dchv1alpha1.ServiceOverrides) error {
-	if overrides == nil || len(overrides.Connectors) == 0 {
-		return nil
+func reconcileRestConfigMapTOML(resources []*unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) error {
+	cmName := renderedName(nameRestService + "-config")
+	configMap := findResource(resources, kindConfigMap, cmName)
+	if configMap == nil {
+		return fmt.Errorf("rest-service ConfigMap %q not found in rendered manifests", cmName)
+	}
+	config, err := parseConfigMapTOML(configMap)
+	if err != nil {
+		return fmt.Errorf("rest-service ConfigMap %q: %w", configMap.GetName(), err)
+	}
+	if config == nil {
+		return fmt.Errorf("rest-service ConfigMap %q has no config.toml entry", configMap.GetName())
 	}
 
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || obj.GetLabels()[labelAppName] != flightName {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("parsing flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		connectors, ok := config["connectors"].(map[string]any)
-		if !ok {
-			connectors = make(map[string]any)
-			config["connectors"] = connectors
-		}
+	ensureTOMLSection(config, "global-connection-types")["tenant-id"] = cr.Namespace
 
-		for _, connector := range overrides.Connectors {
-			if connector.Name == "" {
-				continue
-			}
-			section, ok := connectors[connector.Name].(map[string]any)
-			if !ok {
-				section = make(map[string]any)
-				connectors[connector.Name] = section
-			}
+	// Resolve the flight-service address to the Service FQDN.
+	svcName := renderedName(flightServiceResourceName(cr.Name))
+	flightSvc := findResource(resources, kindService, svcName)
+	if flightSvc == nil {
+		return fmt.Errorf("flight-service Service %q not found in rendered manifests", svcName)
+	}
+	ensureTOMLSection(config, "flight-service")["address"] = fmt.Sprintf("%s.%s.svc", flightSvc.GetName(), cr.Namespace)
 
-			section["enabled"] = connector.Enabled != nil && *connector.Enabled
-			if connector.ConnectionTimeout != nil {
-				duration := connector.ConnectionTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s connectionTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["connection_timeout_secs"] = int64(duration / time.Second)
-			}
-			if connector.RequestTimeout != nil {
-				duration := connector.RequestTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s requestTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["request_timeout_secs"] = int64(duration / time.Second)
-			}
-			if connector.ReadTimeout != nil {
-				duration := connector.ReadTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s readTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["read_timeout_secs"] = int64(duration / time.Second)
-			}
-		}
-
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
+	if err := setConfigMapTOML(configMap, config); err != nil {
+		return fmt.Errorf("updating rest-service ConfigMap %q: %w", configMap.GetName(), err)
 	}
 	return nil
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) error {
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
+func reconcileFlightConfigMapTOML(
+	resources []*unstructured.Unstructured,
+	cr *dchv1alpha1.DataConnectService,
+	audiences []string,
+) error {
+	cmName := renderedName(flightServiceResourceName(cr.Name) + "-config")
+	configMap := findResource(resources, kindConfigMap, cmName)
+	if configMap == nil {
+		return fmt.Errorf("flight-service ConfigMap %q not found in rendered manifests", cmName)
+	}
+	config, err := parseConfigMapTOML(configMap)
+	if err != nil {
+		return fmt.Errorf("flight-service ConfigMap %q: %w", configMap.GetName(), err)
+	}
+	if config == nil {
+		return fmt.Errorf("flight-service ConfigMap %q has no config.toml entry", configMap.GetName())
+	}
+
+	ensureTOMLSection(config, "global-connection-types")["tenant-id"] = cr.Namespace
+
+	// Point the flight service at the REST service account so discovery
+	// requests can be token-reviewed.
+	saName := renderedName(nameRestService + "-sa")
+	restServiceAccount := findResource(resources, kindServiceAccount, saName)
+	if restServiceAccount == nil {
+		return fmt.Errorf("rest-service ServiceAccount %q not found in rendered manifests", saName)
+	}
+	ensureTOMLSection(config, "auth")["discovery_service_account"] = fmt.Sprintf("system:serviceaccount:%s:%s", cr.Namespace, restServiceAccount.GetName())
+	// Audiences accepted when reviewing tokens.
+	if len(audiences) > 0 {
+		ensureTOMLSection(config, "auth")["token_review_audiences"] = audiences
+	}
+
+	// Merge connector overrides from the CR.
+	if cr.Spec.FlightService != nil {
+		if err := applyConnectorSettings(config, cr.Spec.FlightService.Connectors); err != nil {
+			return fmt.Errorf("flight-service ConfigMap %q: %w", configMap.GetName(), err)
+		}
+	}
+
+	if err := setConfigMapTOML(configMap, config); err != nil {
+		return fmt.Errorf("updating flight-service ConfigMap %q: %w", configMap.GetName(), err)
+	}
+
+	return nil
+}
+
+// applyConnectorSettings merges connector overrides from the CR into the
+// [connectors.<name>] tables of a parsed config.toml, preserving connector
+// settings it does not mention.
+func applyConnectorSettings(config map[string]any, connectors []dchv1alpha1.ConnectorConfig) error {
+	for _, connector := range connectors {
+		if connector.Name == "" {
 			continue
 		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
+
+		connectorsTable := ensureTOMLSection(config, "connectors")
+		connectorSection := ensureTOMLSection(connectorsTable, connector.Name)
+
+		// Apply only the settings the CR specifies; omitted settings keep
+		// their values from the base configuration.
+		if connector.Enabled != nil {
+			connectorSection["enabled"] = *connector.Enabled
 		}
-		if config == nil {
-			continue
+		if connector.ConnectionTimeout != nil {
+			duration := connector.ConnectionTimeout.Duration
+			if duration <= 0 || duration%time.Second != 0 {
+				return fmt.Errorf("connector %s connectionTimeout must be a positive whole number of seconds", connector.Name)
+			}
+			connectorSection["connection_timeout_secs"] = int64(duration / time.Second)
 		}
-		globalConnectionTypes, ok := config["global-connection-types"].(map[string]any)
-		if !ok || globalConnectionTypes["tenant-id"] != "opendatahub" {
-			continue
+		if connector.RequestTimeout != nil {
+			duration := connector.RequestTimeout.Duration
+			if duration <= 0 || duration%time.Second != 0 {
+				return fmt.Errorf("connector %s requestTimeout must be a positive whole number of seconds", connector.Name)
+			}
+			connectorSection["request_timeout_secs"] = int64(duration / time.Second)
 		}
-		globalConnectionTypes["tenant-id"] = namespace
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
+		if connector.ReadTimeout != nil {
+			duration := connector.ReadTimeout.Duration
+			if duration <= 0 || duration%time.Second != 0 {
+				return fmt.Errorf("connector %s readTimeout must be a positive whole number of seconds", connector.Name)
+			}
+			connectorSection["read_timeout_secs"] = int64(duration / time.Second)
 		}
 	}
 	return nil
@@ -650,42 +666,6 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 		vars = append(vars, corev1.EnvVar{Name: envOTLPCertificate, Value: trace.Certificate})
 	}
 	return vars
-}
-
-func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) error {
-	var restServiceAccount string
-	for _, obj := range resources {
-		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
-			restServiceAccount = obj.GetName()
-			break
-		}
-	}
-	if restServiceAccount == "" {
-		return nil
-	}
-
-	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		auth, ok := config["auth"].(map[string]any)
-		if !ok {
-			continue
-		}
-		auth["discovery_service_account"] = identity
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-	}
-	return nil
 }
 
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
@@ -876,33 +856,10 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
 }
 
-func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) (bool, error) {
-	updated := false
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return false, fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		auth, ok := config["auth"].(map[string]any)
-		if !ok {
-			continue
-		}
-		auth["token_review_audiences"] = audiences
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return false, fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
-		}
-		updated = true
-	}
-	return updated, nil
-}
-
 func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {
+	if len(audiences) == 0 {
+		return
+	}
 	arg := fmt.Sprintf("--auth-token-audiences=%s", strings.Join(audiences, ","))
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {

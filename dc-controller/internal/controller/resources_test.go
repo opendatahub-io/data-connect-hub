@@ -53,12 +53,13 @@ const (
 	testFlightServiceCA              = "flight-service-ca"
 )
 
-func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
+func serviceConfigMap(serviceName, configTOML string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
+			testNameKey: renderedName(serviceName + "-config"),
 			"labels": map[string]any{
-				"app.kubernetes.io/name": nameFlightService,
+				"app.kubernetes.io/name": serviceName,
 			},
 		},
 		testDataKey: map[string]any{
@@ -67,10 +68,35 @@ func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
 	}}
 }
 
-func configMapWithTOML(configTOML string) *unstructured.Unstructured {
+// testCR mirrors the singleton CR the controller reconciles; its name feeds
+// flightServiceResourceName, so the derived flight instance name is
+// "default-dcs-flight".
+func testCR() *dchv1alpha1.DataConnectService {
+	return &dchv1alpha1.DataConnectService{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-dcs", Namespace: testNamespace},
+	}
+}
+
+func testCRWithFlightOverrides(overrides dchv1alpha1.ServiceOverrides) *dchv1alpha1.DataConnectService {
+	cr := testCR()
+	cr.Spec.FlightService = &dchv1alpha1.FlightServiceConfig{ServiceOverrides: overrides}
+	return cr
+}
+
+func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
+	return serviceConfigMap(flightServiceResourceName("default-dcs"), configTOML)
+}
+
+func restServiceConfigMap(configTOML string) *unstructured.Unstructured {
+	return serviceConfigMap(nameRestService, configTOML)
+}
+
+func namedConfigMap(name, configTOML string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		testKindKey:     kindConfigMap,
-		testMetadataKey: map[string]any{},
+		testKindKey: kindConfigMap,
+		testMetadataKey: map[string]any{
+			testNameKey: name,
+		},
 		testDataKey: map[string]any{
 			testConfigTOMLKey: configTOML,
 		},
@@ -90,7 +116,28 @@ func parsedConfigMapTOML(t *testing.T, configMap *unstructured.Unstructured) map
 	return config
 }
 
-func TestSetConfigMapFlightConnectorSettingsAddConnector(t *testing.T) {
+// flightService returns the rendered flight-service Service with the
+// post-rename name for the default test CR.
+func flightService() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindService,
+		testMetadataKey: map[string]any{
+			testNameKey: "dch-default-dcs-flight",
+		},
+	}}
+}
+
+// restServiceAccount returns the rendered rest-service ServiceAccount.
+func restServiceAccount() *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindServiceAccount,
+		testMetadataKey: map[string]any{
+			testNameKey: "dch-rest-service-sa",
+		},
+	}}
+}
+
+func TestReconcileFlightConfigMapTOMLAddConnector(t *testing.T) {
 	// Add connector settings for connectors that are not in the base configuration.
 	disabled := false
 	enabled := true
@@ -121,24 +168,15 @@ enabled = false
 `,
 			expected: "[connectors.custom]\nenabled = true",
 		},
-		{
-			name:          "missing enabled",
-			connectorName: testSQLiteConnector,
-			configTOML: `
-[connectors.default]
-enabled = true
-`,
-			expected: "[connectors.sqlite]\nenabled = false",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			configMap := flightServiceConfigMap(tt.configTOML)
 
-			if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
+			if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), configMap}, testCRWithFlightOverrides(dchv1alpha1.ServiceOverrides{
 				Connectors: []dchv1alpha1.ConnectorConfig{{Name: tt.connectorName, Enabled: tt.enabled}},
-			}); err != nil {
+			}), nil); err != nil {
 				t.Fatal(err)
 			}
 
@@ -153,7 +191,54 @@ enabled = true
 	}
 }
 
-func TestSetConfigMapFlightConnectorSettingsUpdateConnector(t *testing.T) {
+func TestReconcileFlightConfigMapTOMLEnabledOmitted(t *testing.T) {
+	// When the CR omits enabled, an existing value is preserved; a
+	// connector whose settings are all omitted gets an empty section,
+	// which the service treats as a no-op override.
+	configMap := flightServiceConfigMap(`[connectors.default]
+enabled = true
+
+[connectors.s3]
+enabled = true
+chunk_size = 1024
+`)
+
+	if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), configMap}, testCRWithFlightOverrides(dchv1alpha1.ServiceOverrides{
+		Connectors: []dchv1alpha1.ConnectorConfig{
+			{Name: "s3", ConnectionTimeout: &metav1.Duration{Duration: 30 * time.Second}},
+			{Name: testSQLiteConnector},
+		},
+	}), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	connectors, ok := parsedConfigMapTOML(t, configMap)["connectors"].(map[string]any)
+	if !ok {
+		t.Fatal("expected connectors table")
+	}
+	s3, ok := connectors["s3"].(map[string]any)
+	if !ok {
+		t.Fatal("expected connectors.s3 table")
+	}
+	if got := s3[testTOMLEnabledKey]; got != true {
+		t.Errorf("connectors.s3.enabled = %v, want true (existing value must be preserved)", got)
+	}
+	if got := s3[testTOMLConnectionTimeoutSecsKey]; got != int64(30) {
+		t.Errorf("connectors.s3.connection_timeout_secs = %v, want 30", got)
+	}
+	if got := s3["chunk_size"]; got != int64(1024) {
+		t.Errorf("connectors.s3.chunk_size = %v, want 1024 (unrelated setting must be preserved)", got)
+	}
+	sqlite, ok := connectors[testSQLiteConnector].(map[string]any)
+	if !ok {
+		t.Fatalf("expected connectors.sqlite table, got %#v", connectors[testSQLiteConnector])
+	}
+	if len(sqlite) != 0 {
+		t.Errorf("connectors.sqlite = %#v, want an empty section when all settings are omitted", sqlite)
+	}
+}
+
+func TestReconcileFlightConfigMapTOMLUpdateConnector(t *testing.T) {
 	// Update specified connector settings while preserving unspecified connector settings.
 	enabled := true
 	connectionTimeout := &metav1.Duration{Duration: 30 * time.Second}
@@ -182,7 +267,7 @@ connection_timeout_secs = 20
 `
 	configMap := flightServiceConfigMap(configTOML)
 
-	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
+	if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), configMap}, testCRWithFlightOverrides(dchv1alpha1.ServiceOverrides{
 		Connectors: []dchv1alpha1.ConnectorConfig{
 			{
 				Name:              testSQLiteConnector,
@@ -193,7 +278,7 @@ connection_timeout_secs = 20
 			},
 			{Name: "neo4j", Enabled: &enabled},
 		},
-	}); err != nil {
+	}), nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,108 +329,131 @@ connection_timeout_secs = 20
 	}
 }
 
-func TestSetConfigMapFlightServiceAddress(t *testing.T) {
-	configMap := configMapWithTOML(`[flight-service]
+func TestReconcileRestConfigMapTOMLFlightServiceAddress(t *testing.T) {
+	configMap := restServiceConfigMap(`[flight-service]
 address = "flight-service"
 `)
-	service := &unstructured.Unstructured{Object: map[string]any{
-		"kind": kindService,
-		"metadata": map[string]any{
-			testNameKey: "dch-default-dcs-flight",
-		},
-	}}
+	service := flightService()
 
-	if err := setConfigMapFlightServiceAddress([]*unstructured.Unstructured{service, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
+	if err := reconcileRestConfigMapTOML([]*unstructured.Unstructured{service, configMap}, testCR()); err != nil {
 		t.Fatal(err)
 	}
 	flightService, ok := parsedConfigMapTOML(t, configMap)["flight-service"].(map[string]any)
 	if !ok {
 		t.Fatal("expected [flight-service] table")
 	}
-	if got, want := flightService["address"], "dch-default-dcs-flight.test-namespace.svc"; got != want {
+	if got, want := flightService["address"], "dch-default-dcs-flight."+testNamespace+".svc"; got != want {
 		t.Errorf("flight-service.address = %v, want %q", got, want)
 	}
 }
 
-func TestSetConfigMapGlobalNamespace(t *testing.T) {
-	defaultTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "opendatahub"
-`)
-	customTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "custom-tenant"
-`)
-	noTenant := configMapWithTOML(`[server]
-port = 8080
-`)
-
-	if err := setConfigMapGlobalNamespace([]*unstructured.Unstructured{defaultTenant, customTenant, noTenant}, "test-namespace"); err != nil {
-		t.Fatal(err)
-	}
-
+func TestReconcileConfigMapTOMLGlobalNamespace(t *testing.T) {
+	// tenant-id is always overwritten with the CR namespace, and a missing
+	// [global-connection-types] section is created.
 	for _, tt := range []struct {
-		name string
-		cm   *unstructured.Unstructured
-		want string
+		name       string
+		configTOML string
+		flight     bool
 	}{
-		{name: "default tenant", cm: defaultTenant, want: "test-namespace"},
-		{name: "custom tenant remains unchanged", cm: customTenant, want: "custom-tenant"},
+		{name: "flight default tenant", configTOML: "[global-connection-types]\ntenant-id = \"opendatahub\"\n", flight: true},
+		{name: "rest default tenant", configTOML: "[global-connection-types]\ntenant-id = \"opendatahub\"\n"},
+		{name: "flight custom tenant is overwritten", configTOML: "[global-connection-types]\ntenant-id = \"custom-tenant\"\n", flight: true},
+		{name: "rest custom tenant is overwritten", configTOML: "[global-connection-types]\ntenant-id = \"custom-tenant\"\n"},
+		{name: "flight missing section is created", configTOML: "[server]\nport = 8443\n", flight: true},
+		{name: "rest missing section is created", configTOML: "[server]\nport = 8080\n"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			global, ok := parsedConfigMapTOML(t, tt.cm)["global-connection-types"].(map[string]any)
+			var (
+				cm  *unstructured.Unstructured
+				err error
+			)
+			if tt.flight {
+				cm = flightServiceConfigMap(tt.configTOML)
+				err = reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), cm}, testCR(), nil)
+			} else {
+				cm = restServiceConfigMap(tt.configTOML)
+				err = reconcileRestConfigMapTOML([]*unstructured.Unstructured{flightService(), cm}, testCR())
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			global, ok := parsedConfigMapTOML(t, cm)["global-connection-types"].(map[string]any)
 			if !ok {
 				t.Fatal("expected [global-connection-types] table")
 			}
-			if got := global["tenant-id"]; got != tt.want {
-				t.Errorf("tenant-id = %v, want %q", got, tt.want)
+			if got := global["tenant-id"]; got != testNamespace {
+				t.Errorf("tenant-id = %v, want %q", got, testNamespace)
 			}
 		})
 	}
-	if got := parsedConfigMapTOML(t, noTenant)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without tenant-id was changed unexpectedly; server.port = %v", got)
-	}
-}
 
-func TestSetConfigMapDiscoveryServiceAccount(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
-enabled = true
-discovery_service_account = "old-identity"
+	// A ConfigMap with an unrecognized name is left untouched.
+	unknownConfigMap := namedConfigMap("dch-other-service-config", `[global-connection-types]
+tenant-id = "opendatahub"
 `)
-	configMap.SetName("dch-default-dcs-flight-config")
-	serviceAccount := &unstructured.Unstructured{Object: map[string]any{
-		"kind": kindServiceAccount,
-		"metadata": map[string]any{
-			testNameKey: "dch-rest-service-sa",
-		},
-	}}
-
-	if err := setConfigMapDiscoveryServiceAccount([]*unstructured.Unstructured{serviceAccount, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
+	resources := []*unstructured.Unstructured{
+		restServiceAccount(),
+		flightService(),
+		flightServiceConfigMap("[server]\nport = 8443\n"),
+		restServiceConfigMap("[server]\nport = 8080\n"),
+		unknownConfigMap,
+	}
+	if err := reconcileFlightConfigMapTOML(resources, testCR(), nil); err != nil {
 		t.Fatal(err)
 	}
-	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [auth] table")
+	if err := reconcileRestConfigMapTOML(resources, testCR()); err != nil {
+		t.Fatal(err)
 	}
-	if got, want := auth["discovery_service_account"], "system:serviceaccount:test-namespace:dch-rest-service-sa"; got != want {
-		t.Errorf("discovery_service_account = %v, want %q", got, want)
+	if got := parsedConfigMapTOML(t, unknownConfigMap)["global-connection-types"].(map[string]any)["tenant-id"]; got != "opendatahub" {
+		t.Errorf("ConfigMap with an unrecognized name was changed unexpectedly; tenant-id = %v", got)
 	}
 }
 
-func TestSetConfigMapAudiences(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
+func TestReconcileFlightConfigMapTOMLDiscoveryServiceAccount(t *testing.T) {
+	// The [auth] section is created when absent, and the discovery service
+	// account is always the REST service account identity.
+	for _, tt := range []struct {
+		name       string
+		configTOML string
+	}{
+		{
+			name:       "existing auth section",
+			configTOML: "[auth]\nenabled = true\ndiscovery_service_account = \"old-identity\"\n",
+		},
+		{
+			name:       "missing auth section is created",
+			configTOML: "[server]\nport = 8443\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			configMap := flightServiceConfigMap(tt.configTOML)
+
+			if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), configMap}, testCR(), nil); err != nil {
+				t.Fatal(err)
+			}
+			auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
+			if !ok {
+				t.Fatal("expected [auth] table")
+			}
+			if got, want := auth["discovery_service_account"], "system:serviceaccount:"+testNamespace+":dch-rest-service-sa"; got != want {
+				t.Errorf("discovery_service_account = %v, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestReconcileFlightConfigMapTOMLAudiences(t *testing.T) {
+	configMap := flightServiceConfigMap(`[auth]
 enabled = true
 token_review_audiences = ["old-audience"]
 `)
-	noAuth := configMapWithTOML(`[server]
+	noAuth := restServiceConfigMap(`[server]
 port = 8080
 `)
 	audiences := []string{"audience-one", "audience-two"}
 
-	updated, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap, noAuth}, audiences)
-	if err != nil {
+	if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{restServiceAccount(), configMap, noAuth}, testCR(), audiences); err != nil {
 		t.Fatal(err)
-	}
-	if !updated {
-		t.Fatal("expected an auth ConfigMap to be updated")
 	}
 	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
 	if !ok {
@@ -360,15 +468,127 @@ port = 8080
 			t.Errorf("token_review_audiences[%d] = %v, want %q", i, got[i], audience)
 		}
 	}
+	if _, auth := parsedConfigMapTOML(t, noAuth)["auth"]; auth {
+		t.Error("expected no [auth] section to be added to the rest-service ConfigMap")
+	}
 	if got := parsedConfigMapTOML(t, noAuth)["server"].(map[string]any)["port"]; got != int64(8080) {
 		t.Errorf("ConfigMap without [auth] was changed unexpectedly; server.port = %v", got)
 	}
 }
 
-func TestSetConfigMapAudiencesRejectsInvalidTOML(t *testing.T) {
-	configMap := configMapWithTOML("[auth\nenabled = true")
-	if _, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap}, []string{"audience"}); err == nil {
+func TestReconcileFlightConfigMapTOMLRejectsInvalidTOML(t *testing.T) {
+	configMap := flightServiceConfigMap("[auth\nenabled = true")
+	if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{configMap}, testCR(), []string{"audience"}); err == nil {
 		t.Fatal("expected invalid TOML to return an error")
+	}
+}
+
+func TestReconcileConfigMapTOMLMissingConfigMapAndToml(t *testing.T) {
+	// The base manifests always render both ConfigMaps with a config.toml;
+	// their absence means the manifests drifted, which must fail loudly
+	// instead of silently skipping the CR-driven configuration.
+	if err := reconcileFlightConfigMapTOML(nil, testCR(), nil); err == nil {
+		t.Fatal("expected an error when the flight-service ConfigMap is missing")
+	}
+	if err := reconcileRestConfigMapTOML(nil, testCR()); err == nil {
+		t.Fatal("expected an error when the rest-service ConfigMap is missing")
+	}
+
+	flightNoToml := flightServiceConfigMap("")
+	delete(flightNoToml.Object[testDataKey].(map[string]any), testConfigTOMLKey)
+	if err := reconcileFlightConfigMapTOML([]*unstructured.Unstructured{flightNoToml}, testCR(), nil); err == nil {
+		t.Fatal("expected an error when the flight-service ConfigMap has no config.toml")
+	}
+
+	restNoToml := restServiceConfigMap("")
+	delete(restNoToml.Object[testDataKey].(map[string]any), testConfigTOMLKey)
+	if err := reconcileRestConfigMapTOML([]*unstructured.Unstructured{restNoToml}, testCR()); err == nil {
+		t.Fatal("expected an error when the rest-service ConfigMap has no config.toml")
+	}
+}
+
+func TestReconcileConfigMapTOMLAppliesAllSettings(t *testing.T) {
+	flightConfigMap := flightServiceConfigMap(`[global-connection-types]
+tenant-id = "opendatahub"
+
+[auth]
+enabled = true
+
+[connectors.default]
+enabled = true
+`)
+	restConfigMap := restServiceConfigMap(`[server]
+port = 8080
+
+[global-connection-types]
+tenant-id = "opendatahub"
+
+[flight-service]
+address = "flight-service"
+`)
+	service := flightService()
+	serviceAccount := restServiceAccount()
+
+	enabled := true
+	audiences := []string{"audience-one", "audience-two"}
+	cr := testCRWithFlightOverrides(dchv1alpha1.ServiceOverrides{
+		Connectors: []dchv1alpha1.ConnectorConfig{{Name: testSQLiteConnector, Enabled: &enabled}},
+	})
+
+	if err := reconcileFlightConfigMapTOML(
+		[]*unstructured.Unstructured{service, serviceAccount, flightConfigMap, restConfigMap},
+		cr, audiences,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileRestConfigMapTOML(
+		[]*unstructured.Unstructured{service, serviceAccount, flightConfigMap, restConfigMap},
+		testCR(),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	flightConfig := parsedConfigMapTOML(t, flightConfigMap)
+	if got := flightConfig["global-connection-types"].(map[string]any)["tenant-id"]; got != testNamespace {
+		t.Errorf("flight tenant-id = %v, want %q", got, testNamespace)
+	}
+	auth := flightConfig["auth"].(map[string]any)
+	if got, want := auth["discovery_service_account"], "system:serviceaccount:"+testNamespace+":dch-rest-service-sa"; got != want {
+		t.Errorf("discovery_service_account = %v, want %q", got, want)
+	}
+	got, ok := auth["token_review_audiences"].([]any)
+	if !ok || len(got) != len(audiences) {
+		t.Fatalf("token_review_audiences = %#v, want %#v", auth["token_review_audiences"], audiences)
+	}
+	for i, audience := range audiences {
+		if got[i] != audience {
+			t.Errorf("token_review_audiences[%d] = %v, want %q", i, got[i], audience)
+		}
+	}
+	connectors := flightConfig["connectors"].(map[string]any)
+	if got := connectors[testSQLiteConnector].(map[string]any)["enabled"]; got != true {
+		t.Errorf("connectors.sqlite.enabled = %v, want true", got)
+	}
+	if got := connectors["default"].(map[string]any)["enabled"]; got != true {
+		t.Errorf("connectors.default.enabled = %v, want true (unrelated connector must be preserved)", got)
+	}
+	if _, exists := flightConfig["flight-service"]; exists {
+		t.Error("expected no [flight-service] section in the flight-service ConfigMap")
+	}
+
+	restConfig := parsedConfigMapTOML(t, restConfigMap)
+	if got := restConfig["global-connection-types"].(map[string]any)["tenant-id"]; got != testNamespace {
+		t.Errorf("rest tenant-id = %v, want %q", got, testNamespace)
+	}
+	wantFQDN := "dch-default-dcs-flight." + testNamespace + ".svc"
+	if got := restConfig["flight-service"].(map[string]any)["address"]; got != wantFQDN {
+		t.Errorf("flight-service.address = %v, want %q", got, wantFQDN)
+	}
+	if _, exists := restConfig["auth"]; exists {
+		t.Error("expected no [auth] section in the rest-service ConfigMap")
+	}
+	if _, exists := restConfig["connectors"]; exists {
+		t.Error("expected no [connectors] section in the rest-service ConfigMap")
 	}
 }
 

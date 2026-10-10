@@ -25,29 +25,49 @@ import (
 
 // parseConfigMapTOML parses the config.toml value in a ConfigMap's data.
 // A nil config means the ConfigMap has no data.config.toml entry.
-func parseConfigMapTOML(obj *unstructured.Unstructured) (config map[string]any, data map[string]string, err error) {
+func parseConfigMapTOML(obj *unstructured.Unstructured) (map[string]any, error) {
 	data, found, err := unstructured.NestedStringMap(obj.Object, "data")
 	if err != nil {
-		return nil, nil, fmt.Errorf("reading ConfigMap data: %w", err)
+		return nil, fmt.Errorf("reading ConfigMap data: %w", err)
 	}
 	if !found {
-		return nil, nil, nil
+		return nil, nil
 	}
 	tomlText, ok := data["config.toml"]
 	if !ok {
-		return nil, data, nil
+		return nil, nil
 	}
+	var config map[string]any
 	if err := toml.Unmarshal([]byte(tomlText), &config); err != nil {
-		return nil, data, fmt.Errorf("parsing config.toml: %w", err)
+		return nil, fmt.Errorf("parsing config.toml: %w", err)
 	}
-	return config, data, nil
+	return config, nil
 }
 
-// setConfigMapTOML serializes config and writes it back to the ConfigMap data.
-func setConfigMapTOML(obj *unstructured.Unstructured, config map[string]any, data map[string]string) error {
+// ensureTOMLSection returns the named table of a parsed config.toml,
+// creating it when the section does not exist yet.
+func ensureTOMLSection(config map[string]any, key string) map[string]any {
+	section, ok := config[key].(map[string]any)
+	if !ok {
+		section = make(map[string]any)
+		config[key] = section
+	}
+	return section
+}
+
+// setConfigMapTOML serializes config and writes it back to the ConfigMap's
+// config.toml entry.
+func setConfigMapTOML(obj *unstructured.Unstructured, config map[string]any) error {
 	out, err := toml.Marshal(config)
 	if err != nil {
 		return fmt.Errorf("marshaling config.toml: %w", err)
+	}
+	data, found, err := unstructured.NestedStringMap(obj.Object, "data")
+	if err != nil {
+		return fmt.Errorf("reading ConfigMap data: %w", err)
+	}
+	if !found {
+		data = make(map[string]string)
 	}
 	data["config.toml"] = string(out)
 	if err := unstructured.SetNestedStringMap(obj.Object, data, "data"); err != nil {

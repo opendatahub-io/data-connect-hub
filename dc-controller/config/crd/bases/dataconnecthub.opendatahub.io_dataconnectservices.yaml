@@ -69,7 +69,8 @@ spec:
                         enabled:
                           description: |-
                             enabled controls whether this connector is available for use.
-                            Defaults to false when omitted.
+                            When omitted, the connector keeps the enabled value from the
+                            service configuration defaults.
                           type: boolean
                         name:
                           description: name is the connector provider name (e.g. "postgres",
@@ -2488,7 +2489,8 @@ spec:
                         enabled:
                           description: |-
                             enabled controls whether this connector is available for use.
-                            Defaults to false when omitted.
+                            When omitted, the connector keeps the enabled value from the
+                            service configuration defaults.
                           type: boolean
                         name:
                           description: name is the connector provider name (e.g. "postgres",

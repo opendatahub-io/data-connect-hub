@@ -104,7 +104,8 @@ type ConnectorConfig struct {
 	Name string `json:"name"`
 
 	// enabled controls whether this connector is available for use.
-	// Defaults to false when omitted.
+	// When omitted, the connector keeps the enabled value from the
+	// service configuration defaults.
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
 
