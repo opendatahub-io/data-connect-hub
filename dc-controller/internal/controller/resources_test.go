@@ -50,15 +50,18 @@ const (
 	testFlightImageParam             = "FLIGHT_IMAGE"
 	testSpecKey                      = "spec"
 	testNamespace                    = "test-ns"
+	testFlightInstanceName           = "default-dcs-flight"
+	testFlightFQDN                   = "dch-" + testFlightInstanceName + "." + testNamespace + ".svc"
+	testRestServiceAccount           = "system:serviceaccount:" + testNamespace + ":dch-rest-service-sa"
 	testFlightServiceCA              = "flight-service-ca"
 )
 
-func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
+func labeledConfigMap(label, configTOML string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
 			"labels": map[string]any{
-				"app.kubernetes.io/name": nameFlightService,
+				labelAppName: label,
 			},
 		},
 		testDataKey: map[string]any{
@@ -67,14 +70,12 @@ func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
 	}}
 }
 
-func configMapWithTOML(configTOML string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]any{
-		testKindKey:     kindConfigMap,
-		testMetadataKey: map[string]any{},
-		testDataKey: map[string]any{
-			testConfigTOMLKey: configTOML,
-		},
-	}}
+func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
+	return labeledConfigMap(nameFlightService, configTOML)
+}
+
+func restServiceConfigMap(configTOML string) *unstructured.Unstructured {
+	return labeledConfigMap(nameRestService, configTOML)
 }
 
 func parsedConfigMapTOML(t *testing.T, configMap *unstructured.Unstructured) map[string]any {
@@ -90,8 +91,121 @@ func parsedConfigMapTOML(t *testing.T, configMap *unstructured.Unstructured) map
 	return config
 }
 
-func TestSetConfigMapFlightConnectorSettingsAddConnector(t *testing.T) {
-	// Add connector settings for connectors that are not in the base configuration.
+func TestInjectConfigOverlaysRestService(t *testing.T) {
+	restCM := restServiceConfigMap(`[server]
+port = 8080
+
+[global-connection-types]
+tenant-id = "opendatahub"
+
+[flight-service]
+address = "flight-service"
+ca-cert = "/etc/tls/flight/ca.crt"
+`)
+	flightSvc := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey:     kindService,
+		testMetadataKey: map[string]any{testNameKey: "dch-default-dcs-flight"},
+	}}
+	sa := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey:     kindServiceAccount,
+		testMetadataKey: map[string]any{testNameKey: "dch-rest-service-sa"},
+	}}
+
+	cr := &dchv1alpha1.DataConnectService{}
+	cr.SetName("default-dcs")
+	cr.SetNamespace(testNamespace)
+	params := (&DataConnectServiceReconciler{}).buildOverlayParams(cr, &platformConfig{}, []*unstructured.Unstructured{flightSvc, sa})
+	if err := injectConfigOverlays([]*unstructured.Unstructured{restCM}, params); err != nil {
+		t.Fatal(err)
+	}
+
+	config := parsedConfigMapTOML(t, restCM)
+
+	global, ok := config["global-connection-types"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [global-connection-types] table")
+	}
+	if got, want := global["tenant-id"], testNamespace; got != want {
+		t.Errorf("tenant-id = %v, want %q", got, want)
+	}
+
+	fs, ok := config["flight-service"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [flight-service] table")
+	}
+	if got, want := fs["address"], testFlightFQDN; got != want {
+		t.Errorf("flight-service.address = %v, want %q", got, want)
+	}
+	if got := config["server"].(map[string]any)["port"]; got != int64(8080) {
+		t.Errorf("unrelated server.port was changed; got %v", got)
+	}
+}
+
+func TestInjectConfigOverlaysNoConfigMaps(t *testing.T) {
+	if err := injectConfigOverlays(nil, overlayParams{Namespace: "ns", FlightInstanceName: "f"}); err != nil {
+		t.Fatalf("expected nil error for empty resources, got %v", err)
+	}
+}
+
+func TestInjectConfigOverlaysFlightService(t *testing.T) {
+	flightCM := labeledConfigMap(testFlightInstanceName, `[server]
+port = 8443
+
+[global-connection-types]
+tenant-id = "opendatahub"
+
+[auth]
+enabled = true
+
+[connectors.default]
+enabled = true
+connection_timeout_secs = 10
+`)
+	flightCM.SetName("dch-" + nameFlightService + "-config")
+	sa := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey:     kindServiceAccount,
+		testMetadataKey: map[string]any{testNameKey: "dch-rest-service-sa"},
+	}}
+	audiences := []string{"aud-one", "aud-two"}
+
+	cr := &dchv1alpha1.DataConnectService{}
+	cr.SetName("default-dcs")
+	cr.SetNamespace(testNamespace)
+	cr.Spec.TokenReviewAudiences = audiences
+	params := (&DataConnectServiceReconciler{}).buildOverlayParams(cr, &platformConfig{}, []*unstructured.Unstructured{sa})
+	if err := injectConfigOverlays([]*unstructured.Unstructured{flightCM}, params); err != nil {
+		t.Fatal(err)
+	}
+
+	config := parsedConfigMapTOML(t, flightCM)
+
+	global, ok := config["global-connection-types"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [global-connection-types] table")
+	}
+	if got, want := global["tenant-id"], testNamespace; got != want {
+		t.Errorf("tenant-id = %v, want %q", got, want)
+	}
+
+	auth, ok := config["auth"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [auth] table")
+	}
+	if got, want := auth["discovery_service_account"], testRestServiceAccount; got != want {
+		t.Errorf("discovery_service_account = %v, want %q", got, want)
+	}
+	gotAudiences, ok := auth["token_review_audiences"].([]any)
+	if !ok || len(gotAudiences) != len(audiences) {
+		t.Fatalf("token_review_audiences = %#v, want %#v", auth["token_review_audiences"], audiences)
+	}
+	for i, want := range audiences {
+		if gotAudiences[i] != want {
+			t.Errorf("token_review_audiences[%d] = %v, want %q", i, gotAudiences[i], want)
+		}
+	}
+}
+
+func TestInjectConfigOverlaysConnectorOverrides(t *testing.T) {
 	disabled := false
 	enabled := true
 	tests := []struct {
@@ -105,8 +219,7 @@ func TestSetConfigMapFlightConnectorSettingsAddConnector(t *testing.T) {
 			name:          "disabled SQLite",
 			connectorName: testSQLiteConnector,
 			enabled:       &disabled,
-			configTOML: `
-[connectors.default]
+			configTOML: `[connectors.default]
 enabled = false
 `,
 			expected: "[connectors.sqlite]\nenabled = false",
@@ -115,8 +228,7 @@ enabled = false
 			name:          "enabled custom connector",
 			connectorName: "custom",
 			enabled:       &enabled,
-			configTOML: `
-[connectors.default]
+			configTOML: `[connectors.default]
 enabled = false
 `,
 			expected: "[connectors.custom]\nenabled = true",
@@ -124,8 +236,7 @@ enabled = false
 		{
 			name:          "missing enabled",
 			connectorName: testSQLiteConnector,
-			configTOML: `
-[connectors.default]
+			configTOML: `[connectors.default]
 enabled = true
 `,
 			expected: "[connectors.sqlite]\nenabled = false",
@@ -136,9 +247,12 @@ enabled = true
 		t.Run(tt.name, func(t *testing.T) {
 			configMap := flightServiceConfigMap(tt.configTOML)
 
-			if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
-				Connectors: []dchv1alpha1.ConnectorConfig{{Name: tt.connectorName, Enabled: tt.enabled}},
-			}); err != nil {
+			inputs := overlayParams{
+				Namespace:          testNamespace,
+				FlightInstanceName: nameFlightService,
+				Connectors:         []dchv1alpha1.ConnectorConfig{{Name: tt.connectorName, Enabled: tt.enabled}},
+			}
+			if err := injectConfigOverlays([]*unstructured.Unstructured{configMap}, inputs); err != nil {
 				t.Fatal(err)
 			}
 
@@ -153,8 +267,7 @@ enabled = true
 	}
 }
 
-func TestSetConfigMapFlightConnectorSettingsUpdateConnector(t *testing.T) {
-	// Update specified connector settings while preserving unspecified connector settings.
+func TestInjectConfigOverlaysConnectorTimeouts(t *testing.T) {
 	enabled := true
 	connectionTimeout := &metav1.Duration{Duration: 30 * time.Second}
 	requestTimeout := &metav1.Duration{Duration: 45 * time.Second}
@@ -182,7 +295,9 @@ connection_timeout_secs = 20
 `
 	configMap := flightServiceConfigMap(configTOML)
 
-	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
+	inputs := overlayParams{
+		Namespace:          testNamespace,
+		FlightInstanceName: nameFlightService,
 		Connectors: []dchv1alpha1.ConnectorConfig{
 			{
 				Name:              testSQLiteConnector,
@@ -193,21 +308,15 @@ connection_timeout_secs = 20
 			},
 			{Name: "neo4j", Enabled: &enabled},
 		},
-	}); err != nil {
+	}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{configMap}, inputs); err != nil {
 		t.Fatal(err)
 	}
 
-	data, found, err := unstructured.NestedStringMap(configMap.Object, testDataKey)
-	if err != nil || !found {
-		t.Fatalf("expected ConfigMap data, found=%v err=%v", found, err)
-	}
-	var updated map[string]any
-	if err := toml.Unmarshal([]byte(data[testConfigTOMLKey]), &updated); err != nil {
-		t.Fatalf("expected valid updated TOML: %v", err)
-	}
-	connectors, ok := updated["connectors"].(map[string]any)
+	config := parsedConfigMapTOML(t, configMap)
+	connectors, ok := config["connectors"].(map[string]any)
 	if !ok {
-		t.Fatalf("expected connectors table, got %#v", updated["connectors"])
+		t.Fatalf("expected connectors table, got %#v", config["connectors"])
 	}
 	assertConnector := func(name string, expected map[string]any) {
 		t.Helper()
@@ -244,131 +353,167 @@ connection_timeout_secs = 20
 	}
 }
 
-func TestSetConfigMapFlightServiceAddress(t *testing.T) {
-	configMap := configMapWithTOML(`[flight-service]
-address = "flight-service"
-`)
-	service := &unstructured.Unstructured{Object: map[string]any{
-		"kind": kindService,
-		"metadata": map[string]any{
-			testNameKey: "dch-default-dcs-flight",
-		},
-	}}
-
-	if err := setConfigMapFlightServiceAddress([]*unstructured.Unstructured{service, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
-		t.Fatal(err)
-	}
-	flightService, ok := parsedConfigMapTOML(t, configMap)["flight-service"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [flight-service] table")
-	}
-	if got, want := flightService["address"], "dch-default-dcs-flight.test-namespace.svc"; got != want {
-		t.Errorf("flight-service.address = %v, want %q", got, want)
+func TestInjectConfigOverlaysRejectsInvalidTOML(t *testing.T) {
+	configMap := labeledConfigMap(nameFlightService, "[auth\nenabled = true")
+	inputs := overlayParams{Namespace: testNamespace, FlightInstanceName: nameFlightService}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{configMap}, inputs); err == nil {
+		t.Fatal("expected invalid TOML to return an error")
 	}
 }
 
-func TestSetConfigMapGlobalNamespace(t *testing.T) {
-	defaultTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "opendatahub"
-`)
-	customTenant := configMapWithTOML(`[global-connection-types]
+func TestInjectConfigOverlaysSkipsUnlabeledConfigMaps(t *testing.T) {
+	unlabeled := &unstructured.Unstructured{Object: map[string]any{
+		testKindKey:     kindConfigMap,
+		testMetadataKey: map[string]any{},
+		testDataKey: map[string]any{
+			testConfigTOMLKey: "[global-connection-types]\ntenant-id = \"opendatahub\"\n",
+		},
+	}}
+	inputs := overlayParams{Namespace: testNamespace, FlightInstanceName: "flight"}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{unlabeled}, inputs); err != nil {
+		t.Fatal(err)
+	}
+	global := parsedConfigMapTOML(t, unlabeled)["global-connection-types"].(map[string]any)
+	if got := global["tenant-id"]; got != "opendatahub" {
+		t.Errorf("unlabeled ConfigMap was modified; tenant-id = %v", got)
+	}
+}
+
+func TestInjectConfigOverlaysOverridesCustomTenantID(t *testing.T) {
+	configMap := restServiceConfigMap(`[global-connection-types]
 tenant-id = "custom-tenant"
 `)
-	noTenant := configMapWithTOML(`[server]
-port = 8080
-`)
-
-	if err := setConfigMapGlobalNamespace([]*unstructured.Unstructured{defaultTenant, customTenant, noTenant}, "test-namespace"); err != nil {
+	inputs := overlayParams{Namespace: testNamespace, FlightInstanceName: "flight"}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{configMap}, inputs); err != nil {
 		t.Fatal(err)
 	}
-
-	for _, tt := range []struct {
-		name string
-		cm   *unstructured.Unstructured
-		want string
-	}{
-		{name: "default tenant", cm: defaultTenant, want: "test-namespace"},
-		{name: "custom tenant remains unchanged", cm: customTenant, want: "custom-tenant"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			global, ok := parsedConfigMapTOML(t, tt.cm)["global-connection-types"].(map[string]any)
-			if !ok {
-				t.Fatal("expected [global-connection-types] table")
-			}
-			if got := global["tenant-id"]; got != tt.want {
-				t.Errorf("tenant-id = %v, want %q", got, tt.want)
-			}
-		})
-	}
-	if got := parsedConfigMapTOML(t, noTenant)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without tenant-id was changed unexpectedly; server.port = %v", got)
+	global := parsedConfigMapTOML(t, configMap)["global-connection-types"].(map[string]any)
+	if got := global["tenant-id"]; got != testNamespace {
+		t.Errorf("tenant-id should always follow the CR namespace; got %v", got)
 	}
 }
 
-func TestSetConfigMapDiscoveryServiceAccount(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
-enabled = true
-discovery_service_account = "old-identity"
+func TestInjectConfigOverlaysFlightServiceAddressWithoutService(t *testing.T) {
+	configMap := restServiceConfigMap(`[flight-service]
+address = "flight-service"
 `)
-	configMap.SetName("dch-default-dcs-flight-config")
-	serviceAccount := &unstructured.Unstructured{Object: map[string]any{
-		"kind": kindServiceAccount,
-		"metadata": map[string]any{
-			testNameKey: "dch-rest-service-sa",
-		},
-	}}
-
-	if err := setConfigMapDiscoveryServiceAccount([]*unstructured.Unstructured{serviceAccount, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
+	inputs := overlayParams{Namespace: testNamespace, FlightInstanceName: testFlightInstanceName}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{configMap}, inputs); err != nil {
 		t.Fatal(err)
 	}
-	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [auth] table")
+	fs := parsedConfigMapTOML(t, configMap)["flight-service"].(map[string]any)
+	if got := fs["address"]; got != "flight-service" {
+		t.Errorf("address should remain placeholder when no flight Service exists; got %v", got)
 	}
-	if got, want := auth["discovery_service_account"], "system:serviceaccount:test-namespace:dch-rest-service-sa"; got != want {
+}
+
+func TestInjectConfigOverlaysForcesFlightServiceAddress(t *testing.T) {
+	custom := restServiceConfigMap(`[flight-service]
+address = "my-custom-flight.example.com"
+ca-cert = "/etc/tls/flight/ca.crt"
+`)
+	missing := restServiceConfigMap(`[server]
+port = 8080
+`)
+	inputs := overlayParams{
+		Namespace:          testNamespace,
+		FlightInstanceName: testFlightInstanceName,
+		FlightFQDN:         testFlightFQDN,
+	}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{custom, missing}, inputs); err != nil {
+		t.Fatal(err)
+	}
+
+	fs := parsedConfigMapTOML(t, custom)["flight-service"].(map[string]any)
+	if got, want := fs["address"], testFlightFQDN; got != want {
+		t.Errorf("custom address should be overridden; got %v, want %q", got, want)
+	}
+	if got := fs["ca-cert"]; got != "/etc/tls/flight/ca.crt" {
+		t.Errorf("existing flight-service keys should be preserved; ca-cert = %v", got)
+	}
+
+	fs, ok := parsedConfigMapTOML(t, missing)["flight-service"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [flight-service] section to be created")
+	}
+	if got, want := fs["address"], testFlightFQDN; got != want {
+		t.Errorf("address should be added when missing; got %v, want %q", got, want)
+	}
+}
+
+func TestInjectConfigOverlaysCreatesAuthSection(t *testing.T) {
+	flightCM := labeledConfigMap(testFlightInstanceName, `[server]
+port = 8443
+`)
+	params := overlayParams{
+		Namespace:          testNamespace,
+		FlightInstanceName: testFlightInstanceName,
+		RestServiceAccount: testRestServiceAccount,
+		Audiences:          []string{"aud-one"},
+	}
+	if err := injectConfigOverlays([]*unstructured.Unstructured{flightCM}, params); err != nil {
+		t.Fatal(err)
+	}
+	auth, ok := parsedConfigMapTOML(t, flightCM)["auth"].(map[string]any)
+	if !ok {
+		t.Fatal("expected [auth] section to be created")
+	}
+	if got, want := auth["discovery_service_account"], testRestServiceAccount; got != want {
 		t.Errorf("discovery_service_account = %v, want %q", got, want)
 	}
+	if got := auth["token_review_audiences"]; got == nil {
+		t.Error("expected token_review_audiences to be added")
+	}
 }
 
-func TestSetConfigMapAudiences(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
-enabled = true
-token_review_audiences = ["old-audience"]
-`)
-	noAuth := configMapWithTOML(`[server]
-port = 8080
-`)
-	audiences := []string{"audience-one", "audience-two"}
+func TestMergeConfigOverlay(t *testing.T) {
+	dst := map[string]any{
+		"auth": map[string]any{
+			"enabled":   true,
+			"cache_ttl": int64(60),
+		},
+		"server": map[string]any{"port": int64(8080)},
+	}
+	overlay := map[string]any{
+		"auth": map[string]any{
+			"discovery_service_account": "system:serviceaccount:ns:sa",
+		},
+	}
+	mergeConfigOverlay(dst, overlay)
 
-	updated, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap, noAuth}, audiences)
+	auth := dst["auth"].(map[string]any)
+	if auth["enabled"] != true {
+		t.Error("existing auth.enabled was clobbered")
+	}
+	if auth["cache_ttl"] != int64(60) {
+		t.Error("existing auth.cache_ttl was clobbered")
+	}
+	if auth["discovery_service_account"] != "system:serviceaccount:ns:sa" {
+		t.Error("overlay value was not merged")
+	}
+	if dst["server"].(map[string]any)["port"] != int64(8080) {
+		t.Error("unrelated section was changed")
+	}
+}
+
+func TestWholeSeconds(t *testing.T) {
+	valid := &metav1.Duration{Duration: 30 * time.Second}
+	got, err := wholeSeconds(valid, "connectionTimeout", "postgres")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated {
-		t.Fatal("expected an auth ConfigMap to be updated")
+	if *got != int64(30) {
+		t.Errorf("wholeSeconds = %d, want 30", *got)
 	}
-	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [auth] table")
-	}
-	got, ok := auth["token_review_audiences"].([]any)
-	if !ok || len(got) != len(audiences) {
-		t.Fatalf("token_review_audiences = %#v, want %#v", auth["token_review_audiences"], audiences)
-	}
-	for i, audience := range audiences {
-		if got[i] != audience {
-			t.Errorf("token_review_audiences[%d] = %v, want %q", i, got[i], audience)
-		}
-	}
-	if got := parsedConfigMapTOML(t, noAuth)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without [auth] was changed unexpectedly; server.port = %v", got)
-	}
-}
 
-func TestSetConfigMapAudiencesRejectsInvalidTOML(t *testing.T) {
-	configMap := configMapWithTOML("[auth\nenabled = true")
-	if _, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap}, []string{"audience"}); err == nil {
-		t.Fatal("expected invalid TOML to return an error")
+	invalid := &metav1.Duration{Duration: 500 * time.Millisecond}
+	if _, err := wholeSeconds(invalid, "connectionTimeout", "postgres"); err == nil {
+		t.Fatal("expected error for sub-second duration")
+	}
+
+	got, err = wholeSeconds(nil, "connectionTimeout", "postgres")
+	if err != nil || got != nil {
+		t.Fatalf("nil duration should return nil, got %v err %v", got, err)
 	}
 }
 
@@ -644,7 +789,7 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 	deployment := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindDeployment,
 		testMetadataKey: map[string]any{
-			testNameKey: "default-dcs-flight",
+			testNameKey: testFlightInstanceName,
 		},
 		testSpecKey: map[string]any{
 			"template": map[string]any{

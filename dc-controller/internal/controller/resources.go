@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -310,193 +309,6 @@ func buildServicePatches(deploymentName, containerName string, overrides *dchv1a
 	return patches
 }
 
-func flightServiceResourceName(crName string) string {
-	return crName + "-flight"
-}
-
-func httpRouteResourceName(crName string) string {
-	return crName + "-route"
-}
-
-func renderFlightService(resources []*unstructured.Unstructured, crName string) []*unstructured.Unstructured {
-	serviceName := flightServiceResourceName(crName)
-	for _, obj := range resources {
-		if isFlightServiceResource(obj) {
-			renameFlightServiceResource(obj, serviceName)
-			continue
-		}
-		if obj.GetKind() == kindHTTPRoute {
-			obj.SetName(httpRouteResourceName(crName))
-			obj.Object = replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
-		}
-	}
-	return resources
-}
-
-func isFlightServiceResource(obj *unstructured.Unstructured) bool {
-	name := obj.GetName()
-	switch obj.GetKind() {
-	case kindConfigMap:
-		// The REST service mounts the flight-service-ca ConfigMap, so its
-		// name contains "flight-service" even though it is not a Flight
-		// service resource. Use the app label to distinguish the Flight
-		// ConfigMap from the REST-owned CA ConfigMap.
-		return obj.GetLabels()[labelAppName] == nameFlightService
-	case kindDeployment, kindService, kindServiceAccount, kindNetworkPolicy:
-		return strings.Contains(name, nameFlightService)
-	case kindClusterRoleBinding:
-		return strings.HasSuffix(name, "flight-auth-delegator")
-	default:
-		return false
-	}
-}
-
-func renameFlightServiceResource(obj *unstructured.Unstructured, serviceName string) {
-	content := replaceStringValue(obj.UnstructuredContent(), nameFlightService, serviceName).(map[string]any)
-	obj.Object = content
-	if obj.GetKind() == kindClusterRoleBinding {
-		obj.SetName(strings.Replace(obj.GetName(), "flight-auth-delegator", serviceName+"-auth-delegator", 1))
-	}
-}
-
-func replaceStringValue(value any, old, new string) any {
-	switch value := value.(type) {
-	case string:
-		return strings.ReplaceAll(value, old, new)
-	case map[string]any:
-		for key, child := range value {
-			value[key] = replaceStringValue(child, old, new)
-		}
-	case []any:
-		for i, child := range value {
-			value[i] = replaceStringValue(child, old, new)
-		}
-	}
-	return value
-}
-
-func setConfigMapFlightServiceAddress(resources []*unstructured.Unstructured, namespace, serviceName string) error {
-	var flightSvcName string
-	for _, obj := range resources {
-		if obj.GetKind() == kindService && strings.HasSuffix(obj.GetName(), serviceName) {
-			flightSvcName = obj.GetName()
-			break
-		}
-	}
-	if flightSvcName == "" {
-		return nil
-	}
-	fqdn := fmt.Sprintf("%s.%s.svc", flightSvcName, namespace)
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		flightService, ok := config["flight-service"].(map[string]any)
-		if !ok || flightService["address"] != nameFlightService {
-			continue
-		}
-		flightService["address"] = fqdn
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
-		}
-	}
-	return nil
-}
-
-func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured, flightName string, overrides *dchv1alpha1.ServiceOverrides) error {
-	if overrides == nil || len(overrides.Connectors) == 0 {
-		return nil
-	}
-
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || obj.GetLabels()[labelAppName] != flightName {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("parsing flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		connectors, ok := config["connectors"].(map[string]any)
-		if !ok {
-			connectors = make(map[string]any)
-			config["connectors"] = connectors
-		}
-
-		for _, connector := range overrides.Connectors {
-			if connector.Name == "" {
-				continue
-			}
-			section, ok := connectors[connector.Name].(map[string]any)
-			if !ok {
-				section = make(map[string]any)
-				connectors[connector.Name] = section
-			}
-
-			section["enabled"] = connector.Enabled != nil && *connector.Enabled
-			if connector.ConnectionTimeout != nil {
-				duration := connector.ConnectionTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s connectionTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["connection_timeout_secs"] = int64(duration / time.Second)
-			}
-			if connector.RequestTimeout != nil {
-				duration := connector.RequestTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s requestTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["request_timeout_secs"] = int64(duration / time.Second)
-			}
-			if connector.ReadTimeout != nil {
-				duration := connector.ReadTimeout.Duration
-				if duration <= 0 || duration%time.Second != 0 {
-					return fmt.Errorf("connector %s readTimeout must be a positive whole number of seconds", connector.Name)
-				}
-				section["read_timeout_secs"] = int64(duration / time.Second)
-			}
-		}
-
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-	}
-	return nil
-}
-
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) error {
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		globalConnectionTypes, ok := config["global-connection-types"].(map[string]any)
-		if !ok || globalConnectionTypes["tenant-id"] != "opendatahub" {
-			continue
-		}
-		globalConnectionTypes["tenant-id"] = namespace
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
-		}
-	}
-	return nil
-}
-
 // reconcileTraceEnv reconciles OTLP trace environment variables in deployments,
 // removing stale variables and setting current ones. This ensures that clearing
 // trace.insecure or trace.certificate from the CR actually removes the env vars
@@ -650,42 +462,6 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 		vars = append(vars, corev1.EnvVar{Name: envOTLPCertificate, Value: trace.Certificate})
 	}
 	return vars
-}
-
-func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) error {
-	var restServiceAccount string
-	for _, obj := range resources {
-		if obj.GetKind() == kindServiceAccount && strings.HasSuffix(obj.GetName(), nameRestService+"-sa") {
-			restServiceAccount = obj.GetName()
-			break
-		}
-	}
-	if restServiceAccount == "" {
-		return nil
-	}
-
-	identity := fmt.Sprintf("system:serviceaccount:%s:%s", namespace, restServiceAccount)
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap || !strings.Contains(obj.GetName(), flightName) {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return fmt.Errorf("flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		auth, ok := config["auth"].(map[string]any)
-		if !ok {
-			continue
-		}
-		auth["discovery_service_account"] = identity
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
-		}
-	}
-	return nil
 }
 
 func buildGatewayPatches(gw *dchv1alpha1.Gateway) []kustypes.Patch {
@@ -874,32 +650,6 @@ func patchClusterRoleBindingSubjects(obj *unstructured.Unstructured, namespace s
 		}
 	}
 	_ = unstructured.SetNestedSlice(obj.Object, subjects, "subjects")
-}
-
-func setConfigMapAudiences(resources []*unstructured.Unstructured, audiences []string) (bool, error) {
-	updated := false
-	for _, obj := range resources {
-		if obj.GetKind() != kindConfigMap {
-			continue
-		}
-		config, data, err := parseConfigMapTOML(obj)
-		if err != nil {
-			return false, fmt.Errorf("ConfigMap %q: %w", obj.GetName(), err)
-		}
-		if config == nil {
-			continue
-		}
-		auth, ok := config["auth"].(map[string]any)
-		if !ok {
-			continue
-		}
-		auth["token_review_audiences"] = audiences
-		if err := setConfigMapTOML(obj, config, data); err != nil {
-			return false, fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
-		}
-		updated = true
-	}
-	return updated, nil
 }
 
 func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences []string) {

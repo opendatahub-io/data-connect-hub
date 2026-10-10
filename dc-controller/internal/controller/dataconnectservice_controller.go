@@ -411,42 +411,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("rendering manifests: %w", err)
 	}
 
-	resources = renderFlightService(resources, cr.Name)
-	flightInstanceName := flightServiceResourceName(cr.Name)
-
-	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
-		return fmt.Errorf("setting config namespace: %w", err)
-	}
-	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting discovery service account: %w", err)
-	}
-	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting flight service address: %w", err)
-	}
-	if cr.Spec.FlightService != nil {
-		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
-			return fmt.Errorf("setting flight-service connector configuration: %w", err)
-		}
-	}
-
-	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestServiceContainer, nameFlightServiceContainer) {
-		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
-	}
-
-	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
-	if len(audiences) > 0 {
-		updated, err := setConfigMapAudiences(resources, audiences)
-		if err != nil {
-			return fmt.Errorf("setting token review audiences: %w", err)
-		}
-		if !updated {
-			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
-		}
-		setKubeRbacProxyAudiences(resources, audiences)
-	}
-
-	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
-		return fmt.Errorf("annotating deployments with content hash: %w", err)
+	if err := r.postRender(ctx, resources, cr, platCfg); err != nil {
+		return err
 	}
 
 	return r.applyResources(ctx, cr, cr.Namespace, resources)

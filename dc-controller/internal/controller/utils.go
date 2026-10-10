@@ -23,9 +23,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// parseConfigMapTOML parses the config.toml value in a ConfigMap's data.
-// A nil config means the ConfigMap has no data.config.toml entry.
-func parseConfigMapTOML(obj *unstructured.Unstructured) (config map[string]any, data map[string]string, err error) {
+// loadConfigMapTOML loads and parses the config.toml value in a ConfigMap's
+// data. A nil config means the ConfigMap has no data.config.toml entry.
+func loadConfigMapTOML(obj *unstructured.Unstructured) (config map[string]any, data map[string]string, err error) {
 	data, found, err := unstructured.NestedStringMap(obj.Object, "data")
 	if err != nil {
 		return nil, nil, fmt.Errorf("reading ConfigMap data: %w", err)
