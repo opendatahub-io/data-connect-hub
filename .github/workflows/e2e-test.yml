@@ -8,7 +8,7 @@ on:
       - 'connectors/**'
       - 'dc-controller/**'
       - '!dc-controller/test/**'
-      - 'config/**'
+      - 'manifests/**'
       - 'e2e/**'
       - 'hack/**'
       - 'sdk/python/**'

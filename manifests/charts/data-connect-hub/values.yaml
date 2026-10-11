@@ -1,0 +1,82 @@
+namePrefix: "dch-"
+
+# Images are injected by dc-controller from RELATED_IMAGE_* env vars at
+# render time (digest-pinned by the platform operator in disconnected
+# environments). Standalone `helm template` output is not deployable as-is.
+images:
+  restService: ""
+  flightService: ""
+  kubeRbacProxy: ""
+
+restService:
+  replicas: 1
+  imagePullPolicy: "IfNotPresent"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+  env:
+    - name: RUST_LOG
+      value: "info"
+  envFrom: []
+  volumes: []
+  volumeMounts: []
+  # config only carries CRD-mapped fields; everything else is baked into the
+  # templates (CRD is the user's only entry point).
+  config:
+    tokenReviewAudiences: []
+
+kubeRbacProxy:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Single Flight gRPC service deployment. Omit (null) to deploy no flight
+# service. The controller derives name from the CR (<crName>-flight).
+flightService: null
+#  name: default-flight
+#  imagePullPolicy: "IfNotPresent"
+#  replicas: 1
+#  resources:
+#    requests:
+#      cpu: 100m
+#      memory: 256Mi
+#    limits:
+#      cpu: "1"
+#      memory: 512Mi
+#  env:
+#    - name: RUST_LOG
+#      value: "info"
+#  envFrom: []
+#  volumes: []
+#  volumeMounts: []
+#  config:
+#    tokenReviewAudiences: []
+#  connectors: {}
+
+gateway:
+  enabled: true
+  parentRef:
+    name: "odh-gateway"
+    namespace: "opendatahub"
+
+# Namespace the dc-controller pod runs in; the controller passes its own
+# namespace here at render time, so this default only applies to standalone
+# `helm template` output.
+controllerNamespace: "system"
+
+monitoring:
+  enabled: false
+  scrapeInterval: "30s"
+
+trace:
+  endpoint: ""
+  insecure: ""
+  certificate: ""

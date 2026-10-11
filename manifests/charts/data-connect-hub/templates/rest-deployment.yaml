@@ -1,12 +1,12 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: rest-service
+  name: {{ include "dch.restName" . }}
   labels:
     app.kubernetes.io/name: rest-service
-    app.kubernetes.io/part-of: data-connect-hub
+    {{- include "dch.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.restService.replicas }}
   selector:
     matchLabels:
       app.kubernetes.io/name: rest-service
@@ -14,10 +14,10 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: rest-service
-        app.kubernetes.io/part-of: data-connect-hub
+        {{- include "dch.labels" . | nindent 8 }}
     spec:
       terminationGracePeriodSeconds: 30
-      serviceAccountName: rest-service-sa
+      serviceAccountName: {{ include "dch.restSA" . }}
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -25,7 +25,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: kube-rbac-proxy
-          image: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
+          image: {{ required "images.kubeRbacProxy is required" .Values.images.kubeRbacProxy | quote }}
           args:
             - --secure-listen-address=0.0.0.0:8443
             - --upstream=http://127.0.0.1:8080
@@ -34,6 +34,9 @@ spec:
             - --tls-cert-file=/etc/tls/private/tls.crt
             - --tls-private-key-file=/etc/tls/private/tls.key
             - --logtostderr=true
+            {{- if .Values.kubeRbacProxy.tokenReviewAudiences }}
+            - {{ printf "--auth-token-audiences=%s" (join "," .Values.kubeRbacProxy.tokenReviewAudiences) | quote }}
+            {{- end }}
           ports:
             - name: https
               containerPort: 8443
@@ -44,12 +47,7 @@ spec:
               drop:
                 - ALL
           resources:
-            requests:
-              cpu: 50m
-              memory: 64Mi
-            limits:
-              cpu: 500m
-              memory: 256Mi
+            {{- toYaml .Values.kubeRbacProxy.resources | nindent 12 }}
           volumeMounts:
             - name: kube-rbac-proxy-config
               mountPath: /etc/kube-rbac-proxy
@@ -75,8 +73,8 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 15
         - name: rest-server
-          image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE
-          imagePullPolicy: Always
+          image: {{ required "images.restService is required" .Values.images.restService | quote }}
+          imagePullPolicy: {{ .Values.restService.imagePullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -84,12 +82,7 @@ spec:
               drop:
                 - ALL
           resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
+            {{- toYaml .Values.restService.resources | nindent 12 }}
           args:
             - --config
             - /config/config.toml
@@ -99,8 +92,25 @@ spec:
             - name: metrics
               containerPort: 9090
           env:
-            - name: RUST_LOG
-              value: info
+            {{- if .Values.trace.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.trace.endpoint | quote }}
+            {{- end }}
+            {{- if .Values.trace.insecure }}
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: {{ .Values.trace.insecure | quote }}
+            {{- end }}
+            {{- if .Values.trace.certificate }}
+            - name: OTEL_EXPORTER_OTLP_CERTIFICATE
+              value: {{ .Values.trace.certificate | quote }}
+            {{- end }}
+            {{- with .Values.restService.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .Values.restService.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config
@@ -110,6 +120,9 @@ spec:
             - name: flight-ca
               mountPath: /etc/tls/flight
               readOnly: true
+            {{- with .Values.restService.volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           lifecycle:
             preStop:
               exec:
@@ -129,19 +142,22 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: rest-service-config
+            name: {{ include "dch.restName" . }}-config
         - name: kube-rbac-proxy-config
           configMap:
-            name: rest-service-kube-rbac-proxy-config
+            name: {{ include "dch.restName" . }}-kube-rbac-proxy-config
         - name: proxy-tls
           secret:
-            secretName: rest-service-tls
+            secretName: {{ include "dch.restName" . }}-tls
         - name: db-secret
           secret:
             secretName: dch-database-config
         - name: flight-ca
           configMap:
-            name: flight-service-ca
+            name: {{ include "dch.prefix" . }}-flight-service-ca
             items:
               - key: service-ca.crt
                 path: ca.crt
+        {{- with .Values.restService.volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

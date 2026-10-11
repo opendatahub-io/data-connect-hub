@@ -427,29 +427,65 @@ if [[ -n "$BUCKET" ]]; then
         S3_CLIENT_TLS_ARGS="--no-verify-ssl"
     fi
 
-    kubectl run "$INIT_POD" -n "$NAMESPACE" \
-        --image="$CLIENT_IMAGE" \
-        --image-pull-policy=IfNotPresent \
-        --restart=Never \
-        --env="AWS_ACCESS_KEY_ID=${USERNAME}" \
-        --env="AWS_SECRET_ACCESS_KEY=${PASSWORD}" \
-        --env="AWS_DEFAULT_REGION=us-east-1" \
-        --env="AWS_S3_ADDRESSING_STYLE=path" \
-        --command -- /bin/sh -ceu "
-            ready=0
-            for i in \$(seq 1 60); do
-              if aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api list-buckets >/dev/null 2>&1; then
-                ready=1
-                break
-              fi
-              sleep 2
-            done
-            [ \"\$ready\" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
-            for bucket in ${BUCKET//,/ }; do
-              aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api create-bucket --bucket \"\$bucket\" >/dev/null 2>&1 ||
-                aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api head-bucket --bucket \"\$bucket\"
-            done
-        "
+    # Use OpenShift's namespace-assigned base UID when available; fall back to a
+    # non-root UID on non-OpenShift clusters.
+    INIT_RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+        | cut -d/ -f1)
+    : "${INIT_RUN_AS_USER:=1001}"
+
+    kubectl apply -n "$NAMESPACE" -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${INIT_POD}
+spec:
+  restartPolicy: Never
+  # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+  # rejects pods that do not set an explicit securityContext.
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: init-bucket
+      image: ${CLIENT_IMAGE}
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsNonRoot: true
+        runAsUser: ${INIT_RUN_AS_USER}
+        seccompProfile:
+          type: RuntimeDefault
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: "${USERNAME}"
+        - name: AWS_SECRET_ACCESS_KEY
+          value: "${PASSWORD}"
+        - name: AWS_DEFAULT_REGION
+          value: us-east-1
+        - name: AWS_S3_ADDRESSING_STYLE
+          value: path
+      command:
+        - /bin/sh
+        - -ceu
+        - |
+          ready=0
+          for i in \$(seq 1 60); do
+            if aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api list-buckets >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 2
+          done
+          [ "\$ready" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
+          for bucket in ${BUCKET//,/ }; do
+            aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api create-bucket --bucket "\$bucket" >/dev/null 2>&1 ||
+              aws ${S3_CLIENT_TLS_ARGS} --endpoint-url '${S3_SCHEME}://${RELEASE}:9000' s3api head-bucket --bucket "\$bucket"
+          done
+EOF
 
     kubectl wait --for=jsonpath='{.status.phase}'=Succeeded \
         "pod/$INIT_POD" -n "$NAMESPACE" --timeout=120s || {
