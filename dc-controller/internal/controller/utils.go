@@ -38,7 +38,7 @@ var serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount
 // pod. The CONTROLLER_NAMESPACE environment variable takes precedence;
 // otherwise the namespace is read from the service-account token projection.
 // It returns an empty string when neither is available (e.g. when running
-// outside a cluster), leaving rendered NetworkPolicies on their params.env
+// outside a cluster), leaving rendered NetworkPolicies on their chart value
 // defaults.
 func ResolveControllerNamespace() string {
 	if ns := os.Getenv(controllerNamespaceEnvVar); ns != "" {

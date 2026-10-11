@@ -95,7 +95,7 @@ func main() {
 	flag.StringVar(&metricsCertName, "metrics-cert-name", "tls.crt", "The name of the metrics server certificate file.")
 	flag.StringVar(&metricsCertKey, "metrics-cert-key", "tls.key", "The name of the metrics server key file.")
 	flag.StringVar(&manifestsPath, "manifests-path", "/manifests",
-		"Path to the kustomize manifests directory containing base/, db/, and gateway/ subdirectories")
+		"Path to the manifests directory containing charts/ and connection-types/")
 	opts := zap.Options{
 		Development: true,
 	}
