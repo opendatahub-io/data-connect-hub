@@ -91,7 +91,8 @@ mod tests {
         // kube-rbac-proxy joins x-remote-groups with the separator configured
         // in the rest-service deployment. If the two drift apart, group names
         // stop splitting and group-granted exports are denied.
-        const DEPLOYMENT: &str = include_str!("../../../config/base/rest-service/deployment.yaml");
+        const DEPLOYMENT: &str =
+            include_str!("../../../manifests/charts/data-connect-hub/templates/rest-deployment.yaml");
         const FLAG: &str = "--auth-header-groups-field-separator=";
 
         let values: Vec<&str> = DEPLOYMENT

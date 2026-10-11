@@ -18,7 +18,6 @@ package controller
 
 import (
 	"context"
-	"path/filepath"
 	"testing"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -468,15 +467,11 @@ func (c *staleDCSClient) List(ctx context.Context, list client.ObjectList, opts 
 	return c.Client.List(ctx, list, opts...)
 }
 
-// TestTenantRBACNames pins the kustomize-rendered names the tenant-namespace
+// TestTenantRBACNames pins the chart-rendered names the tenant-namespace
 // reconciler relies on: the secret-access ClusterRole with its secrets rule,
 // and the REST ServiceAccount.
 func TestTenantRBACNames(t *testing.T) {
-	manifestsPath := filepath.Join("..", "..", "..", "config")
-	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, "base"), nil, nil)
-	if err != nil {
-		t.Fatalf("rendering base manifests: %v", err)
-	}
+	resources := renderChart(t)
 
 	haveClusterRole := false
 	haveSecretsRule := false

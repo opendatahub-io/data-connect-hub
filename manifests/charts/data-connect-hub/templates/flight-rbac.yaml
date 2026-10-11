@@ -1,0 +1,31 @@
+{{- with .Values.flightService }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dch.prefix" $ }}-{{ .name }}-auth-delegator
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dch.prefix" $ }}-{{ .name }}-sa
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+{{- end }}
+---
+# Bound by the dc-controller in the global namespace so Flight can read the
+# credentials of connections stored there. Not bound anywhere by default.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "dch.prefix" . }}-flight-service-secret-access
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]

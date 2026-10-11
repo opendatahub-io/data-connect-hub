@@ -1,0 +1,131 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dch.restName" . }}-kube-rbac-proxy-config
+  labels:
+    app.kubernetes.io/name: rest-service
+    {{- include "dch.labels" . | nindent 4 }}
+data:
+  config-file.yaml: |
+    authorization:
+      endpoints:
+        - path: /api/v1alpha1/data/connections/*/binary
+          mappings:
+            - methods: [get]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-store
+                    verb: get
+        - path: /api/v1alpha1/data/connections/*/exports/secrets/*
+          mappings:
+            - methods: [put]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: ""
+                    resource: secrets
+                    verb: create
+        - path: /api/v1alpha1/data/connections/*/readiness
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: create
+        - path: /api/v1alpha1/data/connections/*
+          mappings:
+            - methods: [get, post, patch, delete]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: "{{`{{.FromMethod}}`}}"
+        - path: /api/v1alpha1/data/connections
+          mappings:
+            - methods: [get, post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: "{{`{{.FromMethod}}`}}"
+        - path: /api/v1alpha1/data/connection-types/*
+          mappings:
+            - methods: [get, post, patch, delete]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    verb: "{{`{{.FromMethod}}`}}"
+        - path: /api/v1alpha1/data/connection-types
+          mappings:
+            - methods: [get, post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connection-types
+                    verb: "{{`{{.FromMethod}}`}}"
+        - path: /api/v1alpha1/data/test/credentials
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: data-connections
+                    verb: create
+        - path: /api/v1alpha1/data/flights
+          mappings:
+            - methods: [post]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: flight-services
+                    verb: create
+        - path: /api/v1alpha1/data/flights/*
+          mappings:
+            - methods: [patch, delete]
+              resources:
+                - rewrites:
+                    byHttpHeader:
+                      name: X-Tenant-Id
+                  resourceAttributes:
+                    namespace: "{{`{{.FromHeader}}`}}"
+                    apiGroup: dataconnecthub.opendatahub.io
+                    resource: flight-services
+                    verb: "{{`{{.FromMethod}}`}}"

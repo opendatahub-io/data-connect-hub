@@ -50,7 +50,7 @@ const (
 	labelTenantNamespace = "dataconnecthub.opendatahub.io/tenant"
 
 	// kustomizeNamePrefix is the namePrefix applied to every resource
-	// rendered from config/base/kustomization.yaml. TestTenantRBACNames
+	// rendered from the data-connect-hub chart. TestTenantRBACNames
 	// pins the rendered names to the constants below.
 	kustomizeNamePrefix = "dch-"
 
