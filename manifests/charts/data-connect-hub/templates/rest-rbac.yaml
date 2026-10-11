@@ -1,7 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rest-service-data-access
+  name: {{ include "dch.prefix" . }}-rest-service-data-access
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
@@ -10,20 +12,24 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: rest-service-data-access
+  name: {{ include "dch.prefix" . }}-rest-service-data-access
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 subjects:
   - kind: ServiceAccount
-    name: rest-service-sa
-    namespace: opendatahub
+    name: {{ include "dch.restSA" . }}
+    namespace: {{ .Release.Namespace }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: rest-service-data-access
+  name: {{ include "dch.prefix" . }}-rest-service-data-access
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: rest-service-secret-access
+  name: {{ include "dch.prefix" . }}-rest-service-secret-access
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -32,7 +38,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: secret-export
+  name: {{ include "dch.prefix" . }}-secret-export
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
     resources: ["secrets"]

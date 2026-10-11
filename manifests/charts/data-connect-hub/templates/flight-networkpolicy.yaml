@@ -1,0 +1,43 @@
+{{- with .Values.flightService }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "dch.prefix" $ }}-{{ .name }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: {{ .name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    # The REST service calls Flight over gRPC from the same namespace.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Release.Namespace }}
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: rest-service
+      ports:
+        - protocol: TCP
+          port: 8443
+    # The gateway routes external traffic to Flight.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ $.Values.gateway.parentRef.namespace }}
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: {{ $.Values.gateway.parentRef.name }}
+      ports:
+        - protocol: TCP
+          port: 8443
+    # Metrics scrape.
+    - ports:
+        - protocol: TCP
+          port: 9090
+{{- end }}

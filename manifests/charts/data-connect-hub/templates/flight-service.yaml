@@ -1,0 +1,23 @@
+{{- with .Values.flightService }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dch.prefix" $ }}-{{ .name }}
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
+  annotations:
+    service.beta.openshift.io/serving-cert-secret-name: {{ include "dch.prefix" $ }}-{{ .name }}-tls
+spec:
+  type: ClusterIP
+  ports:
+    - name: grpc
+      port: 8443
+      targetPort: grpc
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+  selector:
+    app.kubernetes.io/name: {{ .name }}
+{{- end }}

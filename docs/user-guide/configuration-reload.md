@@ -7,26 +7,28 @@ Both flight-service and rest-service read configuration, TLS certificates, and d
 
 The dc-controller computes a SHA-256 content hash from ConfigMap and Secret data referenced by each Deployment's `configMap` and `secret` volumes, and stamps the hash as a `dataconnecthub/config-hash` annotation on the pod template. When the hash changes, the pod template updates and Kubernetes triggers a rolling update.
 
-For controller-rendered ConfigMaps (e.g. `flight-service-config`, `rest-service-config`), the hash is computed from the desired state during reconciliation. For externally-managed resources (OpenShift serving-cert Secrets, CA-bundle ConfigMaps, database Secret), the controller fetches the live data from the cluster.
+For controller-rendered ConfigMaps (e.g. `dch-<crName>-flight-config`, `dch-rest-service-config`), the hash is computed from the desired state during reconciliation. For externally-managed resources (OpenShift serving-cert Secrets, CA-bundle ConfigMaps, database Secret), the controller fetches the live data from the cluster.
 
 ### Resources included in the content hash
 
+`<crName>` is the name of the DataConnectService; the Flight resources are named `dch-<crName>-flight-*`.
+
 | Resource | Type | Affected Deployment |
 |---|---|---|
-| `flight-service-config` | ConfigMap | flight-service |
-| `flight-service-tls` | Secret (OpenShift serving-cert) | flight-service |
-| `dch-database-config` | Secret | flight-service, rest-service |
-| `rest-service-config` | ConfigMap | rest-service |
-| `rest-service-tls` | Secret (OpenShift serving-cert) | rest-service |
-| `flight-service-ca` | ConfigMap (OpenShift inject-cabundle) | rest-service |
-| `rest-service-kube-rbac-proxy-config` | ConfigMap | rest-service |
+| `dch-<crName>-flight-config` | ConfigMap | `dch-<crName>-flight` |
+| `dch-<crName>-flight-tls` | Secret (OpenShift serving-cert) | `dch-<crName>-flight` |
+| `dch-database-config` | Secret | `dch-<crName>-flight`, `dch-rest-service` |
+| `dch-rest-service-config` | ConfigMap | `dch-rest-service` |
+| `dch-rest-service-tls` | Secret (OpenShift serving-cert) | `dch-rest-service` |
+| `dch-flight-service-ca` | ConfigMap (OpenShift inject-cabundle) | `dch-rest-service` |
+| `dch-rest-service-kube-rbac-proxy-config` | ConfigMap | `dch-rest-service` |
 
 ### OpenShift certificate rotation
 
 On OpenShift, TLS certificates are managed automatically:
 
-- `flight-service-tls` and `rest-service-tls` are created and rotated by the service-ca-operator via the `service.beta.openshift.io/serving-cert-secret-name` annotation on each Service.
-- `flight-service-ca` is populated by the service-ca-operator via the `service.beta.openshift.io/inject-cabundle` annotation on the ConfigMap.
+- `dch-<crName>-flight-tls` and `dch-rest-service-tls` are created and rotated by the service-ca-operator via the `service.beta.openshift.io/serving-cert-secret-name` annotation on each Service.
+- `dch-flight-service-ca` is populated by the service-ca-operator via the `service.beta.openshift.io/inject-cabundle` annotation on the ConfigMap.
 
 When the service-ca-operator rotates a certificate, the controller detects the change on the next periodic reconcile, recomputes the content hash, and rolls out new pods.
 
