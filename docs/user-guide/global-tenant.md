@@ -58,10 +58,10 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
 
      | Subject | ClusterRole | Grants |
      |---|---|---|
-     | Members of the Auth CR `adminGroups` | [`dch-read-write`](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/base/user-roles/clusterroles.yaml) | • read/write to connection types and connections<br>• ingest data via a connection<br>• no access to Secrets |
-     | Members of the Auth CR `allowedGroups` | [`dch-read`](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/base/user-roles/clusterroles.yaml) | • read-only to connection types and connections<br>• ingest data via a connection<br>• no access to Secrets |
-     | REST ServiceAccount | [`dch-rest-service-secret-access`](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/base/rest-service/data-access-rbac.yaml) | • read/write to Secrets |
-     | Flight ServiceAccount | [`dch-flight-service-secret-access`](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/base/flight-service/secret-access-clusterrole.yaml) | • read-only to Secrets |
+     | Members of the Auth CR `adminGroups` | [`dch-read-write`](https://github.com/opendatahub-io/data-connect-hub/blob/main/manifests/charts/data-connect-hub/templates/data-clusterroles.yaml) | • read/write to connection types and connections<br>• ingest data via a connection<br>• no access to Secrets |
+     | Members of the Auth CR `allowedGroups` | [`dch-read`](https://github.com/opendatahub-io/data-connect-hub/blob/main/manifests/charts/data-connect-hub/templates/data-clusterroles.yaml) | • read-only to connection types and connections<br>• ingest data via a connection<br>• no access to Secrets |
+     | REST ServiceAccount | [`dch-rest-service-secret-access`](https://github.com/opendatahub-io/data-connect-hub/blob/main/manifests/charts/data-connect-hub/templates/rest-rbac.yaml) | • read/write to Secrets |
+     | Flight ServiceAccount | [`dch-flight-service-secret-access`](https://github.com/opendatahub-io/data-connect-hub/blob/main/manifests/charts/data-connect-hub/templates/flight-rbac.yaml) | • read-only to Secrets |
 
    - Updates `DataConnectService.status`:
 

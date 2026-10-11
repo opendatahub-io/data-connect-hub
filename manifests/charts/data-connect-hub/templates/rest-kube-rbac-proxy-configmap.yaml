@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rest-service-kube-rbac-proxy-config
+  name: {{ include "dch.restName" . }}-kube-rbac-proxy-config
   labels:
     app.kubernetes.io/name: rest-service
-    app.kubernetes.io/part-of: data-connect-hub
+    {{- include "dch.labels" . | nindent 4 }}
 data:
   config-file.yaml: |
     authorization:
@@ -17,7 +17,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-store
                     verb: get
@@ -29,7 +29,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: ""
                     resource: secrets
                     verb: create
@@ -41,7 +41,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: create
@@ -53,10 +53,10 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
-                    verb: "{{.FromMethod}}"
+                    verb: "{{`{{.FromMethod}}`}}"
         - path: /api/v1alpha1/data/connections
           mappings:
             - methods: [get, post]
@@ -65,10 +65,10 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
-                    verb: "{{.FromMethod}}"
+                    verb: "{{`{{.FromMethod}}`}}"
         - path: /api/v1alpha1/data/connection-types/*
           mappings:
             - methods: [get, post, patch, delete]
@@ -77,10 +77,10 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
-                    verb: "{{.FromMethod}}"
+                    verb: "{{`{{.FromMethod}}`}}"
         - path: /api/v1alpha1/data/connection-types
           mappings:
             - methods: [get, post]
@@ -89,10 +89,10 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connection-types
-                    verb: "{{.FromMethod}}"
+                    verb: "{{`{{.FromMethod}}`}}"
         - path: /api/v1alpha1/data/test/credentials
           mappings:
             - methods: [post]
@@ -101,7 +101,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: data-connections
                     verb: create
@@ -113,7 +113,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: flight-services
                     verb: create
@@ -125,7 +125,7 @@ data:
                     byHttpHeader:
                       name: X-Tenant-Id
                   resourceAttributes:
-                    namespace: "{{.FromHeader}}"
+                    namespace: "{{`{{.FromHeader}}`}}"
                     apiGroup: dataconnecthub.opendatahub.io
                     resource: flight-services
-                    verb: "{{.FromMethod}}"
+                    verb: "{{`{{.FromMethod}}`}}"

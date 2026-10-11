@@ -1,17 +1,17 @@
+{{- if .Values.monitoring.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: servicemonitor
+  name: {{ include "dch.prefix" . }}-servicemonitor
   labels:
-    app.kubernetes.io/part-of: data-connect-hub
     monitoring.opendatahub.io/scrape: "true"
+    {{- include "dch.labels" . | nindent 4 }}
 spec:
-  # Every resource the controller applies carries this label, so a single
-  # monitor covers all DCH services that expose a "metrics" port.
   selector:
     matchLabels:
       dataconnecthub.opendatahub.io/managed-by: dataconnectservice
   endpoints:
     - port: metrics
       path: /metrics
-      interval: 30s
+      interval: {{ .Values.monitoring.scrapeInterval | default "30s" }}
+{{- end }}
