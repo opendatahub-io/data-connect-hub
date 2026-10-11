@@ -1,0 +1,18 @@
+{{- with .Values.flightService }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "dch.prefix" $ }}-{{ .name }}-auth-delegator
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "dch.prefix" $ }}-{{ .name }}-sa
+    namespace: {{ $.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+{{- end }}

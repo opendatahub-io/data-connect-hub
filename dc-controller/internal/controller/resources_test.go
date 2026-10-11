@@ -17,21 +17,17 @@ limitations under the License.
 package controller
 
 import (
-	"bufio"
 	"context"
-	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -40,56 +36,19 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/kustomize/kyaml/filesys"
 )
 
 const (
-	testBaseManifest                 = "base"
-	testControllerNamespace          = "controller-ns"
-	testGatewayName                  = "custom-gateway"
-	testOpenShiftGatewayNamespace    = "openshift-ingress"
-	testOperandNamespace             = "operand-ns"
-	testSQLiteConnector              = "sqlite"
-	testTOMLEnabledKey               = "enabled"
-	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
-	testTOMLRequestTimeoutSecsKey    = "request_timeout_secs"
-	testTOMLReadTimeoutSecsKey       = "read_timeout_secs"
-	testKindKey                      = "kind"
-	testMetadataKey                  = "metadata"
-	testDataKey                      = "data"
-	testTemplateKey                  = "template"
-	testContainersKey                = "containers"
-	testConfigTOMLKey                = "config.toml"
-	testRestImageParam               = "REST_IMAGE"
-	testFlightImageParam             = "FLIGHT_IMAGE"
-	testSpecKey                      = "spec"
-	testNamespace                    = "test-ns"
-	testFlightServiceCA              = "flight-service-ca"
+	testKindKey        = "kind"
+	testMetadataKey    = "metadata"
+	testFlightCACMName = "flight-service-ca"
+	testDataKey        = "data"
+	testConfigTOMLKey  = "config.toml"
+	testSpecKey        = "spec"
+	testNamespace      = "test-ns"
+	testTemplateKey    = "template"
+	testContainersKey  = "containers"
 )
-
-func flightServiceConfigMap(configTOML string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]any{
-		testKindKey: kindConfigMap,
-		testMetadataKey: map[string]any{
-			"labels": map[string]any{
-				"app.kubernetes.io/name": nameFlightService,
-			},
-		},
-		testDataKey: map[string]any{
-			testConfigTOMLKey: configTOML,
-		},
-	}}
-}
-
-func configMapWithTOML(configTOML string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]any{
-		testKindKey:     kindConfigMap,
-		testMetadataKey: map[string]any{},
-		testDataKey: map[string]any{
-			testConfigTOMLKey: configTOML,
-		},
-	}}
-}
 
 func parsedConfigMapTOML(t *testing.T, configMap *unstructured.Unstructured) map[string]any {
 	t.Helper()
@@ -104,417 +63,285 @@ func parsedConfigMapTOML(t *testing.T, configMap *unstructured.Unstructured) map
 	return config
 }
 
-func TestSetConfigMapFlightConnectorSettingsAddConnector(t *testing.T) {
-	// Add connector settings for connectors that are not in the base configuration.
-	disabled := false
-	enabled := true
-	tests := []struct {
-		name          string
-		connectorName string
-		enabled       *bool
-		configTOML    string
-		expected      string
-	}{
-		{
-			name:          "disabled SQLite",
-			connectorName: testSQLiteConnector,
-			enabled:       &disabled,
-			configTOML: `
-[connectors.default]
-enabled = false
-`,
-			expected: "[connectors.sqlite]\nenabled = false",
-		},
-		{
-			name:          "enabled custom connector",
-			connectorName: "custom",
-			enabled:       &enabled,
-			configTOML: `
-[connectors.default]
-enabled = false
-`,
-			expected: "[connectors.custom]\nenabled = true",
-		},
-		{
-			name:          "missing enabled",
-			connectorName: testSQLiteConnector,
-			configTOML: `
-[connectors.default]
-enabled = true
-`,
-			expected: "[connectors.sqlite]\nenabled = false",
-		},
+// renderChart renders the data-connect-hub chart the way reconcileManifests
+// does, for tests that assert on the rendered operand resources. The CR name
+// matches testFlightServiceName in helm_test.go ("default-dcs-flight").
+func renderChart(t *testing.T) []*unstructured.Unstructured {
+	t.Helper()
+	r := &DataConnectServiceReconciler{
+		RestImage:          "example.com/rest:latest",
+		FlightImage:        "example.com/flight:latest",
+		KubeRbacProxyImage: "example.com/kube-rbac-proxy:latest",
 	}
+	cr := &dchv1alpha1.DataConnectService{
+		ObjectMeta: metav1.ObjectMeta{Name: testCRName},
+	}
+	values, err := r.buildHelmValues(cr, &platformConfig{
+		GatewayName:      "test-gateway",
+		GatewayNamespace: testNamespace,
+	}, RenderOptions{})
+	if err != nil {
+		t.Fatalf("building helm values: %v", err)
+	}
+	resources, err := NewHelmRenderer(filepath.Join("..", "..", "..", "manifests", "charts", "data-connect-hub")).
+		RenderChart(values, testNamespace)
+	if err != nil {
+		t.Fatalf("rendering chart: %v", err)
+	}
+	return resources
+}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			configMap := flightServiceConfigMap(tt.configTOML)
+func renderedRESTDeployment(t *testing.T) ([]*unstructured.Unstructured, *unstructured.Unstructured) {
+	t.Helper()
+	resources := renderChart(t)
+	for _, resource := range resources {
+		if resource.GetKind() != kindDeployment || !strings.HasSuffix(resource.GetName(), "rest-service") {
+			continue
+		}
+		return resources, resource
+	}
+	t.Fatal("rendered REST deployment not found")
+	return nil, nil
+}
 
-			if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
-				Connectors: []dchv1alpha1.ConnectorConfig{{Name: tt.connectorName, Enabled: tt.enabled}},
-			}); err != nil {
-				t.Fatal(err)
+func findRESTServiceResources(t *testing.T, resources []*unstructured.Unstructured) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured) {
+	t.Helper()
+	var configMap, deployment, networkPolicy *unstructured.Unstructured
+	for _, resource := range resources {
+		switch resource.GetKind() {
+		case kindConfigMap:
+			if strings.HasSuffix(resource.GetName(), "rest-service-config") {
+				configMap = resource
 			}
+		case kindDeployment:
+			if strings.HasSuffix(resource.GetName(), "rest-service") {
+				deployment = resource
+			}
+		case kindNetworkPolicy:
+			if strings.HasSuffix(resource.GetName(), "rest-service") {
+				networkPolicy = resource
+			}
+		}
+	}
+	if configMap == nil || deployment == nil || networkPolicy == nil {
+		t.Fatal("rendered REST ConfigMap, Deployment, or NetworkPolicy is missing")
+	}
+	return configMap, deployment, networkPolicy
+}
 
-			data, found, err := unstructured.NestedStringMap(configMap.Object, testDataKey)
-			if err != nil || !found {
-				t.Fatalf("expected ConfigMap data, found=%v err=%v", found, err)
-			}
-			if !strings.Contains(data[testConfigTOMLKey], tt.expected) {
-				t.Fatalf("expected %s, got:\n%s", tt.expected, data[testConfigTOMLKey])
-			}
-		})
+func assertRESTServiceConfig(t *testing.T, configMap *unstructured.Unstructured) {
+	t.Helper()
+	config := parsedConfigMapTOML(t, configMap)
+	server := config["server"].(map[string]any)
+	if server["address"] != "127.0.0.1" || server["port"] != int64(8080) {
+		t.Errorf("REST server config = %#v, want loopback:8080", server)
+	}
+	metrics := config["metrics"].(map[string]any)
+	if metrics["address"] != "0.0.0.0" || metrics["port"] != int64(9090) {
+		t.Errorf("metrics config = %#v, want 0.0.0.0:9090", metrics)
 	}
 }
 
-func TestSetConfigMapFlightConnectorSettingsUpdateConnector(t *testing.T) {
-	// Update specified connector settings while preserving unspecified connector settings.
-	enabled := true
-	connectionTimeout := &metav1.Duration{Duration: 30 * time.Second}
-	requestTimeout := &metav1.Duration{Duration: 45 * time.Second}
-	readTimeout := &metav1.Duration{Duration: 15 * time.Second}
-	configTOML := `
-[connectors.default]
-enabled = false
-connection_timeout_secs = 10
-
-[connectors.postgres]
-enabled = true
-connection_timeout_secs = 30
-
-[connectors.s3]
-enabled = true
-chunk_size = 1024
-
-[connectors.sqlite]
-enabled = false
-connection_timeout_secs = 10
-
-[connectors.neo4j]
-enabled = false
-connection_timeout_secs = 20
-`
-	configMap := flightServiceConfigMap(configTOML)
-
-	if err := setConfigMapFlightConnectorSettings([]*unstructured.Unstructured{configMap}, nameFlightService, &dchv1alpha1.ServiceOverrides{
-		Connectors: []dchv1alpha1.ConnectorConfig{
-			{
-				Name:              testSQLiteConnector,
-				Enabled:           &enabled,
-				ConnectionTimeout: connectionTimeout,
-				RequestTimeout:    requestTimeout,
-				ReadTimeout:       readTimeout,
-			},
-			{Name: "neo4j", Enabled: &enabled},
-		},
-	}); err != nil {
-		t.Fatal(err)
+func assertRESTServiceProbes(t *testing.T, deployment *unstructured.Unstructured) {
+	t.Helper()
+	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
+	var restContainer map[string]any
+	for _, raw := range containers {
+		container, ok := raw.(map[string]any)
+		if ok && container[resourceNameField] == "rest-server" {
+			restContainer = container
+		}
 	}
-
-	data, found, err := unstructured.NestedStringMap(configMap.Object, testDataKey)
-	if err != nil || !found {
-		t.Fatalf("expected ConfigMap data, found=%v err=%v", found, err)
+	if restContainer == nil {
+		t.Fatal("rendered REST deployment has no rest-server container")
 	}
-	var updated map[string]any
-	if err := toml.Unmarshal([]byte(data[testConfigTOMLKey]), &updated); err != nil {
-		t.Fatalf("expected valid updated TOML: %v", err)
-	}
-	connectors, ok := updated["connectors"].(map[string]any)
-	if !ok {
-		t.Fatalf("expected connectors table, got %#v", updated["connectors"])
-	}
-	assertConnector := func(name string, expected map[string]any) {
-		t.Helper()
-		connector, ok := connectors[name].(map[string]any)
+	for _, probeName := range []string{"readinessProbe", "livenessProbe"} {
+		probe, ok := restContainer[probeName].(map[string]any)
 		if !ok {
-			t.Fatalf("expected %s connector table, got %#v", name, connectors[name])
+			t.Errorf("%s is missing", probeName)
+			continue
 		}
-		for key, expectedValue := range expected {
-			if connector[key] != expectedValue {
-				t.Errorf("expected connectors.%s.%s=%v, got %v", name, key, expectedValue, connector[key])
+		httpGet, _ := probe["httpGet"].(map[string]any)
+		port, ok := asInt64(httpGet["port"])
+		if httpGet["scheme"] != "HTTPS" || httpGet["path"] != "/health" || !ok || port != 8443 {
+			t.Errorf("%s httpGet = %#v, want HTTPS /health on port 8443", probeName, httpGet)
+		}
+		wantDelay, wantPeriod := int64(3), int64(10)
+		if probeName == "livenessProbe" {
+			wantDelay, wantPeriod = 5, 15
+		}
+		gotDelay, delayOK := asInt64(probe["initialDelaySeconds"])
+		gotPeriod, periodOK := asInt64(probe["periodSeconds"])
+		if !delayOK || !periodOK || gotDelay != wantDelay || gotPeriod != wantPeriod {
+			t.Errorf("%s timing = %v/%v, want %d/%d", probeName, probe["initialDelaySeconds"], probe["periodSeconds"], wantDelay, wantPeriod)
+		}
+	}
+}
+
+func assertRESTServiceIngress(t *testing.T, networkPolicy *unstructured.Unstructured) {
+	t.Helper()
+	ingress, found, err := unstructured.NestedSlice(networkPolicy.Object, "spec", "ingress")
+	if err != nil || !found || len(ingress) == 0 {
+		t.Fatalf("ingress rules = %v, found=%t err=%v, want non-empty ingress", ingress, found, err)
+	}
+	ports := map[int64]bool{}
+	for _, rawRule := range ingress {
+		rule, ok := rawRule.(map[string]any)
+		if !ok {
+			t.Fatalf("ingress rule has unexpected type %T", rawRule)
+		}
+		rawPorts, ok := rule["ports"].([]any)
+		if !ok || len(rawPorts) != 1 {
+			t.Fatalf("ingress rule ports = %#v, want one port", rule["ports"])
+		}
+		port := rawPorts[0].(map[string]any)
+		if port["protocol"] != "TCP" {
+			t.Errorf("ingress protocol = %v, want TCP", port["protocol"])
+		}
+		portNum, ok := asInt64(port["port"])
+		if !ok {
+			t.Fatalf("ingress port has unexpected type %T", port["port"])
+		}
+		ports[portNum] = true
+		if portNum == 8443 {
+			// The TLS proxy port must be source-restricted: a missing or empty
+			// from list means unrestricted ingress (CWE-284).
+			from, ok := rule["from"].([]any)
+			if !ok || len(from) == 0 {
+				t.Errorf("ingress on 8443 is unrestricted: %#v", rule)
+				continue
+			}
+			for _, rawPeer := range from {
+				peer, ok := rawPeer.(map[string]any)
+				if !ok {
+					t.Fatalf("ingress peer has unexpected type %T", rawPeer)
+				}
+				ns, ok := peer["namespaceSelector"].(map[string]any)
+				if !ok {
+					t.Fatalf("ingress peer on 8443 has no namespaceSelector: %#v", peer)
+				}
+				matchLabels, _ := ns["matchLabels"].(map[string]any)
+				if len(matchLabels) == 0 {
+					t.Errorf("ingress peer on 8443 has an empty namespaceSelector: %#v", peer)
+				}
 			}
 		}
 	}
-	assertConnector("postgres", map[string]any{
-		testTOMLEnabledKey:               true,
-		testTOMLConnectionTimeoutSecsKey: int64(30),
-	})
-	assertConnector("s3", map[string]any{
-		testTOMLEnabledKey: true,
-		"chunk_size":       int64(1024),
-	})
-	assertConnector(testSQLiteConnector, map[string]any{
-		testTOMLEnabledKey:               true,
-		testTOMLConnectionTimeoutSecsKey: int64(30),
-		testTOMLRequestTimeoutSecsKey:    int64(45),
-		testTOMLReadTimeoutSecsKey:       int64(15),
-	})
-	assertConnector("neo4j", map[string]any{
-		testTOMLEnabledKey:               true,
-		testTOMLConnectionTimeoutSecsKey: int64(20),
-	})
-	if connectors["default"].(map[string]any)["enabled"] != false {
-		t.Errorf("expected connectors.default.enabled=false, got %v", connectors["default"].(map[string]any)["enabled"])
+	if !ports[8443] || !ports[9090] {
+		t.Errorf("ingress ports = %v, want 8443 and 9090", ports)
+	}
+	if len(ports) != 2 {
+		t.Errorf("ingress ports = %v, want only 8443 and 9090", ports)
 	}
 }
 
-func TestSetConfigMapFlightServiceAddress(t *testing.T) {
-	configMap := configMapWithTOML(`[flight-service]
-address = "flight-service"
-`)
-	service := &unstructured.Unstructured{Object: map[string]any{
-		testKindKey: kindService,
-		"metadata": map[string]any{
-			resourceNameField: "dch-default-dcs-flight",
-		},
+func kubeRbacProxyDeployment(args ...any) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		testKindKey: kindDeployment,
+		"spec": map[string]any{testTemplateKey: map[string]any{"spec": map[string]any{
+			testContainersKey: []any{map[string]any{resourceNameField: nameKubeRbacProxy, "args": args}},
+		}}},
 	}}
-
-	if err := setConfigMapFlightServiceAddress([]*unstructured.Unstructured{service, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
-		t.Fatal(err)
-	}
-	flightService, ok := parsedConfigMapTOML(t, configMap)["flight-service"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [flight-service] table")
-	}
-	if got, want := flightService["address"], "dch-default-dcs-flight.test-namespace.svc"; got != want {
-		t.Errorf("flight-service.address = %v, want %q", got, want)
-	}
 }
 
-func TestSetConfigMapGlobalNamespace(t *testing.T) {
-	defaultTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "opendatahub"
-`)
-	customTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "custom-tenant"
-`)
-	noTenant := configMapWithTOML(`[server]
-port = 8080
-`)
-
-	if err := setConfigMapGlobalNamespace([]*unstructured.Unstructured{defaultTenant, customTenant, noTenant}, "test-namespace"); err != nil {
-		t.Fatal(err)
-	}
-
-	for _, tt := range []struct {
-		name string
-		cm   *unstructured.Unstructured
-		want string
-	}{
-		{name: "default tenant", cm: defaultTenant, want: "test-namespace"},
-		{name: "custom tenant remains unchanged", cm: customTenant, want: "custom-tenant"},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			global, ok := parsedConfigMapTOML(t, tt.cm)["global-connection-types"].(map[string]any)
-			if !ok {
-				t.Fatal("expected [global-connection-types] table")
-			}
-			if got := global["tenant-id"]; got != tt.want {
-				t.Errorf("tenant-id = %v, want %q", got, tt.want)
-			}
-		})
-	}
-	if got := parsedConfigMapTOML(t, noTenant)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without tenant-id was changed unexpectedly; server.port = %v", got)
-	}
-}
-
-func TestSetConfigMapDiscoveryServiceAccount(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
-enabled = true
-discovery_service_account = "old-identity"
-`)
-	configMap.SetName("dch-default-dcs-flight-config")
-	serviceAccount := &unstructured.Unstructured{Object: map[string]any{
-		testKindKey: kindServiceAccount,
-		"metadata": map[string]any{
-			resourceNameField: "dch-rest-service-sa",
-		},
-	}}
-
-	if err := setConfigMapDiscoveryServiceAccount([]*unstructured.Unstructured{serviceAccount, configMap}, "test-namespace", "default-dcs-flight"); err != nil {
-		t.Fatal(err)
-	}
-	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [auth] table")
-	}
-	if got, want := auth["discovery_service_account"], "system:serviceaccount:test-namespace:dch-rest-service-sa"; got != want {
-		t.Errorf("discovery_service_account = %v, want %q", got, want)
-	}
-}
-
-func TestSetConfigMapAudiences(t *testing.T) {
-	configMap := configMapWithTOML(`[auth]
-enabled = true
-token_review_audiences = ["old-audience"]
-`)
-	noAuth := configMapWithTOML(`[server]
-port = 8080
-`)
-	audiences := []string{"audience-one", "audience-two"}
-
-	updated, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap, noAuth}, audiences)
+func kubeRbacProxyArgs(t *testing.T, deployment *unstructured.Unstructured) []string {
+	t.Helper()
+	containers, _, err := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !updated {
-		t.Fatal("expected an auth ConfigMap to be updated")
+	container := containers[0].(map[string]any)
+	args := container["args"].([]any)
+	result := make([]string, len(args))
+	for i, arg := range args {
+		result[i] = arg.(string)
 	}
-	auth, ok := parsedConfigMapTOML(t, configMap)["auth"].(map[string]any)
-	if !ok {
-		t.Fatal("expected [auth] table")
+	return result
+}
+
+func setKubeRbacProxyArgs(t *testing.T, deployment *unstructured.Unstructured, args []string) {
+	t.Helper()
+	containers, _, err := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
+	if err != nil {
+		t.Fatal(err)
 	}
-	got, ok := auth["token_review_audiences"].([]any)
-	if !ok || len(got) != len(audiences) {
-		t.Fatalf("token_review_audiences = %#v, want %#v", auth["token_review_audiences"], audiences)
+	container := containers[0].(map[string]any)
+	values := make([]any, len(args))
+	for i := range args {
+		values[i] = args[i]
 	}
-	for i, audience := range audiences {
-		if got[i] != audience {
-			t.Errorf("token_review_audiences[%d] = %v, want %q", i, got[i], audience)
+	container["args"] = values
+	containers[0] = container
+	if err := unstructured.SetNestedSlice(deployment.Object, containers, "spec", testTemplateKey, "spec", testContainersKey); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func containsString(values []string, want string) bool {
+	return slices.Contains(values, want)
+}
+
+func containsArgPrefix(values []string, prefix string) bool {
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			return true
 		}
 	}
-	if got := parsedConfigMapTOML(t, noAuth)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without [auth] was changed unexpectedly; server.port = %v", got)
-	}
+	return false
 }
 
-func TestSetConfigMapAudiencesRejectsInvalidTOML(t *testing.T) {
-	configMap := configMapWithTOML("[auth\nenabled = true")
-	if _, err := setConfigMapAudiences([]*unstructured.Unstructured{configMap}, []string{"audience"}); err == nil {
-		t.Fatal("expected invalid TOML to return an error")
+func countArgPrefix(values []string, prefix string) int {
+	count := 0
+	for _, value := range values {
+		if strings.HasPrefix(value, prefix) {
+			count++
+		}
 	}
+	return count
 }
 
-func TestBuildServicePatchesUseSeparateDeploymentAndContainerNames(t *testing.T) {
-	patches := buildServicePatches(nameFlightService, nameFlightServiceContainer, &dchv1alpha1.ServiceOverrides{
-		Env: []corev1.EnvVar{{Name: "CUSTOM_VAR", Value: "custom-value"}},
-	})
-	if len(patches) != 1 {
-		t.Fatalf("patch count = %d, want 1", len(patches))
+func flightConfigMap(t *testing.T, resources []*unstructured.Unstructured) *unstructured.Unstructured {
+	t.Helper()
+	for _, resource := range resources {
+		if resource.GetKind() == kindConfigMap && resource.GetLabels()[labelAppName] == testFlightServiceName {
+			return resource
+		}
 	}
-	if got := patches[0].Target.Name; got != nameFlightService {
-		t.Errorf("patch target Deployment = %q, want %q", got, nameFlightService)
-	}
-	if !strings.Contains(patches[0].Patch, "metadata:\n  name: "+nameFlightService+"\n") {
-		t.Errorf("patch does not target Deployment %q:\n%s", nameFlightService, patches[0].Patch)
-	}
-	if !strings.Contains(patches[0].Patch, "- name: "+nameFlightServiceContainer+"\n") {
-		t.Errorf("patch does not target container %q:\n%s", nameFlightServiceContainer, patches[0].Patch)
-	}
+	t.Fatal("rendered flight-service ConfigMap is missing")
+	return nil
 }
 
-// TestRenderKustomizationManifestRoots renders each root the controller may
-// build, through the in-memory staging that production uses, so that a
-// kustomization reaching outside its own directory is caught here.
-func TestRenderKustomizationManifestRoots(t *testing.T) {
-	manifestsPath := filepath.Join("..", "..", "..", "config")
-
-	tests := []struct {
-		name               string
-		path               string
-		wantServiceMonitor bool
-	}{
-		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
-		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift"), wantServiceMonitor: true},
+// asInt64 normalizes the numeric types produced by the chart's YAML decoder
+// (float64 via YAML-to-JSON) and by hand-built test objects (int64) so
+// assertions can compare rendered values directly.
+func asInt64(value any) (int64, bool) {
+	switch v := value.(type) {
+	case int64:
+		return v, true
+	case float64:
+		return int64(v), true
+	case int:
+		return int64(v), true
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil)
-			if err != nil {
-				t.Fatalf("rendering %s: %v", tt.path, err)
-			}
-
-			var deployments, serviceMonitors int
-			for _, obj := range resources {
-				switch obj.GetKind() {
-				case kindDeployment:
-					deployments++
-				case "ServiceMonitor":
-					serviceMonitors++
-				}
-			}
-
-			if deployments != 2 {
-				t.Errorf("rendered Deployments = %d, want 2", deployments)
-			}
-			want := 0
-			if tt.wantServiceMonitor {
-				want = 1
-			}
-			if serviceMonitors != want {
-				t.Errorf("rendered ServiceMonitors = %d, want %d", serviceMonitors, want)
-			}
-		})
-	}
+	return 0, false
 }
 
-func TestRenderKustomizationGatewayNamespace(t *testing.T) {
-	root := filepath.Join("..", "..", "..", "config")
-	for _, path := range []string{testBaseManifest, filepath.Join("overlays", "openshift")} {
-		t.Run(path, func(t *testing.T) {
-			resources, err := renderKustomization(root, filepath.Join(root, path), nil, map[string]string{
-				"CONTROLLER_NAMESPACE": testControllerNamespace,
-				"GATEWAY_NAME":         testGatewayName,
-				"GATEWAY_NAMESPACE":    testOpenShiftGatewayNamespace,
-				"OPERAND_NAMESPACE":    testOperandNamespace,
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			found := 0
-			paramsFound := false
-			for _, obj := range resources {
-				if obj.GetKind() == kindConfigMap && obj.GetName() == "dch-params" {
-					paramsFound = true
-				}
-				if obj.GetKind() != kindNetworkPolicy {
-					continue
-				}
-				var policy networkingv1.NetworkPolicy
-				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &policy); err != nil {
-					t.Fatal(err)
-				}
-				gatewayIngress := 0
-				if policy.Labels[labelAppName] == nameFlightService {
-					gatewayIngress = 1
-					peer := policy.Spec.Ingress[0].From[0]
-					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testOperandNamespace {
-						t.Errorf("%s REST namespace = %q, want %s", policy.Name, got, testOperandNamespace)
-					}
-					if peer.PodSelector.MatchLabels[labelAppName] != nameRestService {
-						t.Errorf("%s REST selector = %q, want %s", policy.Name, peer.PodSelector.MatchLabels[labelAppName], nameRestService)
-					}
-				} else {
-					peer := policy.Spec.Ingress[1].From[0]
-					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testControllerNamespace {
-						t.Errorf("%s controller namespace = %q, want %s", policy.Name, got, testControllerNamespace)
-					}
-					if peer.PodSelector.MatchLabels[labelAppName] != "dc-controller" {
-						t.Errorf("%s controller selector = %q, want dc-controller", policy.Name, peer.PodSelector.MatchLabels[labelAppName])
-					}
-				}
-				got := policy.Spec.Ingress[gatewayIngress].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
-				if got != testOpenShiftGatewayNamespace {
-					t.Errorf("%s gateway namespace = %q, want %s", policy.Name, got, testOpenShiftGatewayNamespace)
-				}
-				got = policy.Spec.Ingress[gatewayIngress].From[0].PodSelector.MatchLabels["gateway.networking.k8s.io/gateway-name"]
-				if got != testGatewayName {
-					t.Errorf("%s gateway name = %q, want %s", policy.Name, got, testGatewayName)
-				}
-				found++
-			}
-			if found != 2 {
-				t.Errorf("rendered %d NetworkPolicies, want 2", found)
-			}
-			if !paramsFound {
-				t.Error("rendered params ConfigMap must have a stable name")
-			}
-		})
+func tomlStringList(value any) []string {
+	switch list := value.(type) {
+	case []string:
+		return list
+	case []any:
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			s, _ := item.(string)
+			out = append(out, s)
+		}
+		return out
 	}
+	return nil
 }
+
+const tlsECDHERSAAES128GCM = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
 
 func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 	tests := []struct {
@@ -538,7 +365,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, deployment := renderedRESTResources(t)
+			resources, deployment := renderedRESTDeployment(t)
 			args := kubeRbacProxyArgs(t, deployment)
 			args = append(args, "--tls-min-version", "old", "--tls-cipher-suites", "old")
 			setKubeRbacProxyArgs(t, deployment, args)
@@ -633,7 +460,7 @@ func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 		}).Build()
 	r := &DataConnectServiceReconciler{
 		Client:             cli,
-		ManifestsPath:      filepath.Join("..", "..", "..", "config"),
+		ChartPath:          filepath.Join("..", "..", "..", "manifests", "charts", "data-connect-hub"),
 		RestImage:          "example.com/rest:latest",
 		FlightImage:        "example.com/flight:latest",
 		KubeRbacProxyImage: "example.com/kube-rbac-proxy:latest",
@@ -673,40 +500,12 @@ func tlsConfigScheme(t *testing.T) *runtime.Scheme {
 }
 
 func TestRenderRESTServiceTLSLockdown(t *testing.T) {
-	resources := renderRESTBase(t)
+	resources := renderChart(t)
 	configMap, deployment, networkPolicy := findRESTServiceResources(t, resources)
 	assertRESTServiceConfig(t, configMap)
 	assertRESTServiceProbes(t, deployment)
 	assertRESTServiceIngress(t, networkPolicy)
 }
-
-func flightConfigMap(t *testing.T, resources []*unstructured.Unstructured) *unstructured.Unstructured {
-	t.Helper()
-	for _, resource := range resources {
-		if resource.GetKind() == kindConfigMap && resource.GetLabels()[labelAppName] == nameFlightService {
-			return resource
-		}
-	}
-	t.Fatal("rendered flight-service ConfigMap is missing")
-	return nil
-}
-
-func tomlStringList(value any) []string {
-	switch list := value.(type) {
-	case []string:
-		return list
-	case []any:
-		out := make([]string, 0, len(list))
-		for _, item := range list {
-			s, _ := item.(string)
-			out = append(out, s)
-		}
-		return out
-	}
-	return nil
-}
-
-const tlsECDHERSAAES128GCM = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
 
 func TestSetConfigMapFlightTLSProfile(t *testing.T) {
 	tests := []struct {
@@ -756,8 +555,8 @@ func TestSetConfigMapFlightTLSProfile(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resources := renderRESTBase(t)
-			if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, tt.spec); err != nil {
+			resources := renderChart(t)
+			if err := setConfigMapFlightTLSProfile(context.Background(), resources, testFlightServiceName, tt.spec); err != nil {
 				t.Fatalf("setConfigMapFlightTLSProfile() error = %v", err)
 			}
 			config := parsedConfigMapTOML(t, flightConfigMap(t, resources))
@@ -793,7 +592,7 @@ func TestSetConfigMapFlightTLSProfile(t *testing.T) {
 				if err != nil {
 					t.Fatalf("parsing ConfigMap %q: %v", resource.GetName(), err)
 				}
-				if restTLS, ok := config["tls"].(map[string]any); ok && resource.GetLabels()[labelAppName] != nameFlightService {
+				if restTLS, ok := config["tls"].(map[string]any); ok && resource.GetLabels()[labelAppName] != testFlightServiceName {
 					if restTLS["min_version"] != nil || restTLS["ciphers"] != nil {
 						t.Errorf("ConfigMap %q unexpectedly received a TLS policy", resource.GetName())
 					}
@@ -809,8 +608,8 @@ func TestSetConfigMapFlightTLSProfileOldProjectsForFailFastStartup(t *testing.T)
 	// the service fails fast at startup instead of silently upgrading the
 	// minimum. The projected cipher list keeps the Old-only suites (3DES, CBC)
 	// and drops the TLS 1.3 suites that cannot negotiate under TLS 1.0.
-	resources := renderRESTBase(t)
-	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileOldType]); err != nil {
+	resources := renderChart(t)
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, testFlightServiceName, *configv1.TLSProfiles[configv1.TLSProfileOldType]); err != nil {
 		t.Fatalf("setConfigMapFlightTLSProfile() error = %v", err)
 	}
 	config := parsedConfigMapTOML(t, flightConfigMap(t, resources))
@@ -833,432 +632,32 @@ func TestSetConfigMapFlightTLSProfileOldProjectsForFailFastStartup(t *testing.T)
 }
 
 func TestSetConfigMapFlightTLSProfileRejectsUnusableCiphers(t *testing.T) {
-	resources := renderRESTBase(t)
+	resources := renderChart(t)
 	spec := configv1.TLSProfileSpec{
 		MinTLSVersion: configv1.VersionTLS12,
 		Ciphers:       []string{"TLS_FAKE_CIPHER_WITH_NO_MAPPING"},
 	}
-	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, spec); err == nil {
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, testFlightServiceName, spec); err == nil {
 		t.Fatal("setConfigMapFlightTLSProfile() with an all-unusable cipher list = nil error, want rejection")
 	}
 }
 
 func TestFlightTLSProfileChangesTriggerConfigHashRollout(t *testing.T) {
-	resources := renderRESTBase(t)
+	resources := renderChart(t)
 	flightCM := flightConfigMap(t, resources)
 
-	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileIntermediateType]); err != nil {
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, testFlightServiceName, *configv1.TLSProfiles[configv1.TLSProfileIntermediateType]); err != nil {
 		t.Fatalf("projecting Intermediate: %v", err)
 	}
 	hashIntermediate := specHash(flightCM)
 
-	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileModernType]); err != nil {
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, testFlightServiceName, *configv1.TLSProfiles[configv1.TLSProfileModernType]); err != nil {
 		t.Fatalf("projecting Modern: %v", err)
 	}
 	hashModern := specHash(flightCM)
 
 	if hashIntermediate == "" || hashModern == "" || hashIntermediate == hashModern {
 		t.Errorf("config hash did not change with the TLS profile: intermediate=%q modern=%q", hashIntermediate, hashModern)
-	}
-}
-
-func renderRESTBase(t *testing.T) []*unstructured.Unstructured {
-	t.Helper()
-	manifestsPath := filepath.Join("..", "..", "..", "config")
-	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, "base"), nil, nil)
-	if err != nil {
-		t.Fatalf("rendering base manifests: %v", err)
-	}
-	return resources
-}
-
-func findRESTServiceResources(t *testing.T, resources []*unstructured.Unstructured) (*unstructured.Unstructured, *unstructured.Unstructured, *unstructured.Unstructured) {
-	t.Helper()
-	var configMap, deployment, networkPolicy *unstructured.Unstructured
-	for _, resource := range resources {
-		switch resource.GetKind() {
-		case kindConfigMap:
-			if strings.HasSuffix(resource.GetName(), "rest-service-config") {
-				configMap = resource
-			}
-		case kindDeployment:
-			if strings.HasSuffix(resource.GetName(), nameRestService) {
-				deployment = resource
-			}
-		case kindNetworkPolicy:
-			if strings.HasSuffix(resource.GetName(), nameRestService) {
-				networkPolicy = resource
-			}
-		}
-	}
-	if configMap == nil || deployment == nil || networkPolicy == nil {
-		t.Fatal("rendered REST ConfigMap, Deployment, or NetworkPolicy is missing")
-	}
-	return configMap, deployment, networkPolicy
-}
-
-func assertRESTServiceConfig(t *testing.T, configMap *unstructured.Unstructured) {
-	t.Helper()
-	config := parsedConfigMapTOML(t, configMap)
-	server := config["server"].(map[string]any)
-	if server["address"] != "127.0.0.1" || server["port"] != int64(8080) {
-		t.Errorf("REST server config = %#v, want loopback:8080", server)
-	}
-	metrics := config["metrics"].(map[string]any)
-	if metrics["address"] != "0.0.0.0" || metrics["port"] != int64(9090) {
-		t.Errorf("metrics config = %#v, want 0.0.0.0:9090", metrics)
-	}
-}
-
-func assertRESTServiceProbes(t *testing.T, deployment *unstructured.Unstructured) {
-	t.Helper()
-	containers, _, _ := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
-	var restContainer map[string]any
-	for _, raw := range containers {
-		container, ok := raw.(map[string]any)
-		if ok && container[resourceNameField] == nameRestServiceContainer {
-			restContainer = container
-		}
-	}
-	if restContainer == nil {
-		t.Fatal("rendered REST deployment has no rest-server container")
-	}
-	for _, probeName := range []string{"readinessProbe", "livenessProbe"} {
-		probe, ok := restContainer[probeName].(map[string]any)
-		if !ok {
-			t.Errorf("%s is missing", probeName)
-			continue
-		}
-		httpGet, _ := probe["httpGet"].(map[string]any)
-		if httpGet["scheme"] != "HTTPS" || httpGet["path"] != "/health" || httpGet["port"] != int64(8443) {
-			t.Errorf("%s httpGet = %#v, want HTTPS /health on port 8443", probeName, httpGet)
-		}
-		wantDelay, wantPeriod := int64(3), int64(10)
-		if probeName == "livenessProbe" {
-			wantDelay, wantPeriod = 5, 15
-		}
-		if probe["initialDelaySeconds"] != wantDelay || probe["periodSeconds"] != wantPeriod {
-			t.Errorf("%s timing = %v/%v, want %d/%d", probeName, probe["initialDelaySeconds"], probe["periodSeconds"], wantDelay, wantPeriod)
-		}
-	}
-}
-
-func assertRESTServiceIngress(t *testing.T, networkPolicy *unstructured.Unstructured) {
-	t.Helper()
-	ingress, found, err := unstructured.NestedSlice(networkPolicy.Object, "spec", "ingress")
-	if err != nil || !found || len(ingress) == 0 {
-		t.Fatalf("ingress rules = %v, found=%t err=%v, want non-empty ingress", ingress, found, err)
-	}
-	ports := map[int64]bool{}
-	for _, rawRule := range ingress {
-		rule, ok := rawRule.(map[string]any)
-		if !ok {
-			t.Fatalf("ingress rule has unexpected type %T", rawRule)
-		}
-		rawPorts, ok := rule["ports"].([]any)
-		if !ok || len(rawPorts) != 1 {
-			t.Fatalf("ingress rule ports = %#v, want one port", rule["ports"])
-		}
-		port := rawPorts[0].(map[string]any)
-		if port["protocol"] != "TCP" {
-			t.Errorf("ingress protocol = %v, want TCP", port["protocol"])
-		}
-		portNum, ok := port["port"].(int64)
-		if !ok {
-			t.Fatalf("ingress port has unexpected type %T", port["port"])
-		}
-		ports[portNum] = true
-		if portNum == 8443 {
-			// The TLS proxy port must be source-restricted: a missing or empty
-			// from list means unrestricted ingress (CWE-284).
-			from, ok := rule["from"].([]any)
-			if !ok || len(from) == 0 {
-				t.Errorf("ingress on 8443 is unrestricted: %#v", rule)
-				continue
-			}
-			for _, rawPeer := range from {
-				peer, ok := rawPeer.(map[string]any)
-				if !ok {
-					t.Fatalf("ingress peer has unexpected type %T", rawPeer)
-				}
-				ns, ok := peer["namespaceSelector"].(map[string]any)
-				if !ok {
-					t.Fatalf("ingress peer on 8443 has no namespaceSelector: %#v", peer)
-				}
-				matchLabels, _ := ns["matchLabels"].(map[string]any)
-				if len(matchLabels) == 0 {
-					t.Errorf("ingress peer on 8443 has an empty namespaceSelector: %#v", peer)
-				}
-			}
-		}
-	}
-	if !ports[8443] || !ports[9090] {
-		t.Errorf("ingress ports = %v, want 8443 and 9090", ports)
-	}
-	if len(ports) != 2 {
-		t.Errorf("ingress ports = %v, want only 8443 and 9090", ports)
-	}
-}
-
-func kubeRbacProxyDeployment(args ...any) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]any{
-		testKindKey: kindDeployment,
-		"spec": map[string]any{testTemplateKey: map[string]any{"spec": map[string]any{
-			testContainersKey: []any{map[string]any{resourceNameField: nameKubeRbacProxy, "args": args}},
-		}}},
-	}}
-}
-
-func kubeRbacProxyArgs(t *testing.T, deployment *unstructured.Unstructured) []string {
-	t.Helper()
-	containers, _, err := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	container := containers[0].(map[string]any)
-	args := container["args"].([]any)
-	result := make([]string, len(args))
-	for i, arg := range args {
-		result[i] = arg.(string)
-	}
-	return result
-}
-
-func setKubeRbacProxyArgs(t *testing.T, deployment *unstructured.Unstructured, args []string) {
-	t.Helper()
-	containers, _, err := unstructured.NestedSlice(deployment.Object, "spec", testTemplateKey, "spec", testContainersKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-	container := containers[0].(map[string]any)
-	values := make([]any, len(args))
-	for i := range args {
-		values[i] = args[i]
-	}
-	container["args"] = values
-	containers[0] = container
-	if err := unstructured.SetNestedSlice(deployment.Object, containers, "spec", testTemplateKey, "spec", testContainersKey); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func renderedRESTResources(t *testing.T) ([]*unstructured.Unstructured, *unstructured.Unstructured) {
-	t.Helper()
-	manifestsPath := filepath.Join("..", "..", "..", "config")
-	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, "base"), nil, nil)
-	if err != nil {
-		t.Fatalf("rendering base manifests: %v", err)
-	}
-	for _, resource := range resources {
-		if resource.GetKind() != kindDeployment || !strings.HasSuffix(resource.GetName(), nameRestService) {
-			continue
-		}
-		return resources, resource
-	}
-	t.Fatal("rendered REST deployment not found")
-	return nil, nil
-}
-
-func containsString(values []string, want string) bool {
-	return slices.Contains(values, want)
-}
-
-func containsArgPrefix(values []string, prefix string) bool {
-	for _, value := range values {
-		if strings.HasPrefix(value, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-func countArgPrefix(values []string, prefix string) int {
-	count := 0
-	for _, value := range values {
-		if strings.HasPrefix(value, prefix) {
-			count++
-		}
-	}
-	return count
-}
-
-func TestRenderKustomizationImageParams(t *testing.T) {
-	manifestsPath := filepath.Join("..", "..", "..", "config")
-	paramsPath := filepath.Join(manifestsPath, testBaseManifest, "params.env")
-	originalParams, err := os.ReadFile(paramsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	imageParams := map[string]string{
-		RelatedImageRestService:   "registry.example.com/dch/rest@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-		RelatedImageFlightService: "registry.example.com/dch/flight@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-		RelatedImageKubeRbacProxy: "registry.example.com/dch/kube-rbac-proxy@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-	}
-	paths := []struct {
-		name string
-		path string
-	}{
-		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
-		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift")},
-	}
-
-	for _, tt := range paths {
-		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, imageParams)
-			if err != nil {
-				t.Fatalf("rendering %s: %v", tt.path, err)
-			}
-
-			wantImages := map[string]string{
-				nameRestServiceContainer:   imageParams[RelatedImageRestService],
-				nameFlightServiceContainer: imageParams[RelatedImageFlightService],
-				nameKubeRbacProxy:          imageParams[RelatedImageKubeRbacProxy],
-			}
-			for containerName, wantImage := range wantImages {
-				gotImage, found := renderedContainerImage(resources, containerName)
-				if !found {
-					t.Errorf("container %q not found in rendered Deployments", containerName)
-					continue
-				}
-				if gotImage != wantImage {
-					t.Errorf("container %q image = %q, want %q", containerName, gotImage, wantImage)
-				}
-			}
-		})
-	}
-
-	updatedParams, err := os.ReadFile(paramsPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(updatedParams) != string(originalParams) {
-		t.Fatal("rendering changed the source params.env on disk")
-	}
-}
-
-func renderedContainerImage(resources []*unstructured.Unstructured, containerName string) (string, bool) {
-	for _, obj := range resources {
-		if obj.GetKind() != kindDeployment {
-			continue
-		}
-		containers, found, err := unstructured.NestedSlice(obj.Object, "spec", testTemplateKey, "spec", testContainersKey)
-		if err != nil || !found {
-			continue
-		}
-		for _, raw := range containers {
-			container, ok := raw.(map[string]any)
-			if !ok || container[resourceNameField] != containerName {
-				continue
-			}
-			image, _ := container["image"].(string)
-			return image, true
-		}
-	}
-	return "", false
-}
-
-func TestMergeParamsEnvPreservesExistingParams(t *testing.T) {
-	fs := filesys.MakeFsInMemory()
-	path := filepath.Join("/manifests", "params.env")
-	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
-		t.Fatal(err)
-	}
-	original := "# defaults\nREST_IMAGE=old:tag\nKEEP=preserved\nFLIGHT_IMAGE=old-flight@sha256:old\n"
-	if err := fs.WriteFile(path, []byte(original)); err != nil {
-		t.Fatal(err)
-	}
-
-	overrides := map[string]string{
-		testRestImageParam:   "registry.example.com/rest@sha256:abc=def",
-		testFlightImageParam: "registry.example.com/flight@sha256:123",
-	}
-	if err := mergeParamsEnv(fs, path, overrides); err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := fs.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gotParams := make(map[string]string)
-	scanner := bufio.NewScanner(strings.NewReader(string(got)))
-	for scanner.Scan() {
-		key, value, ok := strings.Cut(scanner.Text(), "=")
-		if ok {
-			gotParams[key] = value
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatal(err)
-	}
-	wantParams := map[string]string{
-		testRestImageParam:   overrides[testRestImageParam],
-		testFlightImageParam: overrides[testFlightImageParam],
-		"KEEP":               "preserved",
-	}
-	if len(gotParams) != len(wantParams) {
-		t.Fatalf("params.env entries = %#v, want %#v", gotParams, wantParams)
-	}
-	for key, want := range wantParams {
-		if gotParams[key] != want {
-			t.Errorf("params.env[%q] = %q, want %q", key, gotParams[key], want)
-		}
-	}
-}
-
-func TestMergeParamsEnvRejectsInvalidValuesWithoutWriting(t *testing.T) {
-	fs := filesys.MakeFsInMemory()
-	path := filepath.Join("/manifests", "params.env")
-	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
-		t.Fatal(err)
-	}
-	original := testRestImageParam + "=old:tag\n" + testFlightImageParam + "=old-flight:tag\n"
-	if err := fs.WriteFile(path, []byte(original)); err != nil {
-		t.Fatal(err)
-	}
-
-	err := mergeParamsEnv(fs, path, map[string]string{
-		testRestImageParam:   "registry.example.com/rest:tag",
-		testFlightImageParam: "registry.example.com/flight\nmalicious=value",
-	})
-	if err == nil {
-		t.Fatal("expected error for a params.env value containing a newline")
-	}
-
-	got, readErr := fs.ReadFile(path)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if string(got) != original {
-		t.Errorf("params.env changed after failed merge: %q", got)
-	}
-}
-
-func TestMergeParamsEnvRejectsUnknownKeyWithoutWriting(t *testing.T) {
-	fs := filesys.MakeFsInMemory()
-	path := filepath.Join("/manifests", "params.env")
-	if err := fs.MkdirAll(filepath.Dir(path)); err != nil {
-		t.Fatal(err)
-	}
-	original := "REST_IMAGE=old:tag\n"
-	if err := fs.WriteFile(path, []byte(original)); err != nil {
-		t.Fatal(err)
-	}
-
-	err := mergeParamsEnv(fs, path, map[string]string{
-		"UNKNOWN_IMAGE": "registry.example.com/unknown:tag",
-	})
-	if err == nil {
-		t.Fatal("expected error for an override key not present in params.env")
-	}
-
-	got, readErr := fs.ReadFile(path)
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	if string(got) != original {
-		t.Errorf("params.env changed after failed merge: %q", got)
 	}
 }
 
@@ -1281,7 +680,7 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 	configMap := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
-			resourceNameField: "default-dcs-flight-config",
+			keyName: "default-dcs-flight-config",
 		},
 		testDataKey: map[string]any{
 			testConfigTOMLKey: "[connectors.uri]\nenabled = false\n",
@@ -1290,33 +689,33 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 	deployment := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindDeployment,
 		testMetadataKey: map[string]any{
-			resourceNameField: "default-dcs-flight",
+			keyName: testFlightServiceName,
 		},
 		testSpecKey: map[string]any{
 			testTemplateKey: map[string]any{
 				testSpecKey: map[string]any{
 					testContainersKey: []any{
 						map[string]any{
-							resourceNameField: nameFlightServiceContainer,
-							"image":           "localhost/dch-flight:test",
+							keyName: "flight-server",
+							"image": "localhost/dch-flight:test",
 						},
 					},
 					"volumes": []any{
 						map[string]any{
-							resourceNameField: "config",
-							"configMap":       map[string]any{resourceNameField: "default-dcs-flight-config"},
+							keyName:     "config",
+							"configMap": map[string]any{keyName: "default-dcs-flight-config"},
 						},
 						map[string]any{
-							resourceNameField: "tls",
-							"secret":          map[string]any{"secretName": "default-dcs-flight-tls"},
+							keyName:  "tls",
+							"secret": map[string]any{keySecretName: "default-dcs-flight-tls"},
 						},
 						map[string]any{
-							resourceNameField: "db-secret",
-							"secret":          map[string]any{"secretName": nameDatabaseConfig},
+							keyName:  "db-secret",
+							"secret": map[string]any{keySecretName: nameDatabaseConfig},
 						},
 						map[string]any{
-							resourceNameField: "tmp",
-							"emptyDir":        map[string]any{},
+							keyName:    "tmp",
+							"emptyDir": map[string]any{},
 						},
 					},
 				},
@@ -1340,7 +739,6 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 		t.Fatal("expected dataconnecthub/config-hash annotation on deployment")
 	}
 
-	// Verify hash changes when secret data changes.
 	tlsSecret2 := tlsSecret.DeepCopy()
 	tlsSecret2.Data["tls.crt"] = []byte("rotated-cert")
 	fakeClient2 := fake.NewClientBuilder().WithScheme(s).WithObjects(tlsSecret2, dbSecret).Build()
@@ -1364,7 +762,7 @@ func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.
 	_ = corev1.AddToScheme(s)
 
 	liveCA := &corev1.ConfigMap{
-		ObjectMeta: metav1.ObjectMeta{Name: testFlightServiceCA, Namespace: testNamespace},
+		ObjectMeta: metav1.ObjectMeta{Name: testFlightCACMName, Namespace: testNamespace},
 		Data:       map[string]string{"service-ca.crt": "-----BEGIN CERTIFICATE-----\nMIIC...\n-----END CERTIFICATE-----\n"},
 	}
 	fakeClient := fake.NewClientBuilder().WithScheme(s).WithObjects(liveCA).Build()
@@ -1373,25 +771,25 @@ func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.
 	emptyCA := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindConfigMap,
 		testMetadataKey: map[string]any{
-			resourceNameField: testFlightServiceCA,
+			keyName: testFlightCACMName,
 		},
 		testDataKey: map[string]any{},
 	}}
 	deployment := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindDeployment,
 		testMetadataKey: map[string]any{
-			resourceNameField: nameRestService,
+			keyName: "rest-service",
 		},
 		testSpecKey: map[string]any{
 			testTemplateKey: map[string]any{
 				testSpecKey: map[string]any{
-					testContainersKey: []any{
-						map[string]any{resourceNameField: nameRestServiceContainer, "image": "test:latest"},
+					"containers": []any{
+						map[string]any{keyName: "rest-server", "image": "test:latest"},
 					},
 					"volumes": []any{
 						map[string]any{
-							resourceNameField: "flight-ca",
-							"configMap":       map[string]any{resourceNameField: testFlightServiceCA},
+							keyName:     "flight-ca",
+							"configMap": map[string]any{keyName: testFlightCACMName},
 						},
 					},
 				},
