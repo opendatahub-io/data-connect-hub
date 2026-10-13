@@ -90,6 +90,7 @@ impl MetaStoreReader for TestMetaStore {
             },
             resource: DataConnectionType {
                 name: "SQLite".to_string(),
+                label: None,
                 provider: "sqlite".to_string(),
                 description: None,
                 credentials_fields: vec![Field {
@@ -101,6 +102,7 @@ impl MetaStoreReader for TestMetaStore {
                     enum_values: None,
                     default_value: None,
                 }],
+                tags: None,
             },
             status: Default::default(),
         })

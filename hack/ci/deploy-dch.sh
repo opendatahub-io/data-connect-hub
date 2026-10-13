@@ -3,6 +3,8 @@
 set -euo pipefail
 source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 
+CI_E2E_RUNTIME_BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal
+
 # ===================================================================
 # Build images
 # ===================================================================
@@ -10,10 +12,14 @@ source "$(cd "$(dirname "$0")" && pwd)/lib.sh"
 echo "=== Building images ==="
 
 echo "--- Building flight-service ---"
-docker build -t "$CI_FLIGHT_IMAGE" -f "$CI_REPO_ROOT/services/flight/Containerfile.konflux" "$CI_REPO_ROOT"
+docker build \
+    --build-arg "RUNTIME_BASE_IMAGE=${CI_E2E_RUNTIME_BASE_IMAGE}" \
+    -t "$CI_FLIGHT_IMAGE" -f "$CI_REPO_ROOT/services/flight/Containerfile.konflux" "$CI_REPO_ROOT"
 
 echo "--- Building rest-service ---"
-docker build -t "$CI_REST_IMAGE" -f "$CI_REPO_ROOT/services/rest/Containerfile.konflux" "$CI_REPO_ROOT"
+docker build \
+    --build-arg "RUNTIME_BASE_IMAGE=${CI_E2E_RUNTIME_BASE_IMAGE}" \
+    -t "$CI_REST_IMAGE" -f "$CI_REPO_ROOT/services/rest/Containerfile.konflux" "$CI_REPO_ROOT"
 
 echo "--- Building dc-controller ---"
 sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
@@ -22,7 +28,9 @@ rm -f "$CI_REPO_ROOT/config/base/flight-service/deployment.yaml.bak"
 sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
     "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml"
 rm -f "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml.bak"
-docker build -t "$CI_CONTROLLER_IMAGE" -f "$CI_REPO_ROOT/dc-controller/Containerfile.konflux" "$CI_REPO_ROOT"
+docker build \
+    --build-arg "RUNTIME_BASE_IMAGE=${CI_E2E_RUNTIME_BASE_IMAGE}" \
+    -t "$CI_CONTROLLER_IMAGE" -f "$CI_REPO_ROOT/dc-controller/Containerfile.konflux" "$CI_REPO_ROOT"
 
 # ===================================================================
 # Load images into kind

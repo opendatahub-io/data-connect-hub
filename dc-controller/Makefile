@@ -47,6 +47,8 @@ help: ## Display this help.
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
 	cp config/crd/bases/dataconnecthub.opendatahub.io_dataconnectservices.yaml charts/crds/
+	cp config/crd/bases/dataconnecthub.opendatahub.io_initdataconnectiontypes.yaml charts/crds/initdataconnectiontypes.yaml
+	cp config/crd/bases/dataconnecthub.opendatahub.io_initdataconnections.yaml charts/crds/initdataconnections.yaml
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
@@ -123,6 +125,10 @@ run: manifests generate fmt vet ## Run a controller from your host.
 .PHONY: docker-build
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} -f Containerfile.konflux ..
+
+.PHONY: docker-build-e2e
+docker-build-e2e: ## Build the manager image for E2E tests with a public runtime base.
+	$(CONTAINER_TOOL) build --build-arg RUNTIME_BASE_IMAGE=registry.access.redhat.com/ubi9/ubi-minimal -t ${IMG} -f Containerfile.konflux ..
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.

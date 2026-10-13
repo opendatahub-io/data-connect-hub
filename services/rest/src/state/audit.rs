@@ -420,6 +420,7 @@ mod tests {
             metadata: make_metadata("pg"),
             resource: DataConnectionType {
                 name: "PostgreSQL".to_string(),
+                label: None,
                 provider: "postgres".to_string(),
                 description: None,
                 credentials_fields: required_fields
@@ -434,6 +435,7 @@ mod tests {
                         default_value: None,
                     })
                     .collect(),
+                tags: None,
             },
             status: Default::default(),
         }

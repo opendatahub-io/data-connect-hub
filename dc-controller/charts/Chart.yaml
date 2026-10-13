@@ -2,5 +2,5 @@ apiVersion: v2
 name: dc-controller
 description: DataConnectService operator — deploys and manages Data Connect Hub services on OpenShift
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "0.1.0"

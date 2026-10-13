@@ -81,4 +81,6 @@ pub enum SecretStoreError {
 pub enum DataConnectionTypeError {
     #[error("Required field {0} is missing")]
     MissingRequiredField(String),
+    #[error("{field} must not be empty or whitespace-only{}", index.map(|i| format!(" (index {i})")).unwrap_or_default())]
+    EmptyValue { field: &'static str, index: Option<usize> },
 }

@@ -70,6 +70,13 @@ type InitDataConnectionTypeSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	Name string `json:"name"`
 
+	// label is an optional display label rendered by the UI instead of name
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	// +kubebuilder:validation:Pattern=`\S`
+	// +optional
+	Label *string `json:"label,omitempty"`
+
 	// provider identifies the backing data provider (e.g. "postgres", "s3")
 	// +kubebuilder:validation:MaxLength=253
 	Provider string `json:"provider"`
@@ -81,6 +88,14 @@ type InitDataConnectionTypeSpec struct {
 
 	// credentialsFields defines the fields required to configure credentials for this connection type
 	CredentialsFields []CredentialsField `json:"credentialsFields"`
+
+	// tags are optional free-form labels for categorising the connection type
+	// +kubebuilder:validation:MaxItems=32
+	// +kubebuilder:validation:items:MinLength=1
+	// +kubebuilder:validation:items:MaxLength=256
+	// +kubebuilder:validation:items:Pattern=`\S`
+	// +optional
+	Tags []string `json:"tags,omitempty"`
 }
 
 // InitDataConnectionTypeStatus defines the observed state of InitDataConnectionType.

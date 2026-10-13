@@ -120,8 +120,8 @@ Connection types describe a category of data source (e.g. PostgreSQL). They defi
 ```python
 client.list_connection_types() -> list[ConnectionType]
 client.get_connection_type(type_id) -> ConnectionType
-client.create_connection_type(name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
-client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=...) -> ConnectionType
+client.create_connection_type(name=..., provider=..., description=..., credentials_fields=..., tags=...) -> ConnectionType
+client.update_connection_type(type_id, name=..., provider=..., description=..., credentials_fields=..., tags=...) -> ConnectionType
 client.delete_connection_type(type_id) -> None
 ```
 
@@ -145,7 +145,7 @@ connection_type = client.create_connection_type(
 )
 ```
 
-Pass `description=None` to remove an existing description. Omitting `description` leaves it unchanged.
+Pass `description=None` or `tags=None` to remove the existing value. Omitting a field leaves it unchanged.
 
 #### `ConnectionType`
 
@@ -159,6 +159,7 @@ Pass `description=None` to remove an existing description. Omitting `description
 | `created_at` | `datetime \| None` | Creation timestamp |
 | `updated_at` | `datetime \| None` | Last update timestamp |
 | `credentials_fields` | `list[CredentialField]` | Credential fields required to connect |
+| `tags` | `list[str] \| None` | Arbitrary labels for categorisation |
 | `status` | `ConnectionTypeStatus` | Transports the provider supports |
 
 Pass `id` as the `type_id` argument to `get_connection_type`, `update_connection_type`, and `delete_connection_type` — and as `connection_type_id` to `create_connection`.

@@ -115,6 +115,13 @@ spec:
                 description: description is an optional human-readable description
                 maxLength: 1024
                 type: string
+              label:
+                description: label is an optional display label rendered by the UI
+                  instead of name
+                maxLength: 253
+                minLength: 1
+                pattern: \S
+                type: string
               name:
                 description: name is the unique name of the connection type
                 maxLength: 253
@@ -124,6 +131,16 @@ spec:
                   "s3")
                 maxLength: 253
                 type: string
+              tags:
+                description: tags are optional free-form labels for categorising the
+                  connection type
+                items:
+                  maxLength: 256
+                  minLength: 1
+                  pattern: \S
+                  type: string
+                maxItems: 32
+                type: array
             required:
             - credentialsFields
             - name

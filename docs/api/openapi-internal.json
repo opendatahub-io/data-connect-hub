@@ -1188,6 +1188,12 @@
             "description": "The name of the connection type. This name is unique for connection types of this tenant.",
             "example": "PostgreSQL"
           },
+          "label": {
+            "type": "string",
+            "nullable": true,
+            "description": "Optional display label for the connection type. When present the UI should render this instead of the short ``name``.\n",
+            "example": "S3 compatible object storage"
+          },
           "provider": {
             "type": "string",
             "example": "postgres"
@@ -1201,6 +1207,20 @@
             "items": {
               "$ref": "#/components/schemas/Field"
             }
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "description": "Arbitrary labels for categorising the connection type (e.g. \"domain: database\", \"engine: postgresql\").\n",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "example": [
+              "domain: database",
+              "engine: postgresql",
+              "access: sql"
+            ]
           }
         }
       },
@@ -1275,6 +1295,10 @@
           "name": {
             "type": "string"
           },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
           "provider": {
             "type": "string"
           },
@@ -1286,6 +1310,15 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/Field"
+            }
+          },
+          "tags": {
+            "type": "array",
+            "nullable": true,
+            "description": "Arbitrary labels for categorising the connection type.",
+            "items": {
+              "type": "string",
+              "minLength": 1
             }
           }
         }

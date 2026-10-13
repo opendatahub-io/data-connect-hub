@@ -285,14 +285,18 @@ class DataConnectClient:
         *,
         name: str,
         provider: str,
+        label: str | None = None,
         description: str | None = None,
         credentials_fields: list[CredentialField] | None = None,
+        tags: list[str] | None = None,
     ) -> ConnectionType:
         req = CreateConnectionTypeRequest(
             name=name,
+            label=label,
             provider=provider,
             description=description,
             credentials_fields=credentials_fields or [],
+            tags=tags,
         )
         return self._rest.create_connection_type(req)
 
@@ -301,23 +305,36 @@ class DataConnectClient:
         type_id: str,
         *,
         name: str | None = None,
+        label: str | _UnsetType | None = _UNSET,
         provider: str | None = None,
         description: str | _UnsetType | None = _UNSET,
         credentials_fields: list[CredentialField] | None = None,
+        tags: list[str] | _UnsetType | None = _UNSET,
     ) -> ConnectionType:
-        """Update a connection type; pass ``description=None`` to clear it."""
-        if name is None and provider is None and description is _UNSET and credentials_fields is None:
+        """Update a connection type; pass ``description=None``, ``label=None``, or ``tags=None`` to clear them."""
+        if (
+            name is None
+            and label is _UNSET
+            and provider is None
+            and description is _UNSET
+            and credentials_fields is None
+            and tags is _UNSET
+        ):
             raise DCHConfigError("at least one field must be provided for update")
 
         updates: dict[str, object] = {}
         if name is not None:
             updates["name"] = name
+        if label is not _UNSET:
+            updates["label"] = label
         if provider is not None:
             updates["provider"] = provider
         if description is not _UNSET:
             updates["description"] = description
         if credentials_fields is not None:
             updates["credentials_fields"] = credentials_fields
+        if tags is not _UNSET:
+            updates["tags"] = tags
         req = UpdateConnectionTypeRequest.model_validate(updates)
         return self._rest.update_connection_type(type_id, req)
 

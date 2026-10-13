@@ -1,4 +1,6 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal@sha256:7fbeae18dc9476399f565e68255f602a3374ea8614ba3d14843565131a13ff93 AS builder
+ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:8a842ac769de709143e4edeace516f2008dfdc431b64670ad3353fa323b44736
+
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:d91be7cea9f03a757d69ad7fcdfcd7849dba820110e7980d5e2a1f46ed06ea3b AS builder
 
 RUN microdnf install -y gcc gcc-c++ pkgconf make perl cargo \
     && microdnf clean all
@@ -15,7 +17,7 @@ RUN if [ -f /cachi2/cachi2.env ]; then . /cachi2/cachi2.env; fi && \
     cargo build --release -p rest-service && \
     cp target/release/rest-service /usr/local/bin/rest-service
 
-FROM registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:8a842ac769de709143e4edeace516f2008dfdc431b64670ad3353fa323b44736
+FROM ${RUNTIME_BASE_IMAGE}
 WORKDIR /
 
 COPY --from=builder --chown=root:root --chmod=0555 \

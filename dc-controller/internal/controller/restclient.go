@@ -82,10 +82,12 @@ type FlightServiceStatus struct {
 
 // ConnectionType mirrors the Rust DataConnectionType JSON structure.
 type ConnectionType struct {
-	Name              string  `json:"name"`
-	Provider          string  `json:"provider"`
-	Description       *string `json:"description,omitempty"`
-	CredentialsFields []Field `json:"credentials_fields"`
+	Name              string   `json:"name"`
+	Label             *string  `json:"label,omitempty"`
+	Provider          string   `json:"provider"`
+	Description       *string  `json:"description,omitempty"`
+	CredentialsFields []Field  `json:"credentials_fields"`
+	Tags              []string `json:"tags,omitempty"`
 }
 
 // Field mirrors the Rust Field JSON structure.
