@@ -6,7 +6,7 @@ use crate::query::UriRequest;
 use arrow::array::BinaryArray;
 use arrow::datatypes::{DataType as ArrowDataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnectionResource;
+use commons::api::connections::{DataConnectionResource, DataFormat};
 use commons::api::connector::CredentialsResolver;
 use commons::api::connector::{BinaryQuery, DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
 use commons::api::errors::ConnectorError;
@@ -130,6 +130,10 @@ impl FlightConnector for UriConnector {
 
     fn description(&self) -> String {
         "URI connector".to_string()
+    }
+
+    fn supported_formats(&self) -> Vec<DataFormat> {
+        vec![DataFormat::Tabular, DataFormat::Binary]
     }
 
     #[tracing::instrument(

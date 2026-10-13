@@ -58,14 +58,17 @@ echo "=== Installing Gateway API CRDs ==="
 kubectl apply -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/standard-install.yaml"
 
 echo "=== Installing Istio ==="
-helm repo add istio https://istio-release.storage.googleapis.com/charts --force-update >/dev/null
-helm repo update >/dev/null
-
 kubectl create ns istio-system 2>/dev/null || true
-helm upgrade --install istio-base istio/base -n istio-system --wait >/dev/null
-helm upgrade --install istiod istio/istiod -n istio-system --wait \
-    --set pilot.env.PILOT_ENABLE_GATEWAY_API=true \
-    --set pilot.env.PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER=true >/dev/null
+helm upgrade --install istio-base oci://ghcr.io/istio/release/charts/base \
+    --version "${CI_ISTIO_VERSION}" -n istio-system --wait >/dev/null
+# NOTE: unlike the charts previously published to the GCS helm repo, the
+# current istiod chart uses flat top-level values (env.*), not pilot.env.*.
+# Both PILOT_ENABLE_GATEWAY_API* flags default to true since istio 1.23;
+# they are set explicitly for clarity.
+helm upgrade --install istiod oci://ghcr.io/istio/release/charts/istiod \
+    --version "${CI_ISTIO_VERSION}" -n istio-system --wait \
+    --set env.PILOT_ENABLE_GATEWAY_API=true \
+    --set env.PILOT_ENABLE_GATEWAY_API_DEPLOYMENT_CONTROLLER=true >/dev/null
 
 kubectl rollout status deployment/istiod -n istio-system --timeout=300s
 

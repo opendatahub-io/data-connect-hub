@@ -162,10 +162,22 @@ impl DataIngestionService {
         let connectors = self.connectors_registry.get_supported_connectors();
         let names: Vec<String> = connectors.iter().map(|c| c.provider()).collect();
         let descriptions: Vec<String> = connectors.iter().map(|c| c.description()).collect();
+        // Comma-separated within a single Utf8 column; the REST client splits on ',' when parsing.
+        let formats: Vec<String> = connectors
+            .iter()
+            .map(|c| {
+                c.supported_formats()
+                    .iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
+            .collect();
 
         let batch = RecordBatch::try_from_iter(vec![
             ("name", Arc::new(StringArray::from(names)) as _),
             ("description", Arc::new(StringArray::from(descriptions)) as _),
+            ("supported_formats", Arc::new(StringArray::from(formats)) as _),
         ])
         .map_err(|e| {
             tracing::error!(error = %e, "failed to build connector record batch");

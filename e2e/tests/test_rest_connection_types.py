@@ -18,6 +18,16 @@ EXPECTED_OOB_CONNECTION_TYPES = {
     "URI": "uri",
 }
 
+EXPECTED_SUPPORTED_FORMATS = {
+    "Postgres": ["tabular"],
+    "PGVector": ["tabular"],
+    "ElasticSearch": ["tabular"],
+    "HuggingFace": [],
+    "Milvus": ["tabular"],
+    "Neo4j": ["tabular"],
+    "URI": ["tabular", "binary"],
+}
+
 EXPECTED_CREDENTIAL_FIELDS = {
     "ElasticSearch": {"URI", "USERNAME", "PASSWORD", "CA_CERT", "API_KEY"},
     "HuggingFace": {"URI", "TOKEN"},
@@ -27,32 +37,43 @@ EXPECTED_CREDENTIAL_FIELDS = {
 
 
 class TestRestConnectionType:
-    def test_oob_connection_types_are_registered(self, rest_client: DataConnectClient) -> None:
-        """Verify the controller registers every built-in connection type."""
+    def test_oob_connection_types(self, rest_client: DataConnectClient) -> None:
+        """Verify all OOB connection types are registered with correct attributes."""
         deadline = time.monotonic() + 30
         listed_types = []
         while time.monotonic() < deadline:
             listed_types = rest_client.list_connection_types()
             if all(
-                sum(connection_type.name == name for connection_type in listed_types) == 1
+                sum(ct.name == name for ct in listed_types) == 1
                 for name in EXPECTED_OOB_CONNECTION_TYPES
             ):
                 break
             time.sleep(1)
 
-        for name, provider in EXPECTED_OOB_CONNECTION_TYPES.items():
-            matching_types = [connection_type for connection_type in listed_types if connection_type.name == name]
-            assert len(matching_types) == 1, f"expected exactly one OOB connection type named {name!r}"
-            assert matching_types[0].provider == provider
+        by_name = {ct.name: ct for ct in listed_types}
 
-        by_name = {connection_type.name: connection_type for connection_type in listed_types}
+        # 1. every expected type exists with the correct provider
+        for name, provider in EXPECTED_OOB_CONNECTION_TYPES.items():
+            ct = by_name.get(name)
+            assert ct is not None, f"expected OOB connection type {name!r} not found"
+            assert ct.provider == provider
+
+        # 2. credential field schemas
         for name, expected_fields in EXPECTED_CREDENTIAL_FIELDS.items():
             actual_fields = {field.name for field in by_name[name].credentials_fields}
             assert actual_fields == expected_fields
 
-        postgres_schema = {(field.name, field.required, field.type) for field in by_name["Postgres"].credentials_fields}
-        pgvector_schema = {(field.name, field.required, field.type) for field in by_name["PGVector"].credentials_fields}
+        postgres_schema = {(f.name, f.required, f.type) for f in by_name["Postgres"].credentials_fields}
+        pgvector_schema = {(f.name, f.required, f.type) for f in by_name["PGVector"].credentials_fields}
         assert pgvector_schema == postgres_schema
+
+        # 3. supported_formats set correctly after flight registration
+        for name, expected_formats in EXPECTED_SUPPORTED_FORMATS.items():
+            ct = by_name[name]
+            assert sorted(ct.status.supported_formats) == sorted(expected_formats), (
+                f"{name}: expected supported_formats={expected_formats}, "
+                f"got {ct.status.supported_formats}"
+            )
 
     def test_crud(self, rest_client: DataConnectClient, create_connection_type) -> None:
         ct = create_connection_type(

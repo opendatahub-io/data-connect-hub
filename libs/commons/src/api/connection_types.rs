@@ -1,4 +1,5 @@
 use crate::api::ResourceMetadata;
+use crate::api::connections::DataFormat;
 use crate::api::errors::DataConnectionTypeError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -76,6 +77,8 @@ impl DataConnectionType {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct DataConnectionTypeStatus {
+    #[serde(default)]
+    pub supported_formats: Vec<DataFormat>,
     pub flight_ready: bool,
     pub flight_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

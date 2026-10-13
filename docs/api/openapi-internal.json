@@ -1016,8 +1016,7 @@
             },
             "description": "Credential key-value pairs to store in the secret",
             "example": {
-              "username": "pg_user",
-              "password": "pg_pass"
+              "URI": "postgres://pg_user:pg_pass@db.example.com:5432/mydb"
             }
           }
         },
@@ -1110,9 +1109,7 @@
             },
             "description": "Credential key-value pairs to test",
             "example": {
-              "username": "pg_user",
-              "password": "pg_pass",
-              "host": "db.example.com"
+              "URI": "postgres://pg_user:pg_pass@db.example.com:5432/mydb"
             }
           }
         }
@@ -1145,15 +1142,16 @@
         "properties": {
           "name": {
             "type": "string",
-            "example": "url"
+            "example": "URI"
           },
           "label": {
             "type": "string",
-            "example": "Connection URL"
+            "example": "Connection URI"
           },
           "description": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "example": "PostgreSQL connection URI"
           },
           "required": {
             "type": "boolean"
@@ -1165,6 +1163,7 @@
           "enum_values": {
             "type": "array",
             "nullable": true,
+            "description": "Allowed values; only meaningful when ``type`` is ``enum``.\n",
             "items": {
               "$ref": "#/components/schemas/EnumValue"
             }
@@ -1192,7 +1191,7 @@
             "type": "string",
             "nullable": true,
             "description": "Optional display label for the connection type. When present the UI should render this instead of the short ``name``.\n",
-            "example": "S3 compatible object storage"
+            "example": "PostgreSQL database"
           },
           "provider": {
             "type": "string",
@@ -1227,12 +1226,27 @@
       "DataConnectionTypeStatus": {
         "type": "object",
         "required": [
+          "supported_formats",
           "flight_ready"
         ],
         "properties": {
+          "supported_formats": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "tabular",
+                "binary"
+              ]
+            },
+            "description": "Data formats this connection type supports, determined by the registered Flight connector.  Independent of flight_ready — the list stays stable even when the Flight pod is down.  An empty list means the type is credentials-only, with no built-in ingestion.",
+            "example": [
+              "tabular"
+            ]
+          },
           "flight_ready": {
             "type": "boolean",
-            "description": "Whether a Flight gRPC service supports this connection type"
+            "description": "Whether a Flight gRPC service supports this connection type and is currently running"
           },
           "flight_url": {
             "type": "string",
@@ -1364,6 +1378,40 @@
             "type": "string",
             "description": "Cluster-internal URL of the Flight service",
             "example": "grpcs://flight-service.dch-services.svc:50051"
+          },
+          "supported_connectors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Provider names of connectors this Flight service supports (populated during registration)",
+            "example": [
+              "postgres",
+              "s3"
+            ]
+          },
+          "connector_capabilities": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "tabular",
+                  "binary"
+                ]
+              }
+            },
+            "description": "Maps each connector provider name to its supported data formats. Populated during registration from the Flight service's connector metadata.",
+            "example": {
+              "postgres": [
+                "tabular"
+              ],
+              "s3": [
+                "tabular",
+                "binary"
+              ]
+            }
           },
           "status": {
             "$ref": "#/components/schemas/FlightServiceStatus"

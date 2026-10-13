@@ -5,7 +5,7 @@ use std::time::Duration;
 use arrow::array::BinaryArray;
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
-use commons::api::connections::DataConnectionResource;
+use commons::api::connections::{DataConnectionResource, DataFormat};
 use commons::api::connector::{BinaryQuery, CredentialsResolver};
 use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput, TableInfo};
 use commons::api::errors::ConnectorError;
@@ -167,6 +167,10 @@ impl FlightConnector for S3Connector {
 
     fn description(&self) -> String {
         "Amazon compatible S3 connector".to_string()
+    }
+
+    fn supported_formats(&self) -> Vec<DataFormat> {
+        vec![DataFormat::Tabular, DataFormat::Binary]
     }
 
     #[tracing::instrument(

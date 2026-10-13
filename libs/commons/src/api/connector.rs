@@ -1,4 +1,4 @@
-use crate::api::connections::DataConnectionResource;
+use crate::api::connections::{DataConnectionResource, DataFormat};
 use crate::api::errors::ConnectorError;
 use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
@@ -90,6 +90,10 @@ pub trait DataReader: Send + Sync {
 pub trait FlightConnector: Send + Sync {
     fn provider(&self) -> String;
     fn description(&self) -> String;
+
+    fn supported_formats(&self) -> Vec<DataFormat> {
+        vec![DataFormat::Tabular]
+    }
 
     async fn get_reader(
         &self,

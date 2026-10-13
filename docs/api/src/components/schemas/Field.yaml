@@ -3,13 +3,14 @@ required: [name, label, required, type]
 properties:
   name:
     type: string
-    example: url
+    example: URI
   label:
     type: string
-    example: Connection URL
+    example: Connection URI
   description:
     type: string
     nullable: true
+    example: PostgreSQL connection URI
   required:
     type: boolean
   type:
@@ -18,6 +19,8 @@ properties:
   enum_values:
     type: array
     nullable: true
+    description: >
+      Allowed values; only meaningful when ``type`` is ``enum``.
     items:
       $ref: "EnumValue.yaml"
   default_value:

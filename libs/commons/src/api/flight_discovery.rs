@@ -1,5 +1,6 @@
 use crate::api::ResourceMetadata;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Deserialize, Serialize, Clone)]
 pub struct FlightService {
@@ -9,6 +10,8 @@ pub struct FlightService {
     pub internal_url: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub supported_connectors: Vec<String>,
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub connector_capabilities: HashMap<String, Vec<String>>,
     pub status: FlightServiceStatus,
 }
 

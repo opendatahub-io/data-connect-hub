@@ -351,6 +351,10 @@ pub async fn create_flight_service(
         );
     }
 
+    flight.connector_capabilities = connectors
+        .iter()
+        .map(|c| (c.name.clone(), c.supported_formats.clone()))
+        .collect();
     flight.supported_connectors = connectors.into_iter().map(|c| c.name).collect();
 
     let res = api_service.meta_store.create_flight_service(&flight).await?;
@@ -697,6 +701,7 @@ mod tests {
                         external_url: "http://flight:50051".to_string(),
                         internal_url: "http://flight:50051".to_string(),
                         supported_connectors: vec![],
+                        connector_capabilities: Default::default(),
                         status: Default::default(),
                     },
                 })

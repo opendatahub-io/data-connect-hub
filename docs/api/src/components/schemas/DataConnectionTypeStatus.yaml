@@ -1,9 +1,21 @@
 type: object
-required: [flight_ready]
+required: [supported_formats, flight_ready]
 properties:
+  supported_formats:
+    type: array
+    items:
+      type: string
+      enum: [tabular, binary]
+    description: >-
+      Data formats this connection type supports, determined by the
+      registered Flight connector.  Independent of flight_ready — the
+      list stays stable even when the Flight pod is down.  An empty
+      list means the type is credentials-only, with no built-in
+      ingestion.
+    example: [tabular]
   flight_ready:
     type: boolean
-    description: Whether a Flight gRPC service supports this connection type
+    description: Whether a Flight gRPC service supports this connection type and is currently running
   flight_url:
     type: string
     nullable: true

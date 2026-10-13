@@ -28,6 +28,7 @@ pub struct SupportedConnector {
     pub name: String,
     #[allow(dead_code)]
     pub description: String,
+    pub supported_formats: Vec<String>,
 }
 
 pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, tonic::Status>> + Send>>;
@@ -184,10 +185,22 @@ impl FlightDataClient for FlightClient {
             .ok_or_else(|| tonic::Status::internal("missing 'description' column"))?
             .as_string::<i32>();
 
+        let formats = batch.column_by_name("supported_formats");
+
         Ok((0..batch.num_rows())
             .map(|i| SupportedConnector {
                 name: names.value(i).to_string(),
                 description: descriptions.value(i).to_string(),
+                supported_formats: formats
+                    .map(|col| {
+                        col.as_string::<i32>()
+                            .value(i)
+                            .split(',')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect()
+                    })
+                    .unwrap_or_default(),
             })
             .collect())
     }

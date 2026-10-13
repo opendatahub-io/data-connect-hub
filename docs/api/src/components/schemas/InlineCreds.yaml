@@ -15,6 +15,5 @@ properties:
       type: string
     description: Credential key-value pairs to store in the secret
     example:
-      username: pg_user
-      password: pg_pass
+      URI: postgres://pg_user:pg_pass@db.example.com:5432/mydb
 additionalProperties: false

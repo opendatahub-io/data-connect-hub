@@ -11,7 +11,7 @@ properties:
     description: >
       Optional display label for the connection type. When present the
       UI should render this instead of the short ``name``.
-    example: S3 compatible object storage
+    example: PostgreSQL database
   provider:
     type: string
     example: postgres

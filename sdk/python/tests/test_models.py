@@ -286,14 +286,20 @@ class TestConnectionType:
     def test_flight_ready_from_wrapped_status(self) -> None:
         data = {
             **SAMPLE_CONNECTION_TYPE_WRAPPED_JSON,
-            "status": {"flight_ready": True, "flight_url": "grpc://flight:50051"},
+            "status": {
+                "supported_formats": ["tabular"],
+                "flight_ready": True,
+                "flight_url": "grpc://flight:50051",
+            },
         }
         ct = ConnectionType.model_validate(data)
+        assert ct.status.supported_formats == ["tabular"]
         assert ct.status.flight_ready is True
         assert ct.status.flight_url == "grpc://flight:50051"
 
     def test_status_defaults(self) -> None:
         ct = ConnectionType.model_validate(SAMPLE_CONNECTION_TYPE_WRAPPED_JSON)
+        assert ct.status.supported_formats == []
         assert ct.status.flight_ready is False
         assert ct.status.flight_url is None
 

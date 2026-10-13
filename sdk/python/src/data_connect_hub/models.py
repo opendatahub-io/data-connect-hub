@@ -125,6 +125,7 @@ class CredentialField(BaseModel):
 
 
 class ConnectionTypeStatus(BaseModel):
+    supported_formats: list[str] = Field(default_factory=list)
     flight_ready: bool = False
     flight_url: str | None = None
     message: str | None = None

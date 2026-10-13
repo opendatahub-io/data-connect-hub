@@ -22,6 +22,11 @@ CI_GATEWAY_NAME="${CI_GATEWAY_NAME:-dch-gateway}"
 CI_GATEWAY_NAMESPACE="${CI_GATEWAY_NAMESPACE:-dch}"
 CI_GATEWAY_LOCAL_PORT="${CI_GATEWAY_LOCAL_PORT:-18443}"
 
+# Istio — installed from the official OCI charts at
+# ghcr.io/istio/release/charts (the old istio-release.storage.googleapis.com
+# helm repo is being retired and returns 403 during migration).
+CI_ISTIO_VERSION="${CI_ISTIO_VERSION:-1.31.1}"
+
 # DataConnectService CR name (must be set before flight service names)
 CI_DCS_CR_NAME="${CI_DCS_CR_NAME:-default-dcs}"
 

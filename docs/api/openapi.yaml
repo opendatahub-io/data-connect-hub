@@ -663,8 +663,7 @@ components:
             type: string
           description: Credential key-value pairs to store in the secret
           example:
-            username: pg_user
-            password: pg_pass
+            URI: postgres://pg_user:pg_pass@db.example.com:5432/mydb
       additionalProperties: false
     DataConnectionWithCreds:
       type: object
@@ -736,9 +735,7 @@ components:
             type: string
           description: Credential key-value pairs to test
           example:
-            username: pg_user
-            password: pg_pass
-            host: db.example.com
+            URI: postgres://pg_user:pg_pass@db.example.com:5432/mydb
     EnumValue:
       type: object
       required:
@@ -761,13 +758,14 @@ components:
       properties:
         name:
           type: string
-          example: url
+          example: URI
         label:
           type: string
-          example: Connection URL
+          example: Connection URI
         description:
           type: string
           nullable: true
+          example: PostgreSQL connection URI
         required:
           type: boolean
         type:
@@ -776,6 +774,8 @@ components:
         enum_values:
           type: array
           nullable: true
+          description: |
+            Allowed values; only meaningful when ``type`` is ``enum``.
           items:
             $ref: '#/components/schemas/EnumValue'
         default_value:
@@ -797,7 +797,7 @@ components:
           nullable: true
           description: |
             Optional display label for the connection type. When present the UI should render this instead of the short ``name``.
-          example: S3 compatible object storage
+          example: PostgreSQL database
         provider:
           type: string
           example: postgres
@@ -823,11 +823,22 @@ components:
     DataConnectionTypeStatus:
       type: object
       required:
+        - supported_formats
         - flight_ready
       properties:
+        supported_formats:
+          type: array
+          items:
+            type: string
+            enum:
+              - tabular
+              - binary
+          description: Data formats this connection type supports, determined by the registered Flight connector.  Independent of flight_ready — the list stays stable even when the Flight pod is down.  An empty list means the type is credentials-only, with no built-in ingestion.
+          example:
+            - tabular
         flight_ready:
           type: boolean
-          description: Whether a Flight gRPC service supports this connection type
+          description: Whether a Flight gRPC service supports this connection type and is currently running
         flight_url:
           type: string
           nullable: true
