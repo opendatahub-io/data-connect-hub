@@ -20,6 +20,7 @@ import (
 	"context"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -335,6 +336,25 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(err).NotTo(HaveOccurred())
 			expectPolicyNamespace(np+nameRestService, 1, controllerNamespace)
 			expectPolicyNamespace(flightResourceName, 0, targetNamespace)
+		})
+
+		It("should project Intermediate TLS defaults onto kube-rbac-proxy without the OpenShift config API", func() {
+			// The envtest cluster is vanilla Kubernetes: the config.openshift.io
+			// API is genuinely unavailable, so the profile resolution falls
+			// back to Intermediate and the caller must still project hardened
+			// TLS options onto the applied proxy deployment.
+			reconcileUntilReady()
+
+			deploy := &appsv1.Deployment{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
+			proxy := findContainer(deploy, nameKubeRbacProxy)
+			Expect(proxy).NotTo(BeNil())
+
+			Expect(slices.Contains(proxy.Args, "--tls-min-version=VersionTLS12")).To(BeTrue(),
+				"expected the Intermediate minimum on kube-rbac-proxy without the OpenShift config API")
+			Expect(slices.ContainsFunc(proxy.Args, func(arg string) bool {
+				return strings.HasPrefix(arg, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256")
+			})).To(BeTrue(), "expected Intermediate cipher suites on kube-rbac-proxy")
 		})
 	})
 
