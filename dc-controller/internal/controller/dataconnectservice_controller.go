@@ -123,6 +123,7 @@ type DataConnectServiceReconciler struct {
 	RestImage           string
 	FlightImage         string
 	KubeRbacProxyImage  string
+	ControllerNamespace string
 	FlightServiceClient FlightServiceClient
 }
 
@@ -405,7 +406,12 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		RelatedImageRestService:   r.RestImage,
 		RelatedImageFlightService: r.FlightImage,
 		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
+		"GATEWAY_NAME":            gw.Name,
 		"GATEWAY_NAMESPACE":       gw.Namespace,
+		"OPERAND_NAMESPACE":       cr.Namespace,
+	}
+	if r.ControllerNamespace != "" {
+		paramsEnvOverrides["CONTROLLER_NAMESPACE"] = r.ControllerNamespace
 	}
 	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, paramsEnvOverrides)
 	if err != nil {

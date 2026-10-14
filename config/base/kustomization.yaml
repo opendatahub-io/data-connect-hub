@@ -82,3 +82,38 @@ replacements:
       name: flight-service
     fieldPaths:
     - spec.ingress.1.from.0.namespaceSelector.matchLabels.[kubernetes.io/metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.GATEWAY_NAME
+  targets:
+  - select:
+      kind: NetworkPolicy
+      name: rest-service
+    fieldPaths:
+    - spec.ingress.0.from.0.podSelector.matchLabels.[gateway.networking.k8s.io/gateway-name]
+  - select:
+      kind: NetworkPolicy
+      name: flight-service
+    fieldPaths:
+    - spec.ingress.1.from.0.podSelector.matchLabels.[gateway.networking.k8s.io/gateway-name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.CONTROLLER_NAMESPACE
+  targets:
+  - select:
+      kind: NetworkPolicy
+      name: rest-service
+    fieldPaths:
+    - spec.ingress.1.from.0.namespaceSelector.matchLabels.[kubernetes.io/metadata.name]
+- source:
+    kind: ConfigMap
+    name: params
+    fieldPath: data.OPERAND_NAMESPACE
+  targets:
+  - select:
+      kind: NetworkPolicy
+      name: flight-service
+    fieldPaths:
+    - spec.ingress.0.from.0.namespaceSelector.matchLabels.[kubernetes.io/metadata.name]

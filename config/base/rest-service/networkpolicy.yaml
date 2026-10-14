@@ -16,13 +16,18 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: opendatahub
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: odh-gateway
       ports:
         - protocol: TCP
           port: 8443
-    # The controller runs in the same namespace and calls REST to register
-    # Flight services and connection types.
+    # The controller calls REST to register Flight services and connection types.
     - from:
-        - podSelector:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: system
+          podSelector:
             matchLabels:
               app.kubernetes.io/name: dc-controller
               control-plane: manager

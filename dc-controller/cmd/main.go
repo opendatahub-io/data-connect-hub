@@ -211,6 +211,7 @@ func main() {
 		RestImage:           requiredEnv(controller.RelatedImageRestService),
 		FlightImage:         requiredEnv(controller.RelatedImageFlightService),
 		KubeRbacProxyImage:  requiredEnv(controller.RelatedImageKubeRbacProxy),
+		ControllerNamespace: os.Getenv("APPLICATIONS_NAMESPACE"),
 		FlightServiceClient: controller.NewHTTPFlightServiceClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")

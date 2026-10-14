@@ -38,7 +38,10 @@ import (
 
 const (
 	testBaseManifest                 = "base"
+	testControllerNamespace          = "controller-ns"
+	testGatewayName                  = "custom-gateway"
 	testOpenShiftGatewayNamespace    = "openshift-ingress"
+	testOperandNamespace             = "operand-ns"
 	testSQLiteConnector              = "sqlite"
 	testTOMLEnabledKey               = "enabled"
 	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
@@ -443,8 +446,12 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "config")
 	for _, path := range []string{testBaseManifest, filepath.Join("overlays", "openshift")} {
 		t.Run(path, func(t *testing.T) {
-			resources, err := renderKustomization(root, filepath.Join(root, path), nil,
-				map[string]string{"GATEWAY_NAMESPACE": testOpenShiftGatewayNamespace})
+			resources, err := renderKustomization(root, filepath.Join(root, path), nil, map[string]string{
+				"CONTROLLER_NAMESPACE": testControllerNamespace,
+				"GATEWAY_NAME":         testGatewayName,
+				"GATEWAY_NAMESPACE":    testOpenShiftGatewayNamespace,
+				"OPERAND_NAMESPACE":    testOperandNamespace,
+			})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -462,13 +469,32 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &policy); err != nil {
 					t.Fatal(err)
 				}
-				index := 0
+				gatewayIngress := 0
 				if policy.Labels[labelAppName] == nameFlightService {
-					index = 1
+					gatewayIngress = 1
+					peer := policy.Spec.Ingress[0].From[0]
+					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testOperandNamespace {
+						t.Errorf("%s REST namespace = %q, want %s", policy.Name, got, testOperandNamespace)
+					}
+					if peer.PodSelector.MatchLabels[labelAppName] != nameRestService {
+						t.Errorf("%s REST selector = %q, want %s", policy.Name, peer.PodSelector.MatchLabels[labelAppName], nameRestService)
+					}
+				} else {
+					peer := policy.Spec.Ingress[1].From[0]
+					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testControllerNamespace {
+						t.Errorf("%s controller namespace = %q, want %s", policy.Name, got, testControllerNamespace)
+					}
+					if peer.PodSelector.MatchLabels[labelAppName] != "dc-controller" {
+						t.Errorf("%s controller selector = %q, want dc-controller", policy.Name, peer.PodSelector.MatchLabels[labelAppName])
+					}
 				}
-				got := policy.Spec.Ingress[index].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
+				got := policy.Spec.Ingress[gatewayIngress].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
 				if got != testOpenShiftGatewayNamespace {
 					t.Errorf("%s gateway namespace = %q, want %s", policy.Name, got, testOpenShiftGatewayNamespace)
+				}
+				got = policy.Spec.Ingress[gatewayIngress].From[0].PodSelector.MatchLabels["gateway.networking.k8s.io/gateway-name"]
+				if got != testGatewayName {
+					t.Errorf("%s gateway name = %q, want %s", policy.Name, got, testGatewayName)
 				}
 				found++
 			}
