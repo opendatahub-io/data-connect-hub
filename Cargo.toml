@@ -77,7 +77,7 @@ reqwest-opendal = { package = "reqwest", version = "0.13", default-features = fa
 parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
 arrow-csv = "59.1"
 arrow-json = "59.1"
-base64 = "0.22"
+base64 = "0.23"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 mime = "0.3"
 url = "2.5"
