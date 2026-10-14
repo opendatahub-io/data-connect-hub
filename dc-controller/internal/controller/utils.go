@@ -27,7 +27,7 @@ import (
 
 // controllerNamespaceEnvVar optionally overrides the namespace used to scope
 // the NetworkPolicies the controller renders for the REST and flight services.
-const controllerNamespaceEnvVar = "APPLICATIONS_NAMESPACE"
+const controllerNamespaceEnvVar = "CONTROLLER_NAMESPACE"
 
 // serviceAccountNamespacePath is the projected service-account volume path
 // holding the namespace of the running pod. It is a variable so tests can
@@ -35,7 +35,7 @@ const controllerNamespaceEnvVar = "APPLICATIONS_NAMESPACE"
 var serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
 
 // ResolveControllerNamespace returns the namespace of the running controller
-// pod. The APPLICATIONS_NAMESPACE environment variable takes precedence;
+// pod. The CONTROLLER_NAMESPACE environment variable takes precedence;
 // otherwise the namespace is read from the service-account token projection.
 // It returns an empty string when neither is available (e.g. when running
 // outside a cluster), leaving rendered NetworkPolicies on their params.env
