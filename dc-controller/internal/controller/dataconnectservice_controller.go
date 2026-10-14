@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
 )
 
 const (
@@ -420,6 +421,13 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	resources = renderFlightService(resources, cr.Name)
 	flightInstanceName := flightServiceResourceName(cr.Name)
+
+	tlsProfile, err := platformtls.LoadWithAdherence(ctx, r.Client)
+	if err != nil {
+		logf.FromContext(ctx).Error(err, "failed to resolve cluster TLS profile for kube-rbac-proxy")
+		return fmt.Errorf("resolving cluster TLS profile for kube-rbac-proxy: %w", err)
+	}
+	setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec)
 
 	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
 		return fmt.Errorf("setting config namespace: %w", err)

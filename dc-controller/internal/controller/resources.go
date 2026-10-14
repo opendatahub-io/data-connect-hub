@@ -30,6 +30,8 @@ import (
 	"strings"
 	"time"
 
+	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
+	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -49,6 +51,8 @@ import (
 // --- Kustomize rendering ---
 
 const (
+	resourceNameField = "name"
+
 	// RelatedImageRestService is the env var and params.env key for the REST image.
 	RelatedImageRestService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
 	// RelatedImageFlightService is the env var and params.env key for the Flight image.
@@ -913,6 +917,54 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 				args = existing
 			}
 			args = append(args, arg)
+			container["args"] = args
+			containers[i] = container
+		}
+		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+	}
+}
+
+func setKubeRbacProxyTLSOpts(
+	ctx context.Context,
+	resources []*unstructured.Unstructured,
+	spec configv1.TLSProfileSpec,
+) {
+	minVersion := platformtls.MinVersionFromSpec(ctx, &spec, platformtls.FormatGo)
+	cipherSuites := ""
+	if spec.MinTLSVersion != configv1.VersionTLS13 {
+		cipherSuites = platformtls.CipherSuitesFromSpec(ctx, &spec)
+	}
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		for i, c := range containers {
+			container, ok := c.(map[string]any)
+			if !ok || container[resourceNameField] != nameKubeRbacProxy {
+				continue
+			}
+			var args []any
+			if existing, ok := container["args"].([]any); ok {
+				for index := 0; index < len(existing); index++ {
+					arg, _ := existing[index].(string)
+					if arg == "--tls-min-version" || arg == "--tls-cipher-suites" {
+						index++
+						continue
+					}
+					if strings.HasPrefix(arg, "--tls-min-version=") || strings.HasPrefix(arg, "--tls-cipher-suites=") {
+						continue
+					}
+					args = append(args, existing[index])
+				}
+			}
+			args = append(args, "--tls-min-version="+minVersion)
+			if cipherSuites != "" {
+				args = append(args, "--tls-cipher-suites="+cipherSuites)
+			}
 			container["args"] = args
 			containers[i] = container
 		}
