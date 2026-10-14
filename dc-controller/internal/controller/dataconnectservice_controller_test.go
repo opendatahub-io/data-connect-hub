@@ -71,6 +71,22 @@ var _ = Describe("DataConnectService Controller", func() {
 		}
 	}
 
+	expectGatewayPolicyNamespace := func(namespace string) {
+		for _, tc := range []struct {
+			name         string
+			ingressIndex int
+		}{
+			{np + nameRestService, 0},
+			{flightResourceName, 1},
+		} {
+			policy := &networkingv1.NetworkPolicy{}
+			key := types.NamespacedName{Name: tc.name, Namespace: targetNamespace}
+			ExpectWithOffset(1, k8sClient.Get(ctx, key, policy)).To(Succeed())
+			ExpectWithOffset(1, policy.Spec.Ingress[tc.ingressIndex].From[0].NamespaceSelector.MatchLabels).
+				To(HaveKeyWithValue("kubernetes.io/metadata.name", namespace))
+		}
+	}
+
 	findContainer := func(deploy *appsv1.Deployment, name string) *corev1.Container {
 		for i := range deploy.Spec.Template.Spec.Containers {
 			if deploy.Spec.Template.Spec.Containers[i].Name == name {
@@ -87,6 +103,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			_ = k8sClient.Delete(ctx, &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		for _, name := range []string{
+			np + "params",
 			np + nameRestService + "-config",
 			flightResourceName + "-config",
 			np + nameRestService + "-kube-rbac-proxy-config",
@@ -291,6 +308,12 @@ var _ = Describe("DataConnectService Controller", func() {
 			deploy := &appsv1.Deployment{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService, Namespace: targetNamespace}, deploy)).To(Succeed())
 			Expect(deploy.Labels).To(HaveKeyWithValue(labelManagedBy, managedByDCHService))
+		})
+
+		It("should use the default gateway namespace in both policies", func() {
+			_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+			expectGatewayPolicyNamespace(defaultGatewayNamespace)
 		})
 	})
 
@@ -729,7 +752,7 @@ var _ = Describe("DataConnectService Controller", func() {
 					"distribution.name":    "Standalone",
 					"distribution.version": "0.0.0",
 					"gateway.name":         "custom-gateway",
-					"gateway.namespace":    "custom-ns",
+					"gateway.namespace":    "openshift-ingress",
 				},
 			}
 			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
@@ -752,7 +775,17 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(cr.Status.Gateway).NotTo(BeNil())
 			Expect(cr.Status.Gateway.Name).To(Equal("custom-gateway"))
-			Expect(cr.Status.Gateway.Namespace).To(Equal("custom-ns"))
+			Expect(cr.Status.Gateway.Namespace).To(Equal("openshift-ingress"))
+			expectGatewayPolicyNamespace("openshift-ingress")
+
+			cm := &corev1.ConfigMap{}
+			key := types.NamespacedName{Name: platformConfigName, Namespace: targetNamespace}
+			Expect(k8sClient.Get(ctx, key, cm)).To(Succeed())
+			cm.Data["gateway.namespace"] = "updated-ns"
+			Expect(k8sClient.Update(ctx, cm)).To(Succeed())
+			_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+			expectGatewayPolicyNamespace("updated-ns")
 		})
 
 		It("should prefer spec.gateway over ConfigMap gateway", func() {
@@ -773,6 +806,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(cr.Status.Gateway).NotTo(BeNil())
 			Expect(cr.Status.Gateway.Name).To(Equal("spec-gateway"))
 			Expect(cr.Status.Gateway.Namespace).To(Equal("spec-ns"))
+			expectGatewayPolicyNamespace("spec-ns")
 		})
 	})
 })

@@ -28,6 +28,7 @@ import (
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -431,6 +432,49 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 			}
 			if serviceMonitors != want {
 				t.Errorf("rendered ServiceMonitors = %d, want %d", serviceMonitors, want)
+			}
+		})
+	}
+}
+
+func TestRenderKustomizationGatewayNamespace(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "config")
+	for _, path := range []string{"base", filepath.Join("overlays", "openshift")} {
+		t.Run(path, func(t *testing.T) {
+			resources, err := renderKustomization(root, filepath.Join(root, path), nil, nil,
+				map[string]string{"GATEWAY_NAMESPACE": "openshift-ingress"})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			found := 0
+			paramsFound := false
+			for _, obj := range resources {
+				if obj.GetKind() == kindConfigMap && obj.GetName() == "dch-params" {
+					paramsFound = true
+				}
+				if obj.GetKind() != kindNetworkPolicy {
+					continue
+				}
+				var policy networkingv1.NetworkPolicy
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &policy); err != nil {
+					t.Fatal(err)
+				}
+				index := 0
+				if policy.Labels[labelAppName] == nameFlightService {
+					index = 1
+				}
+				got := policy.Spec.Ingress[index].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
+				if got != "openshift-ingress" {
+					t.Errorf("%s gateway namespace = %q, want openshift-ingress", policy.Name, got)
+				}
+				found++
+			}
+			if found != 2 {
+				t.Errorf("rendered %d NetworkPolicies, want 2", found)
+			}
+			if !paramsFound {
+				t.Error("rendered params ConfigMap must have a stable name")
 			}
 		})
 	}

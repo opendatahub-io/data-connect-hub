@@ -405,6 +405,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		RelatedImageRestService:   r.RestImage,
 		RelatedImageFlightService: r.FlightImage,
 		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
+		"GATEWAY_NAMESPACE":       gw.Namespace,
 	}
 	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil, paramsEnvOverrides)
 	if err != nil {
