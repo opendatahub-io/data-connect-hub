@@ -19,6 +19,16 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+    # The controller runs in the same namespace and calls REST to register
+    # Flight services and connection types.
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dc-controller
+              control-plane: manager
+      ports:
+        - protocol: TCP
+          port: 8443
     - ports:
         - protocol: TCP
           port: 9090
