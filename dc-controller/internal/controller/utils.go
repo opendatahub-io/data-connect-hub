@@ -18,10 +18,38 @@ package controller
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
+
+// controllerNamespaceEnvVar optionally overrides the namespace used to scope
+// the NetworkPolicies the controller renders for the REST and flight services.
+const controllerNamespaceEnvVar = "APPLICATIONS_NAMESPACE"
+
+// serviceAccountNamespacePath is the projected service-account volume path
+// holding the namespace of the running pod. It is a variable so tests can
+// point it at a temporary file.
+var serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+
+// ResolveControllerNamespace returns the namespace of the running controller
+// pod. The APPLICATIONS_NAMESPACE environment variable takes precedence;
+// otherwise the namespace is read from the service-account token projection.
+// It returns an empty string when neither is available (e.g. when running
+// outside a cluster), leaving rendered NetworkPolicies on their params.env
+// defaults.
+func ResolveControllerNamespace() string {
+	if ns := os.Getenv(controllerNamespaceEnvVar); ns != "" {
+		return ns
+	}
+	data, err := os.ReadFile(serviceAccountNamespacePath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
 
 // parseConfigMapTOML parses the config.toml value in a ConfigMap's data.
 // A nil config means the ConfigMap has no data.config.toml entry.
