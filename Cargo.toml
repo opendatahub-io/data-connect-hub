@@ -36,8 +36,8 @@ format-readers = { path = "libs/format-readers" }
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
 flight-service = { path = "services/flight", default-features = false }
-arrow = "59.1.0"
-arrow-flight = { version = "59.1.0", features = ["flight-sql"] }
+arrow = "60.0.0"
+arrow-flight = { version = "60.0.0", features = ["flight-sql"] }
 tonic = "0.14"
 tonic-health = "0.14"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal"] }
@@ -74,9 +74,9 @@ opendal = { version = "0.58", features = ["services-s3"] }
 opendal-http-transport-reqwest = { version = "0.58", default-features = false, features = ["rustls"] }
 # OpenDAL 0.58's reqwest transport uses reqwest 0.13.
 reqwest-opendal = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "stream"] }
-parquet = { version = "59.1", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
-arrow-csv = "59.1"
-arrow-json = "59.1"
+parquet = { version = "60.0", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
+arrow-csv = "60.0"
+arrow-json = "60.0"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 mime = "0.3"

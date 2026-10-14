@@ -10,7 +10,7 @@ unsafe_code = "deny"
 
 [dependencies]
 anyhow = "1.0"
-arrow-flight = { version = "59.1.0", features = ["flight-sql"] }
+arrow-flight = { version = "60.0.0", features = ["flight-sql"] }
 async-trait = "0.1"
 clap = { version = "4.6", features = ["derive"] }
 commons = { path = "../../libs/commons" }
