@@ -407,7 +407,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
 		"GATEWAY_NAMESPACE":       gw.Namespace,
 	}
-	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, nil, paramsEnvOverrides)
+	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, paramsEnvOverrides)
 	if err != nil {
 		return fmt.Errorf("rendering manifests: %w", err)
 	}

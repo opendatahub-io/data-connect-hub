@@ -62,7 +62,7 @@ const (
 // may reference resources outside its own directory (overlays/openshift pulls in
 // ../../base). rootPath must contain diskPath. params override values in the
 // staged base/params.env before Kustomize resolves replacements.
-func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, images []kustypes.Image, params map[string]string) ([]*unstructured.Unstructured, error) {
+func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, params map[string]string) ([]*unstructured.Unstructured, error) {
 	absPath, err := filepath.Abs(diskPath)
 	if err != nil {
 		return nil, fmt.Errorf("resolving path %s: %w", diskPath, err)
@@ -84,8 +84,8 @@ func renderKustomization(rootPath, diskPath string, patches []kustypes.Patch, im
 		}
 	}
 
-	if len(patches) > 0 || len(images) > 0 {
-		if err := patchKustomization(memFS, absPath, patches, images); err != nil {
+	if len(patches) > 0 {
+		if err := patchKustomization(memFS, absPath, patches); err != nil {
 			return nil, fmt.Errorf("patching kustomization: %w", err)
 		}
 	}
@@ -180,7 +180,7 @@ func mergeParamsEnv(fs filesys.FileSystem, path string, overrides map[string]str
 	return nil
 }
 
-func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Patch, images []kustypes.Image) error {
+func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Patch) error {
 	kustPath := filepath.Join(dir, "kustomization.yaml")
 	data, err := fs.ReadFile(kustPath)
 	if err != nil {
@@ -203,19 +203,6 @@ func patchKustomization(fs filesys.FileSystem, dir string, patches []kustypes.Pa
 		}
 		existing, _ := kust["patches"].([]any)
 		kust["patches"] = append(existing, patchSlice...)
-	}
-
-	if len(images) > 0 {
-		imgBytes, err := json.Marshal(images)
-		if err != nil {
-			return err
-		}
-		var imgSlice []any
-		if err := json.Unmarshal(imgBytes, &imgSlice); err != nil {
-			return err
-		}
-		existing, _ := kust["images"].([]any)
-		kust["images"] = append(existing, imgSlice...)
 	}
 
 	out, err := sigyaml.Marshal(kust)

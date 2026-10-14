@@ -52,6 +52,7 @@ var _ = Describe("DataConnectService Controller", func() {
 		// Kustomize adds this prefix to all resource names.
 		np                 = "dch-"
 		flightResourceName = np + resourceName + "-flight"
+		rhoaiGatewayNS     = "openshift-ingress"
 	)
 
 	ctx := context.Background()
@@ -752,7 +753,7 @@ var _ = Describe("DataConnectService Controller", func() {
 					"distribution.name":    "Standalone",
 					"distribution.version": "0.0.0",
 					"gateway.name":         "custom-gateway",
-					"gateway.namespace":    "openshift-ingress",
+					"gateway.namespace":    rhoaiGatewayNS,
 				},
 			}
 			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
@@ -775,8 +776,8 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(cr.Status.Gateway).NotTo(BeNil())
 			Expect(cr.Status.Gateway.Name).To(Equal("custom-gateway"))
-			Expect(cr.Status.Gateway.Namespace).To(Equal("openshift-ingress"))
-			expectGatewayPolicyNamespace("openshift-ingress")
+			Expect(cr.Status.Gateway.Namespace).To(Equal(rhoaiGatewayNS))
+			expectGatewayPolicyNamespace(rhoaiGatewayNS)
 
 			cm := &corev1.ConfigMap{}
 			key := types.NamespacedName{Name: platformConfigName, Namespace: targetNamespace}

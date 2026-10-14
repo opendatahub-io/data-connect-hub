@@ -37,6 +37,8 @@ import (
 )
 
 const (
+	testBaseManifest                 = "base"
+	testOpenShiftGatewayNamespace    = "openshift-ingress"
 	testSQLiteConnector              = "sqlite"
 	testTOMLEnabledKey               = "enabled"
 	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
@@ -402,13 +404,13 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 		path               string
 		wantServiceMonitor bool
 	}{
-		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
 		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift"), wantServiceMonitor: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, nil)
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil)
 			if err != nil {
 				t.Fatalf("rendering %s: %v", tt.path, err)
 			}
@@ -439,10 +441,10 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 
 func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 	root := filepath.Join("..", "..", "..", "config")
-	for _, path := range []string{"base", filepath.Join("overlays", "openshift")} {
+	for _, path := range []string{testBaseManifest, filepath.Join("overlays", "openshift")} {
 		t.Run(path, func(t *testing.T) {
-			resources, err := renderKustomization(root, filepath.Join(root, path), nil, nil,
-				map[string]string{"GATEWAY_NAMESPACE": "openshift-ingress"})
+			resources, err := renderKustomization(root, filepath.Join(root, path), nil,
+				map[string]string{"GATEWAY_NAMESPACE": testOpenShiftGatewayNamespace})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -465,8 +467,8 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 					index = 1
 				}
 				got := policy.Spec.Ingress[index].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
-				if got != "openshift-ingress" {
-					t.Errorf("%s gateway namespace = %q, want openshift-ingress", policy.Name, got)
+				if got != testOpenShiftGatewayNamespace {
+					t.Errorf("%s gateway namespace = %q, want %s", policy.Name, got, testOpenShiftGatewayNamespace)
 				}
 				found++
 			}
@@ -482,7 +484,7 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 
 func TestRenderKustomizationImageParams(t *testing.T) {
 	manifestsPath := filepath.Join("..", "..", "..", "config")
-	paramsPath := filepath.Join(manifestsPath, "base", "params.env")
+	paramsPath := filepath.Join(manifestsPath, testBaseManifest, "params.env")
 	originalParams, err := os.ReadFile(paramsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -497,13 +499,13 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
 		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift")},
 	}
 
 	for _, tt := range paths {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, imageParams)
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, imageParams)
 			if err != nil {
 				t.Fatalf("rendering %s: %v", tt.path, err)
 			}
