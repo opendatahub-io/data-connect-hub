@@ -11,11 +11,29 @@ spec:
       app.kubernetes.io/name: rest-service
   policyTypes:
     - Ingress
-    - Egress
-  # Allow-all for now: we don't yet have a defined gateway/client topology to
-  # scope this down to. This exists so the policy can be tightened later
-  # without having to introduce the resource from scratch.
   ingress:
-    - {}
-  egress:
-    - {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: opendatahub
+          podSelector:
+            matchLabels:
+              gateway.networking.k8s.io/gateway-name: odh-gateway
+      ports:
+        - protocol: TCP
+          port: 8443
+    # The controller calls REST to register Flight services and connection types.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: dc-controller
+              control-plane: manager
+      ports:
+        - protocol: TCP
+          port: 8443
+    - ports:
+        - protocol: TCP
+          port: 9090

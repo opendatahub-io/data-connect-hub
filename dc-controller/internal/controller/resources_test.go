@@ -28,6 +28,7 @@ import (
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 	"github.com/pelletier/go-toml/v2"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -36,6 +37,11 @@ import (
 )
 
 const (
+	testBaseManifest                 = "base"
+	testControllerNamespace          = "controller-ns"
+	testGatewayName                  = "custom-gateway"
+	testOpenShiftGatewayNamespace    = "openshift-ingress"
+	testOperandNamespace             = "operand-ns"
 	testSQLiteConnector              = "sqlite"
 	testTOMLEnabledKey               = "enabled"
 	testTOMLConnectionTimeoutSecsKey = "connection_timeout_secs"
@@ -401,13 +407,13 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 		path               string
 		wantServiceMonitor bool
 	}{
-		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
 		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift"), wantServiceMonitor: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, nil)
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil)
 			if err != nil {
 				t.Fatalf("rendering %s: %v", tt.path, err)
 			}
@@ -436,9 +442,75 @@ func TestRenderKustomizationManifestRoots(t *testing.T) {
 	}
 }
 
+func TestRenderKustomizationGatewayNamespace(t *testing.T) {
+	root := filepath.Join("..", "..", "..", "config")
+	for _, path := range []string{testBaseManifest, filepath.Join("overlays", "openshift")} {
+		t.Run(path, func(t *testing.T) {
+			resources, err := renderKustomization(root, filepath.Join(root, path), nil, map[string]string{
+				"CONTROLLER_NAMESPACE": testControllerNamespace,
+				"GATEWAY_NAME":         testGatewayName,
+				"GATEWAY_NAMESPACE":    testOpenShiftGatewayNamespace,
+				"OPERAND_NAMESPACE":    testOperandNamespace,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			found := 0
+			paramsFound := false
+			for _, obj := range resources {
+				if obj.GetKind() == kindConfigMap && obj.GetName() == "dch-params" {
+					paramsFound = true
+				}
+				if obj.GetKind() != kindNetworkPolicy {
+					continue
+				}
+				var policy networkingv1.NetworkPolicy
+				if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &policy); err != nil {
+					t.Fatal(err)
+				}
+				gatewayIngress := 0
+				if policy.Labels[labelAppName] == nameFlightService {
+					gatewayIngress = 1
+					peer := policy.Spec.Ingress[0].From[0]
+					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testOperandNamespace {
+						t.Errorf("%s REST namespace = %q, want %s", policy.Name, got, testOperandNamespace)
+					}
+					if peer.PodSelector.MatchLabels[labelAppName] != nameRestService {
+						t.Errorf("%s REST selector = %q, want %s", policy.Name, peer.PodSelector.MatchLabels[labelAppName], nameRestService)
+					}
+				} else {
+					peer := policy.Spec.Ingress[1].From[0]
+					if got := peer.NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]; got != testControllerNamespace {
+						t.Errorf("%s controller namespace = %q, want %s", policy.Name, got, testControllerNamespace)
+					}
+					if peer.PodSelector.MatchLabels[labelAppName] != "dc-controller" {
+						t.Errorf("%s controller selector = %q, want dc-controller", policy.Name, peer.PodSelector.MatchLabels[labelAppName])
+					}
+				}
+				got := policy.Spec.Ingress[gatewayIngress].From[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"]
+				if got != testOpenShiftGatewayNamespace {
+					t.Errorf("%s gateway namespace = %q, want %s", policy.Name, got, testOpenShiftGatewayNamespace)
+				}
+				got = policy.Spec.Ingress[gatewayIngress].From[0].PodSelector.MatchLabels["gateway.networking.k8s.io/gateway-name"]
+				if got != testGatewayName {
+					t.Errorf("%s gateway name = %q, want %s", policy.Name, got, testGatewayName)
+				}
+				found++
+			}
+			if found != 2 {
+				t.Errorf("rendered %d NetworkPolicies, want 2", found)
+			}
+			if !paramsFound {
+				t.Error("rendered params ConfigMap must have a stable name")
+			}
+		})
+	}
+}
+
 func TestRenderKustomizationImageParams(t *testing.T) {
 	manifestsPath := filepath.Join("..", "..", "..", "config")
-	paramsPath := filepath.Join(manifestsPath, "base", "params.env")
+	paramsPath := filepath.Join(manifestsPath, testBaseManifest, "params.env")
 	originalParams, err := os.ReadFile(paramsPath)
 	if err != nil {
 		t.Fatal(err)
@@ -453,13 +525,13 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 		name string
 		path string
 	}{
-		{name: "base", path: filepath.Join(manifestsPath, "base")},
+		{name: testBaseManifest, path: filepath.Join(manifestsPath, testBaseManifest)},
 		{name: "openshift overlay", path: filepath.Join(manifestsPath, "overlays", "openshift")},
 	}
 
 	for _, tt := range paths {
 		t.Run(tt.name, func(t *testing.T) {
-			resources, err := renderKustomization(manifestsPath, tt.path, nil, nil, imageParams)
+			resources, err := renderKustomization(manifestsPath, tt.path, nil, imageParams)
 			if err != nil {
 				t.Fatalf("rendering %s: %v", tt.path, err)
 			}
