@@ -1,6 +1,9 @@
 name: URI
 provider: uri
 description: HTTP/REST JSON API endpoint
+tags:
+  - "domain: general"
+  - "protocol: http"
 credentials_fields:
   - name: URI
     label: URI
