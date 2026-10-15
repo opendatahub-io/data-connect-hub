@@ -40,6 +40,8 @@ const (
 	valueSyncedTrue        = "true"
 
 	requeueOnMigrationServiceUnavailable = 30 * time.Second
+
+	cmNameURIv1 = "uri-v1"
 )
 
 // ConfigMapWatcherReconciler watches ODH connection-type ConfigMaps
@@ -74,6 +76,14 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	alreadySynced := cm.Annotations[annotationDCHSynced] == valueSyncedTrue
+
+	if _, isAlias := builtinProviderAliases[cm.Name]; isAlias {
+		if alreadySynced {
+			return ctrl.Result{}, nil
+		}
+		log.Info("skipping import, built-in connection type covers this provider", "name", cm.Name)
+		return r.markSynced(ctx, &cm)
+	}
 
 	fieldsJSON, ok := cm.Data["fields"]
 	if !ok {
@@ -134,6 +144,14 @@ type odhField struct {
 	Name     string `json:"name"`
 	EnvVar   string `json:"envVar"`
 	Required bool   `json:"required"`
+}
+
+// builtinProviderAliases maps legacy ConfigMap names (key) to the
+// built-in connection type provider (value). The ConfigMap watcher
+// skips importing these and the Secret watcher resolves them to the
+// built-in type by matching on provider.
+var builtinProviderAliases = map[string]string{
+	cmNameURIv1: "uri",
 }
 
 func configMapToConnectionType(cm *corev1.ConfigMap, fieldsJSON string) (ConnectionType, error) {
