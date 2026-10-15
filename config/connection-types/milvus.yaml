@@ -1,6 +1,10 @@
 name: Milvus
 provider: milvus
 description: Milvus vector database
+tags:
+  - "domain: vector"
+  - "engine: milvus"
+  - "workload: rag"
 credentials_fields:
   - name: URI
     label: URI

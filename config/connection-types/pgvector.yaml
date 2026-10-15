@@ -1,6 +1,10 @@
 name: PGVector
 provider: postgres
 description: PostgreSQL vector database connection type
+tags:
+  - "domain: vector"
+  - "engine: postgresql"
+  - "workload: rag"
 credentials_fields:
   - name: URI
     label: Uri
