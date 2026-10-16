@@ -69,4 +69,4 @@ jobs:
         if: always()
         run: |
           source hack/ci/lib.sh
-          dump_cluster "$CI_SVC_NAMESPACE" "$CI_TENANT_NAMESPACE"
+          dump_cluster "$CI_GATEWAY_NAMESPACE" "$CI_CONTROLLER_NAMESPACE" "$CI_SVC_NAMESPACE" "$CI_TENANT_NAMESPACE"
