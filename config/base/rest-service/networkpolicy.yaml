@@ -11,6 +11,8 @@ spec:
       app.kubernetes.io/name: rest-service
   policyTypes:
     - Ingress
+  # Allow ingress only through the TLS proxy and metrics endpoint. The REST
+  # server's plaintext port is loopback-only and is not exposed to the pod network.
   ingress:
     - from:
         - namespaceSelector:
