@@ -17,13 +17,26 @@ from __future__ import annotations
 import contextlib
 import os
 import subprocess
+import time
 import uuid
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 import httpx
 import pytest
-from data_connect_hub import CredentialField, CredentialsRef, DataConnectClient, InlineCredentials
+from data_connect_hub import (
+    ConnectionType,
+    CredentialField,
+    CredentialsRef,
+    DataConnectClient,
+    DataConnection,
+    DCHConnectionError,
+    InlineCredentials,
+)
 from data_connect_hub.client import _build_urls
+
+_T = TypeVar("_T")
 
 # ---------------------------------------------------------------------------
 # Load .env written by run-e2e.sh (does not override existing env vars)
@@ -189,7 +202,7 @@ def dch_client(
         tenant_id=tenant_id,
         ca_cert=ca_cert,
         insecure=insecure,
-        max_retries=1,
+        max_retries=3,
         rest_timeout=15.0,
     )
     yield client  # type: ignore[misc]
@@ -224,6 +237,63 @@ def _unique_name(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:8]}"
 
 
+def _find_by_name(items: Sequence[object], name: str):
+    """Return the first item whose ``name`` matches, or ``None``."""
+    return next((item for item in items if item.name == name), None)
+
+
+def _create_with_retry(
+    create: Callable[[], _T],
+    find: Callable[[], _T | None],
+    *,
+    attempts: int = 3,
+    delay: float = 1.0,
+) -> _T:
+    """Create a resource, retrying on transient transport failures.
+
+    A ``POST`` can fail with ``DCHConnectionError`` when the client reuses a
+    pooled keep-alive connection that the Gateway closed first (the request is
+    never delivered). Before each retry, look the resource up by its unique
+    name and adopt it if the server did create it, so a retry can never
+    duplicate resources.
+    """
+    for attempt in range(attempts):
+        try:
+            return create()
+        except DCHConnectionError:
+            if attempt == attempts - 1:
+                raise
+            existing = find()
+            if existing is not None:
+                return existing
+            time.sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
+
+
+def _create_connection_type_with_retry(client: DataConnectClient, name: str, **kwargs) -> ConnectionType:
+    """``create_connection_type`` wrapped with a name-deduped retry."""
+
+    def _create() -> ConnectionType:
+        return client.create_connection_type(name=name, **kwargs)
+
+    def _find() -> ConnectionType | None:
+        return _find_by_name(client.list_connection_types(), name)
+
+    return _create_with_retry(_create, _find)
+
+
+def _create_connection_with_retry(client: DataConnectClient, name: str, **kwargs) -> DataConnection:
+    """``create_connection`` wrapped with a name-deduped retry."""
+
+    def _create() -> DataConnection:
+        return client.create_connection(name=name, **kwargs)
+
+    def _find() -> DataConnection | None:
+        return _find_by_name(client.list_connections(), name)
+
+    return _create_with_retry(_create, _find)
+
+
 def _delete_secret(namespace: str, name: str) -> None:
     subprocess.run(
         ["kubectl", "delete", "secret", name, "--namespace", namespace, "--ignore-not-found"],
@@ -245,8 +315,9 @@ def create_connection_type(rest_client: DataConnectClient):
         description: str | None = "e2e test connection type",
         credentials_fields: list[CredentialField] | None = None,
     ):
-        ct = rest_client.create_connection_type(
-            name=name or _unique_name("e2e-ct"),
+        ct = _create_connection_type_with_retry(
+            rest_client,
+            name or _unique_name("e2e-ct"),
             provider=provider,
             description=description,
             credentials_fields=credentials_fields,
@@ -276,8 +347,9 @@ def create_connection(rest_client: DataConnectClient, tenant_id: str):
         credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
     ):
-        conn = rest_client.create_connection(
-            name=name or _unique_name("e2e-conn"),
+        conn = _create_connection_with_retry(
+            rest_client,
+            name or _unique_name("e2e-conn"),
             connection_type_id=connection_type_id,
             data_format=data_format,
             credentials_ref=credentials_ref,
@@ -350,12 +422,14 @@ def pg_flight_connection(
     if not pg_secret:
         pytest.skip("DCH_PG_SECRET not set (run e2e/setup.sh first)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-pg-type"),
         provider="postgres",
         description="e2e query test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-pg-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -384,12 +458,14 @@ def s3_flight_connection(
     if not s3_secret:
         pytest.skip("DCH_S3_SECRET not set (set AWS credentials in env file)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-s3-type"),
         provider="s3",
         description="e2e S3 test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-s3-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -418,12 +494,14 @@ def milvus_flight_connection(
     if not milvus_secret:
         pytest.skip("DCH_MILVUS_SECRET not set (set DCH_MILVUS_URI in env file)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-milvus-type"),
         provider="milvus",
         description="e2e Milvus test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-milvus-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -452,12 +530,14 @@ def es_flight_connection(
     if not es_secret:
         pytest.skip("DCH_ES_SECRET not set (set DCH_ES_URI in env file)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-es-type"),
         provider="elasticsearch",
         description="e2e Elasticsearch test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-es-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -485,12 +565,14 @@ def es_apikey_flight_connection(
     if not es_apikey_secret:
         pytest.skip("DCH_ES_APIKEY_SECRET not set (ES API key not created)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-es-apikey-type"),
         provider="elasticsearch",
         description="e2e Elasticsearch API key test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-es-apikey-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -519,12 +601,14 @@ def neo4j_flight_connection(
     if not neo4j_secret:
         pytest.skip("DCH_NEO4J_SECRET not set (set DCH_NEO4J_URI in env file)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-neo4j-type"),
         provider="neo4j",
         description="e2e Neo4j test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-neo4j-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
@@ -553,12 +637,14 @@ def uri_flight_connection(
     if not uri_secret:
         pytest.skip("DCH_URI_SECRET not set (set DCH_TENANT_URI_DEPLOY_SERVER=true in env file)")
 
-    ct = rest_client.create_connection_type(
+    ct = _create_connection_type_with_retry(
+        rest_client,
         name=_unique_name("e2e-uri-type"),
         provider="uri",
         description="e2e URI test",
     )
-    conn = rest_client.create_connection(
+    conn = _create_connection_with_retry(
+        rest_client,
         name=_unique_name("e2e-uri-conn"),
         connection_type_id=ct.id,
         data_format="tabular",
