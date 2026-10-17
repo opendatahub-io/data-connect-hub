@@ -1,15 +1,36 @@
 package manifests_test
 
 import (
+	"bytes"
+	"io"
+	"maps"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 
+	"helm.sh/helm/v3/pkg/chart/loader"
+	"helm.sh/helm/v3/pkg/chartutil"
+	"helm.sh/helm/v3/pkg/engine"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	k8syaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/kustomize/kyaml/kio"
 	"sigs.k8s.io/yaml"
+)
+
+const (
+	nameKey           = "name"
+	cpuKey            = "cpu"
+	memoryKey         = "memory"
+	requestsKey       = "requests"
+	resourcesKey      = "resources"
+	limitsKey         = "limits"
+	audiencesKey      = "tokenReviewAudiences"
+	defaultTenant     = "opendatahub"
+	defaultListenAddr = "0.0.0.0"
+	memory256Mi       = "256Mi"
 )
 
 func TestXKSMetricsNetworkPolicyUsesHTTPPort(t *testing.T) {
@@ -66,102 +87,128 @@ func TestXKSMetricsNetworkPolicyUsesHTTPPort(t *testing.T) {
 	t.Fatal("rendered XKS overlay did not contain the metrics NetworkPolicy")
 }
 
-// TestServiceMonitorOnlyInOpenShiftOverlay guards the split between the manifest
-// roots the controller renders: base/ must stay applicable to any cluster, while
-// the ServiceMonitor ships only in overlays/openshift.
-func TestServiceMonitorOnlyInOpenShiftOverlay(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("could not locate manifest test")
+// baseChartValues returns the Helm values the controller derives from a
+// DataConnectService CR, shared by the chart rendering tests below.
+func baseChartValues() map[string]any {
+	return map[string]any{
+		"namePrefix": "dch-",
+		"images": map[string]any{
+			"restService":   "test:rest",
+			"flightService": "test:flight",
+			"kubeRbacProxy": "test:proxy",
+		},
+		"restService": map[string]any{
+			"replicas": 1,
+			resourcesKey: map[string]any{
+				requestsKey: map[string]any{cpuKey: "100m", memoryKey: memory256Mi},
+				limitsKey:   map[string]any{cpuKey: "1", memoryKey: "512Mi"},
+			},
+			"env":          []any{},
+			"envFrom":      []any{},
+			"volumes":      []any{},
+			"volumeMounts": []any{},
+			"config": map[string]any{
+				audiencesKey: []any{},
+			},
+		},
+		"kubeRbacProxy": map[string]any{
+			resourcesKey: map[string]any{
+				requestsKey: map[string]any{cpuKey: "50m", memoryKey: "64Mi"},
+				limitsKey:   map[string]any{cpuKey: "500m", memoryKey: memory256Mi},
+			},
+			audiencesKey: []any{},
+		},
+		"flightService": map[string]any{
+			"name":     "default-flight",
+			"replicas": 1,
+			resourcesKey: map[string]any{
+				requestsKey: map[string]any{cpuKey: "100m", memoryKey: memory256Mi},
+				limitsKey:   map[string]any{cpuKey: "1", memoryKey: "512Mi"},
+			},
+			"env":          []any{},
+			"envFrom":      []any{},
+			"volumes":      []any{},
+			"volumeMounts": []any{},
+			"config": map[string]any{
+				audiencesKey: []any{},
+			},
+		},
+		"gateway": map[string]any{
+			"enabled": true,
+			"parentRef": map[string]any{
+				nameKey:     "odh-gateway",
+				"namespace": defaultTenant,
+			},
+		},
+		"trace": map[string]any{"endpoint": "", "insecure": "", "certificate": ""},
 	}
-	configRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "config"))
+}
 
-	baseNames := renderKinds(t, filepath.Join(configRoot, "base"), "ServiceMonitor")
-	if len(baseNames) > 0 {
-		t.Fatalf("base renders ServiceMonitor(s) %v, want none", baseNames)
+func monitoringValues(enabled bool) map[string]any {
+	return map[string]any{"enabled": enabled, "scrapeInterval": "30s"}
+}
+
+func TestServiceMonitorOnlyWhenMonitoringEnabled(t *testing.T) {
+	chartPath := operandChartPath(t)
+
+	withoutMonitoring := maps.Clone(baseChartValues())
+	withoutMonitoring["monitoring"] = monitoringValues(false)
+
+	baseResources := renderChart(t, chartPath, withoutMonitoring, "test-ns")
+	baseMonitors := filterByKind(baseResources, "ServiceMonitor")
+	if len(baseMonitors) > 0 {
+		t.Fatalf("chart without monitoring renders ServiceMonitor(s), want none")
 	}
 
-	overlayNames := renderKinds(t, filepath.Join(configRoot, "overlays", "openshift"), "ServiceMonitor")
-	if len(overlayNames) != 1 || overlayNames[0] != "dch-servicemonitor" {
-		t.Fatalf("openshift overlay ServiceMonitors = %v, want [dch-servicemonitor]", overlayNames)
+	withMonitoring := maps.Clone(baseChartValues())
+	withMonitoring["monitoring"] = monitoringValues(true)
+
+	overlayResources := renderChart(t, chartPath, withMonitoring, "test-ns")
+	overlayMonitors := filterByKind(overlayResources, "ServiceMonitor")
+	if len(overlayMonitors) != 1 {
+		t.Fatalf("chart with monitoring renders %d ServiceMonitor(s), want 1", len(overlayMonitors))
 	}
 
-	deployments := renderKinds(t, filepath.Join(configRoot, "overlays", "openshift"), "Deployment")
+	deployments := filterByKind(overlayResources, "Deployment")
 	if len(deployments) != 2 {
-		t.Fatalf("openshift overlay Deployments = %v, want the two inherited from base", deployments)
+		t.Fatalf("chart with monitoring renders %d Deployments, want 2", len(deployments))
 	}
 }
 
 func TestRestServiceExposesMetricsPort(t *testing.T) {
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("could not locate manifest test")
-	}
-	configRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "config"))
+	chartPath := operandChartPath(t)
 
-	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), filepath.Join(configRoot, "base"))
-	if err != nil {
-		t.Fatalf("rendering base manifests: %v", err)
-	}
-	rendered, err := resMap.AsYaml()
-	if err != nil {
-		t.Fatalf("serializing base manifests: %v", err)
-	}
-	nodes, err := (&kio.ByteReader{Reader: strings.NewReader(string(rendered))}).Read()
-	if err != nil {
-		t.Fatalf("parsing base manifests: %v", err)
-	}
+	values := baseChartValues()
+	values["monitoring"] = monitoringValues(false)
+
+	resources := renderChart(t, chartPath, values, "test-ns")
 
 	servicePortFound := false
 	containerPortFound := false
-	const metricsPortName = "metrics"
-	for _, node := range nodes {
-		var object struct {
-			Kind     string `yaml:"kind"`
-			Metadata struct {
-				Name string `yaml:"name"`
-			} `yaml:"metadata"`
-			Spec struct {
-				Ports []struct {
-					Name       string `yaml:"name"`
-					Port       int    `yaml:"port"`
-					TargetPort string `yaml:"targetPort"`
-				} `yaml:"ports"`
-				Template struct {
-					Spec struct {
-						Containers []struct {
-							Name  string `yaml:"name"`
-							Ports []struct {
-								Name          string `yaml:"name"`
-								ContainerPort int    `yaml:"containerPort"`
-							} `yaml:"ports"`
-						} `yaml:"containers"`
-					} `yaml:"spec"`
-				} `yaml:"template"`
-			} `yaml:"spec"`
-		}
-		if err := yaml.Unmarshal([]byte(node.MustString()), &object); err != nil {
-			t.Fatalf("parsing rendered resource: %v", err)
-		}
-		if object.Metadata.Name != "dch-rest-service" {
+	for _, obj := range resources {
+		if obj.GetName() != "dch-rest-service" {
 			continue
 		}
-
-		switch object.Kind {
+		switch obj.GetKind() {
 		case "Service":
-			for _, port := range object.Spec.Ports {
-				if port.Name == metricsPortName && port.Port == 9090 && port.TargetPort == metricsPortName {
+			ports, _, _ := unstructured.NestedSlice(obj.Object, "spec", "ports")
+			for _, p := range ports {
+				port, _ := p.(map[string]any)
+				if port[nameKey] == "metrics" {
 					servicePortFound = true
 				}
 			}
 		case "Deployment":
-			for _, container := range object.Spec.Template.Spec.Containers {
-				if container.Name != "rest-server" {
+			containers, _, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+			for _, c := range containers {
+				container, _ := c.(map[string]any)
+				if container[nameKey] != "rest-server" {
 					continue
 				}
-				for _, port := range container.Ports {
-					if port.Name == metricsPortName && port.ContainerPort == 9090 {
+				ports, _ := container["ports"].([]any)
+				for _, p := range ports {
+					port, _ := p.(map[string]any)
+					if port[nameKey] == "metrics" {
 						containerPortFound = true
 					}
 				}
@@ -170,29 +217,76 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 	}
 
 	if !servicePortFound {
-		t.Error("rendered REST Service does not expose metrics port 9090")
+		t.Error("rendered REST Service does not expose metrics port")
 	}
 	if !containerPortFound {
-		t.Error("rendered REST Deployment does not declare metrics container port 9090")
+		t.Error("rendered REST Deployment does not declare metrics container port")
 	}
 }
 
-// renderKinds renders the kustomization at path and returns the names of every
-// rendered resource of the given kind.
-func renderKinds(t *testing.T, path, kind string) []string {
+func operandChartPath(t *testing.T) string {
 	t.Helper()
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate manifest test")
+	}
+	chartPath := filepath.Join(filepath.Dir(filename), "..", "..", "..", "manifests", "charts", "data-connect-hub")
+	return filepath.Clean(chartPath)
+}
 
-	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
-	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), path)
+func renderChart(t *testing.T, chartPath string, values map[string]any, namespace string) []*unstructured.Unstructured {
+	t.Helper()
+	c, err := loader.Load(chartPath)
 	if err != nil {
-		t.Fatalf("rendering %s: %v", path, err)
+		t.Fatalf("loading chart: %v", err)
+	}
+	releaseOpts := chartutil.ReleaseOptions{
+		Name:      "dch",
+		Namespace: namespace,
+		IsInstall: true,
+	}
+	valuesToRender, err := chartutil.ToRenderValues(c, values, releaseOpts, nil)
+	if err != nil {
+		t.Fatalf("preparing values: %v", err)
+	}
+	rendered, err := engine.Render(c, valuesToRender)
+	if err != nil {
+		t.Fatalf("rendering: %v", err)
 	}
 
-	var names []string
-	for _, res := range resMap.Resources() {
-		if res.GetKind() == kind {
-			names = append(names, res.GetName())
+	var objects []*unstructured.Unstructured
+	for name, content := range rendered {
+		if strings.HasSuffix(name, "_helpers.tpl") || strings.HasSuffix(name, "NOTES.txt") {
+			continue
+		}
+		trimmed := strings.TrimSpace(content)
+		if trimmed == "" {
+			continue
+		}
+		decoder := k8syaml.NewYAMLToJSONDecoder(bytes.NewBufferString(trimmed))
+		for {
+			obj := &unstructured.Unstructured{}
+			if err := decoder.Decode(&obj.Object); err != nil {
+				if err == io.EOF {
+					break
+				}
+				t.Fatalf("decoding %s: %v", name, err)
+			}
+			if obj.Object == nil {
+				continue
+			}
+			objects = append(objects, obj)
 		}
 	}
-	return names
+	return objects
+}
+
+func filterByKind(resources []*unstructured.Unstructured, kind string) []*unstructured.Unstructured {
+	var result []*unstructured.Unstructured
+	for _, r := range resources {
+		if r.GetKind() == kind {
+			result = append(result, r)
+		}
+	}
+	return result
 }

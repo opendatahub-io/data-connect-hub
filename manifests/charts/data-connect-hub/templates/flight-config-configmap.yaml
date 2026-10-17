@@ -1,0 +1,53 @@
+{{- with .Values.flightService }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dch.prefix" $ }}-{{ .name }}-config
+  labels:
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
+data:
+  config.toml: |
+    [server]
+    address = "0.0.0.0"
+    port = 8443
+
+    [ingestion_cache_pools]
+    max_capacity = 50
+    ttl_secs = 30
+    idle_secs = 30
+
+    [tls]
+    cert_file = "/etc/tls/private/tls.crt"
+    key_file = "/etc/tls/private/tls.key"
+
+    [auth]
+    enabled = true
+    cache_ttl_secs = 60
+    discovery_service_account = "system:serviceaccount:{{ $.Release.Namespace }}:{{ include "dch.restSA" $ }}"
+    {{- if .config.tokenReviewAudiences }}
+    token_review_audiences = {{ .config.tokenReviewAudiences | toJson }}
+    {{- end }}
+
+    [metrics]
+    enabled = true
+    address = "0.0.0.0"
+    port = 9090
+
+    [connectors.default]
+    enabled = true
+    connection_timeout_secs = 10
+    request_timeout_secs = 30
+    read_timeout_secs = 30
+    {{- range $name, $cfg := .connectors }}
+
+    [connectors.{{ $name }}]
+    {{- range $key, $val := $cfg }}
+    {{ $key }} = {{ kindIs "string" $val | ternary (printf "%q" $val) $val }}
+    {{- end }}
+    {{- end }}
+
+    [global-connection-types]
+    tenant-id = "{{ $.Release.Namespace }}"
+{{- end }}

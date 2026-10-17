@@ -101,6 +101,7 @@ type ReleaseStatus struct {
 type ConnectorConfig struct {
 	// name is the connector provider name (e.g. "postgres", "sqlite", "s3", "elasticsearch", "neo4j", "milvus")
 	// +required
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$`
 	Name string `json:"name"`
 
 	// enabled controls whether this connector is available for use.
@@ -170,6 +171,9 @@ type DataConnectServiceSpec struct {
 	// ConfigMap key "auth.tokenReviewAudiences" (comma-separated).
 	// The CR value takes priority over the ConfigMap.
 	// +optional
+	// +kubebuilder:validation:MaxItems=10
+	// +kubebuilder:validation:items:MaxLength=253
+	// +kubebuilder:validation:items:Pattern=`^[^\s,]+$`
 	TokenReviewAudiences []string `json:"tokenReviewAudiences,omitempty"`
 
 	// gateway is a reference to a Kubernetes Gateway for external traffic.

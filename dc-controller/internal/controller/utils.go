@@ -17,12 +17,8 @@ limitations under the License.
 package controller
 
 import (
-	"fmt"
 	"os"
 	"strings"
-
-	"github.com/pelletier/go-toml/v2"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // controllerNamespaceEnvVar optionally overrides the namespace used to scope
@@ -38,7 +34,7 @@ var serviceAccountNamespacePath = "/var/run/secrets/kubernetes.io/serviceaccount
 // pod. The CONTROLLER_NAMESPACE environment variable takes precedence;
 // otherwise the namespace is read from the service-account token projection.
 // It returns an empty string when neither is available (e.g. when running
-// outside a cluster), leaving rendered NetworkPolicies on their params.env
+// outside a cluster), leaving rendered NetworkPolicies on their chart value
 // defaults.
 func ResolveControllerNamespace() string {
 	if ns := os.Getenv(controllerNamespaceEnvVar); ns != "" {
@@ -49,37 +45,4 @@ func ResolveControllerNamespace() string {
 		return ""
 	}
 	return strings.TrimSpace(string(data))
-}
-
-// parseConfigMapTOML parses the config.toml value in a ConfigMap's data.
-// A nil config means the ConfigMap has no data.config.toml entry.
-func parseConfigMapTOML(obj *unstructured.Unstructured) (config map[string]any, data map[string]string, err error) {
-	data, found, err := unstructured.NestedStringMap(obj.Object, "data")
-	if err != nil {
-		return nil, nil, fmt.Errorf("reading ConfigMap data: %w", err)
-	}
-	if !found {
-		return nil, nil, nil
-	}
-	tomlText, ok := data["config.toml"]
-	if !ok {
-		return nil, data, nil
-	}
-	if err := toml.Unmarshal([]byte(tomlText), &config); err != nil {
-		return nil, data, fmt.Errorf("parsing config.toml: %w", err)
-	}
-	return config, data, nil
-}
-
-// setConfigMapTOML serializes config and writes it back to the ConfigMap data.
-func setConfigMapTOML(obj *unstructured.Unstructured, config map[string]any, data map[string]string) error {
-	out, err := toml.Marshal(config)
-	if err != nil {
-		return fmt.Errorf("marshaling config.toml: %w", err)
-	}
-	data["config.toml"] = string(out)
-	if err := unstructured.SetNestedStringMap(obj.Object, data, "data"); err != nil {
-		return fmt.Errorf("setting ConfigMap data: %w", err)
-	}
-	return nil
 }

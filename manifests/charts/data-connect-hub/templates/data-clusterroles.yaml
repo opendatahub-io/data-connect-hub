@@ -1,7 +1,9 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: read
+  name: {{ include "dch.prefix" . }}-read
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
@@ -10,7 +12,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: read-write
+  name: {{ include "dch.prefix" . }}-read-write
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
@@ -19,7 +23,9 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: admin
+  name: {{ include "dch.prefix" . }}-admin
+  labels:
+    {{- include "dch.labels" . | nindent 4 }}
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
