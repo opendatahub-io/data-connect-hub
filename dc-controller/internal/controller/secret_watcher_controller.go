@@ -137,6 +137,14 @@ func (r *SecretWatcherReconciler) resolveConnectionTypeID(ctx context.Context, n
 		}
 	}
 
+	if alias, ok := builtinProviderAliases[typeRef]; ok {
+		for _, t := range types {
+			if t.Resource.Provider == alias {
+				return t.Metadata.ID, nil
+			}
+		}
+	}
+
 	return "", fmt.Errorf("%w: connection type %q not found", ErrNotFound, typeRef)
 }
 
