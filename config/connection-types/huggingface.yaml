@@ -1,6 +1,9 @@
 name: HuggingFace
 provider: huggingface
 description: Hugging Face model and dataset hub
+tags:
+  - "domain: model-registry"
+  - "vendor: huggingface"
 credentials_fields:
   - name: URI
     label: URI

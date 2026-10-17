@@ -1,6 +1,10 @@
 name: Neo4j
 provider: neo4j
 description: Neo4j graph database
+tags:
+  - "domain: graph"
+  - "engine: neo4j"
+  - "workload: knowledge-graph"
 credentials_fields:
   - name: URI
     label: URI

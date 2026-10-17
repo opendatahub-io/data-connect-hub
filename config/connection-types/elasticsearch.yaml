@@ -1,6 +1,10 @@
 name: ElasticSearch
 provider: elasticsearch
 description: Elasticsearch search and analytics engine
+tags:
+  - "domain: search"
+  - "engine: elasticsearch"
+  - "workload: analytics"
 credentials_fields:
   - name: URI
     label: URI
