@@ -68,6 +68,13 @@ fn build_http_transport(ca_cert: &str) -> Result<HttpTransporter, ConnectorError
     Ok(HttpTransporter::new(ReqwestTransport::new(client)))
 }
 
+fn resolve_region(credentials: &HashMap<String, String>) -> String {
+    if let Some(region) = credentials.get(KEY_REGION).map(|v| v.trim()).filter(|v| !v.is_empty()) {
+        return region.to_string();
+    }
+    "us-east-1".to_string()
+}
+
 fn build_operator(
     credentials: &HashMap<String, String>,
     connection_timeout: Duration,
@@ -85,24 +92,24 @@ fn build_operator(
         .get(KEY_SECRET_ACCESS_KEY)
         .ok_or_else(|| ConnectorError::ConfigError(format!("{KEY_SECRET_ACCESS_KEY} is required")))?;
 
+    let region = resolve_region(credentials);
     let mut builder = S3::default()
         .bucket(bucket)
         .access_key_id(access_key)
-        .secret_access_key(secret_key);
+        .secret_access_key(secret_key)
+        .region(&region);
 
-    if let Some(region) = credentials.get(KEY_REGION) {
-        builder = builder.region(region);
-    }
-
-    if let Some(endpoint) = credentials.get(KEY_ENDPOINT)
-        && !endpoint.is_empty()
+    if let Some(endpoint) = credentials
+        .get(KEY_ENDPOINT)
+        .map(|v| v.trim())
+        .filter(|v| !v.is_empty())
     {
         builder = builder.endpoint(endpoint);
     }
 
     let mut op = Operator::new(builder).map_err(|e| {
         tracing::error!(error = %e, "failed to create S3 operator");
-        ConnectorError::ConnectionError("failed to create S3 operator".to_string())
+        ConnectorError::ConnectionError(format!("failed to create S3 operator: {e}"))
     })?;
 
     if let Some(ca_cert) = credentials.get(KEY_CA_CERT).filter(|value| !value.trim().is_empty()) {
@@ -317,7 +324,7 @@ impl DataReader for S3Reader {
     async fn check_connection(&self) -> Result<(), ConnectorError> {
         self.operator.check().await.map_err(|e| {
             tracing::error!(error = %e, "S3 connection check failed");
-            ConnectorError::ConnectionError("S3 connection check failed".to_string())
+            ConnectorError::ConnectionError(format!("S3 connection check failed: {e}"))
         })
     }
 
@@ -479,6 +486,42 @@ mod tests {
         let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains(KEY_ACCESS_KEY_ID));
+    }
+
+    #[test]
+    fn test_build_operator_empty_region_defaults() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_REGION.to_string(), "".to_string());
+        let result = build_operator(&creds, Duration::from_secs(10), Duration::from_secs(10));
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_resolve_region_keeps_existing() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_REGION.to_string(), "eu-west-1".to_string());
+        assert_eq!(resolve_region(&creds), "eu-west-1");
+    }
+
+    #[test]
+    fn test_resolve_region_empty_string_fallback() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_REGION.to_string(), "".to_string());
+        assert_eq!(resolve_region(&creds), "us-east-1");
+    }
+
+    #[test]
+    fn test_resolve_region_whitespace_fallback() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_REGION.to_string(), "  ".to_string());
+        assert_eq!(resolve_region(&creds), "us-east-1");
+    }
+
+    #[test]
+    fn test_resolve_region_fallback_us_east_1() {
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.remove(KEY_REGION);
+        assert_eq!(resolve_region(&creds), "us-east-1");
     }
 
     #[test]
