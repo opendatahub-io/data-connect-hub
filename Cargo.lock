@@ -4517,6 +4517,7 @@ dependencies = [
  "opendal",
  "opendal-http-transport-reqwest",
  "reqwest 0.13.5",
+ "serde_json",
  "tokio",
  "tracing",
 ]
