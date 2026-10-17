@@ -28,9 +28,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+const testConnectionID = "connection-uuid-123"
+
 type mockMigrationClient struct {
 	listFn      func(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
-	createFn    func(ctx context.Context, tenantID string, conn Connection) error
+	lookupFn    func(ctx context.Context, tenantID, secretName string) (string, error)
+	createFn    func(ctx context.Context, tenantID string, conn Connection) (ConnectionResource, error)
 	listCalls   int
 	createCalls int
 }
@@ -48,12 +51,19 @@ func (m *mockMigrationClient) ListConnectionTypes(ctx context.Context, tenantID 
 	}, nil
 }
 
-func (m *mockMigrationClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) error {
+func (m *mockMigrationClient) LookupConnectionIDBySecret(ctx context.Context, tenantID, secretName string) (string, error) {
+	if m.lookupFn != nil {
+		return m.lookupFn(ctx, tenantID, secretName)
+	}
+	return "", ErrNotFound
+}
+
+func (m *mockMigrationClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) (ConnectionResource, error) {
 	m.createCalls++
 	if m.createFn != nil {
 		return m.createFn(ctx, tenantID, conn)
 	}
-	return nil
+	return ConnectionResource{Metadata: ResourceMetadata{ID: testConnectionID}}, nil
 }
 
 var _ = Describe("Secret Watcher Controller", func() {
@@ -110,10 +120,10 @@ var _ = Describe("Secret Watcher Controller", func() {
 
 		var captured Connection
 		mock := &mockMigrationClient{
-			createFn: func(_ context.Context, tenantID string, conn Connection) error {
+			createFn: func(_ context.Context, tenantID string, conn Connection) (ConnectionResource, error) {
 				Expect(tenantID).To(Equal(secretNamespace))
 				captured = conn
-				return nil
+				return ConnectionResource{Metadata: ResourceMetadata{ID: testConnectionID}}, nil
 			},
 		}
 		r := reconciler(mock)
@@ -131,6 +141,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 
 		Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
 		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(secret.Annotations[annotationDCHConnectionID]).To(Equal(testConnectionID))
 	})
 
 	It("should use Secret name when display-name annotation is absent", func() {
@@ -140,9 +151,9 @@ var _ = Describe("Secret Watcher Controller", func() {
 
 		var captured Connection
 		mock := &mockMigrationClient{
-			createFn: func(_ context.Context, _ string, conn Connection) error {
+			createFn: func(_ context.Context, _ string, conn Connection) (ConnectionResource, error) {
 				captured = conn
-				return nil
+				return ConnectionResource{Metadata: ResourceMetadata{ID: testConnectionID}}, nil
 			},
 		}
 		r := reconciler(mock)
@@ -155,6 +166,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 	It("should skip already-synced Secret", func() {
 		secret := newSecret()
 		secret.Annotations[annotationDCHSynced] = valueSyncedTrue
+		secret.Annotations[annotationDCHConnectionID] = testConnectionID
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 		mock := &mockMigrationClient{}
@@ -216,8 +228,8 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 		mock := &mockMigrationClient{
-			createFn: func(_ context.Context, _ string, _ Connection) error {
-				return ErrServiceUnavailable
+			createFn: func(_ context.Context, _ string, _ Connection) (ConnectionResource, error) {
+				return ConnectionResource{}, ErrServiceUnavailable
 			},
 		}
 		r := reconciler(mock)
@@ -232,8 +244,11 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 		mock := &mockMigrationClient{
-			createFn: func(_ context.Context, _ string, _ Connection) error {
-				return ErrConflict
+			lookupFn: func(_ context.Context, _ string, _ string) (string, error) {
+				return "existing-connection-uuid", nil
+			},
+			createFn: func(_ context.Context, _ string, _ Connection) (ConnectionResource, error) {
+				return ConnectionResource{}, ErrConflict
 			},
 		}
 		r := reconciler(mock)
@@ -243,6 +258,7 @@ var _ = Describe("Secret Watcher Controller", func() {
 
 		Expect(k8sClient.Get(ctx, secretKey, secret)).To(Succeed())
 		Expect(secret.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+		Expect(secret.Annotations[annotationDCHConnectionID]).To(Equal("existing-connection-uuid"))
 	})
 
 	It("should not re-create after successful sync", func() {
@@ -266,8 +282,8 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
 		mock := &mockMigrationClient{
-			createFn: func(_ context.Context, _ string, _ Connection) error {
-				return fmt.Errorf("unexpected error")
+			createFn: func(_ context.Context, _ string, _ Connection) (ConnectionResource, error) {
+				return ConnectionResource{}, fmt.Errorf("unexpected error")
 			},
 		}
 		r := reconciler(mock)

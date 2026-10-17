@@ -57,6 +57,7 @@ fn api_routes(cfg: &mut web::ServiceConfig, _service: Arc<ApiService>) {
                 .route("/connection-types/{id}", web::delete().to(delete_connection_type))
                 .route("/connections", web::get().to(list_connections))
                 .route("/connections", web::post().to(create_connection))
+                .route("/connections/lookup", web::get().to(lookup_connection_id_by_secret))
                 .route("/connections/{id}", web::get().to(get_connection))
                 .route("/connections/{id}", web::patch().to(patch_connection))
                 .route("/connections/{id}", web::delete().to(delete_connection))

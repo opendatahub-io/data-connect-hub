@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"strings"
 	"sync"
@@ -59,7 +60,8 @@ type ConnectionTypeClient interface {
 // ConnectionMigrationClient abstracts REST calls needed by the Secret migration watcher.
 type ConnectionMigrationClient interface {
 	ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
-	CreateConnection(ctx context.Context, tenantID string, conn Connection) error
+	LookupConnectionIDBySecret(ctx context.Context, tenantID, secretName string) (string, error)
+	CreateConnection(ctx context.Context, tenantID string, conn Connection) (ConnectionResource, error)
 }
 
 // FlightServiceClient abstracts REST calls for flight service registration.
@@ -135,10 +137,19 @@ type ConnectionTypeResource struct {
 	Resource ConnectionType   `json:"resource"`
 }
 
+type ConnectionResource struct {
+	Metadata ResourceMetadata `json:"metadata"`
+	Resource Connection       `json:"resource"`
+}
+
 // connectionTypeListResponse is the envelope for GET /connection-types.
 type connectionTypeListResponse struct {
 	TotalCount int                      `json:"total_count"`
 	Items      []ConnectionTypeResource `json:"items"`
+}
+
+type connectionLookupResponse struct {
+	ID string `json:"id"`
 }
 
 // URLResolver returns the base URL for the REST service. It is called on
@@ -331,41 +342,107 @@ func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tena
 	return listResp.Items, nil
 }
 
-func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) error {
-	url, err := c.baseURL()
+func (c *httpConnectionTypeClient) LookupConnectionIDBySecret(ctx context.Context, tenantID, secretName string) (string, error) {
+	baseURL, err := c.baseURL()
 	if err != nil {
-		return ErrServiceUnavailable
+		return "", ErrServiceUnavailable
 	}
 
-	body, err := json.Marshal(conn)
+	query := neturl.Values{}
+	query.Set("secret_ref", secretName)
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		restDataURL(baseURL, connectionsResource)+"/lookup?"+query.Encode(),
+		nil,
+	)
 	if err != nil {
-		return fmt.Errorf("marshaling connection: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, restDataURL(url, connectionsResource), bytes.NewReader(body))
-	if err != nil {
-		return fmt.Errorf("creating request: %w", err)
+		return "", fmt.Errorf("creating request: %w", err)
 	}
 	c.setHeaders(req, tenantID)
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return ErrServiceUnavailable
+		return "", ErrServiceUnavailable
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	if resp.StatusCode == http.StatusCreated {
-		return nil
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if readErr != nil {
+		return "", ErrServiceUnavailable
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", ErrNotFound
 	}
 	if resp.StatusCode == http.StatusConflict {
-		return ErrConflict
+		return "", ErrConflict
 	}
 	if resp.StatusCode >= 500 {
-		return ErrServiceUnavailable
+		return "", ErrServiceUnavailable
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(body))
 	}
 
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
-	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+	var lookupResp connectionLookupResponse
+	if err := json.Unmarshal(body, &lookupResp); err != nil {
+		return "", ErrServiceUnavailable
+	}
+	if lookupResp.ID == "" {
+		return "", ErrServiceUnavailable
+	}
+	return lookupResp.ID, nil
+}
+
+func (c *httpConnectionTypeClient) CreateConnection(ctx context.Context, tenantID string, conn Connection) (ConnectionResource, error) {
+	url, err := c.baseURL()
+	if err != nil {
+		return ConnectionResource{}, ErrServiceUnavailable
+	}
+
+	body, err := json.Marshal(conn)
+	if err != nil {
+		return ConnectionResource{}, fmt.Errorf("marshaling connection: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, restDataURL(url, connectionsResource), bytes.NewReader(body))
+	if err != nil {
+		return ConnectionResource{}, fmt.Errorf("creating request: %w", err)
+	}
+	c.setHeaders(req, tenantID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ConnectionResource{}, ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusConflict {
+		return ConnectionResource{}, ErrConflict
+	}
+	if resp.StatusCode >= 500 {
+		return ConnectionResource{}, ErrServiceUnavailable
+	}
+
+	respBody, readErr := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if readErr != nil {
+		if resp.StatusCode == http.StatusCreated {
+			return ConnectionResource{}, ErrServiceUnavailable
+		}
+		return ConnectionResource{}, fmt.Errorf("reading response: %w", readErr)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		return ConnectionResource{}, fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var created ConnectionResource
+	if err := json.Unmarshal(respBody, &created); err != nil {
+		return ConnectionResource{}, ErrServiceUnavailable
+	}
+	if created.Metadata.ID == "" {
+		return ConnectionResource{}, ErrServiceUnavailable
+	}
+	return created, nil
 }
 
 func (c *httpConnectionTypeClient) RegisterFlightService(ctx context.Context, tenantID string, fs FlightServiceRegistration) error {
