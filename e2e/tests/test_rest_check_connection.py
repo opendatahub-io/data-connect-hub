@@ -56,6 +56,35 @@ class TestRestTestCredentials:
 
         rest_client.test_credentials(dct_id, secret)
 
+    def test_s3_empty_region(
+        self,
+        rest_client: DataConnectClient,
+        s3_flight_connection: str,
+    ) -> None:
+        """Regression: empty region must not cause 'failed to create S3 operator'."""
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        bucket = os.environ.get("AWS_S3_BUCKET")
+        endpoint = os.environ.get("AWS_S3_ENDPOINT")
+        if not all([access_key, secret_key, bucket, endpoint]):
+            pytest.skip("AWS S3 env vars not set")
+
+        conn = rest_client.get_connection(s3_flight_connection)
+        dct_id = conn.data_connection_type_id
+
+        secret: dict[str, str] = {
+            "AWS_ACCESS_KEY_ID": access_key,
+            "AWS_SECRET_ACCESS_KEY": secret_key,
+            "AWS_S3_BUCKET": bucket,
+            "AWS_S3_ENDPOINT": endpoint,
+            "AWS_DEFAULT_REGION": "",
+        }
+        ca_cert_path = os.environ.get("AWS_S3_CA_CERT")
+        if ca_cert_path and os.path.exists(ca_cert_path):
+            secret["AWS_S3_CA_CERT"] = Path(ca_cert_path).read_text()
+
+        rest_client.test_credentials(dct_id, secret)
+
     def test_invalid_credentials(
         self,
         rest_client: DataConnectClient,
