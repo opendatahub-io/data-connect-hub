@@ -1004,7 +1004,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "arrow",
+ "arrow-cast",
  "async-trait",
+ "chrono",
  "futures",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -1485,7 +1487,6 @@ dependencies = [
  "arrow",
  "async-stream",
  "async-trait",
- "chrono",
  "commons",
  "futures",
  "moka",
