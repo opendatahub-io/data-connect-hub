@@ -55,6 +55,89 @@ spec:
                 description: flightService configures the Flight gRPC API deployment
                   or deployments.
                 properties:
+                  autoScaling:
+                    description: |-
+                      autoScaling configures optional KEDA-based autoscaling for the service.
+                      It cannot be used together with replicas.
+                    properties:
+                      cooldownPeriod:
+                        default: 300
+                        description: cooldownPeriod is the number of seconds KEDA
+                          waits before scaling down.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      maxReplicas:
+                        description: maxReplicas is the maximum number of replicas.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        description: minReplicas is the minimum number of replicas.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      pollingInterval:
+                        default: 15
+                        description: pollingInterval is the interval, in seconds,
+                          at which KEDA checks triggers.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      triggers:
+                        description: triggers contains Prometheus metrics that drive
+                          scaling.
+                        items:
+                          description: AutoscalingTrigger defines a Prometheus metric
+                            used by KEDA.
+                          properties:
+                            name:
+                              description: name is the metric name exposed by KEDA.
+                              minLength: 1
+                              type: string
+                            query:
+                              description: query is the PromQL query evaluated by
+                                KEDA.
+                              minLength: 1
+                              type: string
+                            serverAddress:
+                              description: serverAddress is the Prometheus-compatible
+                                endpoint used by KEDA.
+                              minLength: 1
+                              type: string
+                            target:
+                              description: target defines the desired trigger threshold.
+                              properties:
+                                type:
+                                  description: type identifies the target kind. The
+                                    current implementation supports Value.
+                                  enum:
+                                  - Value
+                                  type: string
+                                value:
+                                  description: value is the trigger threshold passed
+                                    to KEDA.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              - value
+                              type: object
+                          required:
+                          - name
+                          - query
+                          - serverAddress
+                          - target
+                          type: object
+                        minItems: 1
+                        type: array
+                    required:
+                    - maxReplicas
+                    - minReplicas
+                    type: object
+                    x-kubernetes-validations:
+                    - message: minReplicas cannot exceed maxReplicas
+                      rule: self.minReplicas <= self.maxReplicas
                   connectors:
                     description: connectors configures individual data connectors.
                     items:
@@ -2456,6 +2539,9 @@ spec:
                       type: object
                     type: array
                 type: object
+                x-kubernetes-validations:
+                - message: replicas and autoScaling cannot be configured together
+                  rule: '!(has(self.replicas) && has(self.autoScaling))'
               gateway:
                 description: |-
                   gateway is a reference to a Kubernetes Gateway for external traffic.
@@ -2474,6 +2560,89 @@ spec:
               restService:
                 description: restService configures the REST API deployment
                 properties:
+                  autoScaling:
+                    description: |-
+                      autoScaling configures optional KEDA-based autoscaling for the service.
+                      It cannot be used together with replicas.
+                    properties:
+                      cooldownPeriod:
+                        default: 300
+                        description: cooldownPeriod is the number of seconds KEDA
+                          waits before scaling down.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      maxReplicas:
+                        description: maxReplicas is the maximum number of replicas.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      minReplicas:
+                        description: minReplicas is the minimum number of replicas.
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      pollingInterval:
+                        default: 15
+                        description: pollingInterval is the interval, in seconds,
+                          at which KEDA checks triggers.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      triggers:
+                        description: triggers contains Prometheus metrics that drive
+                          scaling.
+                        items:
+                          description: AutoscalingTrigger defines a Prometheus metric
+                            used by KEDA.
+                          properties:
+                            name:
+                              description: name is the metric name exposed by KEDA.
+                              minLength: 1
+                              type: string
+                            query:
+                              description: query is the PromQL query evaluated by
+                                KEDA.
+                              minLength: 1
+                              type: string
+                            serverAddress:
+                              description: serverAddress is the Prometheus-compatible
+                                endpoint used by KEDA.
+                              minLength: 1
+                              type: string
+                            target:
+                              description: target defines the desired trigger threshold.
+                              properties:
+                                type:
+                                  description: type identifies the target kind. The
+                                    current implementation supports Value.
+                                  enum:
+                                  - Value
+                                  type: string
+                                value:
+                                  description: value is the trigger threshold passed
+                                    to KEDA.
+                                  minLength: 1
+                                  type: string
+                              required:
+                              - type
+                              - value
+                              type: object
+                          required:
+                          - name
+                          - query
+                          - serverAddress
+                          - target
+                          type: object
+                        minItems: 1
+                        type: array
+                    required:
+                    - maxReplicas
+                    - minReplicas
+                    type: object
+                    x-kubernetes-validations:
+                    - message: minReplicas cannot exceed maxReplicas
+                      rule: self.minReplicas <= self.maxReplicas
                   connectors:
                     description: connectors configures individual data connectors.
                     items:
@@ -4875,6 +5044,9 @@ spec:
                       type: object
                     type: array
                 type: object
+                x-kubernetes-validations:
+                - message: replicas and autoScaling cannot be configured together
+                  rule: '!(has(self.replicas) && has(self.autoScaling))'
               tokenReviewAudiences:
                 description: |-
                   tokenReviewAudiences sets the audiences for Kubernetes TokenReview

@@ -196,10 +196,12 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects;triggerauthentications,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
@@ -239,6 +241,16 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	log.Info("reconciling DataConnectService", "name", cr.Name, "namespace", cr.Namespace)
 
+	if err := validateAutoscaling(&cr); err != nil {
+		log.Error(err, "autoscaling validation failed")
+		platCfg := r.readPlatformConfig(ctx, cr.Namespace)
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidAutoscaling", err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidAutoscaling", err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "InvalidAutoscaling", "Autoscaling configuration is invalid")
+		})
+	}
+
 	// Read platform configuration from ConfigMap in the CR's namespace
 	platCfg := r.readPlatformConfig(ctx, cr.Namespace)
 
@@ -267,10 +279,24 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		}
 	}
 
-	// Phase 3: Ensure InitDataConnectionType CRs exist in the DCS namespace
+	// Phase 3: Reconcile optional CMA/KEDA autoscaling resources.
+	if err := r.reconcileAutoscaling(ctx, &cr); err != nil {
+		log.Error(err, "failed to reconcile autoscaling")
+		reason := "AutoscalingError"
+		if errors.Is(err, errAutoscalingProviderUnavailable) {
+			reason = "AutoscalingProviderUnavailable"
+		}
+		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Service manifests were applied")
+		})
+	}
+
+	// Phase 4: Ensure InitDataConnectionType CRs exist in the DCS namespace
 	r.ensureInitDataConnectionTypes(ctx, &cr)
 
-	// Phase 4: Check all deployments are ready before declaring Ready
+	// Phase 5: Check all deployments are ready before declaring Ready
 	pendingDeployments, err := r.pendingDeployments(ctx, cr.Namespace, cr.UID)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
