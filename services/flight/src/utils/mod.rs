@@ -105,6 +105,13 @@ impl QueryConfig {
 pub struct TlsConfig {
     pub cert_file: Option<String>,
     pub key_file: Option<String>,
+    /// Cluster-projected minimum TLS version ("VersionTLS10".."VersionTLS13").
+    /// Absent keeps the listener on provider defaults (standalone configs);
+    /// the controller always projects it for managed instances.
+    pub min_version: Option<String>,
+    /// Cluster-projected IANA cipher suite names for TLS <= 1.2 handshakes.
+    /// TLS 1.3 suites stay runtime-managed.
+    pub ciphers: Option<Vec<String>>,
 }
 
 impl TlsConfig {

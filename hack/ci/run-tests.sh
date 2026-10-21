@@ -170,6 +170,11 @@ DCH_TENANT_URI_DEPLOY_SERVER=true
 EOF
 fi
 
+cat >> "$e2e_env_file" <<EOF
+#### Legacy import ####
+DCH_LEGACY_IMPORT_ENABLED=true
+EOF
+
 echo "E2E config generated: ${e2e_env_file}"
 
 # ===================================================================
