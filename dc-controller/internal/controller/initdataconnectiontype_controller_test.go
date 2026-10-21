@@ -22,6 +22,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -33,12 +34,38 @@ import (
 type mockConnectionTypeClient struct {
 	createFn    func(ctx context.Context, tenantID string, ct ConnectionType) error
 	createCalls int
+	lastCreate  ConnectionType
+
+	listFn func(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
+
+	updateFn     func(ctx context.Context, tenantID string, id string, ct ConnectionType) error
+	updateCalls  int
+	lastUpdate   ConnectionType
+	lastUpdateID string
 }
 
 func (m *mockConnectionTypeClient) CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error {
 	m.createCalls++
+	m.lastCreate = ct
 	if m.createFn != nil {
 		return m.createFn(ctx, tenantID, ct)
+	}
+	return nil
+}
+
+func (m *mockConnectionTypeClient) ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error) {
+	if m.listFn != nil {
+		return m.listFn(ctx, tenantID)
+	}
+	return nil, nil
+}
+
+func (m *mockConnectionTypeClient) UpdateConnectionType(ctx context.Context, tenantID string, id string, ct ConnectionType) error {
+	m.updateCalls++
+	m.lastUpdate = ct
+	m.lastUpdateID = id
+	if m.updateFn != nil {
+		return m.updateFn(ctx, tenantID, id, ct)
 	}
 	return nil
 }
@@ -52,7 +79,7 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 	crKey := types.NamespacedName{Name: resourceName, Namespace: resourceNamespace}
 
 	newCR := func() *dchv1alpha1.InitDataConnectionType {
-		desc := "Test connection type"
+		desc := testDescription
 		return &dchv1alpha1.InitDataConnectionType{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      resourceName,
@@ -130,7 +157,7 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		Expect(mock.createCalls).To(Equal(1))
 	})
 
-	It("should set AlreadyExists when REST returns 409", func() {
+	It("should requeue when create conflicts so the next reconcile converges", func() {
 		cr := newCR()
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
@@ -141,33 +168,189 @@ var _ = Describe("InitDataConnectionType Controller", func() {
 		}
 		r := reconciler(mock)
 
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(requeueOnServiceUnavailable))
 
 		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
-		Expect(cr.Status.Phase).To(Equal("AlreadyExists"))
+		Expect(cr.Status.Phase).To(Equal("Pending"))
 	})
 
-	It("should not retry after AlreadyExists", func() {
+	It("should patch the stored connection type when it differs from the spec", func() {
 		cr := newCR()
 		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
+		other := "Different description"
+		stored := ConnectionTypeResource{
+			Metadata: ResourceMetadata{ID: testResourceID, TenantID: resourceNamespace},
+			Resource: ConnectionType{
+				Name:        cr.Spec.Name,
+				Provider:    cr.Spec.Provider,
+				Description: &other,
+				CredentialsFields: []Field{
+					{Name: testFieldName, Label: testFieldLabel, Required: true, Type: testFieldType},
+				},
+			},
+		}
 		mock := &mockConnectionTypeClient{
-			createFn: func(_ context.Context, _ string, _ ConnectionType) error {
-				return ErrConflict
+			listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+				return []ConnectionTypeResource{stored}, nil
 			},
 		}
 		r := reconciler(mock)
 
-		// First reconcile hits conflict
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(mock.createCalls).To(Equal(0))
+		Expect(mock.updateCalls).To(Equal(1))
+		Expect(mock.lastUpdateID).To(Equal(testResourceID))
+		Expect(mock.lastUpdate.Name).To(Equal(cr.Spec.Name))
+		Expect(*mock.lastUpdate.Description).To(Equal(*cr.Spec.Description))
+
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		Expect(cr.Status.Phase).To(Equal("Completed"))
+		Expect(cr.Status.Conditions[0].Reason).To(Equal("Updated"))
+	})
+
+	It("should not rewrite the stored connection type when it already matches", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		stored := ConnectionTypeResource{
+			Metadata: ResourceMetadata{ID: testResourceID, TenantID: resourceNamespace},
+			Resource: ConnectionType{
+				Name:        cr.Spec.Name,
+				Provider:    cr.Spec.Provider,
+				Description: cr.Spec.Description,
+				CredentialsFields: []Field{
+					{Name: testFieldName, Label: testFieldLabel, Required: true, Type: testFieldType},
+				},
+			},
+		}
+		mock := &mockConnectionTypeClient{
+			listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+				return []ConnectionTypeResource{stored}, nil
+			},
+		}
+		r := reconciler(mock)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+
+		Expect(mock.createCalls).To(Equal(0))
+		Expect(mock.updateCalls).To(Equal(0))
+
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		Expect(cr.Status.Phase).To(Equal("Completed"))
+		Expect(cr.Status.Conditions[0].Reason).To(Equal("UpToDate"))
+	})
+
+	It("should update the REST service when the CR spec changes", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		mock := &mockConnectionTypeClient{}
+		r := reconciler(mock)
+
+		// First reconcile registers the type.
 		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(mock.createCalls).To(Equal(1))
+		Expect(mock.updateCalls).To(Equal(0))
 
-		// Second reconcile is a no-op (terminal state)
+		// Simulate the stored type still holding the previous spec.
+		previous := testDescription
+		mock.listFn = func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+			return []ConnectionTypeResource{{
+				Metadata: ResourceMetadata{ID: testResourceID, TenantID: resourceNamespace},
+				Resource: ConnectionType{
+					Name:              cr.Spec.Name,
+					Provider:          cr.Spec.Provider,
+					Description:       &previous,
+					CredentialsFields: []Field{},
+				},
+			}}, nil
+		}
+
+		// Update the CR spec — generation bumps, so the next reconcile syncs.
+		next := "Updated by the manifest"
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		cr.Spec.Description = &next
+		Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+
 		_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
 		Expect(err).NotTo(HaveOccurred())
-		Expect(mock.createCalls).To(Equal(1))
+
+		Expect(mock.updateCalls).To(Equal(1))
+		Expect(*mock.lastUpdate.Description).To(Equal(next))
+
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		Expect(cr.Status.Phase).To(Equal("Completed"))
+	})
+
+	It("should requeue when the stored type is deleted concurrently", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+		mock := &mockConnectionTypeClient{
+			listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+				return []ConnectionTypeResource{{
+					Metadata: ResourceMetadata{ID: testResourceID, TenantID: resourceNamespace},
+					Resource: ConnectionType{Name: cr.Spec.Name, Provider: cr.Spec.Provider, CredentialsFields: []Field{}},
+				}}, nil
+			},
+			updateFn: func(_ context.Context, _ string, _ string, _ ConnectionType) error {
+				return ErrNotFound
+			},
+		}
+		r := reconciler(mock)
+
+		result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(result.RequeueAfter).To(Equal(requeueOnServiceUnavailable))
+
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		Expect(cr.Status.Phase).To(Equal("Pending"))
+	})
+
+	It("should re-sync a legacy AlreadyExists CR so it converges to the spec", func() {
+		cr := newCR()
+		Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		// Simulate a CR recorded by an older controller version: the stored
+		// type pre-existed and was never aligned with the spec.
+		cr.Status.Phase = "AlreadyExists"
+		meta.SetStatusCondition(&cr.Status.Conditions, metav1.Condition{
+			Type:               conditionTypeSynced,
+			Status:             metav1.ConditionTrue,
+			Reason:             "AlreadyExists",
+			Message:            "Connection type already exists in the REST service",
+			ObservedGeneration: cr.Generation,
+		})
+		Expect(k8sClient.Status().Update(ctx, cr)).To(Succeed())
+
+		other := "Different description"
+		mock := &mockConnectionTypeClient{
+			listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+				return []ConnectionTypeResource{{
+					Metadata: ResourceMetadata{ID: testResourceID, TenantID: resourceNamespace},
+					Resource: ConnectionType{
+						Name:              cr.Spec.Name,
+						Provider:          cr.Spec.Provider,
+						Description:       &other,
+						CredentialsFields: []Field{},
+					},
+				}}, nil
+			},
+		}
+		r := reconciler(mock)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mock.updateCalls).To(Equal(1))
+
+		Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+		Expect(cr.Status.Phase).To(Equal("Completed"))
 	})
 
 	It("should requeue when REST service is unavailable", func() {

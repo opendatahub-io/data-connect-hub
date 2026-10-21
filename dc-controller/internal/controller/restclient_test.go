@@ -100,14 +100,16 @@ func writeServiceCA(t *testing.T, path string, certificate *x509.Certificate) {
 }
 
 const (
-	testProvider   = "test"
-	testFieldName  = "HOST"
-	testFieldLabel = "Host"
-	testFieldType  = "string"
+	testProvider    = "test"
+	testFieldName   = "HOST"
+	testFieldLabel  = "Host"
+	testFieldType   = "string"
+	testDescription = "Test connection type"
+	testResourceID  = "id-1"
 )
 
 func testConnectionType() ConnectionType {
-	desc := "Test connection type"
+	desc := testDescription
 	return ConnectionType{
 		Name:        "test-type",
 		Provider:    testProvider,
@@ -152,6 +154,46 @@ func TestCreateConnectionTypeConflict(t *testing.T) {
 	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
 	err := client.CreateConnectionType(context.Background(), "test-ns", testConnectionType())
 	assert.ErrorIs(t, err, ErrConflict)
+}
+
+func TestUpdateConnectionType(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, http.MethodPatch, r.Method)
+		assert.Equal(t, "/api/v1alpha1/data/connection-types/id-1", r.URL.Path)
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "test-ns", r.Header.Get("x-tenant-id"))
+
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&body))
+		assert.Equal(t, "test-type", body["name"])
+		assert.Equal(t, testProvider, body["provider"])
+		assert.Equal(t, testDescription, body["description"])
+		// Absent optional fields are explicit nulls so the merge patch
+		// removes any previously stored value.
+		assert.Nil(t, body["label"])
+		assert.Nil(t, body["tags"])
+		fields, ok := body["credentials_fields"].([]any)
+		require.True(t, ok)
+		assert.Len(t, fields, 1)
+
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
+	err := client.UpdateConnectionType(context.Background(), "test-ns", testResourceID, testConnectionType())
+	assert.NoError(t, err)
+}
+
+func TestUpdateConnectionTypeNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewHTTPConnectionTypeClient(func() (string, error) { return server.URL, nil })
+	err := client.UpdateConnectionType(context.Background(), "test-ns", testResourceID, testConnectionType())
+	assert.ErrorIs(t, err, ErrNotFound)
 }
 
 func TestServiceUnavailable(t *testing.T) {
