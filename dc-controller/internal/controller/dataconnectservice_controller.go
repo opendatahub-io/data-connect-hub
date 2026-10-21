@@ -174,7 +174,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	if v := cm.Data["auth.tokenReviewAudiences"]; v != "" {
 		var audiences []string
 		for a := range strings.SplitSeq(v, ",") {
-			if trimmed := strings.TrimSpace(a); trimmed != "" {
+			if trimmed := strings.TrimSpace(a); trimmed != "" && !strings.ContainsAny(trimmed, " \t\n\r") {
 				audiences = append(audiences, trimmed)
 			}
 		}
