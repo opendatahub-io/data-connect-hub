@@ -54,6 +54,8 @@ var (
 // ConnectionTypeClient abstracts REST calls to the connection-type endpoints.
 type ConnectionTypeClient interface {
 	CreateConnectionType(ctx context.Context, tenantID string, ct ConnectionType) error
+	ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error)
+	UpdateConnectionType(ctx context.Context, tenantID string, id string, ct ConnectionType) error
 }
 
 // ConnectionMigrationClient abstracts REST calls needed by the Secret migration watcher.
@@ -232,7 +234,7 @@ func rootCAs(serviceCA []byte) *x509.CertPool {
 	return roots
 }
 
-// NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
+// NewHTTPConnectionTypeClient creates a client that calls the
 // rest-service through kube-rbac-proxy over HTTPS. The URL is resolved
 // dynamically via the provided resolver.
 func NewHTTPConnectionTypeClient(resolver URLResolver) ConnectionTypeClient {
@@ -295,6 +297,75 @@ func (c *httpConnectionTypeClient) CreateConnectionType(ctx context.Context, ten
 
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
 	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+func (c *httpConnectionTypeClient) UpdateConnectionType(ctx context.Context, tenantID string, id string, ct ConnectionType) error {
+	url, err := c.baseURL()
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+
+	body, err := json.Marshal(connectionTypeMergePatch(ct))
+	if err != nil {
+		return fmt.Errorf("marshaling connection type patch: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPatch, restDataURL(url, connectionTypesResource)+"/"+id, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	c.setHeaders(req, tenantID)
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
+	if resp.StatusCode >= 500 {
+		return ErrServiceUnavailable
+	}
+
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	return fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(respBody))
+}
+
+// connectionTypeMergePatch renders a ConnectionType's complete desired state
+// as a JSON merge patch body. Optional fields absent from the desired state
+// are set to an explicit null so a previously stored value is removed rather
+// than left behind (RFC 7396).
+func connectionTypeMergePatch(ct ConnectionType) map[string]any {
+	fields := ct.CredentialsFields
+	if fields == nil {
+		fields = []Field{}
+	}
+	patch := map[string]any{
+		resourceNameField:    ct.Name,
+		"provider":           ct.Provider,
+		"credentials_fields": fields,
+	}
+	if ct.Label != nil {
+		patch["label"] = *ct.Label
+	} else {
+		patch["label"] = nil
+	}
+	if ct.Description != nil {
+		patch["description"] = *ct.Description
+	} else {
+		patch["description"] = nil
+	}
+	if ct.Tags != nil {
+		patch["tags"] = ct.Tags
+	} else {
+		patch["tags"] = nil
+	}
+	return patch
 }
 
 func (c *httpConnectionTypeClient) ListConnectionTypes(ctx context.Context, tenantID string) ([]ConnectionTypeResource, error) {

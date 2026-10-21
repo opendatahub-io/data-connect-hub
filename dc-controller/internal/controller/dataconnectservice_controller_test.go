@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -1057,4 +1058,79 @@ var _ = Describe("reconcileTraceEnv", func() {
 		Expect(envOf(deploy, nameRestService)).NotTo(BeEmpty())
 		Expect(envOf(deploy, nameKubeRbacProxy)).To(BeEmpty())
 	})
+})
+
+var _ = Describe("ensureInitDataConnectionTypes", func() {
+	ctx := context.Background()
+
+	writeType := func(dir, content string) {
+		typesDir := filepath.Join(dir, "connection-types")
+		ExpectWithOffset(1, os.MkdirAll(typesDir, 0o755)).To(Succeed())
+		ExpectWithOffset(1, os.WriteFile(filepath.Join(typesDir, "fixture-type.yaml"), []byte(content), 0o644)).To(Succeed())
+	}
+
+	reconciler := func(dir string) *DataConnectServiceReconciler {
+		return &DataConnectServiceReconciler{
+			Client:        k8sClient,
+			Scheme:        k8sClient.Scheme(),
+			ManifestsPath: dir,
+		}
+	}
+
+	It("should create IDCT CRs and update them when the manifest changes", func() {
+		dir := GinkgoT().TempDir()
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "idct-sync-test"}}
+		Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		DeferCleanup(func() { _ = k8sClient.Delete(ctx, ns) })
+
+		cr := &dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: "dcs", Namespace: ns.Name}}
+		key := types.NamespacedName{Name: "fixture-type", Namespace: ns.Name}
+		r := reconciler(dir)
+
+		writeType(dir, "name: Fixture\nprovider: fixture\ndescription: v1\n")
+		r.ensureInitDataConnectionTypes(ctx, cr)
+
+		idct := &dchv1alpha1.InitDataConnectionType{}
+		Expect(k8sClient.Get(ctx, key, idct)).To(Succeed())
+		Expect(idct.Spec.Name).To(Equal("Fixture"))
+		Expect(*idct.Spec.Description).To(Equal("v1"))
+		generation := idct.Generation
+
+		// Unchanged manifest — the CR is left alone.
+		r.ensureInitDataConnectionTypes(ctx, cr)
+		Expect(k8sClient.Get(ctx, key, idct)).To(Succeed())
+		Expect(idct.Generation).To(Equal(generation))
+
+		// Changed manifest — the spec is converged and the generation bumps,
+		// triggering the IDCT reconciler to patch the REST service.
+		writeType(dir, `name: Fixture
+provider: fixture
+description: v2
+credentials_fields:
+  - name: HOST
+    label: Host
+    required: true
+    type: string
+`)
+		r.ensureInitDataConnectionTypes(ctx, cr)
+		Expect(k8sClient.Get(ctx, key, idct)).To(Succeed())
+		Expect(*idct.Spec.Description).To(Equal("v2"))
+		Expect(idct.Spec.CredentialsFields).To(HaveLen(1))
+		Expect(idct.Generation).To(BeNumerically(">", generation))
+	})
+})
+
+var _ = Describe("connectionTypeFile.toIDCTSpec", func() {
+	DescribeTable("normalizes tags",
+		func(tags []string, expected []string) {
+			file := &connectionTypeFile{Name: "Test", Provider: "test", Tags: tags}
+			Expect(file.toIDCTSpec().Tags).To(Equal(expected))
+		},
+		// An empty non-nil slice would round-trip through the omitempty JSON
+		// tag as nil, making ensureInitDataConnectionTypes update the CR on
+		// every reconcile.
+		Entry("omitted tags stay nil", nil, nil),
+		Entry("empty tags become nil", []string{}, nil),
+		Entry("populated tags are preserved", []string{"a", "b"}, []string{"a", "b"}),
+	)
 })
