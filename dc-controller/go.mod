@@ -3,8 +3,8 @@ module github.com/opendatahub-io/data-connect-hub/dc-controller
 go 1.26.7
 
 require (
-	github.com/onsi/ginkgo/v2 v2.28.1
-	github.com/onsi/gomega v1.39.1
+	github.com/onsi/ginkgo/v2 v2.33.1
+	github.com/onsi/gomega v1.40.0
 	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.0
 	github.com/openshift/api v0.0.0-20261017003925-24b2699a9b32
 	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
