@@ -1003,7 +1003,7 @@ func assertRESTServiceIngress(t *testing.T, networkPolicy *unstructured.Unstruct
 func kubeRbacProxyDeployment(args ...any) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindDeployment,
-		"spec": map[string]any{testTemplateKey: map[string]any{"spec": map[string]any{
+		testSpecKey: map[string]any{testTemplateKey: map[string]any{testSpecKey: map[string]any{
 			testContainersKey: []any{map[string]any{resourceNameField: nameKubeRbacProxy, "args": args}},
 		}}},
 	}}

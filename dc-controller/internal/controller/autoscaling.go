@@ -48,6 +48,7 @@ const (
 	autoscalingBindingSuffix        = "-autoscaling-metrics-reader"
 	autoscalingScaledObjectSuffix   = "-autoscaling"
 	autoscalingMetadataField        = "metadata"
+	autoscalingSpecField            = "spec"
 	autoscalingNameField            = "name"
 	autoscalingKindField            = "kind"
 	autoscalingRBACGroup            = "rbac.authorization.k8s.io"
@@ -167,7 +168,7 @@ func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Un
 			},
 		}),
 		newAutoscalingObject("keda.sh/v1alpha1", "TriggerAuthentication", authName, triggerAuthGVK, map[string]any{
-			"spec": map[string]any{
+			autoscalingSpecField: map[string]any{
 				"secretTargetRef": []any{map[string]any{
 					"parameter":          "bearerToken",
 					autoscalingNameField: secretName,
@@ -224,7 +225,7 @@ func newScaledObject(crName string, service autoscalingService, authName string)
 	}
 
 	return newAutoscalingObject("keda.sh/v1alpha1", "ScaledObject", autoscalingName(crName, "-"+service.name+autoscalingScaledObjectSuffix), scaledObjectGVK, map[string]any{
-		"spec": map[string]any{
+		autoscalingSpecField: map[string]any{
 			"scaleTargetRef": map[string]any{
 				autoscalingNameField: service.deployment,
 				autoscalingKindField: "Deployment",
