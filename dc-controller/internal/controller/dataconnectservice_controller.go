@@ -438,6 +438,9 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightInstanceName); err != nil {
 		return fmt.Errorf("setting flight service address: %w", err)
 	}
+	if err := setConfigMapFlightTLSProfile(ctx, resources, flightInstanceName, tlsProfile.Spec); err != nil {
+		return fmt.Errorf("setting flight TLS profile: %w", err)
+	}
 	if cr.Spec.FlightService != nil {
 		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
 			return fmt.Errorf("setting flight-service connector configuration: %w", err)
