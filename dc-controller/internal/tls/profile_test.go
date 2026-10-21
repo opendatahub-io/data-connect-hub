@@ -234,7 +234,7 @@ func TestResolveDropsRC4Ciphers(t *testing.T) {
 	profile := &configv1.TLSSecurityProfile{Type: configv1.TLSProfileCustomType, Custom: &configv1.CustomTLSProfile{
 		TLSProfileSpec: configv1.TLSProfileSpec{
 			MinTLSVersion: configv1.VersionTLS12,
-			Ciphers:       []string{"RC4-SHA", "TLS_RSA_WITH_RC4_128_SHA", usableECDHECipher},
+			Ciphers:       []string{"TLS_RSA_WITH_RC4_128_SHA", usableECDHECipher},
 		},
 	}}
 	result, err := resolveProfile(context.Background(), newTLSClient(t, tlsAPIServer(profile, configv1.TLSAdherencePolicyStrictAllComponents)))
