@@ -6,4 +6,8 @@ ignore = [
     # h2 unbounded empty DATA frames — transitive dep via actix-http,
     # actix-http has not released a version using h2 0.4 yet.
     "RUSTSEC-2026-0258",
+    # webpki-roots 0.26 trusts distrusted emSign intermediates — transitive dep via
+    # neo4rs and sqlx-core; no 0.26.x fix exists, upstreams have not moved to 1.x.
+    # The webpki-roots 1.x copy in the tree is already patched (>=1.0.10).
+    "RUSTSEC-2026-0381",
 ]

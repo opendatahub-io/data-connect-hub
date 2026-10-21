@@ -356,6 +356,25 @@ var _ = Describe("DataConnectService Controller", func() {
 				return strings.HasPrefix(arg, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256")
 			})).To(BeTrue(), "expected Intermediate cipher suites on kube-rbac-proxy")
 		})
+
+		It("should project the Intermediate TLS profile onto the flight-service configmap without the OpenShift config API", func() {
+			// Caller-level fallback pin for the Flight listener: the envtest
+			// cluster is vanilla Kubernetes, so profile resolution falls back
+			// to Intermediate and the flight configmap must still carry the
+			// projected policy for the rustls acceptor to enforce.
+			reconcileUntilReady()
+
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: flightResourceName + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+			var flightConfigTOML map[string]any
+			Expect(toml.Unmarshal([]byte(cm.Data["config.toml"]), &flightConfigTOML)).To(Succeed())
+			tls, ok := flightConfigTOML["tls"].(map[string]any)
+			Expect(ok).To(BeTrue(), "expected [tls] section in flight config")
+			Expect(tls["min_version"]).To(Equal("VersionTLS12"))
+			ciphers, ok := tls["ciphers"].([]any)
+			Expect(ok).To(BeTrue(), "expected projected cipher suites in flight config")
+			Expect(ciphers).To(ContainElement("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"))
+		})
 	})
 
 	Context("When reconciling with service overrides", func() {

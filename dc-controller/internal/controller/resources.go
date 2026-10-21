@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/sha256"
+	cryptotls "crypto/tls"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -970,6 +971,63 @@ func setKubeRbacProxyTLSOpts(
 		}
 		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
 	}
+}
+
+// setConfigMapFlightTLSProfile projects the resolved cluster TLS profile into
+// every rendered Flight instance ConfigMap so the gRPC listener enforces the
+// same minimum version and TLS <= 1.2 cipher suites as the rest of the
+// platform. DCH is an adhering component: reconcileManifests resolves the
+// profile once and applies it to all serving surfaces regardless of adherence
+// policy. Cipher names are converted through the framework to IANA names the
+// rustls listener understands, and a profile whose cipher list is entirely
+// unusable fails the reconcile instead of silently starting with defaults.
+// The Flight service itself fails fast at startup on minima its rustls build
+// cannot serve (e.g. Old's TLS 1.0) rather than silently downgrading.
+func setConfigMapFlightTLSProfile(ctx context.Context, resources []*unstructured.Unstructured, flightName string, spec configv1.TLSProfileSpec) error {
+	minVersion := platformtls.MinVersionFromSpec(ctx, &spec, platformtls.FormatGo)
+
+	var cipherSuites []string
+	if spec.MinTLSVersion != configv1.VersionTLS13 {
+		scratch := &cryptotls.Config{}
+		tlsOption, _ := platformtls.ConfigFromProfile(spec)
+		tlsOption(scratch)
+		for _, id := range scratch.CipherSuites {
+			if name := cryptotls.CipherSuiteName(id); name != "" {
+				cipherSuites = append(cipherSuites, name)
+			}
+		}
+		if len(spec.Ciphers) > 0 && len(cipherSuites) == 0 {
+			return fmt.Errorf("flight TLS profile has no usable cipher suites for TLS <= 1.2: %v", spec.Ciphers)
+		}
+	}
+
+	for _, obj := range resources {
+		if obj.GetKind() != kindConfigMap || obj.GetLabels()[labelAppName] != flightName {
+			continue
+		}
+		config, data, err := parseConfigMapTOML(obj)
+		if err != nil {
+			return fmt.Errorf("parsing flight-service ConfigMap %q: %w", obj.GetName(), err)
+		}
+		if config == nil {
+			continue
+		}
+		tls, ok := config["tls"].(map[string]any)
+		if !ok {
+			continue
+		}
+		tls["min_version"] = minVersion
+		// TLS 1.3 cipher suites stay runtime-managed by the listener.
+		if len(cipherSuites) > 0 {
+			tls["ciphers"] = cipherSuites
+		} else {
+			delete(tls, "ciphers")
+		}
+		if err := setConfigMapTOML(obj, config, data); err != nil {
+			return fmt.Errorf("updating flight-service ConfigMap %q: %w", obj.GetName(), err)
+		}
+	}
+	return nil
 }
 
 // annotateDeploymentsWithContentHash computes a combined hash of all
