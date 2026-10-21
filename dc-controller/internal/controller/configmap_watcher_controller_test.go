@@ -206,6 +206,26 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(mock.createCalls).To(Equal(2))
 	})
 
+	It("should skip import for ConfigMap covered by a built-in connection type", func() {
+		cm := newConfigMap()
+		cm.Name = cmNameURIv1
+		cmKey := types.NamespacedName{Name: cmNameURIv1, Namespace: cmNamespace}
+		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+		defer func() {
+			_ = k8sClient.Delete(ctx, cm)
+		}()
+
+		mock := &mockConnectionTypeClient{}
+		r := reconciler(mock)
+
+		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: cmKey})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(mock.createCalls).To(Equal(0))
+
+		Expect(k8sClient.Get(ctx, cmKey, cm)).To(Succeed())
+		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))
+	})
+
 	It("should not set error on unexpected REST failure", func() {
 		cm := newConfigMap()
 		Expect(k8sClient.Create(ctx, cm)).To(Succeed())
