@@ -387,8 +387,9 @@ spec:
                       type: object
                     type: array
                   replicas:
-                    default: 1
-                    description: replicas overrides the number of pods
+                    description: |-
+                      replicas overrides the number of pods. Defaults to the deployment's
+                      replica count when unset; it must not be combined with autoScaling.
                     format: int32
                     minimum: 0
                     type: integer
@@ -2892,8 +2893,9 @@ spec:
                       type: object
                     type: array
                   replicas:
-                    default: 1
-                    description: replicas overrides the number of pods
+                    description: |-
+                      replicas overrides the number of pods. Defaults to the deployment's
+                      replica count when unset; it must not be combined with autoScaling.
                     format: int32
                     minimum: 0
                     type: integer

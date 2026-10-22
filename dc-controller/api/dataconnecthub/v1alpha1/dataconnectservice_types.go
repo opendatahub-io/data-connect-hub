@@ -34,9 +34,9 @@ type Gateway struct {
 // ServiceOverrides allows per-service customisation of scaling and pod spec fields.
 // +kubebuilder:validation:XValidation:rule="!(has(self.replicas) && has(self.autoScaling))",message="replicas and autoScaling cannot be configured together"
 type ServiceOverrides struct {
-	// replicas overrides the number of pods
+	// replicas overrides the number of pods. Defaults to the deployment's
+	// replica count when unset; it must not be combined with autoScaling.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=1
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
 
