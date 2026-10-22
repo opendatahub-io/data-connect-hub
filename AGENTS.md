@@ -19,7 +19,7 @@ make test           # all tests
 make fmt            # format all crates
 make lint           # clippy + fmt check
 make doc            # rustdoc with -D warnings
-make audit          # cargo audit
+make audit          # cargo-deny advisories check
 make container-all  # build all container images
 ```
 
@@ -162,7 +162,7 @@ Workflows under `.github/workflows/`:
 
 - **`build-and-test.yml`** — runs on every PR and push
   to `main`. Build, clippy, rustfmt check, unit tests,
-  rustdoc warnings, and `cargo audit`. Uses
+  rustdoc warnings, and `cargo deny check advisories`. Uses
   `Swatinem/rust-cache` for dependency caching.
 - **`python-sdk.yml`** — runs on PRs touching `sdk/python/`.
   Lint, typecheck, and unit tests for the Python SDK.

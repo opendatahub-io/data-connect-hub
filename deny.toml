@@ -1,0 +1,28 @@
+# cargo-deny advisory check, run by `make audit`.
+#
+# Only the advisories check is configured: run `cargo deny check advisories`,
+# not bare `cargo deny check` - the license and ban checks have no
+# configuration here and would fail.
+#
+# unused-ignored-advisory = "deny" enforces staleness: any invocation of
+# `cargo deny check advisories` fails once an ignore entry no longer matches
+# an encountered advisory, and the entry must be removed.
+#
+# cargo-deny resolves the graph cargo actually builds, so advisories on
+# unactivated optional dependencies (rsa via sqlx-mysql) do not fire here;
+# the former cargo-audit ignore for RUSTSEC-2023-0071 is therefore gone.
+
+[advisories]
+# unmaintained is a scope selector, not a reporting level. "workspace" checks
+# unmaintained advisories on direct dependencies only; transitive ones
+# (backoff, instant, paste, rustls-pemfile, unsafe-libyaml) are not reported
+# here at all. Flip to "all" with reasoned ignore entries to start gating
+# them.
+unmaintained = "workspace"
+unused-ignored-advisory = "deny"
+maximum-db-staleness = "P30D"
+ignore = [
+    # h2 unbounded empty DATA frames — transitive dep via actix-http,
+    # actix-http has not released a version using h2 0.4 yet.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3.x pinned by actix-http; no actix-http release uses h2 0.4 yet" },
+]

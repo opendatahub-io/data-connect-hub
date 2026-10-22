@@ -259,7 +259,7 @@ Run `make help` for the full list. Key targets:
 | `lint`                | Clippy + rustfmt check                             |
 | `fmt`                 | Format all crates                                  |
 | `doc`                 | Rustdoc with `-D warnings`                         |
-| `audit`               | `cargo audit`                                      |
+| `audit`               | `cargo deny check advisories`                      |
 | `check-dco`           | Verify DCO sign-off on commits                     |
 | `container-flight`    | Build flight-service container image               |
 | `container-rest`      | Build rest-service container image                 |

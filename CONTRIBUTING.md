@@ -28,7 +28,7 @@ make test-unit
 | `make lint` | Run clippy and format check |
 | `make fmt` | Auto-format all crates |
 | `make doc` | Build rustdoc with warnings as errors |
-| `make audit` | Run `cargo audit` for known vulnerabilities |
+| `make audit` | Run `cargo deny check advisories` for known vulnerabilities |
 | `make check-dco` | Verify DCO sign-off on commits locally |
 | `make all` | Run build + fmt + lint + test + audit |
 
@@ -154,6 +154,6 @@ Every PR must pass the following checks before merge:
 
 | Check | What it verifies |
 |-------|-----------------|
-| **Build and Test** | `cargo build`, clippy, fmt check, unit tests, rustdoc, `cargo audit` |
+| **Build and Test** | `cargo build`, clippy, fmt check, unit tests, rustdoc, `cargo deny check advisories` |
 | **DCO Sign-off** | All commits have a `Signed-off-by:` trailer |
 | **Signed Commits** | All commits have a valid GPG/SSH signature |

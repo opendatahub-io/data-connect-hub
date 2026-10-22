@@ -134,7 +134,7 @@ doc:
 	RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
 
 audit:
-	cargo audit
+	cargo deny check advisories
 
 check-dco:
 	@bash hack/check-dco.sh
@@ -270,7 +270,7 @@ help:
 	@echo "  lint                 clippy + rustfmt check"
 	@echo "  fmt                  format all crates"
 	@echo "  doc                  rustdoc with warnings"
-	@echo "  audit                cargo audit"
+	@echo "  audit                cargo-deny advisories check"
 	@echo ""
 	@echo "Container:"
 	@echo "  container-flight     build flight-service image"
