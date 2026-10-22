@@ -156,6 +156,68 @@
         }
       }
     },
+    "/connections/lookup": {
+      "x-internal": true,
+      "get": {
+        "operationId": "lookupConnectionIDBySecret",
+        "summary": "Resolve a connection ID by Secret reference",
+        "description": "Internal lookup used by the operator during Secret migration. Returns the ID for the unique connection that references `secret_ref` in the tenant. Returns 404 if none match and 409 if the reference is ambiguous.\n",
+        "x-internal": true,
+        "tags": [
+          "connections"
+        ],
+        "parameters": [
+          {
+            "name": "secret_ref",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The unique matching connection ID",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "id"
+                  ],
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          }
+        }
+      }
+    },
     "/connections/{id}": {
       "parameters": [
         {
