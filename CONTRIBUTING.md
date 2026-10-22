@@ -5,6 +5,7 @@ Thank you for your interest in contributing to Data Connect Hub! This guide cove
 ## Prerequisites
 
 - **Rust 1.96+** — the project pins the toolchain via [`rust-toolchain.toml`](rust-toolchain.toml)
+- **cargo-audit and cargo-deny** — required for `make audit` (supply chain checks, part of `make all`)
 - **PostgreSQL** — required for integration tests
 - **Docker or Podman** — required for container builds
 
@@ -28,7 +29,7 @@ make test-unit
 | `make lint` | Run clippy and format check |
 | `make fmt` | Auto-format all crates |
 | `make doc` | Build rustdoc with warnings as errors |
-| `make audit` | Run `cargo audit` for known vulnerabilities |
+| `make audit` | Run `cargo audit` and `cargo deny check` |
 | `make check-dco` | Verify DCO sign-off on commits locally |
 | `make all` | Run build + fmt + lint + test + audit |
 
@@ -154,6 +155,7 @@ Every PR must pass the following checks before merge:
 
 | Check | What it verifies |
 |-------|-----------------|
-| **Build and Test** | `cargo build`, clippy, fmt check, unit tests, rustdoc, `cargo audit` |
+| **Build and Test** | `cargo build`, clippy, fmt check, unit tests, rustdoc |
+| **Supply Chain** | `cargo audit` + `cargo deny check` (advisories, licenses, bans, sources) |
 | **DCO Sign-off** | All commits have a `Signed-off-by:` trailer |
 | **Signed Commits** | All commits have a valid GPG/SSH signature |

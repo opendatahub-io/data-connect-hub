@@ -136,6 +136,7 @@ doc:
 
 audit:
 	cargo audit
+	cargo deny check
 
 check-dco:
 	@bash hack/check-dco.sh
@@ -271,7 +272,7 @@ help:
 	@echo "  lint                 clippy + rustfmt check"
 	@echo "  fmt                  format all crates"
 	@echo "  doc                  rustdoc with warnings"
-	@echo "  audit                cargo audit"
+	@echo "  audit                cargo audit + cargo deny check"
 	@echo ""
 	@echo "Container:"
 	@echo "  container-flight     build flight-service image"
