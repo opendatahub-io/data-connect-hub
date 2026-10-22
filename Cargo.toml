@@ -98,4 +98,4 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     # failing OTLP connection is completely silent.
     "internal-logs",
 ] }
-tracing-opentelemetry = "0.33"
+tracing-opentelemetry = "0.34"
