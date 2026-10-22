@@ -4,11 +4,11 @@ import (
 	"context"
 	cryptotls "crypto/tls"
 	"fmt"
+	"strings"
 	"time"
 
 	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
 	configv1 "github.com/openshift/api/config/v1"
-	ocpcrypto "github.com/openshift/library-go/pkg/crypto"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -93,17 +93,8 @@ func usableCipherSuites(mapped []uint16) []uint16 {
 	for _, suite := range cryptotls.CipherSuites() {
 		usable[suite.ID] = struct{}{}
 	}
-	// Insecure suites are honored only when an OpenShift TLS profile can name
-	// them. RC4 suites are implemented by Go but appear in no profile (RFC
-	// 7465 prohibits RC4), so they are never usable here.
-	profileNames := make(map[string]bool)
-	for _, spec := range configv1.TLSProfiles {
-		for _, name := range ocpcrypto.OpenSSLToIANACipherSuites(spec.Ciphers) {
-			profileNames[name] = true
-		}
-	}
 	for _, suite := range cryptotls.InsecureCipherSuites() {
-		if profileNames[suite.Name] {
+		if !strings.Contains(suite.Name, "RC4") {
 			usable[suite.ID] = struct{}{}
 		}
 	}
