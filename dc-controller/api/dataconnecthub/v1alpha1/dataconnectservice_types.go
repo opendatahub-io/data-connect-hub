@@ -32,12 +32,18 @@ type Gateway struct {
 }
 
 // ServiceOverrides allows per-service customisation of scaling and pod spec fields.
+// +kubebuilder:validation:XValidation:rule="!(has(self.replicas) && has(self.autoScaling))",message="replicas and autoScaling cannot be configured together"
 type ServiceOverrides struct {
-	// replicas overrides the number of pods
+	// replicas overrides the number of pods. Defaults to the deployment's
+	// replica count when unset; it must not be combined with autoScaling.
 	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:default=1
 	// +optional
 	Replicas *int32 `json:"replicas,omitempty"`
+
+	// autoScaling configures optional KEDA-based autoscaling for the service.
+	// It cannot be used together with replicas.
+	// +optional
+	AutoScaling *AutoScalingConfig `json:"autoScaling,omitempty"`
 
 	// resources overrides the container resource requirements
 	// +optional
@@ -64,6 +70,72 @@ type ServiceOverrides struct {
 	// +listMapKey=name
 	// +optional
 	Connectors []ConnectorConfig `json:"connectors,omitempty"`
+}
+
+// AutoScalingConfig configures KEDA autoscaling for a service deployment.
+// +kubebuilder:validation:XValidation:rule="self.minReplicas <= self.maxReplicas",message="minReplicas cannot exceed maxReplicas"
+type AutoScalingConfig struct {
+	// minReplicas is the minimum number of replicas.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Required
+	MinReplicas *int32 `json:"minReplicas"`
+
+	// maxReplicas is the maximum number of replicas.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Required
+	MaxReplicas *int32 `json:"maxReplicas"`
+
+	// pollingInterval is the interval, in seconds, at which KEDA checks triggers.
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:default=15
+	// +optional
+	PollingInterval *int32 `json:"pollingInterval,omitempty"`
+
+	// cooldownPeriod is the number of seconds KEDA waits before scaling down.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:default=300
+	// +optional
+	CooldownPeriod *int32 `json:"cooldownPeriod,omitempty"`
+
+	// triggers contains Prometheus metrics that drive scaling.
+	// +kubebuilder:validation:MinItems=1
+	// +optional
+	Triggers []AutoscalingTrigger `json:"triggers,omitempty"`
+}
+
+// AutoscalingTrigger defines a Prometheus metric used by KEDA.
+type AutoscalingTrigger struct {
+	// name is the metric name exposed by KEDA.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+
+	// serverAddress is the Prometheus-compatible endpoint used by KEDA.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	ServerAddress string `json:"serverAddress"`
+
+	// query is the PromQL query evaluated by KEDA.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	Query string `json:"query"`
+
+	// target defines the desired trigger threshold.
+	// +kubebuilder:validation:Required
+	Target AutoscalingTarget `json:"target"`
+}
+
+// AutoscalingTarget defines the target value for an autoscaling trigger.
+type AutoscalingTarget struct {
+	// type identifies the target kind. The current implementation supports Value.
+	// +kubebuilder:validation:Enum=Value
+	// +kubebuilder:validation:Required
+	Type string `json:"type"`
+
+	// value is the trigger threshold passed to KEDA.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:Required
+	Value string `json:"value"`
 }
 
 // FlightServiceConfig configures the Flight gRPC API deployment.
