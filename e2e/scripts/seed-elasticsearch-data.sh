@@ -30,7 +30,7 @@ done
 
 [[ -n "$ENDPOINT" ]] || { echo "error: Elasticsearch URI is required (-e)" >&2; exit 1; }
 
-POD_NAME="e2e-es-seed"
+POD_NAME="dch-e2e-es-seed"
 
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true

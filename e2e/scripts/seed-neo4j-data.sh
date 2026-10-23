@@ -58,7 +58,7 @@ if [[ -n "$CERT_FILE" ]]; then
     }
 fi
 
-POD_NAME="e2e-neo4j-seed"
+POD_NAME="dch-e2e-neo4j-seed"
 
 CYPHER_SEED=$(cat <<'CYPHER'
 CREATE (tokyo:City {name: 'Tokyo', country: 'Japan', population: 13960000, dch_e2e: true}),
