@@ -914,7 +914,13 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 			}
 			var args []any
 			if existing, ok := container["args"].([]any); ok {
-				args = existing
+				for _, value := range existing {
+					arg, ok := value.(string)
+					if ok && strings.HasPrefix(arg, "--auth-token-audiences=") {
+						continue
+					}
+					args = append(args, value)
+				}
 			}
 			args = append(args, arg)
 			container["args"] = args

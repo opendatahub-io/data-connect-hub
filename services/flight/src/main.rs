@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use commons::utils::{TraceConfig, init_tracing, log_trace_exporter};
+use commons::utils::{TraceConfig, init_tracing_json, log_trace_exporter};
 #[cfg(feature = "elasticsearch")]
 use elasticsearch_connector::ElasticsearchConnector;
 use flight_service::flight::DataIngestionService;
@@ -111,7 +111,7 @@ async fn main() -> Result<()> {
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
 
     let trace = TraceConfig::from_env();
-    let tracer_provider = init_tracing(SERVICE_NAME, args.json_logs, &trace)?;
+    let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
 
     tracing::info!("Starting DataConnectorHub Flight service");
     log_trace_exporter(&trace);
