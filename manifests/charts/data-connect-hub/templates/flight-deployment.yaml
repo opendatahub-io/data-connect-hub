@@ -1,23 +1,25 @@
+{{- with .Values.flightService }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: flight-service
+  name: {{ include "dch.prefix" $ }}-{{ .name }}
   labels:
-    app.kubernetes.io/name: flight-service
-    app.kubernetes.io/part-of: data-connect-hub
+    app.kubernetes.io/name: {{ .name }}
+    {{- include "dch.labels" $ | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .replicas }}
   selector:
     matchLabels:
-      app.kubernetes.io/name: flight-service
+      app.kubernetes.io/name: {{ .name }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: flight-service
-        app.kubernetes.io/part-of: data-connect-hub
+        app.kubernetes.io/name: {{ .name }}
+        {{- include "dch.labels" $ | nindent 8 }}
     spec:
       terminationGracePeriodSeconds: 30
-      serviceAccountName: flight-service-sa
+      serviceAccountName: {{ include "dch.prefix" $ }}-{{ .name }}-sa
       automountServiceAccountToken: true
       securityContext:
         runAsNonRoot: true
@@ -25,8 +27,8 @@ spec:
           type: RuntimeDefault
       containers:
         - name: flight-server
-          image: RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE
-          imagePullPolicy: IfNotPresent
+          image: {{ required "images.flightService is required" $.Values.images.flightService | quote }}
+          imagePullPolicy: {{ .imagePullPolicy | default "IfNotPresent" }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -34,12 +36,7 @@ spec:
               drop:
                 - ALL
           resources:
-            requests:
-              cpu: 100m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
+            {{- toYaml .resources | nindent 12 }}
           args:
             - --config
             - /config/config.toml
@@ -49,8 +46,25 @@ spec:
             - name: metrics
               containerPort: 9090
           env:
-            - name: RUST_LOG
-              value: info
+            {{- if $.Values.trace.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ $.Values.trace.endpoint | quote }}
+            {{- end }}
+            {{- if $.Values.trace.insecure }}
+            - name: OTEL_EXPORTER_OTLP_INSECURE
+              value: {{ $.Values.trace.insecure | quote }}
+            {{- end }}
+            {{- if $.Values.trace.certificate }}
+            - name: OTEL_EXPORTER_OTLP_CERTIFICATE
+              value: {{ $.Values.trace.certificate | quote }}
+            {{- end }}
+            {{- with .env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- with .envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           volumeMounts:
             - name: config
               mountPath: /config
@@ -62,6 +76,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- with .volumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           lifecycle:
             preStop:
               exec:
@@ -79,14 +96,18 @@ spec:
       volumes:
         - name: config
           configMap:
-            name: flight-service-config
+            name: {{ include "dch.prefix" $ }}-{{ .name }}-config
         - name: db-secret
           secret:
             secretName: dch-database-config
         - name: tls
           secret:
-            secretName: flight-service-tls
+            secretName: {{ include "dch.prefix" $ }}-{{ .name }}-tls
         - name: tmp
           emptyDir:
             medium: Memory
             sizeLimit: 10Mi
+        {{- with .volumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+{{- end }}
