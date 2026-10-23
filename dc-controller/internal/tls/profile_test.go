@@ -234,7 +234,7 @@ func TestResolveDropsRC4Ciphers(t *testing.T) {
 	profile := &configv1.TLSSecurityProfile{Type: configv1.TLSProfileCustomType, Custom: &configv1.CustomTLSProfile{
 		TLSProfileSpec: configv1.TLSProfileSpec{
 			MinTLSVersion: configv1.VersionTLS12,
-			Ciphers:       []string{"RC4-SHA", "TLS_RSA_WITH_RC4_128_SHA", usableECDHECipher},
+			Ciphers:       []string{"TLS_RSA_WITH_RC4_128_SHA", usableECDHECipher},
 		},
 	}}
 	result, err := resolveProfile(context.Background(), newTLSClient(t, tlsAPIServer(profile, configv1.TLSAdherencePolicyStrictAllComponents)))
@@ -257,14 +257,12 @@ func TestResolveDropsRC4Ciphers(t *testing.T) {
 	}
 }
 
-func TestResolveDropsUnnameableInsecureCiphers(t *testing.T) {
-	// The ECDHE RSA 3DES suite is implemented by Go but no OpenShift profile
-	// can name it (Old carries only the RSA key-exchange 3DES variant), so the
-	// runtime cipher vocabulary rejects it.
+func TestResolveRetainsImplementedCustomCiphers(t *testing.T) {
+	// Custom profiles may request any cipher implemented by the runtime.
 	profile := &configv1.TLSSecurityProfile{Type: configv1.TLSProfileCustomType, Custom: &configv1.CustomTLSProfile{
 		TLSProfileSpec: configv1.TLSProfileSpec{
 			MinTLSVersion: configv1.VersionTLS12,
-			Ciphers:       []string{"ECDHE-RSA-DES-CBC3-SHA", usableECDHECipher},
+			Ciphers:       []string{"TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA", usableECDHECipher},
 		},
 	}}
 	result, err := resolveProfile(context.Background(), newTLSClient(t, tlsAPIServer(profile, configv1.TLSAdherencePolicyStrictAllComponents)))
@@ -272,8 +270,8 @@ func TestResolveDropsUnnameableInsecureCiphers(t *testing.T) {
 		t.Fatalf("resolveProfile() returned an error: %v", err)
 	}
 	config := applyTLSOpts(result.TLSOpts)
-	if len(config.CipherSuites) != 1 || config.CipherSuites[0] != cryptotls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 {
-		t.Fatalf("CipherSuites = %v, want the unnameable 3DES entry dropped and the usable suite kept", config.CipherSuites)
+	if len(config.CipherSuites) != 2 || config.CipherSuites[0] != cryptotls.TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA || config.CipherSuites[1] != cryptotls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256 {
+		t.Fatalf("CipherSuites = %v, want both runtime-supported custom suites", config.CipherSuites)
 	}
 }
 

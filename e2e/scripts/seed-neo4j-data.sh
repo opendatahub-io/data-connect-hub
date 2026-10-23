@@ -58,7 +58,7 @@ if [[ -n "$CERT_FILE" ]]; then
     }
 fi
 
-POD_NAME="e2e-neo4j-seed"
+POD_NAME="dch-e2e-neo4j-seed"
 
 CYPHER_SEED=$(cat <<'CYPHER'
 CREATE (tokyo:City {name: 'Tokyo', country: 'Japan', population: 13960000, dch_e2e: true}),
@@ -82,18 +82,16 @@ CREATE (tokyo:City {name: 'Tokyo', country: 'Japan', population: 13960000, dch_e
 CYPHER
 )
 
-kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-kubectl run "$POD_NAME" -n "$NAMESPACE" \
-    --image="neo4j:5-community" \
-    --image-pull-policy=IfNotPresent \
-    --restart=Never \
-    --env="NEO4J_URI=${NEO4J_URI}" \
-    --env="ADMIN_PASS=${ADMIN_PASS}" \
-    --env="CYPHER_SEED=${CYPHER_SEED}" \
-    --env="READONLY_USER=${READONLY_USER}" \
-    --env="READONLY_PASS=${READONLY_PASS}" \
-    --env="NEO4J_CA_B64=${NEO4J_CA_B64:-}" \
-    --command -- sh -c '
+# Flatten the multi-line cypher seed into a single YAML double-quoted scalar
+# (\n escapes), and stage the seed script in a temp file. Both are computed
+# before the manifest heredoc on purpose: this bash (3.2 on macOS) parses a
+# $(cat <<'X' ...) substitution inside an unquoted heredoc as shell code, so
+# an unbalanced ")" in the script body would truncate it. The manifest heredoc
+# below therefore only contains plain variables and one simple $(sed ...).
+CYPHER_ONELINE="$(printf '%s' "$CYPHER_SEED" | sed -e 's/\\/\\\\/g' -e 's/$/\\n/' | tr -d '\n')"
+SEED_TMP="$(mktemp)"
+trap 'rm -f "$SEED_TMP"' EXIT
+cat > "$SEED_TMP" <<'SEED'
 set -eu
 
 # When a CA certificate is available, import it into the JDK trust store so
@@ -171,7 +169,7 @@ cs "$CYPHER_SEED" || { echo "Failed to insert test data" >&2; exit 1; }
 
 echo "Creating read-only user: $READONLY_USER"
 cs "DROP USER $READONLY_USER IF EXISTS;" 2>/dev/null || true
-cs "CREATE USER $READONLY_USER SET PASSWORD '\''${READONLY_PASS}'\'' SET PASSWORD CHANGE NOT REQUIRED;" || { echo "Failed to create read-only user" >&2; exit 1; }
+cs "CREATE USER $READONLY_USER SET PASSWORD '${READONLY_PASS}' SET PASSWORD CHANGE NOT REQUIRED;" || { echo "Failed to create read-only user" >&2; exit 1; }
 if cs "GRANT ROLE reader TO $READONLY_USER;" 2>/dev/null; then
   echo "Granted reader role to $READONLY_USER"
 else
@@ -179,7 +177,62 @@ else
 fi
 
 echo "Neo4j seed data and read-only user created successfully"
-'
+SEED
+
+# Use OpenShift's namespace-assigned base UID when available; fall back to the
+# image default (7474 = neo4j) on non-OpenShift clusters where kubelet needs a
+# numeric UID to verify runAsNonRoot.
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=7474}"
+
+kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+
+kubectl apply -n "$NAMESPACE" -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD_NAME}
+spec:
+  restartPolicy: Never
+  # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+  # rejects pods that do not set an explicit securityContext.
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: seed
+      image: neo4j:5-community
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsNonRoot: true
+        runAsUser: ${RUN_AS_USER}
+        seccompProfile:
+          type: RuntimeDefault
+      env:
+        - name: NEO4J_URI
+          value: "${NEO4J_URI}"
+        - name: ADMIN_PASS
+          value: "${ADMIN_PASS}"
+        - name: CYPHER_SEED
+          value: "${CYPHER_ONELINE}"
+        - name: READONLY_USER
+          value: "${READONLY_USER}"
+        - name: READONLY_PASS
+          value: "${READONLY_PASS}"
+        - name: NEO4J_CA_B64
+          value: "${NEO4J_CA_B64:-}"
+      command:
+        - /bin/sh
+        - -c
+        - |
+$(sed 's/^/          /' "$SEED_TMP")
+EOF
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
     -n "$NAMESPACE" --timeout=120s || {

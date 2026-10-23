@@ -33,15 +33,15 @@ class TestFlightS3GetTables:
     def test_filter_by_name(self, dch_client: DataConnectClient, s3_flight_connection: str) -> None:
         """Filtering by exact file path returns only that file."""
         table = dch_client.get_tables(
-            s3_flight_connection, table_name_filter="datasets/dch-test-prompts.parquet"
+            s3_flight_connection, table_name_filter="datasets/dch-e2e-prompts.parquet"
         )
         assert isinstance(table, pa.Table)
         assert table.num_rows == 1
-        assert table.column("table_name")[0].as_py() == "datasets/dch-test-prompts.parquet"
+        assert table.column("table_name")[0].as_py() == "datasets/dch-e2e-prompts.parquet"
 
     def test_filter_wildcard(self, dch_client: DataConnectClient, s3_flight_connection: str) -> None:
         """LIKE wildcard filter matches multiple files."""
-        table = dch_client.get_tables(s3_flight_connection, table_name_filter="datasets/%dch-test-prompts%")
+        table = dch_client.get_tables(s3_flight_connection, table_name_filter="datasets/%dch-e2e-prompts%")
         assert isinstance(table, pa.Table)
         assert table.num_rows >= 3
 
@@ -49,7 +49,7 @@ class TestFlightS3GetTables:
         """When include_schema=True, table_schema contains valid IPC schema bytes."""
         table = dch_client.get_tables(
             s3_flight_connection,
-            table_name_filter="datasets/dch-test-prompts.parquet",
+            table_name_filter="datasets/dch-e2e-prompts.parquet",
             include_schema=True,
         )
         assert isinstance(table, pa.Table)
@@ -61,7 +61,7 @@ class TestFlightS3GetTables:
 
         schema = pa.ipc.read_schema(pa.BufferReader(schema_bytes))
         field_names = [f.name for f in schema]
-        print("\n[S3] Schema for 'datasets/dch-test-prompts.parquet':")
+        print("\n[S3] Schema for 'datasets/dch-e2e-prompts.parquet':")
         for f in schema:
             print(f"  {f.name}: {f.type} (nullable={f.nullable})")
 

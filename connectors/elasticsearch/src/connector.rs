@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use arrow::array::{
-    ArrayRef, BooleanArray, Float32Array, Float64Array, Int8Array, Int16Array, Int32Array, Int64Array, StringArray,
-    TimestampMillisecondArray,
-};
-use arrow::datatypes::{DataType as ArrowDataType, Schema, TimeUnit};
+use arrow::array::ArrayRef;
+use arrow::datatypes::{DataType as ArrowDataType, Schema};
 use arrow::record_batch::RecordBatch;
+use commons::api::arrow_convert::json_values_to_array;
 use commons::api::connections::DataConnectionResource;
 use commons::api::connector::CredentialsResolver;
 use commons::api::connector::{DataReader, FlightConnector, Query, QueryOptions, QueryOutput};
@@ -379,7 +377,7 @@ fn extract_column_from_hits(
         })
         .collect();
 
-    json_values_to_array(data_type, &values)
+    json_values_to_array(field_path, data_type, &values)
 }
 
 fn resolve_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
@@ -390,93 +388,11 @@ fn resolve_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serd
     Some(current)
 }
 
-fn json_values_to_array(
-    data_type: &ArrowDataType,
-    values: &[Option<&serde_json::Value>],
-) -> Result<ArrayRef, ConnectorError> {
-    match data_type {
-        ArrowDataType::Boolean => {
-            let arr: BooleanArray = values.iter().map(|v| v.and_then(|v| v.as_bool())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int8 => {
-            let arr: Int8Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i8))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int16 => {
-            let arr: Int16Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i16))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int32 => {
-            let arr: Int32Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_i64()).map(|n| n as i32))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Int64 => {
-            let arr: Int64Array = values.iter().map(|v| v.and_then(|v| v.as_i64())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Float32 => {
-            let arr: Float32Array = values
-                .iter()
-                .map(|v| v.and_then(|v| v.as_f64()).map(|n| n as f32))
-                .collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Float64 => {
-            let arr: Float64Array = values.iter().map(|v| v.and_then(|v| v.as_f64())).collect();
-            Ok(Arc::new(arr))
-        },
-        ArrowDataType::Timestamp(TimeUnit::Millisecond, _) => {
-            let arr: TimestampMillisecondArray = values
-                .iter()
-                .map(|v| {
-                    v.and_then(|v| {
-                        v.as_i64().or_else(|| {
-                            v.as_str().and_then(|s| {
-                                chrono::DateTime::parse_from_rfc3339(s)
-                                    .ok()
-                                    .map(|dt| dt.timestamp_millis())
-                                    .or_else(|| {
-                                        chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f")
-                                            .ok()
-                                            .map(|dt| dt.and_utc().timestamp_millis())
-                                    })
-                            })
-                        })
-                    })
-                })
-                .collect();
-            Ok(Arc::new(arr.with_timezone("UTC")))
-        },
-        _ => {
-            let arr: StringArray = values
-                .iter()
-                .map(|v| {
-                    v.map(|v| match v {
-                        serde_json::Value::String(s) => s.clone(),
-                        other => other.to_string(),
-                    })
-                })
-                .collect();
-            Ok(Arc::new(arr))
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::Array;
-    use arrow::datatypes::Field;
+    use arrow::array::{Array, Int64Array, StringArray, TimestampMillisecondArray};
+    use arrow::datatypes::{Field, TimeUnit};
 
     #[test]
     fn test_connector_provider() {
@@ -510,77 +426,42 @@ mod tests {
     }
 
     #[test]
-    fn test_json_values_to_array_boolean() {
-        let v_true = serde_json::json!(true);
-        let v_false = serde_json::json!(false);
-        let vals = vec![Some(&v_true), None, Some(&v_false)];
-        let arr = json_values_to_array(&ArrowDataType::Boolean, &vals).unwrap();
-        let bool_arr = arr.as_any().downcast_ref::<BooleanArray>().unwrap();
-        assert_eq!(bool_arr.len(), 3);
-        assert!(bool_arr.value(0));
-        assert!(bool_arr.is_null(1));
-        assert!(!bool_arr.value(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_int64() {
-        let v1 = serde_json::json!(42);
-        let v2 = serde_json::json!(99);
-        let vals = vec![Some(&v1), Some(&v2), None];
-        let arr = json_values_to_array(&ArrowDataType::Int64, &vals).unwrap();
-        let int_arr = arr.as_any().downcast_ref::<Int64Array>().unwrap();
-        assert_eq!(int_arr.value(0), 42);
-        assert_eq!(int_arr.value(1), 99);
-        assert!(int_arr.is_null(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_float64() {
-        let v = serde_json::json!(1.23);
-        let vals = vec![Some(&v), None];
-        let arr = json_values_to_array(&ArrowDataType::Float64, &vals).unwrap();
-        let f_arr = arr.as_any().downcast_ref::<Float64Array>().unwrap();
-        assert!((f_arr.value(0) - 1.23).abs() < f64::EPSILON);
-        assert!(f_arr.is_null(1));
-    }
-
-    #[test]
-    fn test_json_values_to_array_utf8_fallback() {
-        let v_str = serde_json::json!("hello");
-        let v_obj = serde_json::json!({"nested": true});
-        let vals = vec![Some(&v_str), Some(&v_obj), None];
-        let arr = json_values_to_array(&ArrowDataType::Utf8, &vals).unwrap();
-        let str_arr = arr.as_any().downcast_ref::<StringArray>().unwrap();
-        assert_eq!(str_arr.value(0), "hello");
-        assert_eq!(str_arr.value(1), r#"{"nested":true}"#);
-        assert!(str_arr.is_null(2));
-    }
-
-    #[test]
-    fn test_json_values_to_array_timestamp_epoch() {
-        let v = serde_json::json!(1700000000000_i64);
-        let vals = vec![Some(&v), None];
-        let arr = json_values_to_array(
-            &ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
-            &vals,
-        )
-        .unwrap();
-        let ts_arr = arr.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
+    fn test_hits_to_record_batch_timestamp() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "created_at",
+            ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+            true,
+        )]));
+        let hits = vec![
+            serde_json::json!({"_source": {"created_at": 1700000000000_i64}}),
+            serde_json::json!({"_source": {"created_at": "2023-11-14T22:13:20.000Z"}}),
+            serde_json::json!({"_source": {}}),
+        ];
+        let batch = hits_to_record_batch(&schema, &hits).unwrap();
+        let ts_arr = batch
+            .column(0)
+            .as_any()
+            .downcast_ref::<TimestampMillisecondArray>()
+            .unwrap();
         assert_eq!(ts_arr.value(0), 1700000000000);
-        assert!(ts_arr.is_null(1));
+        assert_eq!(ts_arr.value(1), 1700000000000);
+        assert!(ts_arr.is_null(2));
     }
 
     #[test]
-    fn test_json_values_to_array_timestamp_iso() {
-        let v = serde_json::json!("2023-11-14T22:13:20.000Z");
-        let vals = vec![Some(&v)];
-        let arr = json_values_to_array(
-            &ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
-            &vals,
-        )
-        .unwrap();
-        let ts_arr = arr.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
-        assert_eq!(ts_arr.value(0), 1700000000000);
+    fn test_hits_to_record_batch_timestamp_invalid() {
+        let schema = Arc::new(Schema::new(vec![Field::new(
+            "created_at",
+            ArrowDataType::Timestamp(TimeUnit::Millisecond, Some("UTC".into())),
+            true,
+        )]));
+        let hits = vec![serde_json::json!({"_source": {"created_at": "not-a-date"}})];
+        let err = hits_to_record_batch(&schema, &hits).unwrap_err();
+        assert!(
+            matches!(err, ConnectorError::SQLError(_)),
+            "should be SQLError: {}",
+            err
+        );
     }
 
     #[test]
@@ -631,5 +512,15 @@ mod tests {
 
         let missing_arr = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
         assert!(missing_arr.is_null(0));
+    }
+
+    #[test]
+    fn test_hits_to_record_batch_int8_overflow_propagates() {
+        let schema = Arc::new(Schema::new(vec![Field::new("score", ArrowDataType::Int8, true)]));
+        let hits = vec![serde_json::json!({"_source": {"score": 300}})];
+        let err = hits_to_record_batch(&schema, &hits).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("score"), "should name the field: {msg}");
+        assert!(msg.contains("300"), "should include the value: {msg}");
     }
 }

@@ -41,11 +41,16 @@ kind load docker-image "$CI_FLIGHT_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_REST_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_CONTROLLER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 
-echo "=== Loading tracing images into kind ==="
-docker pull "$CI_OTEL_COLLECTOR_IMAGE"
-docker pull "$CI_JAEGER_IMAGE"
-kind load docker-image "$CI_OTEL_COLLECTOR_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
-kind load docker-image "$CI_JAEGER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
+echo "=== Pulling tracing images inside kind node ==="
+# kind load docker-image fails for multi-arch registry images: it pipes
+# `docker save` into `ctr images import --all-platforms`, which requires
+# content for every platform in the index, but the host only pulled the
+# local platform. Pulling inside the node lets its containerd resolve
+# the index for the node platform itself.
+docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
+    ctr --namespace=k8s.io images pull "$CI_OTEL_COLLECTOR_IMAGE"
+docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
+    ctr --namespace=k8s.io images pull "$CI_JAEGER_IMAGE"
 
 assert_deployment_image() {
     local deployment="$1"
@@ -408,6 +413,115 @@ spec:
     targetPort: 16686
     nodePort: ${CI_JAEGER_NODE_PORT}
 EOF
+
+# ===================================================================
+# Legacy connection import fixtures (ODH Dashboard ConfigMaps + Secrets)
+# ===================================================================
+
+echo "=== Creating legacy connection import fixtures ==="
+kubectl create namespace "$CI_TENANT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+# s3 connection type (mirrors odh-dashboard/manifests/base/connection-types/s3.yaml)
+kubectl apply -n "$CI_TENANT_NAMESPACE" -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3
+  labels:
+    opendatahub.io/connection-type: "true"
+  annotations:
+    openshift.io/display-name: "S3 compatible object storage - v1"
+    openshift.io/description: "Connect to storage systems that are compatible with Amazon S3"
+data:
+  category: '["Object storage"]'
+  fields: |
+    [
+      {"type":"short-text","name":"Access key","envVar":"AWS_ACCESS_KEY_ID","required":true,"properties":{}},
+      {"type":"hidden","name":"Secret key","envVar":"AWS_SECRET_ACCESS_KEY","required":true,"properties":{}},
+      {"type":"short-text","name":"Endpoint","envVar":"AWS_S3_ENDPOINT","required":true,"properties":{}},
+      {"type":"short-text","name":"Region","envVar":"AWS_DEFAULT_REGION","required":false,"properties":{}},
+      {"type":"short-text","name":"Bucket","envVar":"AWS_S3_BUCKET","required":false,"properties":{}}
+    ]
+EOF
+
+# oci-v1 connection type (mirrors odh-dashboard/manifests/base/connection-types/oci-v1.yaml)
+kubectl apply -n "$CI_TENANT_NAMESPACE" -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oci-v1
+  labels:
+    opendatahub.io/connection-type: "true"
+  annotations:
+    openshift.io/display-name: "OCI compliant registry - v1"
+    openshift.io/description: "Connect to an OCI-compliant container registry"
+data:
+  category: '["Container registry"]'
+  fields: |
+    [
+      {"type":"dropdown","name":"Access type","envVar":"ACCESS_TYPE","properties":{}},
+      {"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{}},
+      {"type":"short-text","name":"Registry host","envVar":"OCI_HOST","properties":{}}
+    ]
+EOF
+
+# uri-v1 connection type (should be skipped — covered by built-in URI type)
+kubectl apply -n "$CI_TENANT_NAMESPACE" -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: uri-v1
+  labels:
+    opendatahub.io/connection-type: "true"
+  annotations:
+    openshift.io/display-name: "URI - v1"
+    openshift.io/description: "URI connection type"
+data:
+  category: '["URI"]'
+  fields: |
+    [{"type":"uri","name":"URI","envVar":"URI","required":true,"properties":{}}]
+EOF
+
+# Legacy S3 connection Secret
+kubectl create secret generic e2e-legacy-s3-conn \
+    -n "$CI_TENANT_NAMESPACE" \
+    --from-literal=AWS_ACCESS_KEY_ID=e2e-test-key \
+    --from-literal=AWS_SECRET_ACCESS_KEY=e2e-test-secret \
+    --from-literal=AWS_S3_ENDPOINT=http://example.com:9000 \
+    --from-literal=AWS_DEFAULT_REGION=us-east-1 \
+    --from-literal=AWS_S3_BUCKET=e2e-test-bucket \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl label secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
+    opendatahub.io/dashboard=true --overwrite >/dev/null
+kubectl annotate secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
+    openshift.io/display-name="E2E Legacy S3 Connection" \
+    opendatahub.io/connection-type-ref=s3 \
+    --overwrite >/dev/null
+
+# Legacy OCI connection Secret
+kubectl create secret generic e2e-legacy-oci-conn \
+    -n "$CI_TENANT_NAMESPACE" \
+    --from-literal=ACCESS_TYPE=Pull \
+    --from-literal=OCI_HOST=registry.example.com \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl label secret e2e-legacy-oci-conn -n "$CI_TENANT_NAMESPACE" \
+    opendatahub.io/dashboard=true --overwrite >/dev/null
+kubectl annotate secret e2e-legacy-oci-conn -n "$CI_TENANT_NAMESPACE" \
+    openshift.io/display-name="E2E Legacy OCI Connection" \
+    opendatahub.io/connection-type-ref=oci-v1 \
+    --overwrite >/dev/null
+
+# Legacy URI connection Secret (should resolve to built-in URI via alias)
+kubectl create secret generic e2e-legacy-uri-conn \
+    -n "$CI_TENANT_NAMESPACE" \
+    --from-literal=URI=https://example.com/api \
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl label secret e2e-legacy-uri-conn -n "$CI_TENANT_NAMESPACE" \
+    opendatahub.io/dashboard=true --overwrite >/dev/null
+kubectl annotate secret e2e-legacy-uri-conn -n "$CI_TENANT_NAMESPACE" \
+    openshift.io/display-name="E2E Legacy URI Connection" \
+    opendatahub.io/connection-type-ref=uri-v1 \
+    --overwrite >/dev/null
 
 # ===================================================================
 # Tenant data sources for E2E connectors

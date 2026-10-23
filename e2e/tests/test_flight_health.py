@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ipaddress
 import os
 import ssl
 import tempfile
@@ -19,15 +18,6 @@ def _parse_target(endpoint: str) -> tuple[str, int]:
     if not parsed.hostname:
         raise ValueError(f"Invalid DCH_GATEWAY_ENDPOINT: {endpoint!r}")
     return parsed.hostname, parsed.port or 443
-
-
-def _host_is_loopback(host: str) -> bool:
-    if host in {"localhost", "127.0.0.1", "::1"}:
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
 
 
 def _authority_from_server_cert(cert_pem: str) -> str | None:
@@ -60,7 +50,12 @@ def _build_channel(gateway_endpoint: str, insecure: bool, ca_cert: str | None) -
         root_certs = cert_pem.encode("utf-8")
 
         override = os.environ.get("DCH_GRPC_HEALTH_AUTHORITY")
-        if not override and _host_is_loopback(host):
+        # In insecure mode we already trust the exact certificate we just
+        # fetched, so the expected authority can be derived from it for any
+        # endpoint shape. External gateway addresses serve the router's
+        # wildcard certificate for the cluster domain, which never matches
+        # the ELB hostname.
+        if not override:
             override = _authority_from_server_cert(cert_pem)
         if override:
             options.extend(

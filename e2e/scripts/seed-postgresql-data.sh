@@ -54,27 +54,35 @@ if [[ "${PG_URL}" =~ sslmode=verify-(ca|full) ]]; then
     CA_B64="$(base64 -i "$CA_CERT_PATH" | tr -d '\n')"
 fi
 
-POD_NAME="e2e-pg-seed"
-# Proxy env only when we actually have a CA to verify with, so sslmode=require URLs
-# keep working unauthenticated (no PGSSLROOTCERT -> libpq honors sslmode).
-POD_ENVS=()
+POD_NAME="dch-e2e-pg-seed"
+# Proxy the CA env only when we actually have a CA to verify with, so
+# sslmode=require URLs keep working unauthenticated (no PGSSLROOTCERT ->
+# libpq honors sslmode).
+CA_ENV_YAML=""
 if [[ -n "${CA_B64:-}" ]]; then
-    POD_ENVS+=(--env="E2E_PG_CA_B64=${CA_B64}")
-    POD_ENVS+=(--env="PGSSLROOTCERT=/tmp/postgresql-ca.crt")
+    CA_ENV_YAML="        - name: E2E_PG_CA_B64
+          value: \"${CA_B64}\"
+        - name: PGSSLROOTCERT
+          value: /tmp/postgresql-ca.crt"
 fi
 
-kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
-kubectl run "$POD_NAME" -n "$NAMESPACE" \
-    --image="$PG_IMAGE" \
-    --image-pull-policy=IfNotPresent \
-    --restart=Never \
-    ${POD_ENVS[@]+"${POD_ENVS[@]}"} \
-    --env="PGURI=${SEED_URL}" \
-    --command -- sh -c '
-        if [ -n "${E2E_PG_CA_B64:-}" ]; then
-            printf "%s" "$E2E_PG_CA_B64" | base64 -d > /tmp/postgresql-ca.crt
-        fi
-        psql "$PGURI" -v ON_ERROR_STOP=1 <<SQL
+# Use OpenShift's namespace-assigned base UID when available; fall back to a
+# non-root UID on non-OpenShift clusters where kubelet needs a numeric UID to
+# verify runAsNonRoot.
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=1001}"
+
+# Stage the seed script in a temp file to avoid nested heredoc parsing issues
+# on Bash 3.2 (macOS).
+SEED_TMP="$(mktemp)"
+trap 'rm -f "$SEED_TMP"' EXIT
+cat > "$SEED_TMP" <<'SEED'
+if [ -n "${E2E_PG_CA_B64:-}" ]; then
+    printf "%s" "$E2E_PG_CA_B64" | base64 -d > /tmp/postgresql-ca.crt
+fi
+psql "$PGURI" -v ON_ERROR_STOP=1 <<SQL
 CREATE SCHEMA IF NOT EXISTS dch_e2e;
 DROP TABLE IF EXISTS dch_e2e.cities;
 CREATE TABLE dch_e2e.cities (
@@ -84,11 +92,50 @@ CREATE TABLE dch_e2e.cities (
     population INTEGER NOT NULL
 );
 INSERT INTO dch_e2e.cities (name, country, population) VALUES
-    ('"'"'Tokyo'"'"',  '"'"'Japan'"'"',          13960000),
-    ('"'"'London'"'"', '"'"'United Kingdom'"'"',  8982000),
-    ('"'"'Paris'"'"',  '"'"'France'"'"',          2161000);
+    ('Tokyo',  'Japan',          13960000),
+    ('London', 'United Kingdom',  8982000),
+    ('Paris',  'France',          2161000);
 SQL
-'
+SEED
+
+kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+
+kubectl apply -n "$NAMESPACE" -f - <<EOF
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${POD_NAME}
+spec:
+  restartPolicy: Never
+  # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+  # rejects pods that do not set an explicit securityContext.
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: seed
+      image: ${PG_IMAGE}
+      imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsNonRoot: true
+        runAsUser: ${RUN_AS_USER}
+        seccompProfile:
+          type: RuntimeDefault
+      env:
+        - name: PGURI
+          value: "${SEED_URL}"
+${CA_ENV_YAML}
+
+      command:
+        - /bin/sh
+        - -c
+        - |
+$(sed 's/^/          /' "$SEED_TMP")
+EOF
 
 kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
     -n "$NAMESPACE" --timeout=120s || {

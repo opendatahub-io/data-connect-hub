@@ -31,9 +31,11 @@ data-connect-hub/
 ├── config/                    Kustomize deployment configs
 ├── hack/                      Scripts and Python tooling
 ├── docs/                      Documentation and proposals
+├── .cargo/                    cargo-audit configuration
 ├── Cargo.toml                 Workspace manifest
 ├── Makefile                   Build, test, lint, container targets
 ├── clippy.toml                Clippy configuration
+├── deny.toml                  cargo-deny configuration
 ├── rustfmt.toml               Rustfmt configuration
 └── rust-toolchain.toml        Rust toolchain pinning
 ```
@@ -41,6 +43,7 @@ data-connect-hub/
 ## Prerequisites
 
 - Rust 1.96+
+- cargo-audit and cargo-deny (for `make audit` supply chain checks)
 - PostgreSQL (for metadata storage and integration testing)
 - Podman or Docker (for container builds)
 
@@ -259,7 +262,7 @@ Run `make help` for the full list. Key targets:
 | `lint`                | Clippy + rustfmt check                             |
 | `fmt`                 | Format all crates                                  |
 | `doc`                 | Rustdoc with `-D warnings`                         |
-| `audit`               | `cargo audit`                                      |
+| `audit`               | `cargo audit` + `cargo deny check`                 |
 | `check-dco`           | Verify DCO sign-off on commits                     |
 | `container-flight`    | Build flight-service container image               |
 | `container-rest`      | Build rest-service container image                 |

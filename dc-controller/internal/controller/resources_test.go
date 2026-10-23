@@ -709,6 +709,188 @@ func TestRenderRESTServiceTLSLockdown(t *testing.T) {
 	assertRESTServiceIngress(t, networkPolicy)
 }
 
+func flightConfigMap(t *testing.T, resources []*unstructured.Unstructured) *unstructured.Unstructured {
+	t.Helper()
+	for _, resource := range resources {
+		if resource.GetKind() == kindConfigMap && resource.GetLabels()[labelAppName] == nameFlightService {
+			return resource
+		}
+	}
+	t.Fatal("rendered flight-service ConfigMap is missing")
+	return nil
+}
+
+func tomlStringList(value any) []string {
+	switch list := value.(type) {
+	case []string:
+		return list
+	case []any:
+		out := make([]string, 0, len(list))
+		for _, item := range list {
+			s, _ := item.(string)
+			out = append(out, s)
+		}
+		return out
+	}
+	return nil
+}
+
+const tlsECDHERSAAES128GCM = "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+
+func TestSetConfigMapFlightTLSProfile(t *testing.T) {
+	tests := []struct {
+		name           string
+		spec           configv1.TLSProfileSpec
+		wantMin        configv1.TLSProtocolVersion
+		wantCiphers    []string
+		wantCiphersKey bool
+	}{
+		{
+			name:    "Intermediate projects minimum and IANA cipher suites",
+			spec:    *configv1.TLSProfiles[configv1.TLSProfileIntermediateType],
+			wantMin: configv1.VersionTLS12,
+			wantCiphers: []string{
+				"TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+				tlsECDHERSAAES128GCM,
+				"TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+				"TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+				"TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+				"TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+			},
+			wantCiphersKey: true,
+		},
+		{
+			name:    "Modern projects TLS 1.3 with runtime-managed ciphers",
+			spec:    *configv1.TLSProfiles[configv1.TLSProfileModernType],
+			wantMin: configv1.VersionTLS13,
+		},
+		{
+			name: "Custom profile projects verbatim",
+			spec: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+				Ciphers:       []string{tlsECDHERSAAES128GCM},
+			},
+			wantMin:        configv1.VersionTLS12,
+			wantCiphers:    []string{tlsECDHERSAAES128GCM},
+			wantCiphersKey: true,
+		},
+		{
+			name: "Custom profile with no ciphers omits the cipher list",
+			spec: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+			},
+			wantMin:        configv1.VersionTLS12,
+			wantCiphersKey: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resources := renderRESTBase(t)
+			if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, tt.spec); err != nil {
+				t.Fatalf("setConfigMapFlightTLSProfile() error = %v", err)
+			}
+			config := parsedConfigMapTOML(t, flightConfigMap(t, resources))
+			tls, ok := config["tls"].(map[string]any)
+			if !ok {
+				t.Fatalf("flight config has no [tls] section: %#v", config)
+			}
+			if tls["min_version"] != string(tt.wantMin) {
+				t.Errorf("tls.min_version = %v, want %s", tls["min_version"], tt.wantMin)
+			}
+			_, hasCiphers := tls["ciphers"]
+			if hasCiphers != tt.wantCiphersKey {
+				t.Errorf("tls.ciphers present = %t, want %t", hasCiphers, tt.wantCiphersKey)
+			}
+			if got := tomlStringList(tls["ciphers"]); len(got) != len(tt.wantCiphers) {
+				t.Errorf("tls.ciphers = %v, want %v", got, tt.wantCiphers)
+			} else {
+				for i := range got {
+					if got[i] != tt.wantCiphers[i] {
+						t.Errorf("tls.ciphers[%d] = %q, want %q", i, got[i], tt.wantCiphers[i])
+					}
+				}
+			}
+			if tls["cert_file"] == nil || tls["key_file"] == nil {
+				t.Errorf("projection dropped the TLS identity: %#v", tls)
+			}
+			// The REST ConfigMap must not grow a TLS policy.
+			for _, resource := range resources {
+				if resource.GetKind() != kindConfigMap {
+					continue
+				}
+				config, _, err := parseConfigMapTOML(resource)
+				if err != nil {
+					t.Fatalf("parsing ConfigMap %q: %v", resource.GetName(), err)
+				}
+				if restTLS, ok := config["tls"].(map[string]any); ok && resource.GetLabels()[labelAppName] != nameFlightService {
+					if restTLS["min_version"] != nil || restTLS["ciphers"] != nil {
+						t.Errorf("ConfigMap %q unexpectedly received a TLS policy", resource.GetName())
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSetConfigMapFlightTLSProfileOldProjectsForFailFastStartup(t *testing.T) {
+	// Documented limitation: the Flight listener cannot serve the Old minimum
+	// (rustls has no TLS 1.0/1.1), so the profile is projected verbatim and
+	// the service fails fast at startup instead of silently upgrading the
+	// minimum. The projected cipher list keeps the Old-only suites (3DES, CBC)
+	// and drops the TLS 1.3 suites that cannot negotiate under TLS 1.0.
+	resources := renderRESTBase(t)
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileOldType]); err != nil {
+		t.Fatalf("setConfigMapFlightTLSProfile() error = %v", err)
+	}
+	config := parsedConfigMapTOML(t, flightConfigMap(t, resources))
+	tls := config["tls"].(map[string]any)
+	if tls["min_version"] != string(configv1.VersionTLS10) {
+		t.Errorf("tls.min_version = %v, want %s", tls["min_version"], configv1.VersionTLS10)
+	}
+	ciphers := tomlStringList(tls["ciphers"])
+	if !containsString(ciphers, "TLS_RSA_WITH_3DES_EDE_CBC_SHA") {
+		t.Errorf("tls.ciphers = %v, want the Old 3DES suite to survive projection", ciphers)
+	}
+	if !containsString(ciphers, tlsECDHERSAAES128GCM) {
+		t.Errorf("tls.ciphers = %v, want the shared ECDHE suite to survive projection", ciphers)
+	}
+	for _, cipher := range ciphers {
+		if strings.HasPrefix(cipher, "TLS_AES_") || strings.HasPrefix(cipher, "TLS_CHACHA20_POLY1305_SHA256") {
+			t.Errorf("tls.ciphers = %v, want TLS 1.3-only suites dropped under a TLS 1.0 minimum", ciphers)
+		}
+	}
+}
+
+func TestSetConfigMapFlightTLSProfileRejectsUnusableCiphers(t *testing.T) {
+	resources := renderRESTBase(t)
+	spec := configv1.TLSProfileSpec{
+		MinTLSVersion: configv1.VersionTLS12,
+		Ciphers:       []string{"TLS_FAKE_CIPHER_WITH_NO_MAPPING"},
+	}
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, spec); err == nil {
+		t.Fatal("setConfigMapFlightTLSProfile() with an all-unusable cipher list = nil error, want rejection")
+	}
+}
+
+func TestFlightTLSProfileChangesTriggerConfigHashRollout(t *testing.T) {
+	resources := renderRESTBase(t)
+	flightCM := flightConfigMap(t, resources)
+
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileIntermediateType]); err != nil {
+		t.Fatalf("projecting Intermediate: %v", err)
+	}
+	hashIntermediate := specHash(flightCM)
+
+	if err := setConfigMapFlightTLSProfile(context.Background(), resources, nameFlightService, *configv1.TLSProfiles[configv1.TLSProfileModernType]); err != nil {
+		t.Fatalf("projecting Modern: %v", err)
+	}
+	hashModern := specHash(flightCM)
+
+	if hashIntermediate == "" || hashModern == "" || hashIntermediate == hashModern {
+		t.Errorf("config hash did not change with the TLS profile: intermediate=%q modern=%q", hashIntermediate, hashModern)
+	}
+}
+
 func renderRESTBase(t *testing.T) []*unstructured.Unstructured {
 	t.Helper()
 	manifestsPath := filepath.Join("..", "..", "..", "config")

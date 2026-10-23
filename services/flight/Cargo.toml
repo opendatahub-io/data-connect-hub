@@ -2,6 +2,8 @@
 name = "flight-service"
 version = "0.1.0"
 edition = "2024"
+license.workspace = true
+publish = false
 
 [lints]
 workspace = true
@@ -57,6 +59,7 @@ anyhow = { workspace = true }
 kube-utils = { workspace = true }
 tower = { workspace = true }
 rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -70,3 +73,5 @@ sqlx = { workspace = true }
 opendal = { workspace = true }
 parquet = { workspace = true }
 arrow-csv = { workspace = true }
+rcgen = { workspace = true }
+tempfile = { workspace = true }

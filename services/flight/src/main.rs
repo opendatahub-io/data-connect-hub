@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let builder = tonic::transport::Server::builder();
-    let builder = configure_tls(builder, &config.tls).await?;
+    let (builder, tls_acceptor) = configure_tls(builder, &config.tls).await?;
     configure_metrics(&config)?;
 
     let connectors_registry = Arc::new(build_connectors_registry(&config));
@@ -133,7 +133,7 @@ async fn main() -> Result<()> {
 
     let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
 
-    let server_result = start_server(builder, &auth, service, addr).await;
+    let server_result = start_server(builder, tls_acceptor, &auth, service, addr).await;
     tracing::info!("DataConnectorHub Flight service stopped");
 
     if let Some(provider) = tracer_provider
