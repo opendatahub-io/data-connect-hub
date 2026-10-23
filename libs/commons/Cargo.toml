@@ -21,6 +21,3 @@ opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 tracing-opentelemetry = { workspace = true }
-
-[dev-dependencies]
-serde_json = { workspace = true }
