@@ -12,7 +12,7 @@
 set -euo pipefail
 
 NAMESPACE=""
-RELEASE="e2e-uri-server"
+RELEASE="dch-e2e-uri-server"
 IMAGE="docker.io/library/nginx:alpine@sha256:72ba65eb42c10344912a84ff42408db7d34f2feb642204570ab8fc5ffd29f1d3"
 TIMEOUT="60s"
 
@@ -22,7 +22,7 @@ Usage: $0 -n <namespace> [-r <release>] [-i <image>] [-t <timeout>]
 
 Options:
   -n NAMESPACE     target namespace (required)
-  -r RELEASE       resource name (default: e2e-uri-server)
+  -r RELEASE       resource name (default: dch-e2e-uri-server)
   -i IMAGE         nginx image (default: docker.io/library/nginx:alpine)
   -t TIMEOUT       rollout timeout (default: 60s)
   -h               show this help
