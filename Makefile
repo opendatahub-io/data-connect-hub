@@ -8,6 +8,7 @@ $(error VERSION could not be determined; set VERSION explicitly)
 endif
 IMAGE            ?= data-connection-hub
 CONTAINER_ENGINE ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+REDOCLY_CLI      ?= docker.io/redocly/cli:2.69.0
 V                ?=
 
 ifneq ($(V),)
@@ -222,7 +223,7 @@ _generate-openapi-docs-container:
 		--pull=newer \
 		-v "$$PWD:/spec:Z" \
 		--entrypoint sh \
-		docker.io/redocly/cli -c ' \
+		$(REDOCLY_CLI) -c ' \
 			echo "1. Bundling external spec to openapi.yaml (with x-internal removed)..." && redocly bundle external@latest --output docs/api/openapi.yaml --remove-unused-components && \
 			echo "2. Bundling external spec to openapi.json (with x-internal removed)..." && redocly bundle external@latest --ext json --output docs/api/openapi.json && \
 			echo "3. Bundling internal spec to openapi-internal.yaml (with x-internal removed)..." && redocly bundle internal@latest --output docs/api/openapi-internal.yaml --remove-unused-components && \
