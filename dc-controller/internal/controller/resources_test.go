@@ -617,6 +617,35 @@ func TestSetKubeRbacProxyTLSOptsFallsBackToIntermediateWhenAPIServerObjectIsAbse
 	}
 }
 
+func TestSetKubeRbacProxyAudiencesIsIdempotent(t *testing.T) {
+	deployment := kubeRbacProxyDeployment(
+		"--secure-listen-address=0.0.0.0:8443",
+		"--auth-token-audiences=old-audience",
+	)
+	resources := []*unstructured.Unstructured{deployment}
+	audiences := []string{"new-audience", "another-audience"}
+
+	setKubeRbacProxyAudiences(resources, audiences)
+	setKubeRbacProxyAudiences(resources, audiences)
+
+	args := kubeRbacProxyArgs(t, deployment)
+	if len(args) == 0 {
+		t.Fatal("expected kube-rbac-proxy arguments")
+	}
+	count := 0
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--auth-token-audiences=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("audience argument count = %d, want 1; args = %v", count, args)
+	}
+	if !containsString(args, "--auth-token-audiences=new-audience,another-audience") {
+		t.Fatalf("args = %v, want updated audience argument", args)
+	}
+}
+
 func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 	// A denied APIServer read must fail the reconcile before any resources
 	// are applied, so a misconfigured RBAC surface cannot roll out proxy

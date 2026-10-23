@@ -1,6 +1,7 @@
 pub mod config;
 
 use anyhow::{Context, Result};
+use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::Resource;
@@ -8,10 +9,120 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use tonic::transport::{Certificate, ClientTlsConfig};
 use tracing::info;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Registry;
+use tracing_subscriber::fmt::FmtContext;
+use tracing_subscriber::fmt::FormattedFields;
+use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, JsonFields, Writer};
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
+
+struct RestJsonFormat;
+
+#[derive(Default)]
+struct RestJsonVisitor(serde_json::Map<String, serde_json::Value>);
+
+impl tracing::field::Visit for RestJsonVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .insert(field.name().to_owned(), serde_json::Value::String(format!("{value:?}")));
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0
+            .insert(field.name().to_owned(), serde_json::Value::String(value.to_owned()));
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for RestJsonFormat
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let mut visitor = RestJsonVisitor::default();
+        event.record(&mut visitor);
+        let fields = visitor.0;
+        let mut log = serde_json::Map::new();
+
+        let mut timestamp = String::new();
+        tracing_subscriber::fmt::time::SystemTime.format_time(&mut Writer::new(&mut timestamp))?;
+        log.insert("ts".to_owned(), serde_json::Value::String(timestamp));
+        log.insert(
+            "level".to_owned(),
+            serde_json::Value::String(event.metadata().level().to_string()),
+        );
+        log.insert(
+            "logger".to_owned(),
+            serde_json::Value::String(event.metadata().target().to_owned()),
+        );
+        log.insert(
+            "service.name".to_owned(),
+            serde_json::Value::String("data-connect-hub".to_owned()),
+        );
+
+        let span_context = tracing::Span::current().context().span().span_context().clone();
+        if span_context.is_valid() {
+            log.insert(
+                "trace_id".to_owned(),
+                serde_json::Value::String(span_context.trace_id().to_string()),
+            );
+            log.insert(
+                "span_id".to_owned(),
+                serde_json::Value::String(span_context.span_id().to_string()),
+            );
+        }
+
+        if let Some(span) = event
+            .parent()
+            .and_then(|id| ctx.span(id))
+            .or_else(|| ctx.lookup_current())
+            && let Some(fields) = span.extensions().get::<FormattedFields<N>>()
+            && let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(&fields.fields)
+            && let Some(request_path) = fields.get("request.path").and_then(serde_json::Value::as_str)
+        {
+            log.insert(
+                "request-path".to_owned(),
+                serde_json::Value::String(request_path.to_owned()),
+            );
+        }
+
+        if !fields.is_empty() {
+            let mut fields = fields;
+            let message = fields.remove("message").unwrap_or(serde_json::Value::Null);
+            log.insert("msg".to_owned(), message);
+            log.extend(fields);
+        } else {
+            log.insert("msg".to_owned(), serde_json::Value::Null);
+        }
+
+        writer.write_str(&serde_json::to_string(&log).map_err(|_| std::fmt::Error)?)?;
+        writer.write_char('\n')
+    }
+}
 
 /// ENV_OTLP_ENDPOINT names the environment variable holding the OTLP/gRPC
 /// collector URL. It is set from `spec.trace.exporter` on the DataConnectService.
@@ -91,16 +202,38 @@ pub fn init_tracing(
     json_logs: bool,
     trace: &TraceConfig,
 ) -> Result<Option<SdkTracerProvider>> {
+    init_tracing_inner(service_name, json_logs, trace, false)
+}
+
+/// init_tracing_json installs tracing using the standard structured JSON field names.
+pub fn init_tracing_json(
+    service_name: &'static str,
+    json_logs: bool,
+    trace: &TraceConfig,
+) -> Result<Option<SdkTracerProvider>> {
+    init_tracing_inner(service_name, json_logs, trace, true)
+}
+
+fn init_tracing_inner(
+    service_name: &'static str,
+    json_logs: bool,
+    trace: &TraceConfig,
+    rest_json: bool,
+) -> Result<Option<SdkTracerProvider>> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let fmt_layer: Box<dyn Layer<Registry> + Send + Sync> = if json_logs {
-        Box::new(
-            fmt::layer()
-                .json()
-                .with_file(true)
-                .with_line_number(true)
-                .with_target(true),
-        )
+        if rest_json {
+            Box::new(fmt::layer().event_format(RestJsonFormat).fmt_fields(JsonFields::new()))
+        } else {
+            Box::new(
+                fmt::layer()
+                    .json()
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_target(true),
+            )
+        }
     } else {
         Box::new(fmt::layer().with_file(true).with_line_number(true).with_target(true))
     };

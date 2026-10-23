@@ -10,6 +10,7 @@ require (
 	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/stretchr/testify v1.12.1
+	go.uber.org/zap v1.27.1
 	k8s.io/api v0.37.1
 	k8s.io/apimachinery v0.37.1
 	k8s.io/client-go v0.37.1

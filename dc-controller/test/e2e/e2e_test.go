@@ -55,11 +55,19 @@ var _ = Describe("dc-controller", Ordered, func() {
 		It("starts the controller manager", func() {
 			fixture.AssertControllerReady()
 		})
+
+		It("uses JSON logging with the required fields", func() {
+			fixture.AssertControllerJSONLogging()
+		})
 	})
 
 	Context("DataConnectService reconciliation", func() {
 		It("creates a DataConnectService and waits for Ready", func() {
 			fixture.CreateDataConnectService()
+		})
+
+		It("uses JSON logging for REST and Flight", func() {
+			fixture.AssertServiceJSONLogging()
 		})
 
 		It("reconciles REST replica changes", func() {
