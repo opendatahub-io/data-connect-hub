@@ -41,11 +41,16 @@ kind load docker-image "$CI_FLIGHT_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_REST_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 kind load docker-image "$CI_CONTROLLER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
 
-echo "=== Loading tracing images into kind ==="
-docker pull "$CI_OTEL_COLLECTOR_IMAGE"
-docker pull "$CI_JAEGER_IMAGE"
-kind load docker-image "$CI_OTEL_COLLECTOR_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
-kind load docker-image "$CI_JAEGER_IMAGE" --name "$CI_KIND_CLUSTER_NAME"
+echo "=== Pulling tracing images inside kind node ==="
+# kind load docker-image fails for multi-arch registry images: it pipes
+# `docker save` into `ctr images import --all-platforms`, which requires
+# content for every platform in the index, but the host only pulled the
+# local platform. Pulling inside the node lets its containerd resolve
+# the index for the node platform itself.
+docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
+    ctr --namespace=k8s.io images pull "$CI_OTEL_COLLECTOR_IMAGE"
+docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
+    ctr --namespace=k8s.io images pull "$CI_JAEGER_IMAGE"
 
 assert_deployment_image() {
     local deployment="$1"
