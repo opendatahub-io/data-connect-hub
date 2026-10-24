@@ -7,7 +7,6 @@ require (
 	github.com/onsi/gomega v1.39.1
 	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.0
 	github.com/openshift/api v0.0.0-20261022144628-c3d7aef33fc1
-	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/stretchr/testify v1.12.1
 	k8s.io/api v0.37.1
@@ -31,6 +30,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.14.0 // indirect
+	github.com/evanphx/json-patch v4.5.0+incompatible // indirect
 	github.com/evanphx/json-patch/v5 v5.9.11 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
@@ -67,6 +67,7 @@ require (
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/openshift/controller-runtime-common v0.0.0-20261008111711-8ec0dc844066 // indirect
+	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.24.0 // indirect
 	github.com/prometheus/client_model v0.6.3 // indirect
