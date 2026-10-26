@@ -84,7 +84,7 @@ func assertJSONLogRecord(logNamespace, workload, container string) {
 		output, err = utils.Run(cmd)
 		g.Expect(err).NotTo(HaveOccurred())
 		g.Expect(hasRequiredJSONLogRecord(output)).To(BeTrue(),
-			"expected a JSON log record with ts, level, msg, logger, and service.name")
+			"expected a JSON log record with ts, level, msg, logger, and service.name; logs:\n%s", output)
 	}, "2m", "2s").Should(Succeed())
 }
 
