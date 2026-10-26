@@ -183,6 +183,12 @@ def uri_secret() -> str | None:
     return os.environ.get("DCH_URI_SECRET") or None
 
 
+@pytest.fixture(scope="session")
+def user_secret() -> str | None:
+    """Secret the e2e user owns (granted via RBAC), unlike the connector secrets."""
+    return os.environ.get("DCH_USER_SECRET") or None
+
+
 # ---------------------------------------------------------------------------
 # Client fixtures
 # ---------------------------------------------------------------------------

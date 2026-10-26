@@ -84,6 +84,7 @@ ES_BASIC_SECRET="dch-e2e-es-basic-creds"
 ES_APIKEY_SECRET="dch-e2e-es-apikey-creds"
 NEO4J_SECRET="dch-e2e-neo4j-creds"
 URI_SECRET="dch-e2e-uri-creds"
+USER_SECRET="dch-e2e-user-creds"
 URI_SERVER_NAME="dch-e2e-uri-server"
 ENV_FILE="$SCRIPT_DIR/.env"
 
@@ -124,8 +125,10 @@ setup_user_rbac() {
 }
 
 setup_service_rbac() {
+    # The e2e user secret is always granted so plain CRUD tests can reference
+    # a secret the user legitimately owns.
+    local -a secret_names=("--resource-name=$USER_SECRET")
     # Allow flight service SA to read K8s secret for datasource in tenant namespace
-    local -a secret_names=()
     [[ "$E2E_PG_ENABLED" == "true" ]] && secret_names+=("--resource-name=$PG_SECRET")
     [[ "$E2E_S3_ENABLED" == "true" ]] && secret_names+=("--resource-name=$S3_SECRET")
     [[ "$E2E_MILVUS_ENABLED" == "true" ]] && secret_names+=("--resource-name=$MILVUS_SECRET")
@@ -146,6 +149,15 @@ setup_service_rbac() {
             --role=dch-e2e-flight-secret-read \
             --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+        # The e2e user acts as the tenant who owns the datasource secrets, so
+        # it must be able to read them itself: the services now verify the
+        # requester's access to a connection's credentials_ref secret.
+        kubectl create rolebinding dch-e2e-user-secret-read-rb \
+            -n "$DCH_TENANT_ID" \
+            --role=dch-e2e-flight-secret-read \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 
     # Grant REST tenant secret access for inline credentials, rollback, readiness, and export.
@@ -159,6 +171,15 @@ setup_service_rbac() {
 # -------------------------------------------------------------------
 # Setup: credential secrets
 # -------------------------------------------------------------------
+
+setup_user_secret() {
+    # A secret the e2e user owns and can read: the positive case for the
+    # requester-is-authorized checks on credentials_ref.
+    kubectl create secret generic "$USER_SECRET" \
+        -n "$DCH_TENANT_ID" \
+        --from-literal="URI=postgresql://e2e-user:e2e-password@localhost:5432/e2e" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
 
 setup_pg_secret() {
     E2E_PG_ENABLED="false"
@@ -449,6 +470,7 @@ DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
 DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
+DCH_USER_SECRET=${USER_SECRET}
 EOF
 
     if [[ "$E2E_PG_ENABLED" == "true" ]]; then
@@ -547,6 +569,7 @@ setup_user_rbac
 echo "[4/11] SA RBAC ready"
 
 # 4. Credential secrets
+setup_user_secret
 setup_pg_secret
 setup_s3_secret
 setup_milvus_secret
