@@ -36,6 +36,7 @@ import (
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/test/utils"
 )
 
@@ -109,8 +110,8 @@ func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to set the controller-manager test image")
 	cmd = exec.Command("kubectl", "set", "env", "deployment/"+managerDeployment,
-		"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE="+restImage,
-		"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE="+flightImage,
+		controller.RelatedImageRestService+"="+restImage,
+		controller.RelatedImageFlightService+"="+flightImage,
 		"-n", namespace)
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to set the REST and Flight test images")

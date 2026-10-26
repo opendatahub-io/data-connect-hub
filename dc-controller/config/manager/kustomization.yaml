@@ -3,3 +3,7 @@ resources:
 - platform-config.yaml
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+images:
+- name: controller
+  newName: example.com/dc-controller
+  newTag: v0.0.1
