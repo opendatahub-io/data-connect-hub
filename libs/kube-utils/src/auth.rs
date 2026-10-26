@@ -71,7 +71,7 @@ impl KubeAuthClient {
                 debug!("Performing TokenReview");
                 let review = TokenReview {
                     spec: TokenReviewSpec {
-                        token: Some(token_owned),
+                        token: token_owned,
                         audiences: Some(audiences.clone()),
                     },
                     ..Default::default()

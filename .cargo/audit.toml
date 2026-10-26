@@ -27,15 +27,4 @@ ignore = [
     "RUSTSEC-2024-0436",
     # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
     "RUSTSEC-2025-0134",
-    # unsafe-libyaml 0.2.11 (via serde_yaml, kube)
-    "RUSTSEC-2024-0449",
-    # zstd streaming decompression memory safety — zstd 0.13.x is pinned by
-    # actix-http 3.13.x and parquet 59.x; the fixed zstd 0.14.3/zstd-safe
-    # 8.2.0 line requires actix-http 3.19 and parquet 60 (arrow 60).
-    # Remove these when both are upgraded.
-    # Also ignored in deny.toml.
-    "RUSTSEC-2026-0391",
-    "RUSTSEC-2026-0398",
-    "RUSTSEC-2026-0403",
-    "RUSTSEC-2026-0410",
 ]

@@ -28,17 +28,6 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "neo4rs requires paste; no neo4rs release drops it" },
     # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
     { id = "RUSTSEC-2025-0134", reason = "neo4rs and rustls-native-certs require rustls-pemfile" },
-    # unsafe-libyaml 0.2.11 (via serde_yaml, kube)
-    { id = "RUSTSEC-2024-0449", reason = "kube requires serde_yaml, which depends on unsafe-libyaml" },
-    # zstd streaming decompression memory safety — zstd 0.13.x is pinned by
-    # actix-http 3.13.x and parquet 59.x; the fixed zstd 0.14.3/zstd-safe
-    # 8.2.0 line requires actix-http 3.19 and parquet 60 (arrow 60).
-    # Remove these when both are upgraded.
-    # Also ignored in .cargo/audit.toml.
-    { id = "RUSTSEC-2026-0391", reason = "zstd 0.13 pinned by actix-http 3.13.x and parquet 59.x; fix needs actix-http 3.19 + parquet 60" },
-    { id = "RUSTSEC-2026-0398", reason = "zstd-safe 7.x from the zstd 0.13 pin; fix needs actix-http 3.19 + parquet 60" },
-    { id = "RUSTSEC-2026-0403", reason = "zstd-safe 7.x from the zstd 0.13 pin; fix needs actix-http 3.19 + parquet 60" },
-    { id = "RUSTSEC-2026-0410", reason = "zstd-sys 2.1.0 from the zstd 0.13 pin; fix needs actix-http 3.19 + parquet 60" },
 ]
 
 [licenses]
@@ -54,7 +43,6 @@ allow = [
     "MIT",
     "MIT-0",
     "Unicode-3.0",
-    "Unicode-DFS-2016",
     "Unlicense",
     "Zlib",
 ]
