@@ -499,12 +499,12 @@ func reconcileTraceEnv(resources []*unstructured.Unstructured, trace *dchv1alpha
 		wanted[name] = true
 	}
 
-	// Build the desired env var set
+	// Build the desired env var set. desiredVars keeps the deterministic order
+	// from traceEnv: iterating it directly (rather than a map, whose iteration
+	// order is randomized) keeps the rendered env list stable across
+	// reconciles, avoiding pointless deployment spec churn and rolling
+	// restarts.
 	desiredVars := traceEnv(trace)
-	desiredMap := make(map[string]string, len(desiredVars))
-	for _, v := range desiredVars {
-		desiredMap[v.Name] = v.Value
-	}
 
 	// All OTLP env vars that must be reconciled
 	otlpVars := map[string]bool{
@@ -548,11 +548,11 @@ func reconcileTraceEnv(resources []*unstructured.Unstructured, trace *dchv1alpha
 			}
 
 			// Add back the desired OTLP env vars
-			for name, value := range desiredMap {
-				newEnv = append(newEnv, map[string]any{"name": name, "value": value})
+			for _, v := range desiredVars {
+				newEnv = append(newEnv, map[string]any{"name": v.Name, "value": v.Value})
 			}
 
-			if len(newEnv) != len(env) || len(desiredMap) > 0 {
+			if len(newEnv) != len(env) || len(desiredVars) > 0 {
 				container["env"] = newEnv
 				containers[i] = container
 				changed = true
