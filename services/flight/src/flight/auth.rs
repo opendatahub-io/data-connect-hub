@@ -137,7 +137,7 @@ fn extract_bearer_token<B>(req: &http::Request<B>) -> Option<&str> {
         .strip_prefix(BEARER_PREFIX)
 }
 
-fn auth_error_to_status(e: &AuthError) -> Status {
+pub(crate) fn auth_error_to_status(e: &AuthError) -> Status {
     match e {
         AuthError::Unauthenticated(msg) => Status::unauthenticated(msg),
         AuthError::Forbidden(msg) => Status::permission_denied(msg),

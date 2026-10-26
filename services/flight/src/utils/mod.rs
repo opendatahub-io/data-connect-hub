@@ -35,7 +35,7 @@ impl Default for QueryConfig {
 
 #[derive(Debug, Deserialize)]
 pub struct AuthConfig {
-    #[serde(default)]
+    #[serde(default = "default_auth_enabled")]
     pub enabled: bool,
     #[serde(default = "default_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
@@ -43,6 +43,10 @@ pub struct AuthConfig {
     pub token_review_audiences: Vec<String>,
     #[serde(default)]
     pub discovery_service_account: String,
+}
+
+fn default_auth_enabled() -> bool {
+    true
 }
 
 fn default_cache_ttl_secs() -> u64 {
@@ -56,9 +60,9 @@ fn default_token_review_audiences() -> Vec<String> {
 impl Default for AuthConfig {
     fn default() -> Self {
         Self {
-            enabled: false,
+            enabled: default_auth_enabled(),
             cache_ttl_secs: default_cache_ttl_secs(),
-            token_review_audiences: vec![],
+            token_review_audiences: default_token_review_audiences(),
             discovery_service_account: String::new(),
         }
     }
@@ -194,4 +198,62 @@ pub struct ServerConfig {
     pub tls: TlsConfig,
     #[serde(rename = "global-connection-types")]
     pub global_connection_types: GlobalConnectionTypes,
+}
+
+#[cfg(test)]
+mod tests {
+    use config::Config;
+
+    use super::*;
+
+    fn auth_config_toml(auth_section: &str) -> String {
+        format!(
+            r#"
+            [server]
+            address = "127.0.0.1"
+            port = 50051
+
+            [database]
+            url = "postgresql://user-a@localhost:5432/db-a"
+
+            [ingestion_cache_pools]
+            max_capacity = 100
+            ttl_secs = 300
+            idle_secs = 60
+
+            [global-connection-types]
+            tenant-id = "opendatahub"
+
+            {auth_section}
+            "#
+        )
+    }
+
+    fn deserialize_auth_config(toml_str: &str) -> ServerConfig {
+        let config = Config::builder()
+            .add_source(config::File::from_str(toml_str, config::FileFormat::Toml))
+            .build()
+            .unwrap();
+
+        config.try_deserialize().unwrap()
+    }
+
+    #[test]
+    fn test_auth_defaults_to_enabled_without_auth_section() {
+        let server_config = deserialize_auth_config(&auth_config_toml(""));
+        assert!(server_config.auth.enabled);
+        assert_eq!(server_config.auth.cache_ttl_secs, 300);
+    }
+
+    #[test]
+    fn test_auth_can_be_explicitly_disabled() {
+        let toml_str = auth_config_toml(
+            r#"
+            [auth]
+            enabled = false
+            "#,
+        );
+        let server_config = deserialize_auth_config(&toml_str);
+        assert!(!server_config.auth.enabled);
+    }
 }

@@ -7,7 +7,7 @@ use actix_web::{HttpMessage, HttpResponse};
 use super::endpoints::ApiContext;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
-use commons::api::X_TENANT_ID;
+use commons::api::{AUTHORIZATION, X_REMOTE_GROUPS, X_REMOTE_USER, X_TENANT_ID};
 use opentelemetry::propagation::Extractor;
 use tracing::Instrument;
 use tracing::field::Empty;
@@ -85,6 +85,19 @@ pub async fn trace_request(
     response
 }
 
+/// bearer_token extracts the token from an `Authorization` header. The
+/// auth-scheme is case-insensitive per RFC 7235, so both `Bearer` and
+/// `bearer` are accepted.
+fn bearer_token(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(AUTHORIZATION)?.to_str().ok()?;
+    let (scheme, token) = value.split_once(' ')?;
+    if scheme.eq_ignore_ascii_case("bearer") {
+        Some(token.to_string())
+    } else {
+        None
+    }
+}
+
 pub async fn validate_headers(
     req: ServiceRequest,
     next: Next<impl MessageBody + 'static>,
@@ -114,7 +127,14 @@ pub async fn validate_headers(
         },
     };
 
-    req.extensions_mut().insert(ApiContext { tenant_id });
+    let identity = crate::auth::resolve_identity(
+        bearer_token(req.headers()).as_deref(),
+        req.headers().get(X_REMOTE_USER).and_then(|value| value.to_str().ok()),
+        req.headers().get(X_REMOTE_GROUPS).and_then(|value| value.to_str().ok()),
+    )
+    .ok();
+
+    req.extensions_mut().insert(ApiContext { tenant_id, identity });
 
     next.call(req).await.map(ServiceResponse::map_into_left_body)
 }
@@ -174,6 +194,30 @@ mod tests {
         let parent = TraceContextPropagator::new().extract(&HeaderExtractor(&map));
 
         assert!(!parent.span().span_context().is_valid());
+    }
+
+    #[test]
+    fn test_bearer_token_accepts_scheme_case_insensitively() {
+        let map = headers(&[("authorization", "Bearer token-value")]);
+        assert_eq!(bearer_token(&map), Some("token-value".to_string()));
+
+        let map = headers(&[("authorization", "bearer token-value")]);
+        assert_eq!(bearer_token(&map), Some("token-value".to_string()));
+
+        let map = headers(&[("authorization", "BEARER token-value")]);
+        assert_eq!(bearer_token(&map), Some("token-value".to_string()));
+    }
+
+    #[test]
+    fn test_bearer_token_rejects_other_schemes_and_missing_header() {
+        let map = headers(&[("authorization", "Basic dXNlcjpwYXNz")]);
+        assert_eq!(bearer_token(&map), None);
+
+        let map = headers(&[("authorization", "Bearer")]);
+        assert_eq!(bearer_token(&map), None);
+
+        let map = headers(&[(X_TENANT_ID, "test-tenant")]);
+        assert_eq!(bearer_token(&map), None);
     }
 
     #[test]

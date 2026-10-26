@@ -1,4 +1,5 @@
 use crate::flight::QueryContext;
+use crate::flight::auth::auth_error_to_status;
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
@@ -22,12 +23,15 @@ use commons::api::connector::{CredentialsResolver, FlightConnector, QueryOptions
 use commons::api::errors::ConnectorError;
 use commons::api::storage::MetaStoreReader;
 use commons::api::storage::{MetaStore, SecretStore};
+use commons::api::{X_REMOTE_GROUPS, X_REMOTE_USER};
 use futures::TryStreamExt;
+use kube_utils::auth::{AuthInfo, KubeAuthClient};
 use prost::Message;
 use prost::bytes::Bytes;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
+use tonic::metadata::MetadataMap;
 use tonic::{Request, Response, Status};
 use tracing::{debug, info};
 
@@ -69,6 +73,7 @@ pub struct DataIngestionService {
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
+    auth_client: Option<Arc<KubeAuthClient>>,
 }
 
 impl DataIngestionService {
@@ -92,7 +97,35 @@ impl DataIngestionService {
             secret_store,
             sql_info: builder.build().expect("valid sql info"),
             query_options,
+            auth_client: None,
         }
+    }
+
+    /// with_auth_client enables requester checks on connection credentials.
+    /// When no client is set the service resolves `credentials_ref` secrets
+    /// without verifying the requester (development mode).
+    pub fn with_auth_client(mut self, auth_client: Arc<KubeAuthClient>) -> Self {
+        self.auth_client = Some(auth_client);
+        self
+    }
+
+    /// check_secret_access verifies that the authenticated remote user may
+    /// read the connection's credentials secret before the service resolves
+    /// it on their behalf. It is a no-op when auth is disabled.
+    async fn check_secret_access(
+        &self,
+        metadata: &MetadataMap,
+        tenant_id: &str,
+        connection: &DataConnectionResource,
+    ) -> Result<(), Status> {
+        let Some(auth) = self.auth_client.as_ref() else {
+            return Ok(());
+        };
+        let auth_info = remote_auth_info(metadata)?;
+        auth.authorize_secret(&auth_info, tenant_id, &connection.resource.credentials_ref.secret)
+            .await
+            .map_err(|e| auth_error_to_status(&e))?;
+        Ok(())
     }
 
     fn query_to_string(query: &CommandGetSqlInfo) -> Vec<String> {
@@ -251,6 +284,8 @@ impl DataIngestionService {
 
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
+        self.check_secret_access(metadata, tenant_id, &connection).await?;
+
         let reader = connector
             .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
@@ -312,6 +347,8 @@ impl DataIngestionService {
         let connection_id = QueryContext::connection_id(metadata)?;
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
 
+        self.check_secret_access(metadata, tenant_id, &connection).await?;
+
         let reader = connector
             .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
@@ -356,6 +393,8 @@ impl DataIngestionService {
         let tenant_id = QueryContext::tenant_id(metadata)?;
         let connection_id = QueryContext::connection_id(metadata)?;
         let (connection, connector) = self.get_connector_by_connection_id(tenant_id, connection_id).await?;
+
+        self.check_secret_access(metadata, tenant_id, &connection).await?;
 
         let reader = connector
             .get_reader(&connection, self as &dyn CredentialsResolver)
@@ -418,6 +457,8 @@ impl DataIngestionService {
 
         let (connection, connector) = self.get_connector_by_connection_id(&tenant_id, &connection_id).await?;
 
+        self.check_secret_access(metadata, &tenant_id, &connection).await?;
+
         let reader = connector
             .get_reader(&connection, self as &dyn CredentialsResolver)
             .await
@@ -464,6 +505,8 @@ impl DataIngestionService {
             String::from_utf8(message.value.to_vec()).map_err(|_| Status::invalid_argument("Invalid download path"))?;
 
         let (connection, connector) = self.get_connector_by_connection_id(&tenant_id, &connection_id).await?;
+
+        self.check_secret_access(metadata, &tenant_id, &connection).await?;
 
         let reader = connector
             .get_reader(&connection, self as &dyn CredentialsResolver)
@@ -670,5 +713,72 @@ impl CredentialsResolver for DataIngestionService {
             },
             _ => Err(ConnectorError::ConnectionError("No credentials found".to_string())),
         }
+    }
+}
+
+/// remote_auth_info rebuilds the requester identity recorded by the auth
+/// middleware from the x-remote-user and x-remote-groups headers.
+fn remote_auth_info(metadata: &MetadataMap) -> Result<AuthInfo, Status> {
+    let username = metadata
+        .get(X_REMOTE_USER)
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| Status::permission_denied("no authenticated user on request"))?;
+    let groups = metadata
+        .get(X_REMOTE_GROUPS)
+        .and_then(|value| value.to_str().ok())
+        .map(|joined| joined.split(',').map(str::to_string).collect())
+        .unwrap_or_default();
+    Ok(AuthInfo {
+        username: username.to_string(),
+        groups,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::remote_auth_info;
+    use tonic::metadata::MetadataMap;
+
+    fn metadata(pairs: &[(&str, &str)]) -> MetadataMap {
+        let mut map = MetadataMap::new();
+        for (key, value) in pairs {
+            map.insert(
+                tonic::metadata::MetadataKey::from_bytes(key.as_bytes()).unwrap(),
+                value.parse().unwrap(),
+            );
+        }
+        map
+    }
+
+    #[test]
+    fn remote_auth_info_reads_user_and_groups() {
+        let map = metadata(&[
+            ("x-remote-user", "system:serviceaccount:tenant-a:dch-test-user"),
+            ("x-remote-groups", "system:serviceaccounts,tenant-a-users"),
+        ]);
+
+        let info = remote_auth_info(&map).expect("auth info");
+        assert_eq!(info.username, "system:serviceaccount:tenant-a:dch-test-user");
+        assert_eq!(
+            info.groups,
+            vec!["system:serviceaccounts".to_string(), "tenant-a-users".to_string()]
+        );
+    }
+
+    #[test]
+    fn remote_auth_info_without_groups_defaults_to_empty() {
+        let map = metadata(&[("x-remote-user", "system:serviceaccount:tenant-a:dch-test-user")]);
+
+        let info = remote_auth_info(&map).expect("auth info");
+        assert!(info.groups.is_empty());
+    }
+
+    #[test]
+    fn remote_auth_info_without_user_is_denied() {
+        let map = metadata(&[("x-remote-groups", "system:serviceaccounts")]);
+
+        let err = remote_auth_info(&map).expect_err("missing user must be denied");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
     }
 }

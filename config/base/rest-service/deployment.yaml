@@ -33,6 +33,8 @@ spec:
             - --ignore-paths=/health
             - --tls-cert-file=/etc/tls/private/tls.crt
             - --tls-private-key-file=/etc/tls/private/tls.key
+            - --auth-header-fields-enabled
+            - --auth-header-groups-field-separator=,
             - --logtostderr=true
           ports:
             - name: https

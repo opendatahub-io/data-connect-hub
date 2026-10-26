@@ -17,6 +17,7 @@ use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use futures::StreamExt;
+use kube_utils::auth::AuthError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -31,11 +32,33 @@ use crate::state::ApiService;
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
+    pub identity: Option<crate::auth::RequestIdentity>,
 }
 
 #[derive(Serialize)]
 struct HealthResponse {
     service: String,
+}
+
+/// authorize_secret_ref checks that the requester behind the request's
+/// identity may read the named secret before the service resolves it on their
+/// behalf. It is a no-op when auth is disabled (no authorizer configured).
+async fn authorize_secret_ref(
+    service: &ApiService,
+    ctx: &ApiContext,
+    secret_name: &str,
+) -> Result<(), RestErrorResponse> {
+    let Some(authorizer) = service.authorizer.as_ref() else {
+        return Ok(());
+    };
+    let identity = ctx
+        .identity
+        .as_ref()
+        .ok_or_else(|| AuthError::Unauthenticated("no authenticated identity on request".to_string()))?;
+    authorizer
+        .check_secret_access(identity, &ctx.tenant_id, secret_name)
+        .await?;
+    Ok(())
 }
 
 pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
@@ -124,6 +147,8 @@ pub async fn create_connection(
         CreateConnectionRequest::DataConnectionWithSecretRef(connection) => {
             info!("create_connection: for tenant {:?}", tenant_id);
 
+            authorize_secret_ref(service.as_ref(), &ctx, connection.credentials_ref.secret.as_str()).await?;
+
             let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
 
             Ok(HttpResponse::Created().json(connection_res))
@@ -166,6 +191,25 @@ pub async fn patch_connection(
     info!("patch_connection: for tenant {:?}", ctx.tenant_id);
     let id = id.into_inner();
     let patch = body.into_inner();
+
+    // A merge patch can retarget credentials_ref at a different secret;
+    // preview the patched connection and require access to any new secret
+    // before the update is applied.
+    let existing = service
+        .meta_store
+        .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+    let preview = {
+        let mut value =
+            serde_json::to_value(&existing.resource).map_err(|e| MetaStoreError::Serialization(e.to_string()))?;
+        json_patch::merge(&mut value, &patch);
+        let patched: DataConnection =
+            serde_json::from_value(value).map_err(|e| MetaStoreError::Deserialization(e.to_string()))?;
+        patched
+    };
+    if preview.credentials_ref.secret != existing.resource.credentials_ref.secret {
+        authorize_secret_ref(service.as_ref(), &ctx, preview.credentials_ref.secret.as_str()).await?;
+    }
 
     let update_fn = Arc::new(move |conn: DataConnection| {
         let mut value = serde_json::to_value(&conn)
@@ -413,6 +457,17 @@ pub async fn check_existent_connection(
     let connection_id = id.into_inner();
     let tenant_id = ctx.tenant_id.clone();
 
+    let connection = service
+        .meta_store
+        .get_data_connection(tenant_id.as_str(), connection_id.as_str())
+        .await?;
+    authorize_secret_ref(
+        service.as_ref(),
+        &ctx,
+        connection.resource.credentials_ref.secret.as_str(),
+    )
+    .await?;
+
     audit_data_connection(service.as_ref(), tenant_id.as_str(), connection_id.as_str()).await?;
 
     info!("Connection checked successfully");
@@ -458,6 +513,13 @@ pub async fn export_connection(
         .meta_store
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
         .await?;
+
+    authorize_secret_ref(
+        service.as_ref(),
+        &ctx,
+        connection.resource.credentials_ref.secret.as_str(),
+    )
+    .await?;
 
     let mut props = HashMap::new();
 
@@ -1018,6 +1080,85 @@ mod tests {
         ))
     }
 
+    struct StubAuthorizer {
+        result: Result<(), kube_utils::auth::AuthError>,
+    }
+
+    impl StubAuthorizer {
+        fn allowing() -> Self {
+            Self { result: Ok(()) }
+        }
+
+        fn denying() -> Self {
+            Self {
+                result: Err(kube_utils::auth::AuthError::Forbidden("denied".to_string())),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::auth::RequestAuthorizer for StubAuthorizer {
+        async fn check_secret_access(
+            &self,
+            _identity: &crate::auth::RequestIdentity,
+            _tenant_id: &str,
+            _secret_name: &str,
+        ) -> Result<(), kube_utils::auth::AuthError> {
+            self.result.clone()
+        }
+    }
+
+    /// RemoteUserAuthorizer only allows requests whose identity arrived as the
+    /// proxy-injected remote-user headers, asserting the full pipeline from
+    /// header extraction through group splitting.
+    struct RemoteUserAuthorizer;
+
+    #[async_trait::async_trait]
+    impl crate::auth::RequestAuthorizer for RemoteUserAuthorizer {
+        async fn check_secret_access(
+            &self,
+            identity: &crate::auth::RequestIdentity,
+            _tenant_id: &str,
+            _secret_name: &str,
+        ) -> Result<(), kube_utils::auth::AuthError> {
+            match identity {
+                crate::auth::RequestIdentity::RemoteUser { username, groups }
+                    if username == "proxy-user" && groups == &vec!["group-a".to_string(), "group-b".to_string()] =>
+                {
+                    Ok(())
+                },
+                _ => Err(kube_utils::auth::AuthError::Forbidden(
+                    "expected remote user".to_string(),
+                )),
+            }
+        }
+    }
+
+    fn test_service_with_authorizer(authorizer: StubAuthorizer) -> web::Data<ApiService> {
+        web::Data::new(
+            ApiService::new(
+                Arc::new(StubMetaStore),
+                Arc::new(StubSecretStore::new()),
+                None,
+                None,
+                "test-tenant".to_string(),
+            )
+            .with_authorizer(Arc::new(authorizer)),
+        )
+    }
+
+    fn secret_ref_connection_body() -> serde_json::Value {
+        serde_json::json!({
+            "name": "my-pg",
+            "data_connection_type_id": "ct-1",
+            "format": "tabular",
+            "credentials_ref": {
+                "secret": "my-pg-creds"
+            },
+            "properties": {}
+        })
+    }
+
     fn test_app_config(cfg: &mut web::ServiceConfig) {
         cfg.service(
             web::scope(&format!("/api/{API_VERSION}/data"))
@@ -1038,6 +1179,7 @@ mod tests {
                     "/connections/{id}/exports/secrets/{secret_name}",
                     web::put().to(export_connection),
                 )
+                .route("/connections/{id}/readiness", web::post().to(check_existent_connection))
                 .default_service(web::route().to(not_found)),
         );
     }
@@ -1049,6 +1191,247 @@ mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_requires_token_when_auth_enabled() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::allowing()))
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(secret_ref_connection_body())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 401);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unauthenticated");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(secret_ref_connection_body())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "forbidden");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_allowed_creates_connection() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::allowing()))
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(secret_ref_connection_body())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["metadata"]["id"], "new-conn");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_remote_user_headers_are_authorized() {
+        let app = test::init_service(
+            App::new()
+                .app_data(web::Data::new(
+                    ApiService::new(
+                        Arc::new(StubMetaStore),
+                        Arc::new(StubSecretStore::new()),
+                        None,
+                        None,
+                        "test-tenant".to_string(),
+                    )
+                    .with_authorizer(Arc::new(RemoteUserAuthorizer)),
+                ))
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("x-remote-user", "proxy-user"))
+            .insert_header(("x-remote-groups", "group-a,group-b"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(secret_ref_connection_body())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_secret_ref_succeeds_when_auth_disabled() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(secret_ref_connection_body())
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_allowed_creates_secret() {
+        let svc = test_service_with_authorizer(StubAuthorizer::allowing());
+        let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+        let secret = svc
+            .secret_store
+            .get_secret("test-tenant", "exported-secret")
+            .await
+            .expect("exported secret should exist");
+        assert_eq!(secret.properties["username"], "pg_user");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_changing_secret_ref_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connections/conn-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "credentials_ref": { "secret": "someone-elses-secret" }
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_changing_secret_ref_allowed_succeeds() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::allowing()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connections/conn-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "credentials_ref": { "secret": "someone-elses-secret" }
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_untouched_secret_ref_skips_check() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connections/conn-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .insert_header(("content-type", "application/json"))
+            .set_json(serde_json::json!({
+                "properties": { "host": "new-host" }
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_check_existent_connection_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections/conn-1/readiness"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
     }
 
     #[actix_web::test]
