@@ -53,6 +53,7 @@ import (
 
 const (
 	resourceNameField = "name"
+	imageField        = "image"
 
 	// RelatedImageRestService is the env var and params.env key for the REST image.
 	RelatedImageRestService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
@@ -357,7 +358,7 @@ func replaceStringValue(value any, old, new string) any {
 		return strings.ReplaceAll(value, old, new)
 	case map[string]any:
 		for key, child := range value {
-			if key == "image" {
+			if key == imageField {
 				// Container image references must not be rewritten by the
 				// service rename: an image whose repository contains the
 				// service name (e.g. example.com/dch-flight-service) would

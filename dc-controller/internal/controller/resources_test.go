@@ -1225,7 +1225,7 @@ func renderedContainerImage(resources []*unstructured.Unstructured, containerNam
 			if !ok || container[resourceNameField] != containerName {
 				continue
 			}
-			image, _ := container["image"].(string)
+			image, _ := container[imageField].(string)
 			return image, true
 		}
 	}
@@ -1372,7 +1372,7 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 					testContainersKey: []any{
 						map[string]any{
 							resourceNameField: nameFlightServiceContainer,
-							"image":           "localhost/dch-flight:test",
+							imageField:        "localhost/dch-flight:test",
 						},
 					},
 					"volumes": []any{
@@ -1460,7 +1460,7 @@ func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.
 			testTemplateKey: map[string]any{
 				testSpecKey: map[string]any{
 					testContainersKey: []any{
-						map[string]any{resourceNameField: nameRestServiceContainer, "image": "test:latest"},
+						map[string]any{resourceNameField: nameRestServiceContainer, imageField: "test:latest"},
 					},
 					"volumes": []any{
 						map[string]any{
