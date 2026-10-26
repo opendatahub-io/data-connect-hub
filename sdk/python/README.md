@@ -80,6 +80,14 @@ client = DataConnectClient(
 
 Use `insecure=True` only for development environments where certificate verification is intentionally disabled.
 
+### FIPS environments
+
+The SDK is installed into your Python environment, not shipped in a Data Connect Hub service image. The SDK itself does not implement cryptography, but its TLS connections depend on the cryptographic libraries in that environment. The default, REST-only installation uses `httpx` and Python's TLS stack; it is **not independently FIPS-validated**. If FIPS-validated cryptography is required, use a Python runtime configured to use a validated module in its approved mode and verify that configuration for your environment. `httpx` normally uses the `certifi` CA bundle; use `ca_cert` or an appropriate trust-store configuration if your deployment requires different trusted CAs. The trust store does not determine whether the TLS cryptographic module is FIPS-validated.
+
+**Do not use the standard PyPI `[flight]` wheels when TLS must use a FIPS-validated module.** The Flight SQL paths use native dependencies: the inspected Linux `adbc-driver-flightsql` wheels (1.12.0) contain Go's `crypto/tls`, and the inspected `pyarrow` wheels (26.0.0) contain statically linked OpenSSL in Arrow Flight. Neither delegates Flight TLS to the host's validated OpenSSL module merely because the host runs in FIPS mode. This finding covers the inspected wheel versions and platforms (CPython 3.11, Linux x86_64 and aarch64), not independently built dependencies.
+
+`insecure=True` disables peer certificate verification, **not** TLS encryption or FIPS checks; do not use it to address a FIPS limitation.
+
 ### Configure a Data Source
 
 Before querying data:
