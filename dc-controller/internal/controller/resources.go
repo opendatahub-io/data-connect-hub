@@ -357,6 +357,13 @@ func replaceStringValue(value any, old, new string) any {
 		return strings.ReplaceAll(value, old, new)
 	case map[string]any:
 		for key, child := range value {
+			if key == "image" {
+				// Container image references must not be rewritten by the
+				// service rename: an image whose repository contains the
+				// service name (e.g. example.com/dch-flight-service) would
+				// otherwise be corrupted into a nonexistent reference.
+				continue
+			}
 			value[key] = replaceStringValue(child, old, new)
 		}
 	case []any:

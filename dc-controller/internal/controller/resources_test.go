@@ -1166,6 +1166,51 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 	}
 }
 
+// TestRenderFlightServicePreservesContainerImages verifies that the per-CR
+// flight-service rename rewrites resource names and labels but leaves
+// container image references untouched, even when the repository contains
+// the "flight-service" substring.
+func TestRenderFlightServicePreservesContainerImages(t *testing.T) {
+	manifestsPath := filepath.Join("..", "..", "..", "config")
+	imageParams := map[string]string{
+		RelatedImageRestService:   "example.com/dch-rest-service:e2e",
+		RelatedImageFlightService: "example.com/dch-flight-service:e2e",
+		RelatedImageKubeRbacProxy: "example.com/odh-kube-rbac-proxy:e2e",
+	}
+	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, testBaseManifest), nil, imageParams)
+	if err != nil {
+		t.Fatalf("rendering base: %v", err)
+	}
+
+	crName := "e2e-dataconnectservice"
+	resources = renderFlightService(resources, crName)
+
+	var flightDeployment *unstructured.Unstructured
+	wantName := "dch-" + crName + "-flight"
+	for _, obj := range resources {
+		if obj.GetKind() == kindDeployment && obj.GetName() == wantName {
+			flightDeployment = obj
+			break
+		}
+	}
+	if flightDeployment == nil {
+		t.Fatalf("flight Deployment %q not found after rename", wantName)
+	}
+
+	labels, found, err := unstructured.NestedString(flightDeployment.Object, "spec", testTemplateKey, testMetadataKey, "labels", labelAppName)
+	if err != nil || !found || labels != crName+"-flight" {
+		t.Errorf("pod label %s = %q (found=%v, err=%v), want %q", labelAppName, labels, found, err, crName+"-flight")
+	}
+
+	gotImage, found := renderedContainerImage(resources, nameFlightServiceContainer)
+	if !found {
+		t.Fatalf("container %q not found in rendered Deployments", nameFlightServiceContainer)
+	}
+	if gotImage != imageParams[RelatedImageFlightService] {
+		t.Errorf("flight container image = %q, want %q (image references must survive the service rename)", gotImage, imageParams[RelatedImageFlightService])
+	}
+}
+
 func renderedContainerImage(resources []*unstructured.Unstructured, containerName string) (string, bool) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {

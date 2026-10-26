@@ -138,13 +138,16 @@ func (e *E2EFixture) ReconcileFlightConnectorConfig(
 	expected map[string]map[string]any,
 ) {
 	DeferCleanup(e.ResetFlightConnectorConfig)
+	// Set Recreate before the config patch: switching a Deployment to
+	// Recreate mid-rollout can deadlock it at the surge pod count, because
+	// the deployment controller never scales the new ReplicaSet back up.
+	e.useRecreateFlightDeploymentStrategy()
 	By("patching Flight connector configuration")
 	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 		dcs.Spec.FlightService.Connectors = connectors
 	})
 
 	e.waitForDCSObservedGeneration(patched.Generation)
-	e.useRecreateFlightDeploymentStrategy()
 
 	By("waiting for connector configuration to reconcile and become Ready")
 	e.waitForDCSReady(patched.Generation, 2, 2)
@@ -157,11 +160,11 @@ func (e *E2EFixture) ResetFlightConnectorConfig() {
 	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
 	if current.Spec.FlightService != nil && len(current.Spec.FlightService.Connectors) > 0 {
 		By("restoring default Flight connector configuration")
+		e.useRecreateFlightDeploymentStrategy()
 		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 			dcs.Spec.FlightService.Connectors = nil
 		})
 		e.waitForDCSObservedGeneration(patched.Generation)
-		e.useRecreateFlightDeploymentStrategy()
 		e.waitForDCSReady(patched.Generation, 2, 2)
 	}
 	e.restoreFlightDeploymentStrategy()

@@ -231,7 +231,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			restContainer := findContainer(restDeploy, nameRestServiceContainer)
 			Expect(restContainer).NotTo(BeNil())
 			Expect(restContainer.Image).To(Equal(testRestImage))
-			Expect(restContainer.ImagePullPolicy).To(Equal(corev1.PullAlways))
+			Expect(restContainer.ImagePullPolicy).To(Equal(corev1.PullIfNotPresent))
 			Expect(*restDeploy.Spec.Replicas).To(Equal(int32(1)))
 
 			flightDeploy := &appsv1.Deployment{}
