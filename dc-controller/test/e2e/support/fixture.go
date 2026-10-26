@@ -103,6 +103,16 @@ func (e *E2EFixture) Setup(managerImage string) {
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
 
+	By("setting the controller-manager to use the locally built test image")
+	cmd = exec.Command("kubectl", "set", "image", "deployment/"+managerDeployment,
+		"manager="+managerImage, "-n", namespace)
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to set the controller-manager test image")
+	cmd = exec.Command("kubectl", "rollout", "status", "deployment/"+managerDeployment,
+		"-n", namespace, "--timeout=5m")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Controller-manager test image failed to become ready")
+
 	By("creating a Kubernetes Go client")
 	cfg, err := clientconfig.GetConfig()
 	Expect(err).NotTo(HaveOccurred())
