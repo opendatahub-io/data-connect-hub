@@ -36,7 +36,7 @@ var _ = Describe("dc-controller", Ordered, func() {
 
 	BeforeAll(func() {
 		fixture = support.NewE2EFixture()
-		fixture.Setup(managerImage)
+		fixture.Setup(managerImage, restImage, flightImage)
 	})
 
 	AfterAll(func() {

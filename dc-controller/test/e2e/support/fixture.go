@@ -79,7 +79,7 @@ func NewE2EFixture() *E2EFixture {
 }
 
 // Setup installs CRDs, deploys the controller, and provisions the suite dependencies.
-func (e *E2EFixture) Setup(managerImage string) {
+func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	By("creating manager namespace")
 	cmd := exec.Command("kubectl", "create", "ns", namespace)
 	_, err := utils.Run(cmd)
@@ -108,6 +108,12 @@ func (e *E2EFixture) Setup(managerImage string) {
 		"manager="+managerImage, "-n", namespace)
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to set the controller-manager test image")
+	cmd = exec.Command("kubectl", "set", "env", "deployment/"+managerDeployment,
+		"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE="+restImage,
+		"RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE="+flightImage,
+		"-n", namespace)
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to set the REST and Flight test images")
 	cmd = exec.Command("kubectl", "rollout", "status", "deployment/"+managerDeployment,
 		"-n", namespace, "--timeout=5m")
 	_, err = utils.Run(cmd)
