@@ -1,13 +1,30 @@
+# cargo-audit configuration. Keep this list in step with the [advisories]
+# ignore list in deny.toml: every advisory that fires in the graph cargo
+# actually builds is ignored in both, so cargo audit output stays clean and
+# each tool cross-checks the other. The only divergence is entries that fire
+# solely in cargo audit's Cargo.lock scan, which live here only.
+
 [advisories]
 ignore = [
-    # Marvin Attack (timing sidechannel) in the `rsa` crate — transitive dep via sqlx,
-    # no upstream fix available as of 2026-07.
+    # RUSTSEC-2023-0071 (Marvin Attack, rsa 0.9.x timing sidechannel) reaches
+    # the lockfile only through sqlx-mysql, an optional sqlx driver we never
+    # enable: the workspace enables only the postgres and sqlite drivers, so
+    # rsa is never compiled into any binary. cargo audit scans Cargo.lock and
+    # flags the unactivated optional dep, while the graph-aware dependency
+    # check (cargo deny) correctly does not. No fixed rsa release exists.
     "RUSTSEC-2023-0071",
     # h2 unbounded empty DATA frames — transitive dep via actix-http,
     # actix-http has not released a version using h2 0.4 yet.
+    # Also ignored in deny.toml.
     "RUSTSEC-2026-0258",
-    # webpki-roots 0.26 trusts distrusted emSign intermediates — transitive dep via
-    # neo4rs and sqlx-core; no 0.26.x fix exists, upstreams have not moved to 1.x.
-    # The webpki-roots 1.x copy in the tree is already patched (>=1.0.10).
-    "RUSTSEC-2026-0381",
+    # Unmaintained transitive dependencies; not under our control.
+    # Also ignored in deny.toml.
+    # backoff 0.4.0 (via neo4rs)
+    "RUSTSEC-2025-0012",
+    # instant 0.1.13 (via backoff)
+    "RUSTSEC-2024-0384",
+    # paste 1.0.15 (via neo4rs)
+    "RUSTSEC-2024-0436",
+    # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
+    "RUSTSEC-2025-0134",
 ]

@@ -1,4 +1,4 @@
-ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:b3a0b012de0c578082e1bc5b01c8bc27461b4eeb571a0b1a2b21a07dbd845a62
+ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:f9a3f225bc0e265827d123f0e07a9f7ae5686d0cb61fa85e55fc589240543d3f
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:907b68736aa798b2d38255b7aa070b2a70acb90803864a40f05d0ec47556ddd0 AS builder
 

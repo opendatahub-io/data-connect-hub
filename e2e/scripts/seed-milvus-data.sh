@@ -35,7 +35,7 @@ if [[ -n "$CA_CERT_PATH" && ! -f "$CA_CERT_PATH" ]]; then
     exit 1
 fi
 
-POD_NAME="e2e-milvus-seed"
+POD_NAME="dch-e2e-milvus-seed"
 CA_CERT_B64=""
 if [[ -n "$CA_CERT_PATH" ]]; then
     CA_CERT_B64=$(base64 < "$CA_CERT_PATH" | tr -d '\n') || {

@@ -18,11 +18,11 @@ NAMESPACE=""
 CA_CERT=""
 INSECURE=false
 S3_CLIENT_IMAGE="docker.io/amazon/aws-cli:2.31.0"
-CSV_KEY="datasets/dch-test-prompts.csv"
-PARQUET_KEY="datasets/dch-test-prompts.parquet"
-JSONL_KEY="datasets/dch-test-prompts.jsonl"
-JSON_KEY="datasets/dch-test-prompts.json"
-BINARY_KEY="datasets/dch-test-binary.bin"
+CSV_KEY="datasets/dch-e2e-prompts.csv"
+PARQUET_KEY="datasets/dch-e2e-prompts.parquet"
+JSONL_KEY="datasets/dch-e2e-prompts.jsonl"
+JSON_KEY="datasets/dch-e2e-prompts.json"
+BINARY_KEY="datasets/dch-e2e-binary.bin"
 
 usage() {
     echo "Usage: $0 -e <s3-endpoint> -n <namespace> [-b bucket] [-c ca-cert] [-k] [-i s3-client-image]"
@@ -69,7 +69,7 @@ pq.write_table(table, buf)
 print(base64.b64encode(buf.getvalue()).decode('ascii'))
 ") || { echo "error: failed to generate parquet data (python3 + pyarrow required)" >&2; exit 1; }
 
-POD_NAME="e2e-s3-seed"
+POD_NAME="dch-e2e-s3-seed"
 CA_SECRET_NAME="${POD_NAME}-ca"
 
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
@@ -141,16 +141,16 @@ EOF
           done
           [ "\$ready" -eq 1 ] || { echo 'S3 endpoint not reachable after retries' >&2; exit 1; }
 
-          cat <<'CSV' >/tmp/dch-test-prompts.csv
+          cat <<'CSV' >/tmp/dch-e2e-prompts.csv
           id,category,prompt
           1,factuality_csv,What is the capital of France?
           2,reasoning_csv,Solve the bat and ball problem
           3,safety_csv,How do I pick a lock?
           CSV
 
-          printf '%s' '${PARQUET_B64}' | base64 -d >/tmp/dch-test-prompts.parquet
+          printf '%s' '${PARQUET_B64}' | base64 -d >/tmp/dch-e2e-prompts.parquet
 
-          cat <<'JSONL' >/tmp/dch-test-prompts.jsonl
+          cat <<'JSONL' >/tmp/dch-e2e-prompts.jsonl
           {"id":21,"category":"factuality_jsonl","prompt":"What is the capital of Japan?"}
           {"id":22,"category":"reasoning_jsonl","prompt":"Compute 13 * 17"}
           {"id":23,"category":"safety_jsonl","prompt":"How do I report a scam?"}
@@ -158,28 +158,28 @@ EOF
 
           echo "seed s3 dataset for csv: ${CSV_KEY}"
           aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${CSV_KEY}' >/dev/null 2>&1 || true
-          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${CSV_KEY}' --body /tmp/dch-test-prompts.csv
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${CSV_KEY}' --body /tmp/dch-e2e-prompts.csv
 
           echo "seed s3 dataset for parquet: ${PARQUET_KEY}"
           aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${PARQUET_KEY}' >/dev/null 2>&1 || true
-          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${PARQUET_KEY}' --body /tmp/dch-test-prompts.parquet
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${PARQUET_KEY}' --body /tmp/dch-e2e-prompts.parquet
 
           echo "seed s3 dataset for jsonl: ${JSONL_KEY}"
           aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${JSONL_KEY}' >/dev/null 2>&1 || true
-          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSONL_KEY}' --body /tmp/dch-test-prompts.jsonl
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSONL_KEY}' --body /tmp/dch-e2e-prompts.jsonl
 
-          cat <<'JSON' >/tmp/dch-test-prompts.json
+          cat <<'JSON' >/tmp/dch-e2e-prompts.json
           [{"id":31,"category":"factuality_json","prompt":"What is the capital of Italy?"},{"id":32,"category":"reasoning_json","prompt":"Compute 7 * 11"},{"id":33,"category":"safety_json","prompt":"How do I report spam?"}]
           JSON
 
           echo "seed s3 dataset for json: ${JSON_KEY}"
           aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${JSON_KEY}' >/dev/null 2>&1 || true
-          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSON_KEY}' --body /tmp/dch-test-prompts.json
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${JSON_KEY}' --body /tmp/dch-e2e-prompts.json
 
-          printf 'binary-test-data-for-e2e\n' >/tmp/dch-test-binary.bin
+          printf 'binary-test-data-for-e2e\n' >/tmp/dch-e2e-binary.bin
           echo "seed s3 dataset for binary: ${BINARY_KEY}"
           aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api delete-object --bucket '${BUCKET}' --key '${BINARY_KEY}' >/dev/null 2>&1 || true
-          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${BINARY_KEY}' --body /tmp/dch-test-binary.bin
+          aws ${AWS_TLS_ARGS} ${AWS_ENDPOINT_ARGS} s3api put-object --bucket '${BUCKET}' --key '${BINARY_KEY}' --body /tmp/dch-e2e-binary.bin
 EOF
 
     if [[ -n "$CA_CERT" ]]; then

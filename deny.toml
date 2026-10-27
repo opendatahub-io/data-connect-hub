@@ -1,0 +1,60 @@
+# cargo-deny configuration. `make audit` runs `cargo deny check` alongside
+# `cargo audit`; keep the [advisories] ignore list in step with
+# .cargo/audit.toml. Advisories that fire only in cargo audit's Cargo.lock
+# scan (unactivated optional dependencies) have no entry here: cargo-deny
+# resolves the graph cargo actually builds and would flag their ignore as
+# advisory-not-detected.
+#
+# unused-ignored-advisory = "deny" enforces staleness: any invocation of
+# `cargo deny check` fails once an ignore entry no longer matches
+# an encountered advisory, and the entry must be removed (here and in
+# .cargo/audit.toml).
+
+[advisories]
+unmaintained = "all"
+unused-ignored-advisory = "deny"
+maximum-db-staleness = "P30D"
+ignore = [
+    # h2 unbounded empty DATA frames — transitive dep via actix-http,
+    # actix-http has not released a version using h2 0.4 yet.
+    # Also ignored in .cargo/audit.toml.
+    { id = "RUSTSEC-2026-0258", reason = "h2 0.3.x pinned by actix-http; no actix-http release uses h2 0.4 yet" },
+    # Unmaintained transitive dependencies; not under our control.
+    # backoff 0.4.0 (via neo4rs)
+    { id = "RUSTSEC-2025-0012", reason = "neo4rs requires backoff; no neo4rs release drops it" },
+    # instant 0.1.13 (via backoff)
+    { id = "RUSTSEC-2024-0384", reason = "pulled in by backoff via neo4rs" },
+    # paste 1.0.15 (via neo4rs)
+    { id = "RUSTSEC-2024-0436", reason = "neo4rs requires paste; no neo4rs release drops it" },
+    # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
+    { id = "RUSTSEC-2025-0134", reason = "neo4rs and rustls-native-certs require rustls-pemfile" },
+]
+
+[licenses]
+allow = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CC0-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

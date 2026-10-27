@@ -54,7 +54,7 @@ if [[ "${PG_URL}" =~ sslmode=verify-(ca|full) ]]; then
     CA_B64="$(base64 -i "$CA_CERT_PATH" | tr -d '\n')"
 fi
 
-POD_NAME="e2e-pg-seed"
+POD_NAME="dch-e2e-pg-seed"
 # Proxy the CA env only when we actually have a CA to verify with, so
 # sslmode=require URLs keep working unauthenticated (no PGSSLROOTCERT ->
 # libpq honors sslmode).
