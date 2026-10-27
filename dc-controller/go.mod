@@ -5,7 +5,7 @@ go 1.26.7
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1
 	github.com/onsi/gomega v1.39.1
-	github.com/opendatahub-io/odh-platform-utilities/framework v0.2.0
+	github.com/opendatahub-io/odh-platform-utilities/framework v0.3.1
 	github.com/openshift/api v0.0.0-20261026215420-da0032bf0c5f
 	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/stretchr/testify v1.12.1
@@ -65,7 +65,7 @@ require (
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/monochromegane/go-gitignore v0.0.0-20200626010858-205db1a8cc00 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/openshift/controller-runtime-common v0.0.0-20261008111711-8ec0dc844066 // indirect
+	github.com/openshift/controller-runtime-common v0.0.0-20261026124434-bdfc411d93cd // indirect
 	github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_golang v1.25.0 // indirect

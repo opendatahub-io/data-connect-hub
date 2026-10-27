@@ -63,7 +63,10 @@ func resolveProfile(ctx context.Context, reader client.Reader) (Result, error) {
 	if loaded.UsedFallback {
 		log.Info("APIServer TLS profile unavailable; using Intermediate fallback")
 	}
-	tlsOption, unsupportedCiphers := platformtls.ConfigFromProfile(loaded.Spec)
+	tlsOption, unsupportedCiphers, err := platformtls.ConfigFromProfileWithError(loaded.Spec)
+	if err != nil {
+		return Result{}, fmt.Errorf("building TLS options from profile: %w", err)
+	}
 	for _, cipher := range unsupportedCiphers {
 		log.Info("TLS profile cipher unsupported by Go", "cipher", cipher)
 	}
