@@ -26,7 +26,13 @@ pub fn resolve_identity(
     }
     if let Some(username) = remote_user.filter(|username| !username.is_empty()) {
         let groups = remote_groups
-            .map(|joined| joined.split(',').map(str::to_string).collect())
+            .map(|joined| {
+                joined
+                    .split(',')
+                    .filter(|group| !group.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
             .unwrap_or_default();
         return Ok(RequestIdentity::RemoteUser {
             username: username.to_string(),
@@ -107,6 +113,32 @@ mod tests {
             RequestIdentity::RemoteUser {
                 username: "proxy-user".to_string(),
                 groups: vec![]
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_identity_with_empty_groups_header_yields_no_groups() {
+        let identity = resolve_identity(None, Some("proxy-user"), Some("")).unwrap();
+
+        assert_eq!(
+            identity,
+            RequestIdentity::RemoteUser {
+                username: "proxy-user".to_string(),
+                groups: vec![],
+            },
+        );
+    }
+
+    #[test]
+    fn resolve_identity_skips_empty_segments_in_groups_header() {
+        let identity = resolve_identity(None, Some("proxy-user"), Some("group-a,,group-b")).unwrap();
+
+        assert_eq!(
+            identity,
+            RequestIdentity::RemoteUser {
+                username: "proxy-user".to_string(),
+                groups: vec!["group-a".to_string(), "group-b".to_string()],
             },
         );
     }

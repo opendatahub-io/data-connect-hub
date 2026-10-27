@@ -120,7 +120,9 @@ where
                 headers.insert(X_REMOTE_USER, val);
             }
             let groups_joined = auth_info.groups.join(",");
-            if let Ok(val) = http::HeaderValue::from_str(&groups_joined) {
+            if !groups_joined.is_empty()
+                && let Ok(val) = http::HeaderValue::from_str(&groups_joined)
+            {
                 headers.insert(X_REMOTE_GROUPS, val);
             }
 

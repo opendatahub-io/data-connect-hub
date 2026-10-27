@@ -288,7 +288,7 @@ pub async fn start_server(
             )
             .await?,
         );
-        data_service = data_service.with_auth_client(kube_auth.clone());
+        data_service = data_service.with_authorizer(kube_auth.clone());
         tower::util::Either::Left(AuthLayer::new(kube_auth, auth.discovery_service_account.clone()))
     } else {
         tracing::warn!("Auth is DISABLED — all requests are unauthenticated");

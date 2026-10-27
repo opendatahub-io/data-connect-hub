@@ -25,7 +25,7 @@ use commons::api::storage::MetaStoreReader;
 use commons::api::storage::{MetaStore, SecretStore};
 use commons::api::{X_REMOTE_GROUPS, X_REMOTE_USER};
 use futures::TryStreamExt;
-use kube_utils::auth::{AuthInfo, KubeAuthClient};
+use kube_utils::auth::{AuthError, AuthInfo, KubeAuthClient};
 use prost::Message;
 use prost::bytes::Bytes;
 use std::collections::HashMap;
@@ -73,7 +73,28 @@ pub struct DataIngestionService {
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
-    auth_client: Option<Arc<KubeAuthClient>>,
+    auth_client: Option<Arc<dyn SecretAuthorizer>>,
+}
+
+/// SecretAuthorizer checks that a requester may read a connection's
+/// credentials secret before the service resolves it on their behalf. It is
+/// a trait so tests can substitute a stub for the API-server-backed client.
+#[async_trait::async_trait]
+pub trait SecretAuthorizer: Send + Sync {
+    async fn authorize_secret(&self, auth_info: &AuthInfo, tenant_id: &str, secret_name: &str)
+    -> Result<(), AuthError>;
+}
+
+#[async_trait::async_trait]
+impl SecretAuthorizer for KubeAuthClient {
+    async fn authorize_secret(
+        &self,
+        auth_info: &AuthInfo,
+        tenant_id: &str,
+        secret_name: &str,
+    ) -> Result<(), AuthError> {
+        KubeAuthClient::authorize_secret(self, auth_info, tenant_id, secret_name).await
+    }
 }
 
 impl DataIngestionService {
@@ -101,18 +122,18 @@ impl DataIngestionService {
         }
     }
 
-    /// with_auth_client enables requester checks on connection credentials.
-    /// When no client is set the service resolves `credentials_ref` secrets
-    /// without verifying the requester (development mode).
-    pub fn with_auth_client(mut self, auth_client: Arc<KubeAuthClient>) -> Self {
-        self.auth_client = Some(auth_client);
+    /// with_authorizer enables requester checks on connection credentials.
+    /// When no authorizer is set the service resolves `credentials_ref`
+    /// secrets without verifying the requester (development mode).
+    pub fn with_authorizer(mut self, authorizer: Arc<dyn SecretAuthorizer>) -> Self {
+        self.auth_client = Some(authorizer);
         self
     }
 
     /// check_secret_access verifies that the authenticated remote user may
     /// read the connection's credentials secret before the service resolves
     /// it on their behalf. It is a no-op when auth is disabled.
-    async fn check_secret_access(
+    pub(crate) async fn check_secret_access(
         &self,
         metadata: &MetadataMap,
         tenant_id: &str,
@@ -727,7 +748,13 @@ fn remote_auth_info(metadata: &MetadataMap) -> Result<AuthInfo, Status> {
     let groups = metadata
         .get(X_REMOTE_GROUPS)
         .and_then(|value| value.to_str().ok())
-        .map(|joined| joined.split(',').map(str::to_string).collect())
+        .map(|joined| {
+            joined
+                .split(',')
+                .filter(|group| !group.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
         .unwrap_or_default();
     Ok(AuthInfo {
         username: username.to_string(),
@@ -769,6 +796,17 @@ mod tests {
     #[test]
     fn remote_auth_info_without_groups_defaults_to_empty() {
         let map = metadata(&[("x-remote-user", "system:serviceaccount:tenant-a:dch-test-user")]);
+
+        let info = remote_auth_info(&map).expect("auth info");
+        assert!(info.groups.is_empty());
+    }
+
+    #[test]
+    fn remote_auth_info_with_empty_groups_header_yields_no_groups() {
+        let map = metadata(&[
+            ("x-remote-user", "system:serviceaccount:tenant-a:dch-test-user"),
+            ("x-remote-groups", ""),
+        ]);
 
         let info = remote_auth_info(&map).expect("auth info");
         assert!(info.groups.is_empty());

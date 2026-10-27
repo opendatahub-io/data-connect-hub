@@ -12,7 +12,6 @@ use commons::api::connections::DataConnection;
 use commons::api::creds::TestCredentials;
 use commons::api::errors::MetaStoreError;
 use commons::api::flight_discovery::FlightService;
-use commons::api::flight_discovery::FlightServiceResource;
 use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
@@ -327,7 +326,27 @@ pub async fn get_binary_data(
 ) -> Result<HttpResponse, RestErrorResponse> {
     info!("get_binary_data: binary download for tenant {:?}", ctx.tenant_id);
 
-    let flight = flight_service_by_connection(service.as_ref(), ctx.tenant_id.as_str(), id.as_str()).await?;
+    let connection = service
+        .meta_store
+        .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
+        .await?;
+
+    authorize_secret_ref(
+        service.as_ref(),
+        &ctx,
+        connection.resource.credentials_ref.secret.as_str(),
+    )
+    .await?;
+
+    let dct = service
+        .meta_store
+        .get_data_connection_type(ctx.tenant_id.as_str(), &connection.resource.data_connection_type_id)
+        .await?;
+
+    let flight = service
+        .meta_store
+        .get_flight_service_by_connector(&dct.resource.provider)
+        .await?;
 
     let batch_stream = service
         .flight_client(flight.resource.internal_url.as_str())
@@ -561,27 +580,6 @@ pub async fn export_connection(
 
 pub async fn not_found() -> Result<HttpResponse, RestErrorResponse> {
     Err(EndpointError::PathNotFound.into())
-}
-
-async fn flight_service_by_connection(
-    service: &ApiService,
-    tenant_id: &str,
-    data_connection_id: &str,
-) -> Result<FlightServiceResource, MetaStoreError> {
-    let dc = service
-        .meta_store
-        .get_data_connection(tenant_id, data_connection_id)
-        .await?;
-
-    let dct = service
-        .meta_store
-        .get_data_connection_type(tenant_id, &dc.resource.data_connection_type_id)
-        .await?;
-
-    service
-        .meta_store
-        .get_flight_service_by_connector(&dct.resource.provider)
-        .await
 }
 
 // ------------------------------------------------------------
@@ -1989,6 +1987,27 @@ mod tests {
         assert_eq!(resp.status(), 400);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["code"], "invalid_query");
+    }
+
+    #[actix_web::test]
+    async fn test_get_binary_data_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(StubAuthorizer::denying()))
+                .app_data(query_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::get()
+            .uri(&api_path("/connections/conn-1/binary?path=data/file.bin"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "forbidden");
     }
 
     #[actix_web::test]
