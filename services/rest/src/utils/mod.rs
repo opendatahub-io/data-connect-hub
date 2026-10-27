@@ -56,7 +56,7 @@ pub struct AuthConfig {
 }
 
 fn default_auth_enabled() -> bool {
-    true
+    false
 }
 
 fn default_auth_cache_ttl_secs() -> u64 {
@@ -167,22 +167,22 @@ mod tests {
     }
 
     #[test]
-    fn test_auth_defaults_to_enabled_without_auth_section() {
+    fn test_auth_defaults_to_disabled_without_auth_section() {
         let server_config = deserialize_auth_config(&auth_config_toml(""));
-        assert!(server_config.auth.enabled);
+        assert!(!server_config.auth.enabled);
         assert_eq!(server_config.auth.cache_ttl_secs, 300);
     }
 
     #[test]
-    fn test_auth_can_be_explicitly_disabled() {
+    fn test_auth_can_be_explicitly_enabled() {
         let toml_str = auth_config_toml(
             r#"
             [auth]
-            enabled = false
+            enabled = true
             "#,
         );
         let server_config = deserialize_auth_config(&toml_str);
-        assert!(!server_config.auth.enabled);
+        assert!(server_config.auth.enabled);
     }
 
     #[test]

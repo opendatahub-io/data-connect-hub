@@ -63,11 +63,8 @@ class TestRestConnection:
         rest_client: DataConnectClient,
         create_connection,
         pg_connection_type,
-        user_secret: str | None,
     ) -> None:
-        if not user_secret:
-            pytest.skip("DCH_USER_SECRET not set (run e2e/run-e2e.sh first)")
-        credentials_ref = CredentialsRef(secret=user_secret)
+        credentials_ref = CredentialsRef(secret="e2e-ns/e2e-secret")
         self._create_and_assert_connection(
             rest_client,
             create_connection,
@@ -122,14 +119,11 @@ class TestRestConnection:
         rest_client: DataConnectClient,
         create_connection,
         pg_connection_type,
-        user_secret: str | None,
     ) -> None:
-        if not user_secret:
-            pytest.skip("DCH_USER_SECRET not set (run e2e/run-e2e.sh first)")
         conn = create_connection(
             name="e2e-delete-pg",
             connection_type_id=pg_connection_type.id,
-            credentials_ref=CredentialsRef(secret=user_secret),
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
         )
         rest_client.delete_connection(conn.id)
 
@@ -151,14 +145,11 @@ class TestRestConnection:
         rest_client: DataConnectClient,
         create_connection,
         pg_connection_type,
-        user_secret: str | None,
     ) -> None:
-        if not user_secret:
-            pytest.skip("DCH_USER_SECRET not set (run e2e/run-e2e.sh first)")
         conn = create_connection(
             name="e2e-update-pg",
             connection_type_id=pg_connection_type.id,
-            credentials_ref=CredentialsRef(secret=user_secret),
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
             properties={"database": "testdb"},
         )
         updated = rest_client.update_connection(conn.id, name="e2e-updated-pg")

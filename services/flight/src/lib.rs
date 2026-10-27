@@ -264,38 +264,36 @@ pub async fn start_server(
     builder: tonic::transport::Server,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
     auth: &utils::AuthConfig,
-    mut data_service: DataIngestionService,
+    data_service: DataIngestionService,
     addr: std::net::SocketAddr,
 ) -> Result<()> {
+    let service = FlightServiceServer::new(data_service);
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
         .set_serving::<FlightServiceServer<DataIngestionService>>()
         .await;
 
     // Either keeps both branches on one router type so the TLS transport
-    // choice below is a single serve path. The same client is shared with the
-    // data service so its secret checks run against the requesting user.
+    // choice below is a single serve path.
     let auth_layer = if auth.enabled {
         tracing::info!(
             "Auth enabled (cache TTL: {}s, token_review_audiences: {:?})",
             auth.cache_ttl_secs,
             auth.token_review_audiences
         );
-        let kube_auth = Arc::new(
-            KubeAuthClient::try_default(
-                Duration::from_secs(auth.cache_ttl_secs),
-                auth.token_review_audiences.clone(),
-            )
-            .await?,
-        );
-        data_service = data_service.with_authorizer(kube_auth.clone());
-        tower::util::Either::Left(AuthLayer::new(kube_auth, auth.discovery_service_account.clone()))
+        let kube_auth = KubeAuthClient::try_default(
+            Duration::from_secs(auth.cache_ttl_secs),
+            auth.token_review_audiences.clone(),
+        )
+        .await?;
+        tower::util::Either::Left(AuthLayer::new(
+            Arc::new(kube_auth),
+            auth.discovery_service_account.clone(),
+        ))
     } else {
         tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
         tower::util::Either::Right(tower::layer::util::Identity::new())
     };
-
-    let service = FlightServiceServer::new(data_service);
 
     let router = builder
         .layer(TraceLayer::new())

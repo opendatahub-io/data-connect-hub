@@ -120,9 +120,7 @@ where
                 headers.insert(X_REMOTE_USER, val);
             }
             let groups_joined = auth_info.groups.join(",");
-            if !groups_joined.is_empty()
-                && let Ok(val) = http::HeaderValue::from_str(&groups_joined)
-            {
+            if let Ok(val) = http::HeaderValue::from_str(&groups_joined) {
                 headers.insert(X_REMOTE_GROUPS, val);
             }
 
@@ -139,7 +137,7 @@ fn extract_bearer_token<B>(req: &http::Request<B>) -> Option<&str> {
         .strip_prefix(BEARER_PREFIX)
 }
 
-pub(crate) fn auth_error_to_status(e: &AuthError) -> Status {
+fn auth_error_to_status(e: &AuthError) -> Status {
     match e {
         AuthError::Unauthenticated(msg) => Status::unauthenticated(msg),
         AuthError::Forbidden(msg) => Status::permission_denied(msg),
