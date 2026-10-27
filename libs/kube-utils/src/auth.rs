@@ -117,7 +117,10 @@ impl KubeAuthClient {
     }
 
     pub async fn authorize(&self, auth_info: &AuthInfo, tenant_id: &str, verb: &str) -> Result<(), AuthError> {
-        let key = format!("{}:{:?}:{}:{}", auth_info.username, auth_info.groups, tenant_id, verb);
+        let key = format!(
+            "conn:{}:{:?}:{}:{}",
+            auth_info.username, auth_info.groups, tenant_id, verb
+        );
         let client = self.client.clone();
         let username = auth_info.username.clone();
         let groups = auth_info.groups.clone();
@@ -234,7 +237,7 @@ impl KubeAuthClient {
 
 fn secret_cache_key(auth_info: &AuthInfo, tenant_id: &str, secret_name: &str) -> String {
     format!(
-        "{}:{:?}:{}:secrets:get:{}",
+        "secret:{}:{:?}:{}:secrets:get:{}",
         auth_info.username, auth_info.groups, tenant_id, secret_name
     )
 }
@@ -328,5 +331,23 @@ mod tests {
 
         assert_ne!(first, second);
         assert_ne!(first, other_tenant);
+    }
+
+    #[test]
+    fn secret_cache_key_is_namespaced_apart_from_tenant_cache_keys() {
+        // The conn-level authorize() key is "conn:{user}:{groups}:{tenant}:{verb}";
+        // the two key families share one cache, so they must be structurally
+        // disjoint even for identical users, tenants, and verbs.
+        let secret_key = super::secret_cache_key(&auth_info(), "tenant-a", "get");
+        let conn_key = format!(
+            "conn:{}:{:?}:{}:{}",
+            auth_info().username,
+            auth_info().groups,
+            "tenant-a",
+            "get"
+        );
+
+        assert!(secret_key.starts_with("secret:"));
+        assert_ne!(secret_key, conn_key);
     }
 }
