@@ -201,6 +201,10 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // so it must hold the permissions it grants (RBAC escalation prevention).
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods;nodes,verbs=get;list;watch
+// The controller binds the autoscaling SA to the view ClusterRole for Thanos
+// queries; bind on that role satisfies RBAC escalation prevention without
+// granting the controller the view permissions themselves.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=view,verbs=bind
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
