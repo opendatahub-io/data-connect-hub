@@ -130,6 +130,67 @@ func validAutoscalingConfig() *dchv1alpha1.AutoScalingConfig {
 	}
 }
 
+func newReplicatedDeployment(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata":   map[string]any{"name": name},
+		"spec":       map[string]any{"replicas": int64(1)},
+	}}
+}
+
+func TestRemoveReplicasFromAutoscaledDeployments(t *testing.T) {
+	t.Parallel()
+
+	cr := &dchv1alpha1.DataConnectService{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice"},
+		Spec: dchv1alpha1.DataConnectServiceSpec{
+			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
+		},
+	}
+
+	restDeploy := newReplicatedDeployment(renderedRestDeploymentName)
+	flightDeploy := newReplicatedDeployment(renderedFlightDeploymentName(cr.Name))
+	otherDeploy := newReplicatedDeployment("dch-unrelated")
+
+	removeReplicasFromAutoscaledDeployments([]*unstructured.Unstructured{restDeploy, flightDeploy, otherDeploy}, cr)
+
+	if _, found, _ := unstructured.NestedInt64(restDeploy.Object, "spec", "replicas"); found {
+		t.Error("autoscaled REST deployment still carries spec.replicas")
+	}
+	if replicas, found, _ := unstructured.NestedInt64(flightDeploy.Object, "spec", "replicas"); !found || replicas != 1 {
+		t.Errorf("non-autoscaled flight deployment replicas = (%d, found=%t), want (1, true)", replicas, found)
+	}
+	if replicas, found, _ := unstructured.NestedInt64(otherDeploy.Object, "spec", "replicas"); !found || replicas != 1 {
+		t.Errorf("unrelated deployment replicas = (%d, found=%t), want (1, true)", replicas, found)
+	}
+}
+
+func TestRemoveReplicasFromAutoscaledDeploymentsBothServices(t *testing.T) {
+	t.Parallel()
+
+	cr := &dchv1alpha1.DataConnectService{
+		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice"},
+		Spec: dchv1alpha1.DataConnectServiceSpec{
+			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
+			FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
+				AutoScaling: validAutoscalingConfig(),
+			}},
+		},
+	}
+
+	restDeploy := newReplicatedDeployment(renderedRestDeploymentName)
+	flightDeploy := newReplicatedDeployment(renderedFlightDeploymentName(cr.Name))
+
+	removeReplicasFromAutoscaledDeployments([]*unstructured.Unstructured{restDeploy, flightDeploy}, cr)
+
+	for _, deploy := range []*unstructured.Unstructured{restDeploy, flightDeploy} {
+		if _, found, _ := unstructured.NestedInt64(deploy.Object, "spec", "replicas"); found {
+			t.Errorf("autoscaled deployment %s still carries spec.replicas", deploy.GetName())
+		}
+	}
+}
+
 func validAutoscalingTrigger() dchv1alpha1.AutoscalingTrigger {
 	return dchv1alpha1.AutoscalingTrigger{
 		Name:          "request-rate",

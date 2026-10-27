@@ -377,6 +377,29 @@ var _ = Describe("DataConnectService Controller", func() {
 		})
 	})
 
+	Context("When autoscaling is configured without replicas", func() {
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should accept the CR through API server defaulting and CEL validation", func() {
+			// Regression test: replicas must not carry a structural-schema
+			// default, otherwise the API server defaults it before the CEL
+			// rule runs and every autoScaling configuration is rejected.
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+	})
+
 	Context("When reconciling with service overrides", func() {
 		BeforeEach(func() {
 			createDatabaseSecret()

@@ -139,6 +139,31 @@ func renderedFlightDeploymentName(crName string) string {
 	return "dch-" + flightServiceResourceName(crName)
 }
 
+// removeReplicasFromAutoscaledDeployments drops spec.replicas from
+// deployments managed by KEDA. The base manifests pin replicas to 1, and a
+// later force-apply of that field would reset the KEDA-managed replica count.
+func removeReplicasFromAutoscaledDeployments(resources []*unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) {
+	autoscaled := map[string]struct{}{}
+	if serviceAutoScaling(cr.Spec.RestService) != nil {
+		autoscaled[renderedRestDeploymentName] = struct{}{}
+	}
+	if flightAutoScaling(cr.Spec.FlightService) != nil {
+		autoscaled[renderedFlightDeploymentName(cr.Name)] = struct{}{}
+	}
+	if len(autoscaled) == 0 {
+		return
+	}
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		if _, ok := autoscaled[obj.GetName()]; !ok {
+			continue
+		}
+		unstructured.RemoveNestedField(obj.Object, autoscalingSpecField, "replicas")
+	}
+}
+
 func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Unstructured {
 	services := []autoscalingService{
 		{name: "rest", deployment: renderedRestDeploymentName, config: serviceAutoScaling(cr.Spec.RestService)},
@@ -181,7 +206,7 @@ func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Un
 		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRole, roleName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRole}, map[string]any{
 			"rules": []any{
 				map[string]any{"apiGroups": []any{""}, "resources": []any{"pods"}, "verbs": []any{"get"}},
-				map[string]any{"apiGroups": []any{"metrics.k8s.io"}, "resources": []any{"pods", "nodes"}, "verbs": []any{"get", "list", "watch"}},
+				map[string]any{"apiGroups": []any{"metrics.k8s.io"}, "resources": []any{"pods"}, "verbs": []any{"get", "list", "watch"}},
 			},
 		}),
 		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRoleBinding, bindingName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRoleBinding}, map[string]any{

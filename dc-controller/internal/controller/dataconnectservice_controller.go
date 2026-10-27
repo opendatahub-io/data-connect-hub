@@ -200,7 +200,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // The controller creates the autoscaling metrics-reader Role in tenant namespaces,
 // so it must hold the permissions it grants (RBAC escalation prevention).
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
-// +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods;nodes,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods,verbs=get;list;watch
 // The controller binds the autoscaling SA to the view ClusterRole for Thanos
 // queries; bind on that role satisfies RBAC escalation prevention without
 // granting the controller the view permissions themselves.
@@ -496,6 +496,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		}
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
+
+	removeReplicasFromAutoscaledDeployments(resources, cr)
 
 	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
 		return fmt.Errorf("annotating deployments with content hash: %w", err)

@@ -21,6 +21,7 @@ rules:
   - watch
 - apiGroups:
   - ""
+  - metrics.k8s.io
   resources:
   - pods
   verbs:
@@ -146,15 +147,6 @@ rules:
   - list
   - patch
   - update
-  - watch
-- apiGroups:
-  - metrics.k8s.io
-  resources:
-  - nodes
-  - pods
-  verbs:
-  - get
-  - list
   - watch
 - apiGroups:
   - monitoring.coreos.com

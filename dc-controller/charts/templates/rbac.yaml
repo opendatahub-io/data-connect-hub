@@ -62,7 +62,7 @@ rules:
   resources: [pods]
   verbs: [get, list, watch]
 - apiGroups: [metrics.k8s.io]
-  resources: [pods, nodes]
+  resources: [pods]
   verbs: [get, list, watch]
 # Lets the controller bind the autoscaling SA to the view ClusterRole
 # (thanos queries) without holding the view permissions itself.
