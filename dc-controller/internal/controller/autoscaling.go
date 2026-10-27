@@ -46,6 +46,7 @@ const (
 	autoscalingAuthSuffix           = "-autoscaling-auth"
 	autoscalingRoleSuffix           = "-autoscaling-metrics-reader"
 	autoscalingBindingSuffix        = "-autoscaling-metrics-reader"
+	autoscalingViewBindingSuffix    = "-autoscaling-thanos-view"
 	autoscalingScaledObjectSuffix   = "-autoscaling"
 	autoscalingMetadataField        = "metadata"
 	autoscalingSpecField            = "spec"
@@ -158,6 +159,7 @@ func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Un
 	authName := autoscalingName(cr.Name, autoscalingAuthSuffix)
 	roleName := autoscalingName(cr.Name, autoscalingRoleSuffix)
 	bindingName := autoscalingName(cr.Name, autoscalingBindingSuffix)
+	viewBindingName := autoscalingName(cr.Name, autoscalingViewBindingSuffix)
 
 	resources := []*unstructured.Unstructured{
 		newAutoscalingObject("v1", kindServiceAccount, saName, schema.GroupVersionKind{Version: "v1", Kind: kindServiceAccount}, map[string]any{}),
@@ -186,15 +188,19 @@ func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Un
 			"roleRef":  map[string]any{"apiGroup": autoscalingRBACGroup, autoscalingKindField: kindRole, autoscalingNameField: roleName},
 			"subjects": []any{map[string]any{autoscalingKindField: kindServiceAccount, autoscalingNameField: saName}},
 		}),
+		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRoleBinding, viewBindingName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRoleBinding}, map[string]any{
+			"roleRef":  map[string]any{"apiGroup": autoscalingRBACGroup, autoscalingKindField: "ClusterRole", autoscalingNameField: "view"},
+			"subjects": []any{map[string]any{autoscalingKindField: kindServiceAccount, autoscalingNameField: saName}},
+		}),
 	}
 
 	for _, service := range configured {
-		resources = append(resources, newScaledObject(cr.Name, service, authName))
+		resources = append(resources, newScaledObject(cr.Name, cr.Namespace, service, authName))
 	}
 	return resources
 }
 
-func newScaledObject(crName string, service autoscalingService, authName string) *unstructured.Unstructured {
+func newScaledObject(crName, namespace string, service autoscalingService, authName string) *unstructured.Unstructured {
 	triggers := make([]any, 0, len(service.config.Triggers))
 	for _, trigger := range service.config.Triggers {
 		triggers = append(triggers, map[string]any{
@@ -202,6 +208,7 @@ func newScaledObject(crName string, service autoscalingService, authName string)
 			autoscalingMetadataField: map[string]any{
 				"metricName":    trigger.Name,
 				"serverAddress": trigger.ServerAddress,
+				"namespace":     namespace,
 				"query":         trigger.Query,
 				"threshold":     trigger.Target.Value,
 				"authModes":     "bearer",
@@ -332,12 +339,14 @@ func autoscalingResourceNames(crName string) []*unstructured.Unstructured {
 	authName := autoscalingName(crName, autoscalingAuthSuffix)
 	roleName := autoscalingName(crName, autoscalingRoleSuffix)
 	bindingName := autoscalingName(crName, autoscalingBindingSuffix)
+	viewBindingName := autoscalingName(crName, autoscalingViewBindingSuffix)
 	return []*unstructured.Unstructured{
 		newAutoscalingObject("v1", kindServiceAccount, saName, schema.GroupVersionKind{Version: "v1", Kind: kindServiceAccount}, nil),
 		newAutoscalingObject("v1", kindSecret, secretName, schema.GroupVersionKind{Version: "v1", Kind: kindSecret}, nil),
 		newAutoscalingObject("keda.sh/v1alpha1", "TriggerAuthentication", authName, triggerAuthGVK, nil),
 		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRole, roleName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRole}, nil),
 		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRoleBinding, bindingName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRoleBinding}, nil),
+		newAutoscalingObject(autoscalingRBACGroup+"/v1", kindRoleBinding, viewBindingName, schema.GroupVersionKind{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRoleBinding}, nil),
 		newAutoscalingObject("keda.sh/v1alpha1", "ScaledObject", autoscalingName(crName, "-rest"+autoscalingScaledObjectSuffix), scaledObjectGVK, nil),
 		newAutoscalingObject("keda.sh/v1alpha1", "ScaledObject", autoscalingName(crName, "-flight"+autoscalingScaledObjectSuffix), scaledObjectGVK, nil),
 	}

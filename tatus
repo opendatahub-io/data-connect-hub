@@ -1,0 +1,97 @@
+[1mdiff --git a/dc-controller/api/dataconnecthub/v1alpha1/dataconnectservice_types.go b/dc-controller/api/dataconnecthub/v1alpha1/dataconnectservice_types.go[m
+[1mindex 27b04a6..ef97a7f 100644[m
+[1m--- a/dc-controller/api/dataconnecthub/v1alpha1/dataconnectservice_types.go[m
+[1m+++ b/dc-controller/api/dataconnecthub/v1alpha1/dataconnectservice_types.go[m
+[36m@@ -32,6 +32,7 @@[m [mtype Gateway struct {[m
+ }[m
+ [m
+ // ServiceOverrides allows per-service customisation of scaling and pod spec fields.[m
+[32m+[m[32m// +kubebuilder:validation:XValidation:rule="!(has(self.replicas) && has(self.autoScaling))",message="replicas and autoScaling cannot be configured together"[m
+ type ServiceOverrides struct {[m
+ 	// replicas overrides the number of pods[m
+ 	// +kubebuilder:validation:Minimum=0[m
+[36m@@ -39,6 +40,11 @@[m [mtype ServiceOverrides struct {[m
+ 	// +optional[m
+ 	Replicas *int32 `json:"replicas,omitempty"`[m
+ [m
+[32m+[m	[32m// autoScaling configures optional KEDA-based autoscaling for the service.[m
+[32m+[m	[32m// It cannot be used together with replicas.[m
+[32m+[m	[32m// +optional[m
+[32m+[m	[32mAutoScaling *AutoScalingConfig `json:"autoScaling,omitempty"`[m
+[32m+[m
+ 	// resources overrides the container resource requirements[m
+ 	// +optional[m
+ 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`[m
+[36m@@ -66,6 +72,72 @@[m [mtype ServiceOverrides struct {[m
+ 	Connectors []ConnectorConfig `json:"connectors,omitempty"`[m
+ }[m
+ [m
+[32m+[m[32m// AutoScalingConfig configures KEDA autoscaling for a service deployment.[m
+[32m+[m[32m// +kubebuilder:validation:XValidation:rule="self.minReplicas <= self.maxReplicas",message="minReplicas cannot exceed maxReplicas"[m
+[32m+[m[32mtype AutoScalingConfig struct {[m
+[32m+[m	[32m// minReplicas is the minimum number of replicas.[m
+[32m+[m	[32m// +kubebuilder:validation:Minimum=0[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mMinReplicas *int32 `json:"minReplicas"`[m
+[32m+[m
+[32m+[m	[32m// maxReplicas is the maximum number of replicas.[m
+[32m+[m	[32m// +kubebuilder:validation:Minimum=1[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mMaxReplicas *int32 `json:"maxReplicas"`[m
+[32m+[m
+[32m+[m	[32m// pollingInterval is the interval, in seconds, at which KEDA checks triggers.[m
+[32m+[m	[32m// +kubebuilder:validation:Minimum=1[m
+[32m+[m	[32m// +kubebuilder:default=15[m
+[32m+[m	[32m// +optional[m
+[32m+[m	[32mPollingInterval *int32 `json:"pollingInterval,omitempty"`[m
+[32m+[m
+[32m+[m	[32m// cooldownPeriod is the number of seconds KEDA waits before scaling down.[m
+[32m+[m	[32m// +kubebuilder:validation:Minimum=0[m
+[32m+[m	[32m// +kubebuilder:default=300[m
+[32m+[m	[32m// +optional[m
+[32m+[m	[32mCooldownPeriod *int32 `json:"cooldownPeriod,omitempty"`[m
+[32m+[m
+[32m+[m	[32m// triggers contains Prometheus metrics that drive scaling.[m
+[32m+[m	[32m// +kubebuilder:validation:MinItems=1[m
+[32m+[m	[32m// +optional[m
+[32m+[m	[32mTriggers []AutoscalingTrigger `json:"triggers,omitempty"`[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// AutoscalingTrigger defines a Prometheus metric used by KEDA.[m
+[32m+[m[32mtype AutoscalingTrigger struct {[m
+[32m+[m	[32m// name is the metric name exposed by KEDA.[m
+[32m+[m	[32m// +kubebuilder:validation:MinLength=1[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mName string `json:"name"`[m
+[32m+[m
+[32m+[m	[32m// serverAddress is the Prometheus-compatible endpoint used by KEDA.[m
+[32m+[m	[32m// +kubebuilder:validation:MinLength=1[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mServerAddress string `json:"serverAddress"`[m
+[32m+[m
+[32m+[m	[32m// query is the PromQL query evaluated by KEDA.[m
+[32m+[m	[32m// +kubebuilder:validation:MinLength=1[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mQuery string `json:"query"`[m
+[32m+[m
+[32m+[m	[32m// target defines the desired trigger threshold.[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mTarget AutoscalingTarget `json:"target"`[m
+[32m+[m[32m}[m
+[32m+[m
+[32m+[m[32m// AutoscalingTarget defines the target value for an autoscaling trigger.[m
+[32m+[m[32mtype AutoscalingTarget struct {[m
+[32m+[m	[32m// type identifies the target kind. The current implementation supports Value.[m
+[32m+[m	[32m// +kubebuilder:validation:Enum=Value[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mType string `json:"type"`[m
+[32m+[m
+[32m+[m	[32m// value is the trigger threshold passed to KEDA.[m
+[32m+[m	[32m// +kubebuilder:validation:MinLength=1[m
+[32m+[m	[32m// +kubebuilder:validation:Required[m
+[32m+[m	[32mValue string `json:"value"`[m
+[32m+[m[32m}[m
+[32m+[m
+ // FlightServiceConfig configures the Flight gRPC API deployment.[m
+ type FlightServiceConfig struct {[m
+ 	ServiceOverrides `json:",inline"`[m

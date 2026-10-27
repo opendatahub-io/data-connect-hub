@@ -56,6 +56,14 @@ rules:
 - apiGroups: [keda.sh]
   resources: [scaledobjects, triggerauthentications]
   verbs: [create, delete, get, list, patch, update, watch]
+# Held so the controller can grant them in the per-tenant autoscaling
+# metrics-reader Role (RBAC escalation prevention).
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+- apiGroups: [metrics.k8s.io]
+  resources: [pods, nodes]
+  verbs: [get, list, watch]
 - apiGroups: [monitoring.coreos.com]
   resources: [servicemonitors]
   verbs: [create, delete, get, list, patch, update, watch]

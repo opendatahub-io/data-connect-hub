@@ -53,7 +53,7 @@ func TestAutoscalingResourcesRenderRESTAndFlightTargets(t *testing.T) {
 	t.Parallel()
 
 	cr := &dchv1alpha1.DataConnectService{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice"},
+		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice", Namespace: "dch-services"},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
 			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
 			FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
@@ -87,6 +87,20 @@ func TestAutoscalingResourcesRenderRESTAndFlightTargets(t *testing.T) {
 	}
 	if _, ok := targets[renderedFlightDeploymentName(cr.Name)]; !ok {
 		t.Errorf("Flight deployment target %q was not rendered", renderedFlightDeploymentName(cr.Name))
+	}
+
+	for _, scaledObject := range scaledObjects {
+		triggers, found, err := unstructured.NestedSlice(scaledObject.Object, "spec", "triggers")
+		if err != nil || !found || len(triggers) == 0 {
+			t.Fatalf("reading trigger metadata for %s: found=%t error=%v", scaledObject.GetName(), found, err)
+		}
+		metadata, found, err := unstructured.NestedStringMap(triggers[0].(map[string]any), "metadata")
+		if err != nil || !found {
+			t.Fatalf("reading trigger metadata for %s: found=%t error=%v", scaledObject.GetName(), found, err)
+		}
+		if metadata["namespace"] != cr.Namespace {
+			t.Errorf("trigger namespace = %q, want %q", metadata["namespace"], cr.Namespace)
+		}
 	}
 }
 
