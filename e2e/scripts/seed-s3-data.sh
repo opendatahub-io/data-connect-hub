@@ -231,6 +231,7 @@ kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
     echo "error: S3 seed pod '$POD_NAME' failed" >&2
     exit 1
 }
-kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+# Leave the completed seed pod in place for inspection; the next run deletes
+# and recreates it.
 
 echo "S3 test data seeded (namespace=${NAMESPACE}, bucket=${BUCKET})"
