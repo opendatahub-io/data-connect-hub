@@ -72,6 +72,14 @@ print(base64.b64encode(buf.getvalue()).decode('ascii'))
 POD_NAME="dch-e2e-s3-seed"
 CA_SECRET_NAME="${POD_NAME}-ca"
 
+# Use OpenShift's namespace-assigned base UID when available; fall back to a
+# non-root UID on non-OpenShift clusters where kubelet needs a numeric UID to
+# verify runAsNonRoot.
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=1001}"
+
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
 AWS_TLS_ARGS=""
@@ -103,10 +111,24 @@ metadata:
   namespace: ${NAMESPACE}
 spec:
   restartPolicy: Never
+  # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+  # rejects pods that do not set an explicit securityContext.
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
   containers:
     - name: aws-cli
       image: ${S3_CLIENT_IMAGE}
       imagePullPolicy: IfNotPresent
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        runAsNonRoot: true
+        runAsUser: ${RUN_AS_USER}
+        seccompProfile:
+          type: RuntimeDefault
       env:
         - name: AWS_ACCESS_KEY_ID
           value: "${ACCESS_KEY}"
@@ -116,6 +138,11 @@ spec:
           value: us-east-1
         - name: AWS_S3_ADDRESSING_STYLE
           value: path
+        # The aws-cli image runs as root and defaults to HOME=/root, which an
+        # arbitrary non-root UID cannot write. Point HOME at the world-writable
+        # /tmp so the CLI can create its config/cache directories.
+        - name: HOME
+          value: /tmp
 EOF
 
     if [[ -n "$CA_CERT" ]]; then

@@ -233,6 +233,14 @@ kubectl create namespace "$NAMESPACE" \
     -o yaml |
     kubectl apply -f - >/dev/null
 
+# Use OpenShift's namespace-assigned base UID when available; fall back to a
+# non-root UID on non-OpenShift clusters where kubelet needs a numeric UID to
+# verify runAsNonRoot.
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=1001}"
+
 # ---------------------------------------------------------------------------
 # Chart version
 # ---------------------------------------------------------------------------
@@ -444,10 +452,24 @@ spec:
         app.kubernetes.io/name: postgresql
         app.kubernetes.io/instance: ${RELEASE}
     spec:
+      # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+      # rejects pods that do not set an explicit securityContext.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       initContainers:
         - name: init-pgdata
           image: ${IMAGE}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: ${RUN_AS_USER}
+            seccompProfile:
+              type: RuntimeDefault
           command:
             - sh
             - -c
@@ -466,6 +488,14 @@ EOF
         - name: init-tls
           image: ${IMAGE}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: ${RUN_AS_USER}
+            seccompProfile:
+              type: RuntimeDefault
           command:
             - sh
             - -c
@@ -502,6 +532,14 @@ EOF
         - name: postgresql
           image: ${IMAGE}
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: ${RUN_AS_USER}
+            seccompProfile:
+              type: RuntimeDefault
 EOF
 
     if [[ "$SSL_ENABLED" == "true" ]]; then
