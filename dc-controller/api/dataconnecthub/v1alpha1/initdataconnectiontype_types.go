@@ -115,6 +115,8 @@ type InitDataConnectionTypeStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=opendatahub,shortName=idct
 // +kubebuilder:printcolumn:name="Provider",type=string,JSONPath=`.spec.provider`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Synced",type=string,JSONPath=`.status.conditions[?(@.type=="Synced")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // InitDataConnectionType is the Schema for the initdataconnectiontypes API
