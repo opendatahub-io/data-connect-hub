@@ -128,9 +128,12 @@ setup_user_rbac() {
     fi
 
     if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
-        # The secret-reader SA holds the same API access as the e2e user so
-        # export tests can cover both outcomes of the service-side
-        # SubjectAccessReview (see setup_service_rbac for its secret read).
+        # The secret-reader SA holds the same API access as the e2e user
+        # plus read access to the datasource secrets, so export tests can
+        # cover both outcomes of the service-side SubjectAccessReview. The
+        # plain e2e user deliberately lacks the secret read so the
+        # service-side check denies its exports.
+        kubectl delete rolebinding dch-e2e-user-secret-read-rb -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
         kubectl delete rolebinding dch-e2e-secret-reader-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
         kubectl create rolebinding dch-e2e-secret-reader-access \
             -n "$DCH_TENANT_ID" \
@@ -139,6 +142,16 @@ setup_user_rbac() {
         kubectl create rolebinding dch-e2e-secret-reader-export-secret-rb \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-secret-export \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        # The secret-read Role is created later by setup_service_rbac once
+        # the enabled datasource secrets are known; a RoleBinding may safely
+        # reference it before then. The old binding name is removed because
+        # it granted the plain e2e user and would keep the denial test from
+        # passing.
+        kubectl create rolebinding dch-e2e-secret-reader-secret-read-rb \
+            -n "$DCH_TENANT_ID" \
+            --role=dch-e2e-flight-secret-read \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
@@ -166,20 +179,6 @@ setup_service_rbac() {
             -n "$DCH_TENANT_ID" \
             --role=dch-e2e-flight-secret-read \
             --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-        # The secret-reader SA must be able to read the datasource secrets
-        # itself: export_connection verifies the requester's access to the
-        # connection's credentials_ref secret. The plain e2e user
-        # deliberately lacks this binding so the service-side check denies
-        # its exports. The old binding name is removed because it granted
-        # the plain e2e user and would keep the denial test from passing.
-        kubectl delete rolebinding dch-e2e-user-secret-read-rb \
-            -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl create rolebinding dch-e2e-secret-reader-secret-read-rb \
-            -n "$DCH_TENANT_ID" \
-            --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 
