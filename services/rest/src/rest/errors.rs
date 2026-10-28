@@ -182,21 +182,25 @@ pub fn path_config() -> PathConfig {
 
 impl From<AuthError> for RestErrorResponse {
     fn from(err: AuthError) -> Self {
-        let (code, status) = match &err {
-            AuthError::Unauthenticated(_) => ("unauthenticated", 401),
-            AuthError::Forbidden(_) => ("forbidden", 403),
-            AuthError::TokenReviewError(_) | AuthError::AccessReviewError(_) | AuthError::Internal(_) => {
-                tracing::error!("{err}");
-                ("auth_error", 500)
-            },
-        };
-        let message = match &err {
+        let (code, status, message) = match &err {
+            // Rejection reasons can echo API-server internals, so they are
+            // logged but not returned to the caller.
             AuthError::Unauthenticated(_) => {
                 tracing::warn!("{err}");
-                "A valid bearer token is required".to_string()
+                (
+                    "unauthenticated",
+                    401,
+                    "An authenticated identity is required".to_string(),
+                )
             },
-            AuthError::Forbidden(_) => "Access to the referenced secret was denied".to_string(),
-            _ => "Authorization check failed".to_string(),
+            // The denial names the secret and tenant namespace the caller
+            // already supplied, so it is returned verbatim to make the
+            // failure actionable for the end user.
+            AuthError::Forbidden(message) => ("forbidden", 403, message.clone()),
+            AuthError::TokenReviewError(_) | AuthError::AccessReviewError(_) | AuthError::Internal(_) => {
+                tracing::error!("{err}");
+                ("auth_error", 500, "Authorization check failed".to_string())
+            },
         };
         RestErrorResponse {
             code: code.to_string(),

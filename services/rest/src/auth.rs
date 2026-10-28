@@ -1,47 +1,28 @@
 use kube_utils::auth::{AuthError, AuthInfo, KubeAuthClient};
 
 /// RequestIdentity identifies the sender of a request for the secret-access
-/// authorization check. Behind kube-rbac-proxy the bearer token never reaches
-/// this service (the k8s.io/apiserver authenticator deletes the Authorization
-/// header during proxy authentication), so identity can also arrive as the
-/// proxy-injected x-remote-user/x-remote-groups headers.
+/// authorization check. Requests reach the rest-service through
+/// kube-rbac-proxy, which authenticates the caller itself, strips the
+/// `Authorization` header, and injects the username as `x-remote-user`
+/// (enabled with `--auth-header-fields-enabled`). The identity is
+/// trustworthy only because the proxy also strips client-sent `x-remote-*`
+/// headers before injecting its own. The proxy's `x-remote-groups` header,
+/// by contrast, is a delimiter-joined string, and Kubernetes group names may
+/// themselves contain the separator, so it cannot be decoded losslessly and
+/// is never used for authorization.
 #[derive(Debug, Clone, PartialEq)]
-pub enum RequestIdentity {
-    BearerToken(String),
-    RemoteUser { username: String, groups: Vec<String> },
+pub struct RequestIdentity {
+    pub username: String,
 }
 
-/// resolve_identity picks the identity for a request: a bearer token when one
-/// is present (it is self-authenticating via TokenReview), otherwise the
-/// proxy-propagated remote user, otherwise an error. The bearer token takes
-/// priority because it is verified against the API server, while the remote
-/// headers are only trustworthy when the request arrived through the proxy.
-pub fn resolve_identity(
-    auth_token: Option<&str>,
-    remote_user: Option<&str>,
-    remote_groups: Option<&str>,
-) -> Result<RequestIdentity, AuthError> {
-    if let Some(token) = auth_token.filter(|token| !token.is_empty()) {
-        return Ok(RequestIdentity::BearerToken(token.to_string()));
-    }
-    if let Some(username) = remote_user.filter(|username| !username.is_empty()) {
-        let groups = remote_groups
-            .map(|joined| {
-                joined
-                    .split(',')
-                    .filter(|group| !group.is_empty())
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        return Ok(RequestIdentity::RemoteUser {
-            username: username.to_string(),
-            groups,
-        });
-    }
-    Err(AuthError::Unauthenticated(
-        "no authenticated identity on request".to_string(),
-    ))
+/// resolve_identity picks the identity for a request: the proxy-propagated
+/// remote username when present, otherwise `None` so the request is treated
+/// as unauthenticated.
+pub fn resolve_identity(remote_user: Option<&str>) -> Option<RequestIdentity> {
+    let username = remote_user.filter(|username| !username.is_empty())?;
+    Some(RequestIdentity {
+        username: username.to_string(),
+    })
 }
 
 /// RequestAuthorizer verifies that the requester behind a request identity may
@@ -51,7 +32,7 @@ pub fn resolve_identity(
 /// their behalf.
 #[async_trait::async_trait]
 pub trait RequestAuthorizer: Send + Sync {
-    /// check_secret_access resolves the identity to an authenticated user and
+    /// check_secret_access reviews the proxy-authenticated identity and
     /// returns an error if that user cannot read the secret.
     async fn check_secret_access(
         &self,
@@ -69,12 +50,15 @@ impl RequestAuthorizer for KubeAuthClient {
         tenant_id: &str,
         secret_name: &str,
     ) -> Result<(), AuthError> {
-        let auth_info = match identity {
-            RequestIdentity::BearerToken(token) => self.authenticate(token).await?,
-            RequestIdentity::RemoteUser { username, groups } => AuthInfo {
-                username: username.clone(),
-                groups: groups.clone(),
-            },
+        let auth_info = AuthInfo {
+            username: identity.username.clone(),
+            // Group membership cannot be transported losslessly through
+            // the proxy's delimiter-joined header, so the identity is
+            // reviewed by username alone. That can only under-approximate
+            // the caller's real access: the review matches bindings that
+            // name the user directly and never grants anything the
+            // caller does not hold.
+            groups: Vec::new(),
         };
         self.authorize_secret(&auth_info, tenant_id, secret_name).await
     }
@@ -85,75 +69,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn resolve_identity_prefers_bearer_token_over_remote_headers() {
-        let identity = resolve_identity(Some("some-token"), Some("proxy-user"), Some("group-a,group-b")).unwrap();
-
-        assert_eq!(identity, RequestIdentity::BearerToken("some-token".to_string()));
-    }
-
-    #[test]
-    fn resolve_identity_uses_remote_user_when_no_token() {
-        let identity = resolve_identity(None, Some("proxy-user"), Some("group-a,group-b")).unwrap();
+    fn resolve_identity_uses_remote_user() {
+        let identity = resolve_identity(Some("proxy-user")).unwrap();
 
         assert_eq!(
             identity,
-            RequestIdentity::RemoteUser {
-                username: "proxy-user".to_string(),
-                groups: vec!["group-a".to_string(), "group-b".to_string()],
+            RequestIdentity {
+                username: "proxy-user".to_string()
             },
         );
     }
 
     #[test]
-    fn resolve_identity_without_groups_yields_empty_group_list() {
-        let identity = resolve_identity(None, Some("proxy-user"), None).unwrap();
-
-        assert_eq!(
-            identity,
-            RequestIdentity::RemoteUser {
-                username: "proxy-user".to_string(),
-                groups: vec![]
-            },
-        );
-    }
-
-    #[test]
-    fn resolve_identity_with_empty_groups_header_yields_no_groups() {
-        let identity = resolve_identity(None, Some("proxy-user"), Some("")).unwrap();
-
-        assert_eq!(
-            identity,
-            RequestIdentity::RemoteUser {
-                username: "proxy-user".to_string(),
-                groups: vec![],
-            },
-        );
-    }
-
-    #[test]
-    fn resolve_identity_skips_empty_segments_in_groups_header() {
-        let identity = resolve_identity(None, Some("proxy-user"), Some("group-a,,group-b")).unwrap();
-
-        assert_eq!(
-            identity,
-            RequestIdentity::RemoteUser {
-                username: "proxy-user".to_string(),
-                groups: vec!["group-a".to_string(), "group-b".to_string()],
-            },
-        );
-    }
-
-    #[test]
-    fn resolve_identity_fails_without_token_or_remote_user() {
-        let result = resolve_identity(None, None, None);
-
-        assert!(matches!(result, Err(AuthError::Unauthenticated(_))));
+    fn resolve_identity_fails_without_remote_user() {
+        assert!(resolve_identity(None).is_none());
     }
 
     #[test]
     fn resolve_identity_fails_with_empty_remote_user() {
-        let result = resolve_identity(None, Some(""), Some("group-a"));
-
-        assert!(matches!(result, Err(AuthError::Unauthenticated(_))));
+        assert!(resolve_identity(Some("")).is_none());
     }
 }

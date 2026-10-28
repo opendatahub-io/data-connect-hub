@@ -51,8 +51,6 @@ pub struct AuthConfig {
     pub enabled: bool,
     #[serde(default = "default_auth_cache_ttl_secs")]
     pub cache_ttl_secs: u64,
-    #[serde(default)]
-    pub token_review_audiences: Vec<String>,
 }
 
 fn default_auth_enabled() -> bool {
@@ -68,7 +66,6 @@ impl Default for AuthConfig {
         Self {
             enabled: default_auth_enabled(),
             cache_ttl_secs: default_auth_cache_ttl_secs(),
-            token_review_audiences: Vec::new(),
         }
     }
 }

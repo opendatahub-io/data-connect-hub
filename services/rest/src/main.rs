@@ -219,14 +219,13 @@ async fn main() -> Result<()> {
         config.global_connection_types.tenant_id.clone(),
     );
     if config.auth.enabled {
-        tracing::info!(
-            "Auth enabled (cache TTL: {}s, token_review_audiences: {:?})",
-            config.auth.cache_ttl_secs,
-            config.auth.token_review_audiences
-        );
+        tracing::info!("Auth enabled (cache TTL: {}s)", config.auth.cache_ttl_secs);
         let auth_client = kube_utils::auth::KubeAuthClient::try_default(
             std::time::Duration::from_secs(config.auth.cache_ttl_secs),
-            config.auth.token_review_audiences.clone(),
+            // kube-rbac-proxy strips the Authorization header, so the
+            // rest-service never reviews request tokens and configures no
+            // TokenReview audiences.
+            Vec::new(),
         )
         .await?;
         service = service.with_authorizer(std::sync::Arc::new(auth_client));

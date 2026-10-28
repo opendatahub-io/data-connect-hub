@@ -76,6 +76,7 @@ DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
 DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 
 E2E_SA_NAME="dch-e2e-user"
+E2E_SECRET_READER_SA_NAME="dch-e2e-secret-reader"
 E2E_DENIED_SA_NAME="dch-e2e-denied-user"
 PG_SECRET="dch-e2e-pg-creds"
 S3_SECRET="dch-e2e-s3-creds"
@@ -101,6 +102,10 @@ setup_user_accounts() {
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
+    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$E2E_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
     if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
@@ -119,6 +124,22 @@ setup_user_rbac() {
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-secret-export \
             --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+
+    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        # The secret-reader SA holds the same API access as the e2e user so
+        # export tests can cover both outcomes of the service-side
+        # SubjectAccessReview (see setup_service_rbac for its secret read).
+        kubectl delete rolebinding dch-e2e-secret-reader-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding dch-e2e-secret-reader-access \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read-write \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" >/dev/null
+        kubectl create rolebinding dch-e2e-secret-reader-export-secret-rb \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-secret-export \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 }
@@ -147,13 +168,18 @@ setup_service_rbac() {
             --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-        # The e2e user must be able to read the datasource secrets itself:
-        # export_connection verifies the requester's access to the
-        # connection's credentials_ref secret.
-        kubectl create rolebinding dch-e2e-user-secret-read-rb \
+        # The secret-reader SA must be able to read the datasource secrets
+        # itself: export_connection verifies the requester's access to the
+        # connection's credentials_ref secret. The plain e2e user
+        # deliberately lacks this binding so the service-side check denies
+        # its exports. The old binding name is removed because it granted
+        # the plain e2e user and would keep the denial test from passing.
+        kubectl delete rolebinding dch-e2e-user-secret-read-rb \
+            -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding dch-e2e-secret-reader-secret-read-rb \
             -n "$DCH_TENANT_ID" \
             --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 
@@ -440,6 +466,9 @@ generate_tokens() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
+    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_SECRET_READER_AUTH_TOKEN=$(kubectl create token "$E2E_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
     if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         DCH_DENIED_AUTH_TOKEN=$(kubectl create token "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
@@ -455,6 +484,7 @@ DCH_GATEWAY_ENDPOINT=${DCH_GATEWAY_ENDPOINT}
 DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
+DCH_SECRET_READER_AUTH_TOKEN=${DCH_SECRET_READER_AUTH_TOKEN}
 DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
