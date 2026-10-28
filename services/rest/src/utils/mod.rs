@@ -46,6 +46,31 @@ impl Default for MetricsConfig {
 }
 
 #[derive(Debug, Deserialize, Clone)]
+pub struct AuthConfig {
+    #[serde(default = "default_auth_enabled")]
+    pub enabled: bool,
+    #[serde(default = "default_auth_cache_ttl_secs")]
+    pub cache_ttl_secs: u64,
+}
+
+fn default_auth_enabled() -> bool {
+    false
+}
+
+fn default_auth_cache_ttl_secs() -> u64 {
+    300
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_auth_enabled(),
+            cache_ttl_secs: default_auth_cache_ttl_secs(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Clone)]
 pub struct ServerConfig {
     pub server: Server,
     pub database: DatabaseConfig,
@@ -55,6 +80,8 @@ pub struct ServerConfig {
     pub flight_service: FlightService,
     #[serde(default)]
     pub metrics: MetricsConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 pub fn default_secret_labels() -> HashMap<String, String> {
@@ -104,6 +131,55 @@ mod tests {
         assert!(server_config.metrics.enabled);
         assert_eq!(server_config.metrics.address, "127.0.0.2");
         assert_eq!(server_config.metrics.port, 9191);
+    }
+
+    fn auth_config_toml(auth_section: &str) -> String {
+        format!(
+            r#"
+            [database]
+            url = "postgresql://user-a@localhost:5432/db-a"
+
+            [server]
+            address = "127.0.0.1"
+            port = 8080
+
+            [global-connection-types]
+            tenant-id = "opendatahub"
+
+            [flight-service]
+            ca-cert = "/etc/tls/flight/ca.crt"
+
+            {auth_section}
+            "#
+        )
+    }
+
+    fn deserialize_auth_config(toml_str: &str) -> ServerConfig {
+        let config = Config::builder()
+            .add_source(config::File::from_str(toml_str, config::FileFormat::Toml))
+            .build()
+            .unwrap();
+
+        config.try_deserialize().unwrap()
+    }
+
+    #[test]
+    fn test_auth_defaults_to_disabled_without_auth_section() {
+        let server_config = deserialize_auth_config(&auth_config_toml(""));
+        assert!(!server_config.auth.enabled);
+        assert_eq!(server_config.auth.cache_ttl_secs, 300);
+    }
+
+    #[test]
+    fn test_auth_can_be_explicitly_enabled() {
+        let toml_str = auth_config_toml(
+            r#"
+            [auth]
+            enabled = true
+            "#,
+        );
+        let server_config = deserialize_auth_config(&toml_str);
+        assert!(server_config.auth.enabled);
     }
 
     #[test]

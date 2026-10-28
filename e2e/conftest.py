@@ -99,6 +99,11 @@ def auth_token() -> str:
 
 
 @pytest.fixture(scope="session")
+def secret_reader_auth_token() -> str:
+    return os.environ.get("DCH_SECRET_READER_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
 def denied_auth_token() -> str:
     return os.environ.get("DCH_DENIED_AUTH_TOKEN", "")
 
@@ -213,6 +218,35 @@ def dch_client(
 def rest_client(dch_client: DataConnectClient) -> DataConnectClient:
     """Alias of ``dch_client``, kept for readability in REST-only tests."""
     return dch_client
+
+
+@pytest.fixture(scope="session")
+def secret_reader_client(
+    gateway_endpoint: str,
+    tenant_id: str,
+    secret_reader_auth_token: str,
+    ca_cert: str | None,
+    insecure: bool,
+) -> DataConnectClient:
+    """Client for the secret-reader SA.
+
+    The runner gives this SA the same API access as the default e2e user
+    plus read access to the datasource secrets, so secret-export tests can
+    cover both outcomes of the service-side SubjectAccessReview.
+    """
+    if not secret_reader_auth_token:
+        pytest.skip("DCH_SECRET_READER_AUTH_TOKEN not set")
+    client = DataConnectClient(
+        gateway_endpoint,
+        token=secret_reader_auth_token,
+        tenant_id=tenant_id,
+        ca_cert=ca_cert,
+        insecure=insecure,
+        max_retries=3,
+        rest_timeout=15.0,
+    )
+    yield client  # type: ignore[misc]
+    client.close()
 
 
 @pytest.fixture(scope="session")

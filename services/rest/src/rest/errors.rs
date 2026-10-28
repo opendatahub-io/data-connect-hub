@@ -2,6 +2,7 @@ use actix_web::web::{JsonConfig, PathConfig, QueryConfig};
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
 use commons::api::errors::SecretStoreError;
 use commons::api::errors::{ConnectorError, MetaStoreError};
+use kube_utils::auth::AuthError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
@@ -177,6 +178,36 @@ pub fn query_config() -> QueryConfig {
 
 pub fn path_config() -> PathConfig {
     PathConfig::default().error_handler(|err, _req| extraction_error("invalid_path", err.into()))
+}
+
+impl From<AuthError> for RestErrorResponse {
+    fn from(err: AuthError) -> Self {
+        let (code, status, message) = match &err {
+            // Rejection reasons can echo API-server internals, so they are
+            // logged but not returned to the caller.
+            AuthError::Unauthenticated(_) => {
+                tracing::warn!("{err}");
+                (
+                    "unauthenticated",
+                    401,
+                    "An authenticated identity is required".to_string(),
+                )
+            },
+            // The denial names the secret and tenant namespace the caller
+            // already supplied, so it is returned verbatim to make the
+            // failure actionable for the end user.
+            AuthError::Forbidden(message) => ("forbidden", 403, message.clone()),
+            AuthError::TokenReviewError(_) | AuthError::AccessReviewError(_) | AuthError::Internal(_) => {
+                tracing::error!("{err}");
+                ("auth_error", 500, "Authorization check failed".to_string())
+            },
+        };
+        RestErrorResponse {
+            code: code.to_string(),
+            message,
+            status,
+        }
+    }
 }
 
 impl From<EndpointError> for RestErrorResponse {

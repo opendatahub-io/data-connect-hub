@@ -21,6 +21,7 @@ use url::Url;
 /// SERVICE_NAME identifies this service in exported traces.
 const SERVICE_NAME: &str = "dch-rest-service";
 
+mod auth;
 mod clients;
 mod rest;
 #[allow(unused)]
@@ -210,13 +211,28 @@ async fn main() -> Result<()> {
 
     let flight_ca_cert = read_ca_cert(&config).await?;
 
-    let service = Arc::new(ApiService::new(
+    let mut service = ApiService::new(
         meta_store,
         Arc::new(secret_store),
         flight_ca_cert,
         config.server.sa_token_file.clone(),
         config.global_connection_types.tenant_id.clone(),
-    ));
+    );
+    if config.auth.enabled {
+        tracing::info!("Auth enabled (cache TTL: {}s)", config.auth.cache_ttl_secs);
+        let auth_client = kube_utils::auth::KubeAuthClient::try_default(
+            std::time::Duration::from_secs(config.auth.cache_ttl_secs),
+            // kube-rbac-proxy strips the Authorization header, so the
+            // rest-service never reviews request tokens and configures no
+            // TokenReview audiences.
+            Vec::new(),
+        )
+        .await?;
+        service = service.with_authorizer(std::sync::Arc::new(auth_client));
+    } else {
+        tracing::warn!("Auth is DISABLED — secret references are not checked against the requester");
+    }
+    let service = Arc::new(service);
 
     let metrics_enabled = config.metrics.enabled;
     if metrics_enabled {
