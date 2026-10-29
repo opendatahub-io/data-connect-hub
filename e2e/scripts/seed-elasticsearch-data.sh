@@ -32,7 +32,15 @@ done
 
 POD_NAME="dch-e2e-es-seed"
 
-kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+# Use OpenShift's namespace-assigned base UID when available; fall back to the
+# image user's UID (curlimages/curl declares USER as a name (curl_user), which
+# kubelet cannot verify against runAsNonRoot on clusters without SCC mutation
+# (kind/containerd)).
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=100}"
+
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
 
 kubectl apply -n "$NAMESPACE" -f - <<EOF
@@ -57,10 +65,7 @@ spec:
         capabilities:
           drop: ["ALL"]
         runAsNonRoot: true
-        # curlimages/curl declares USER as a name (curl_user), which kubelet
-        # cannot verify against runAsNonRoot on clusters without SCC mutation
-        # (kind/containerd). Pin the image user's UID explicitly.
-        runAsUser: 100
+        runAsUser: ${RUN_AS_USER}
         seccompProfile:
           type: RuntimeDefault
       env:
@@ -145,4 +150,5 @@ kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
     echo "ERROR: seed pod '$POD_NAME' failed" >&2
     exit 1
 }
-kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
+# Leave the completed seed pod in place for inspection; the next run deletes
+# and recreates it.

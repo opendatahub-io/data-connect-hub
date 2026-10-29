@@ -117,7 +117,10 @@ impl KubeAuthClient {
     }
 
     pub async fn authorize(&self, auth_info: &AuthInfo, tenant_id: &str, verb: &str) -> Result<(), AuthError> {
-        let key = format!("{}:{:?}:{}:{}", auth_info.username, auth_info.groups, tenant_id, verb);
+        let key = format!(
+            "conn:{}:{:?}:{}:{}",
+            auth_info.username, auth_info.groups, tenant_id, verb
+        );
         let client = self.client.clone();
         let username = auth_info.username.clone();
         let groups = auth_info.groups.clone();
@@ -168,6 +171,91 @@ impl KubeAuthClient {
             )))
         }
     }
+
+    /// authorize_secret checks that the requesting user (not the service's own
+    /// identity) may read the named secret in the tenant namespace. It exists
+    /// so services that resolve a connection's `credentials_ref` on a user's
+    /// behalf cannot act as a confused deputy for secrets the user cannot
+    /// read directly.
+    pub async fn authorize_secret(
+        &self,
+        auth_info: &AuthInfo,
+        tenant_id: &str,
+        secret_name: &str,
+    ) -> Result<(), AuthError> {
+        let key = secret_cache_key(auth_info, tenant_id, secret_name);
+        let spec = secret_review_spec(auth_info, tenant_id, secret_name);
+        let client = self.client.clone();
+
+        let allowed = self
+            .sar_cache
+            .try_get_with(key, async move {
+                let secret_name = spec
+                    .resource_attributes
+                    .as_ref()
+                    .and_then(|a| a.name.clone())
+                    .unwrap_or_default();
+                debug!(
+                    "Performing SubjectAccessReview for user={} namespace={} secret={}",
+                    spec.user.as_deref().unwrap_or_default(),
+                    spec.resource_attributes
+                        .as_ref()
+                        .and_then(|a| a.namespace.clone())
+                        .unwrap_or_default(),
+                    secret_name
+                );
+                let sar = SubjectAccessReview {
+                    spec,
+                    ..Default::default()
+                };
+
+                let api: Api<SubjectAccessReview> = Api::all(client);
+                let result = api
+                    .create(&PostParams::default(), &sar)
+                    .await
+                    .map_err(|e| AuthError::AccessReviewError(e.to_string()))?;
+
+                let status = result
+                    .status
+                    .ok_or_else(|| AuthError::Internal("SAR returned no status".into()))?;
+
+                debug!("SubjectAccessReview result: allowed={}", status.allowed);
+                Ok(status.allowed)
+            })
+            .await
+            .map_err(|e: Arc<AuthError>| e.as_ref().clone())?;
+
+        if allowed {
+            Ok(())
+        } else {
+            Err(AuthError::Forbidden(format!(
+                "access denied for secret {secret_name} in namespace {tenant_id}"
+            )))
+        }
+    }
+}
+
+fn secret_cache_key(auth_info: &AuthInfo, tenant_id: &str, secret_name: &str) -> String {
+    format!(
+        "secret:{}:{:?}:{}:secrets:get:{}",
+        auth_info.username, auth_info.groups, tenant_id, secret_name
+    )
+}
+
+fn secret_review_spec(auth_info: &AuthInfo, tenant_id: &str, secret_name: &str) -> SubjectAccessReviewSpec {
+    SubjectAccessReviewSpec {
+        user: Some(auth_info.username.clone()),
+        groups: Some(auth_info.groups.clone()),
+        resource_attributes: Some(ResourceAttributes {
+            namespace: Some(tenant_id.to_string()),
+            verb: Some("get".into()),
+            group: Some("".into()),
+            resource: Some("secrets".into()),
+            name: Some(secret_name.to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
 }
 
 fn has_compatible_audience(requested: &[String], returned: Option<&[String]>) -> bool {
@@ -183,7 +271,14 @@ fn has_compatible_audience(requested: &[String], returned: Option<&[String]>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::has_compatible_audience;
+    use super::{AuthInfo, has_compatible_audience, secret_review_spec};
+
+    fn auth_info() -> AuthInfo {
+        AuthInfo {
+            username: "system:serviceaccount:tenant-a:dch-test-user".to_string(),
+            groups: vec!["system:serviceaccounts".to_string()],
+        }
+    }
 
     #[test]
     fn rejects_authenticated_response_without_returned_audience() {
@@ -209,5 +304,50 @@ mod tests {
         ];
 
         assert!(has_compatible_audience(&requested, Some(returned.as_slice())));
+    }
+
+    #[test]
+    fn secret_review_spec_targets_named_secret_in_core_group() {
+        let spec = secret_review_spec(&auth_info(), "tenant-a", "db-secret");
+
+        let attrs = spec.resource_attributes.expect("resource attributes");
+        assert_eq!(attrs.namespace.as_deref(), Some("tenant-a"));
+        assert_eq!(attrs.verb.as_deref(), Some("get"));
+        assert_eq!(attrs.group.as_deref(), Some(""));
+        assert_eq!(attrs.resource.as_deref(), Some("secrets"));
+        assert_eq!(attrs.name.as_deref(), Some("db-secret"));
+        assert_eq!(
+            spec.user.as_deref(),
+            Some("system:serviceaccount:tenant-a:dch-test-user")
+        );
+        assert_eq!(spec.groups, Some(vec!["system:serviceaccounts".to_string()]));
+    }
+
+    #[test]
+    fn secret_review_spec_scopes_cache_key_by_secret_name() {
+        let first = super::secret_cache_key(&auth_info(), "tenant-a", "db-secret");
+        let second = super::secret_cache_key(&auth_info(), "tenant-a", "other-secret");
+        let other_tenant = super::secret_cache_key(&auth_info(), "tenant-b", "db-secret");
+
+        assert_ne!(first, second);
+        assert_ne!(first, other_tenant);
+    }
+
+    #[test]
+    fn secret_cache_key_is_namespaced_apart_from_tenant_cache_keys() {
+        // The conn-level authorize() key is "conn:{user}:{groups}:{tenant}:{verb}";
+        // the two key families share one cache, so they must be structurally
+        // disjoint even for identical users, tenants, and verbs.
+        let secret_key = super::secret_cache_key(&auth_info(), "tenant-a", "get");
+        let conn_key = format!(
+            "conn:{}:{:?}:{}:{}",
+            auth_info().username,
+            auth_info().groups,
+            "tenant-a",
+            "get"
+        );
+
+        assert!(secret_key.starts_with("secret:"));
+        assert_ne!(secret_key, conn_key);
     }
 }

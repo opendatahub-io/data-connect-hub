@@ -17,6 +17,7 @@ use commons::api::secret::Secret;
 use commons::api::storage::MetaStore;
 use commons::api::storage::SecretStore;
 use futures::StreamExt;
+use kube_utils::auth::AuthError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -31,11 +32,33 @@ use crate::state::ApiService;
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
+    pub identity: Option<crate::auth::RequestIdentity>,
 }
 
 #[derive(Serialize)]
 struct HealthResponse {
     service: String,
+}
+
+/// authorize_secret_ref checks that the requester behind the request's
+/// identity may read the named secret before the service resolves it on their
+/// behalf. It is a no-op when auth is disabled (no authorizer configured).
+async fn authorize_secret_ref(
+    service: &ApiService,
+    ctx: &ApiContext,
+    secret_name: &str,
+) -> Result<(), RestErrorResponse> {
+    let Some(authorizer) = service.authorizer.as_ref() else {
+        return Ok(());
+    };
+    let identity = ctx
+        .identity
+        .as_ref()
+        .ok_or_else(|| AuthError::Unauthenticated("no authenticated identity on request".to_string()))?;
+    authorizer
+        .check_secret_access(identity, &ctx.tenant_id, secret_name)
+        .await?;
+    Ok(())
 }
 
 pub async fn health() -> Result<HttpResponse, RestErrorResponse> {
@@ -458,6 +481,17 @@ pub async fn export_connection(
         .meta_store
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
         .await?;
+
+    if connection.resource.credentials_ref.secret.is_empty() {
+        return Err(ValidationError::InvalidSecret.into());
+    }
+
+    authorize_secret_ref(
+        service.as_ref(),
+        &ctx,
+        connection.resource.credentials_ref.secret.as_str(),
+    )
+    .await?;
 
     let mut props = HashMap::new();
 
@@ -1018,6 +1052,59 @@ mod tests {
         ))
     }
 
+    struct StubAuthorizer {
+        result: Result<(), kube_utils::auth::AuthError>,
+        seen_identity: RwLock<Option<crate::auth::RequestIdentity>>,
+    }
+
+    impl StubAuthorizer {
+        fn allowing() -> Self {
+            Self {
+                result: Ok(()),
+                seen_identity: RwLock::new(None),
+            }
+        }
+
+        fn denying() -> Self {
+            Self {
+                result: Err(kube_utils::auth::AuthError::Forbidden(
+                    "access denied for secret my-pg-creds in namespace test-tenant".to_string(),
+                )),
+                seen_identity: RwLock::new(None),
+            }
+        }
+
+        fn seen_identity(&self) -> Option<crate::auth::RequestIdentity> {
+            self.seen_identity.read().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::auth::RequestAuthorizer for StubAuthorizer {
+        async fn check_secret_access(
+            &self,
+            identity: &crate::auth::RequestIdentity,
+            _tenant_id: &str,
+            _secret_name: &str,
+        ) -> Result<(), kube_utils::auth::AuthError> {
+            *self.seen_identity.write().unwrap() = Some(identity.clone());
+            self.result.clone()
+        }
+    }
+
+    fn test_service_with_authorizer(authorizer: Arc<StubAuthorizer>) -> web::Data<ApiService> {
+        web::Data::new(
+            ApiService::new(
+                Arc::new(StubMetaStore),
+                Arc::new(StubSecretStore::new()),
+                None,
+                None,
+                "test-tenant".to_string(),
+            )
+            .with_authorizer(authorizer),
+        )
+    }
+
     fn test_app_config(cfg: &mut web::ServiceConfig) {
         cfg.service(
             web::scope(&format!("/api/{API_VERSION}/data"))
@@ -1049,6 +1136,106 @@ mod tests {
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 200);
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_denied_returns_403() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(Arc::new(StubAuthorizer::denying())))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("x-remote-user", "some-user"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 403);
+        // The denial message names the secret and namespace so the caller can
+        // tell which reference was rejected; it must reach the response body.
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "forbidden");
+        assert_eq!(
+            body["message"],
+            "access denied for secret my-pg-creds in namespace test-tenant"
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_export_connection_allowed_creates_secret() {
+        let svc = test_service_with_authorizer(Arc::new(StubAuthorizer::allowing()));
+        let app = test::init_service(App::new().app_data(svc.clone()).configure(test_app_config)).await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("x-remote-user", "some-user"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+        let secret = svc
+            .secret_store
+            .get_secret("test-tenant", "exported-secret")
+            .await
+            .expect("exported secret should exist");
+        assert_eq!(secret.properties["username"], "pg_user");
+    }
+
+    #[actix_web::test]
+    async fn test_export_ignores_remote_groups_header() {
+        // Regression test: kube-rbac-proxy renders x-remote-groups by joining
+        // group names with a separator, so a caller whose single literal group
+        // is "ordinary,secret-readers" must not be reconstructed as a member
+        // of "secret-readers". The header is never parsed: the identity
+        // carries the username only and is reviewed by username alone.
+        let authorizer = Arc::new(StubAuthorizer::allowing());
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(authorizer.clone()))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("x-remote-user", "attacker"))
+            .insert_header(("x-remote-groups", "ordinary,secret-readers"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+        assert_eq!(
+            authorizer.seen_identity(),
+            Some(crate::auth::RequestIdentity {
+                username: "attacker".to_string()
+            })
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_export_without_remote_user_returns_401() {
+        // Regression test: kube-rbac-proxy authenticates the caller and
+        // strips the Authorization header, so a bearer token alone must not
+        // identify the requester; only the proxy-injected x-remote-user does.
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(Arc::new(StubAuthorizer::allowing())))
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("authorization", "Bearer some-token"))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 401);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["code"], "unauthenticated");
     }
 
     #[actix_web::test]
