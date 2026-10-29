@@ -409,6 +409,35 @@ var _ = Describe("DataConnectService Controller", func() {
 			deleteCR()
 		})
 
+		It("should not publish status from a stale reconciliation", func() {
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			initialGeneration := cr.Generation
+
+			cr.Spec.RestService = &dchv1alpha1.ServiceOverrides{}
+			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+
+			result, err := reconciler().updateStatus(
+				ctx,
+				reconcile.Request{NamespacedName: crKey},
+				&platformConfig{},
+				initialGeneration,
+				conditionTypeReady,
+				func(*dchv1alpha1.DataConnectService) {},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.Requeue).To(BeTrue())
+
+			current := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, current)).To(Succeed())
+			Expect(current.Status.Phase).To(BeEmpty())
+		})
+
 		It("should mark the CR Degraded and create no autoscaling resources", func() {
 			trigger := validAutoscalingTrigger()
 			trigger.ServerAddress = "http://attacker.example"

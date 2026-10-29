@@ -257,7 +257,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err := validateAutoscaling(&cr); err != nil {
 		log.Error(err, "autoscaling validation failed")
 		platCfg := r.readPlatformConfig(ctx, cr.Namespace)
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidAutoscaling", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidAutoscaling", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "InvalidAutoscaling", "Autoscaling configuration is invalid")
@@ -270,7 +270,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Phase 1: Validate database secret exists
 	if err := r.validateDatabaseSecret(ctx, cr.Namespace); err != nil {
 		log.Error(err, "database secret validation failed")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseSecretMissing",
@@ -289,7 +289,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if errors.As(err, &conflict) {
 				reason = "ResourceConflict"
 			}
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
 				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
 				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, reason, "Failed to apply manifests")
@@ -308,7 +308,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if errors.As(err, &conflict) {
 			reason = "ResourceConflict"
 		}
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Service manifests were applied")
@@ -322,7 +322,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	pendingDeployments, err := r.pendingDeployments(ctx, cr.Namespace, cr.UID)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -331,7 +331,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if len(pendingDeployments) > 0 {
 		msg := fmt.Sprintf("Waiting for deployments: %v", pendingDeployments)
 		log.Info(msg)
-		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
 			r.gatewayStatus(ctx, cr, &platCfg)
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -343,7 +343,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Phase 5: Register flight service instances
 	if err := r.registerFlightService(ctx, &cr); err != nil {
 		log.Error(err, "failed to register flight service")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -351,7 +351,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// All ready
-	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
+	return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -364,12 +364,16 @@ func (r *DataConnectServiceReconciler) updateStatus(
 	ctx context.Context,
 	req ctrl.Request,
 	platCfg *platformConfig,
+	expectedGeneration int64,
 	phase string,
 	mutate func(*dchv1alpha1.DataConnectService),
 ) (ctrl.Result, error) {
 	var cr dchv1alpha1.DataConnectService
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, err
+	}
+	if cr.Generation != expectedGeneration {
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	cr.Status.Phase = phase
