@@ -318,12 +318,13 @@ func newAutoscalingObject(apiVersion, kind, name string, gvk schema.GroupVersion
 	return result
 }
 
+// autoscalingName derives an autoscaling resource name from the CR name by
+// pure concatenation, matching the flight and route derivation. Names are
+// never truncated: distinct CR names always yield distinct resource names,
+// and the API server rejects any name exceeding the kind's length limit
+// instead of silently colliding.
 func autoscalingName(crName, suffix string) string {
-	name := crName + suffix
-	if len(name) > 63 {
-		name = strings.TrimSuffix(name[:63], "-")
-	}
-	return name
+	return crName + suffix
 }
 
 func (r *DataConnectServiceReconciler) reconcileAutoscaling(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {

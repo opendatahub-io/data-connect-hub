@@ -17,12 +17,24 @@ limitations under the License.
 package controller
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/apimachinery/pkg/types"
+	clientgotesting "k8s.io/client-go/testing"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -329,5 +341,380 @@ func validAutoscalingTrigger() dchv1alpha1.AutoscalingTrigger {
 		ServerAddress: autoscalingMonitoringEndpoint,
 		Query:         "sum(rate(requests_total[2m]))",
 		Target:        dchv1alpha1.AutoscalingTarget{Type: "Value", Value: "0.4"},
+	}
+}
+
+// --- Name generation: pure concatenation, no truncation ---
+
+func autoscalingNameSuffixes() []string {
+	return []string{
+		autoscalingServiceAccountSuffix,
+		autoscalingSecretSuffix,
+		autoscalingAuthSuffix,
+		autoscalingRoleSuffix,
+		autoscalingBindingSuffix,
+		autoscalingViewBindingSuffix,
+		"-rest" + autoscalingScaledObjectSuffix,
+		"-flight" + autoscalingScaledObjectSuffix,
+	}
+}
+
+func TestAutoscalingNameNeverTruncates(t *testing.T) {
+	t.Parallel()
+
+	crName := strings.Repeat("a", 70)
+	for _, suffix := range autoscalingNameSuffixes() {
+		if got, want := autoscalingName(crName, suffix), crName+suffix; got != want {
+			t.Errorf("autoscalingName(70-char name, %q) = %q, want full concatenation %q", suffix, got, want)
+		}
+	}
+}
+
+func TestAutoscalingNameDistinctForCRNamesSharingPrefix(t *testing.T) {
+	t.Parallel()
+
+	prefix := strings.Repeat("a", 63)
+	cr1, cr2 := prefix+"-one", prefix+"-two"
+	for _, suffix := range autoscalingNameSuffixes() {
+		if autoscalingName(cr1, suffix) == autoscalingName(cr2, suffix) {
+			t.Errorf("autoscalingName() collides for suffix %q: both CRs yield %q", suffix, autoscalingName(cr1, suffix))
+		}
+	}
+}
+
+func TestAutoscalingResourceNamesUniqueForLongCRName(t *testing.T) {
+	t.Parallel()
+
+	crName := strings.Repeat("a", 63) + "-one"
+	resources := autoscalingResourceNames(crName)
+	if len(resources) != 8 {
+		t.Fatalf("autoscalingResourceNames() rendered %d resources, want 8", len(resources))
+	}
+
+	seen := map[string]struct{}{}
+	for _, resource := range resources {
+		key := resource.GetKind() + "/" + resource.GetName()
+		if _, duplicate := seen[key]; duplicate {
+			t.Errorf("autoscalingResourceNames() yields duplicate %s", key)
+		}
+		seen[key] = struct{}{}
+		if !strings.HasPrefix(resource.GetName(), crName) {
+			t.Errorf("name %q does not preserve the full CR name", resource.GetName())
+		}
+	}
+}
+
+// --- Reconcile-level behavior with a fake client ---
+
+const autoscalingTestNamespace = "dch-autoscaling-test"
+
+func autoscalingTestScheme(t *testing.T) *runtime.Scheme {
+	t.Helper()
+	scheme := runtime.NewScheme()
+	if err := dchv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatalf("registering DataConnectService scheme: %v", err)
+	}
+	for _, gvk := range []schema.GroupVersionKind{
+		{Version: "v1", Kind: kindServiceAccount},
+		{Version: "v1", Kind: kindSecret},
+		{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRole},
+		{Group: autoscalingRBACGroup, Version: "v1", Kind: kindRoleBinding},
+		scaledObjectGVK,
+		triggerAuthGVK,
+	} {
+		scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
+		scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
+	}
+	return scheme
+}
+
+func autoscalingEnabledCR(name, uid string) *dchv1alpha1.DataConnectService {
+	return &dchv1alpha1.DataConnectService{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: autoscalingTestNamespace, UID: types.UID(uid)},
+		Spec: dchv1alpha1.DataConnectServiceSpec{
+			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
+			FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
+				AutoScaling: validAutoscalingConfig(),
+			}},
+		},
+	}
+}
+
+// autoscalingFakeBuilder returns a fake client builder backed by a plain
+// object tracker. The default field-managed tracker cannot compare
+// unstructured objects registered under several GVKs; a plain tracker is
+// sufficient because applyResources never relies on managed fields.
+func autoscalingFakeBuilder(t *testing.T, scheme *runtime.Scheme) *fake.ClientBuilder {
+	t.Helper()
+	tracker := clientgotesting.NewObjectTracker(scheme, serializer.NewCodecFactory(scheme).UniversalDecoder())
+	return fake.NewClientBuilder().WithScheme(scheme).WithObjectTracker(tracker)
+}
+
+func newAutoscalingReconciler(t *testing.T, objects ...client.Object) (*DataConnectServiceReconciler, client.Client) {
+	t.Helper()
+	scheme := autoscalingTestScheme(t)
+	cli := autoscalingFakeBuilder(t, scheme).WithObjects(objects...).Build()
+	return &DataConnectServiceReconciler{Client: cli, Scheme: scheme}, cli
+}
+
+func getAutoscalingResource(t *testing.T, cli client.Client, resource *unstructured.Unstructured) *unstructured.Unstructured {
+	t.Helper()
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(resource.GroupVersionKind())
+	key := client.ObjectKey{Namespace: autoscalingTestNamespace, Name: resource.GetName()}
+	if err := cli.Get(context.Background(), key, live); err != nil {
+		t.Fatalf("getting %s %s: %v", resource.GetKind(), resource.GetName(), err)
+	}
+	return live
+}
+
+func TestReconcileAutoscalingTwoLongNameCRsUniqueAndOwned(t *testing.T) {
+	t.Parallel()
+
+	prefix := strings.Repeat("a", 63)
+	cr1 := autoscalingEnabledCR(prefix+"-one", "uid-cr-one")
+	cr2 := autoscalingEnabledCR(prefix+"-two", "uid-cr-two")
+	r, cli := newAutoscalingReconciler(t)
+	ctx := context.Background()
+
+	for _, cr := range []*dchv1alpha1.DataConnectService{cr1, cr2} {
+		if err := r.reconcileAutoscaling(ctx, cr); err != nil {
+			t.Fatalf("reconcileAutoscaling(%s) failed: %v", cr.Name, err)
+		}
+	}
+
+	seen := map[string]string{}
+	for _, cr := range []*dchv1alpha1.DataConnectService{cr1, cr2} {
+		for _, resource := range autoscalingResourceNames(cr.Name) {
+			key := resource.GetKind() + "/" + resource.GetName()
+			if other, duplicate := seen[key]; duplicate {
+				t.Errorf("%s is generated for both CR %s and CR %s", key, other, cr.Name)
+			}
+			seen[key] = cr.Name
+
+			live := getAutoscalingResource(t, cli, resource)
+			if !hasControllerOwner(live, cr.UID) {
+				t.Errorf("%s is not owned by CR %s (uid %s)", key, cr.Name, cr.UID)
+			}
+		}
+	}
+}
+
+func TestReconcileAutoscalingStableAcrossReconciles(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-stable")
+	r, cli := newAutoscalingReconciler(t)
+	ctx := context.Background()
+
+	if err := r.reconcileAutoscaling(ctx, cr); err != nil {
+		t.Fatalf("first reconcileAutoscaling() failed: %v", err)
+	}
+
+	versions := map[string]string{}
+	for _, resource := range autoscalingResourceNames(cr.Name) {
+		live := getAutoscalingResource(t, cli, resource)
+		versions[resource.GetKind()+"/"+resource.GetName()] = live.GetResourceVersion()
+	}
+
+	if err := r.reconcileAutoscaling(ctx, cr); err != nil {
+		t.Fatalf("second reconcileAutoscaling() failed: %v", err)
+	}
+
+	for _, resource := range autoscalingResourceNames(cr.Name) {
+		key := resource.GetKind() + "/" + resource.GetName()
+		live := getAutoscalingResource(t, cli, resource)
+		if live.GetResourceVersion() != versions[key] {
+			t.Errorf("%s was rewritten by a no-op reconcile (resourceVersion %q -> %q)", key, versions[key], live.GetResourceVersion())
+		}
+	}
+}
+
+func TestPruneAutoscalingResourcesRemovesOnlyOwnedResources(t *testing.T) {
+	t.Parallel()
+
+	prefix := strings.Repeat("a", 63)
+	cr1 := autoscalingEnabledCR(prefix+"-one", "uid-prune-one")
+	cr2 := autoscalingEnabledCR(prefix+"-two", "uid-prune-two")
+	r, cli := newAutoscalingReconciler(t)
+	ctx := context.Background()
+
+	for _, cr := range []*dchv1alpha1.DataConnectService{cr1, cr2} {
+		if err := r.reconcileAutoscaling(ctx, cr); err != nil {
+			t.Fatalf("reconcileAutoscaling(%s) failed: %v", cr.Name, err)
+		}
+	}
+
+	// Disabling autoscaling on CR2 must prune exactly CR2's resources.
+	if err := r.pruneAutoscalingResources(ctx, cr2, nil); err != nil {
+		t.Fatalf("pruneAutoscalingResources() failed: %v", err)
+	}
+
+	for _, resource := range autoscalingResourceNames(cr2.Name) {
+		live := &unstructured.Unstructured{}
+		live.SetGroupVersionKind(resource.GroupVersionKind())
+		key := client.ObjectKey{Namespace: autoscalingTestNamespace, Name: resource.GetName()}
+		err := cli.Get(ctx, key, live)
+		if !apierrors.IsNotFound(err) {
+			t.Errorf("CR2 resource %s %s was not pruned (err = %v)", resource.GetKind(), resource.GetName(), err)
+		}
+	}
+	for _, resource := range autoscalingResourceNames(cr1.Name) {
+		live := getAutoscalingResource(t, cli, resource)
+		if !hasControllerOwner(live, cr1.UID) {
+			t.Errorf("CR1 resource %s %s lost its owner during CR2 prune", resource.GetKind(), resource.GetName())
+		}
+	}
+}
+
+// --- applyResources: foreign owners and create races ---
+
+// seedForApply mirrors the metadata applyResources stamps on created objects
+// (namespace, managed-by label, spec-hash annotation) so a seeded object
+// reaches the hash-equality branch. Owner references and annotations are
+// excluded from the spec hash, so callers may set either afterwards.
+func seedForApply(obj *unstructured.Unstructured, namespace string) *unstructured.Unstructured {
+	seed := obj.DeepCopy()
+	seed.SetNamespace(namespace)
+	labels := seed.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels[labelManagedBy] = managedByDCHService
+	seed.SetLabels(labels)
+	annotations := seed.GetAnnotations()
+	if annotations == nil {
+		annotations = map[string]string{}
+	}
+	annotations[annotationSpecHash] = specHash(seed)
+	seed.SetAnnotations(annotations)
+	return seed
+}
+
+func controllerOwnerRef(cr *dchv1alpha1.DataConnectService) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: dchv1alpha1.GroupVersion.String(),
+		Kind:       "DataConnectService",
+		Name:       cr.Name,
+		UID:        cr.UID,
+		Controller: ptr.To(true),
+	}
+}
+
+func foreignControllerOwnerRef() metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: dchv1alpha1.GroupVersion.String(),
+		Kind:       "DataConnectService",
+		Name:       "other-dataconnectservice",
+		UID:        "uid-foreign",
+		Controller: ptr.To(true),
+	}
+}
+
+func autoscalingServiceAccountOf(t *testing.T, cr *dchv1alpha1.DataConnectService) *unstructured.Unstructured {
+	t.Helper()
+	for _, resource := range autoscalingResources(cr) {
+		if resource.GetKind() == kindServiceAccount {
+			return resource
+		}
+	}
+	t.Fatal("no ServiceAccount in rendered autoscaling resources")
+	return nil
+}
+
+func TestApplyResourcesSurfacesForeignOwnedResource(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-foreign-test")
+	sa := autoscalingServiceAccountOf(t, cr)
+
+	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
+
+	r, _ := newAutoscalingReconciler(t, seed)
+	err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa})
+	if err == nil {
+		t.Fatal("applyResources() = nil error, want error for a resource owned by another controller")
+	}
+	var ownerErr *controllerutil.AlreadyOwnedError
+	if !errors.As(err, &ownerErr) {
+		t.Fatalf("applyResources() error = %v, want AlreadyOwnedByAnotherControllerError", err)
+	}
+}
+
+func TestApplyResourcesCreateRaceSurfacesForeignOwner(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-race-test")
+	sa := autoscalingServiceAccountOf(t, cr)
+
+	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
+
+	scheme := autoscalingTestScheme(t)
+	getCalls := 0
+	cli := autoscalingFakeBuilder(t, scheme).
+		WithObjects(seed).
+		WithInterceptorFuncs(interceptor.Funcs{
+			// Hide the seeded object from the initial read so the create
+			// path runs and loses the race with the existing object.
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if getCalls == 0 {
+					getCalls++
+					return apierrors.NewNotFound(schema.GroupResource{Resource: "serviceaccounts"}, key.Name)
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &DataConnectServiceReconciler{Client: cli, Scheme: scheme}
+
+	err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa})
+	if err == nil {
+		t.Fatal("applyResources() = nil error, want the create race to fall through and surface the foreign owner")
+	}
+	var ownerErr *controllerutil.AlreadyOwnedError
+	if !errors.As(err, &ownerErr) {
+		t.Fatalf("applyResources() error = %v, want AlreadyOwnedByAnotherControllerError", err)
+	}
+}
+
+func TestApplyResourcesCreateRaceWithOwnResourceSucceeds(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-race-own-test")
+	sa := autoscalingServiceAccountOf(t, cr)
+
+	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed.SetOwnerReferences([]metav1.OwnerReference{controllerOwnerRef(cr)})
+
+	scheme := autoscalingTestScheme(t)
+	getCalls := 0
+	cli := autoscalingFakeBuilder(t, scheme).
+		WithObjects(seed).
+		WithInterceptorFuncs(interceptor.Funcs{
+			Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+				if getCalls == 0 {
+					getCalls++
+					return apierrors.NewNotFound(schema.GroupResource{Resource: "serviceaccounts"}, key.Name)
+				}
+				return c.Get(ctx, key, obj, opts...)
+			},
+		}).
+		Build()
+	r := &DataConnectServiceReconciler{Client: cli, Scheme: scheme}
+
+	if err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa}); err != nil {
+		t.Fatalf("applyResources() failed on a benign create race: %v", err)
+	}
+
+	live := &unstructured.Unstructured{}
+	live.SetGroupVersionKind(sa.GroupVersionKind())
+	key := client.ObjectKey{Namespace: autoscalingTestNamespace, Name: sa.GetName()}
+	if err := cli.Get(context.Background(), key, live); err != nil {
+		t.Fatalf("getting ServiceAccount after create race: %v", err)
+	}
+	if !hasControllerOwner(live, cr.UID) {
+		t.Errorf("ServiceAccount lost its owner during the create race")
 	}
 }

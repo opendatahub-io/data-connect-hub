@@ -23,6 +23,7 @@ import (
 	cryptotls "crypto/tls"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -764,16 +765,21 @@ func (r *DataConnectServiceReconciler) applyResources(
 		err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing)
 
 		if apierrors.IsNotFound(err) {
-			if err := r.Create(ctx, obj); err != nil {
-				if apierrors.IsAlreadyExists(err) {
-					continue
-				}
-				return fmt.Errorf("creating %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			createErr := r.Create(ctx, obj)
+			if createErr == nil {
+				log.V(1).Info("created resource", "kind", obj.GetKind(), "name", obj.GetName())
+				continue
 			}
-			log.V(1).Info("created resource", "kind", obj.GetKind(), "name", obj.GetName())
-			continue
-		}
-		if err != nil {
+			if !apierrors.IsAlreadyExists(createErr) {
+				return fmt.Errorf("creating %s %s: %w", obj.GetKind(), obj.GetName(), createErr)
+			}
+			// Lost a create race — fall through to the compare-and-update
+			// path so a foreign-owned object surfaces as an error instead of
+			// being silently skipped.
+			if err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing); err != nil {
+				return fmt.Errorf("getting %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+		} else if err != nil {
 			return fmt.Errorf("getting %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
@@ -783,10 +789,18 @@ func (r *DataConnectServiceReconciler) applyResources(
 		}
 		if existingHash == desiredHash {
 			if !hasControllerOwner(existing, cr.GetUID()) {
-				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err == nil {
-					if updateErr := r.Update(ctx, existing); updateErr != nil {
-						return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
+				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err != nil {
+					var alreadyOwned *controllerutil.AlreadyOwnedError
+					if errors.As(err, &alreadyOwned) {
+						return fmt.Errorf("claiming ownership of %s %s: %w", obj.GetKind(), obj.GetName(), err)
 					}
+					// Cluster-scoped objects cannot carry a reference to the
+					// namespaced CR; they are managed by label and cleaned up
+					// explicitly instead.
+					continue
+				}
+				if updateErr := r.Update(ctx, existing); updateErr != nil {
+					return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
 				}
 			}
 			continue
