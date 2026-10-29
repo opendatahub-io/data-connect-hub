@@ -554,6 +554,58 @@ var _ = Describe("DataConnectService Controller", func() {
 		})
 	})
 
+	Context("When deployment tooling pre-seeds a rendered resource", func() {
+		const seededCAConfigMap = np + "flight-service-ca"
+
+		BeforeEach(func() {
+			createDatabaseSecret()
+
+			// Deployment tooling (hack/ci/deploy-dch.sh) seeds the flight
+			// CA-bundle ConfigMap before creating the DataConnectService so
+			// the first Flight rollout can already mount the CA. The seeded
+			// object is unowned and its content differs from the rendered
+			// desired state.
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      seededCAConfigMap,
+					Namespace: targetNamespace,
+				},
+				Data: map[string]string{"service-ca.crt": "seeded-ca-certificate"},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should reconcile over the seeded object and preserve its externally supplied data", func() {
+			reconcileUntilReady()
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal(conditionTypeReady))
+
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: seededCAConfigMap, Namespace: targetNamespace}, cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("service-ca.crt", "seeded-ca-certificate"))
+			Expect(cm.Annotations).To(HaveKeyWithValue("service.beta.openshift.io/inject-cabundle", "true"))
+			Expect(cm.Labels).To(HaveKeyWithValue(labelManagedBy, managedByDCHService))
+			Expect(cm.OwnerReferences).To(HaveLen(1))
+			Expect(cm.OwnerReferences[0].UID).To(Equal(validated.UID))
+		})
+	})
+
 	Context("When reconciling with service overrides", func() {
 		BeforeEach(func() {
 			createDatabaseSecret()

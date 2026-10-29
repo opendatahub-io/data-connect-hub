@@ -756,27 +756,39 @@ func resourceConflictError(obj *unstructured.Unstructured, detail string) error 
 	}
 }
 
-// verifyAdoptable checks that a pre-existing object occupying a generated
-// resource name is safe for the controller to take over. Ownership is verified
-// first: any owner reference pointing at another controller makes the object
-// foreign and it is rejected regardless of its content. References to a
-// previous incarnation of the same DataConnectService are not foreign — the CR
-// may have been deleted and recreated before garbage collection removed its
-// old dependents — but such objects still have to pass the content checks, and
-// adoption replaces the stale reference. Unowned objects must match the
-// desired content exactly, including the controller's managed-by label. For
-// Secrets this covers the type, every rendered annotation (notably
+// verifyNotForeignOwned rejects a pre-existing object that carries an owner
+// reference to any controller other than the reconciled DataConnectService.
+// References to a previous incarnation of the same DataConnectService are not
+// foreign — the CR may have been deleted and recreated before garbage
+// collection removed its old dependents. This check applies to every
+// generated resource: an object another controller manages is never taken
+// over, regardless of its content.
+func verifyNotForeignOwned(existing *unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) error {
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == cr.GetUID() || isStaleOwnerReference(ref, cr) {
+			continue
+		}
+		return resourceConflictError(existing, fmt.Sprintf("it is owned by %s %q (uid %q)", ref.Kind, ref.Name, ref.UID))
+	}
+	return nil
+}
+
+// verifyAdoptable checks that a pre-existing autoscaling resource occupying a
+// generated resource name is safe for the controller to take over. It is only
+// invoked for autoscaling resources: their content is fully
+// controller-rendered and includes the token Secret KEDA authenticates its
+// metric requests with, so a pre-existing object at one of those names is
+// never silently trusted. Unowned objects must match the desired content
+// exactly, including the controller's managed-by label. For Secrets this
+// covers the type, every rendered annotation (notably
 // kubernetes.io/service-account.name on token Secrets) and the data: a
 // repair-apply only rewrites fields the controller itself declares, so foreign
 // data — for example an attacker-chosen bearer token that KEDA would consume
 // for authenticated metric requests — would survive reconciliation and must be
 // rejected up front.
 func verifyAdoptable(existing, desired *unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) error {
-	for _, ref := range existing.GetOwnerReferences() {
-		if ref.UID == cr.GetUID() || isStaleOwnerReference(ref, cr) {
-			continue
-		}
-		return resourceConflictError(existing, fmt.Sprintf("it is owned by %s %q (uid %q)", ref.Kind, ref.Name, ref.UID))
+	if err := verifyNotForeignOwned(existing, cr); err != nil {
+		return err
 	}
 	if detail := secretAdoptionConflict(existing, desired); detail != "" {
 		return resourceConflictError(existing, detail)
@@ -985,41 +997,81 @@ func (r *DataConnectServiceReconciler) applyResources(
 			continue
 		}
 
-		// Admission gate for objects the controller does not own yet: verify
-		// ownership and content before managing them, so a pre-existing
-		// object with a generated name is never silently trusted.
-		if err := verifyAdoptable(existing, obj, cr); err != nil {
+		// Admission gate for objects the controller does not own yet.
+		//
+		// Autoscaling resources are fully controller-rendered and include the
+		// token Secret KEDA authenticates its metric requests with, so a
+		// pre-existing object at one of their names is only managed after
+		// passing the full admission gate below.
+		//
+		// Every other resource keeps the legacy reconcile: objects another
+		// controller owns are still rejected, but unowned objects may be
+		// legitimately seeded by deployment tooling or carry externally
+		// injected fields (e.g. the flight CA-bundle ConfigMap, whose
+		// service-ca.crt key is supplied outside the controller). Those are
+		// repaired via SSA, which only rewrites fields the controller itself
+		// declares.
+		if isAutoscalingResource(cr.Name, obj) {
+			if err := verifyAdoptable(existing, obj, cr); err != nil {
+				return err
+			}
+
+			// Content verified — adopt the object by stamping lineage markers.
+			// The owner reference is upserted directly rather than through
+			// controllerutil: the admission gate has already established that no
+			// foreign references remain, and the standard helper cannot claim
+			// cluster-scoped objects, whose namespace the API server has already
+			// cleared. The explicit cluster-scoped cleanup deletes them by this
+			// reference.
+			before := existing.DeepCopy()
+			existingLabels := existing.GetLabels()
+			if existingLabels == nil {
+				existingLabels = map[string]string{}
+			}
+			existingLabels[labelManagedBy] = managedByDCHService
+			existing.SetLabels(existingLabels)
+			existingAnnotations := existing.GetAnnotations()
+			if existingAnnotations == nil {
+				existingAnnotations = map[string]string{}
+			}
+			existingAnnotations[annotationSpecHash] = desiredHash
+			existing.SetAnnotations(existingAnnotations)
+			setAdoptionOwnerReference(existing, cr)
+			if reflect.DeepEqual(before.Object, existing.Object) {
+				continue
+			}
+			if err := r.Update(ctx, existing); err != nil {
+				return fmt.Errorf("adopting %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+			log.V(1).Info("adopted pre-existing resource", "kind", obj.GetKind(), "name", obj.GetName())
+			continue
+		}
+
+		if err := verifyNotForeignOwned(existing, cr); err != nil {
 			return err
 		}
 
-		// Content verified — adopt the object by stamping lineage markers.
-		// The owner reference is upserted directly rather than through
-		// controllerutil: the admission gate has already established that no
-		// foreign references remain, and the standard helper cannot claim
-		// cluster-scoped objects, whose namespace the API server has already
-		// cleared. The explicit cluster-scoped cleanup deletes them by this
-		// reference.
-		before := existing.DeepCopy()
-		existingLabels := existing.GetLabels()
-		if existingLabels == nil {
-			existingLabels = map[string]string{}
+		existingHash := ""
+		if existingAnn := existing.GetAnnotations(); existingAnn != nil {
+			existingHash = existingAnn[annotationSpecHash]
 		}
-		existingLabels[labelManagedBy] = managedByDCHService
-		existing.SetLabels(existingLabels)
-		existingAnnotations := existing.GetAnnotations()
-		if existingAnnotations == nil {
-			existingAnnotations = map[string]string{}
-		}
-		existingAnnotations[annotationSpecHash] = desiredHash
-		existing.SetAnnotations(existingAnnotations)
-		setAdoptionOwnerReference(existing, cr)
-		if reflect.DeepEqual(before.Object, existing.Object) {
+		if existingHash == desiredHash {
+			if !hasControllerOwner(existing, cr.GetUID()) {
+				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err == nil {
+					if updateErr := r.Update(ctx, existing); updateErr != nil {
+						return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
+					}
+				}
+			}
 			continue
 		}
-		if err := r.Update(ctx, existing); err != nil {
-			return fmt.Errorf("adopting %s %s: %w", obj.GetKind(), obj.GetName(), err)
+
+		obj.SetResourceVersion("")
+		obj.SetManagedFields(nil)
+		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner("dc-controller"), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
+			return fmt.Errorf("updating %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
-		log.V(1).Info("adopted pre-existing resource", "kind", obj.GetKind(), "name", obj.GetName())
+		log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
 	}
 	return nil
 }

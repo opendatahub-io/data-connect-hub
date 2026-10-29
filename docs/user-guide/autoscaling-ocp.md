@@ -1,9 +1,8 @@
 
 ## DCH Autoscaling on OpenShift
 ### Prerequisites
-- OpenShift CustomMetricsAutoScaling (CMA) operator
-- A `DataConnectService` resource with metrics enabled for the service being
-  autoscaled. See [Prometheus Metrics](metrics.md).
+- OpenShift `Custom Metrics Autoscaler` (CMA) operator installed.
+- `Data Connect Hub` installed and a `DataConnectService` resource exists. We will update this resource to enable autoscaling for its REST and Flight services.
 
 ### Steps
 - Set the Prometheus server URL to the cluster monitoring endpoint. This is

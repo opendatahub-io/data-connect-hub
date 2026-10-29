@@ -408,6 +408,21 @@ func autoscalingResourceNames(crName string) []*unstructured.Unstructured {
 	}
 }
 
+// isAutoscalingResource reports whether obj is one of the autoscaling
+// resources generated for the named DataConnectService. Only these carry the
+// strict pre-existing-object admission gate in applyResources: their content
+// is fully controller-rendered and includes the token Secret KEDA
+// authenticates its metric requests with, so a pre-existing object at one of
+// these names must match the desired state exactly before it is managed.
+func isAutoscalingResource(crName string, obj *unstructured.Unstructured) bool {
+	for _, resource := range autoscalingResourceNames(crName) {
+		if resource.GetKind() == obj.GetKind() && resource.GetName() == obj.GetName() {
+			return true
+		}
+	}
+	return false
+}
+
 func isUnstructuredOwnedBy(obj *unstructured.Unstructured, uid types.UID) bool {
 	for _, ref := range obj.GetOwnerReferences() {
 		if ref.UID == uid {
