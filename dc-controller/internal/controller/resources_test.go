@@ -264,7 +264,7 @@ address = "flight-service"
 `)
 	service := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindService,
-		"metadata": map[string]any{
+		testMetadataKey: map[string]any{
 			resourceNameField: "dch-default-dcs-flight",
 		},
 	}}
@@ -327,7 +327,7 @@ discovery_service_account = "old-identity"
 	configMap.SetName("dch-default-dcs-flight-config")
 	serviceAccount := &unstructured.Unstructured{Object: map[string]any{
 		testKindKey: kindServiceAccount,
-		"metadata": map[string]any{
+		testMetadataKey: map[string]any{
 			resourceNameField: "dch-rest-service-sa",
 		},
 	}}

@@ -6,11 +6,17 @@
   autoscaled. See [Prometheus Metrics](metrics.md).
 
 ### Steps
-- Get the OpenShift Thanos route and save the complete Prometheus server URL:
+- Set the Prometheus server URL to the cluster monitoring endpoint. This is
+  the only accepted `serverAddress` for autoscaling triggers:
   ```bash
-  THANOS_SERVER_ADDRESS="https://$(oc get route thanos-querier -n openshift-monitoring -o jsonpath='{.spec.host}')"
+  THANOS_SERVER_ADDRESS="https://thanos-querier.openshift-monitoring.svc.cluster.local:9092"
   printf '%s\n' "$THANOS_SERVER_ADDRESS"
   ```
+  The port must be `9092` (the tenancy query API). The autoscaling
+  service account only holds the `view` role in the `DataConnectService`
+  namespace, which grants access to the namespace-scoped query endpoints on
+  this port. Other ports on the same service, such as `9091`, require
+  cluster-level roles and are rejected.
 
 - Confirm that the CMA/KEDA APIs are installed:
   ```bash
@@ -135,6 +141,19 @@
 
 Every Prometheus trigger must specify `serverAddress`. DCH does not discover
 or default this value.
+
+The autoscaling setup gives KEDA a service-account token, and that token is
+only ever sent to the cluster monitoring endpoint
+(`https://thanos-querier.openshift-monitoring.svc.cluster.local:9092`) over
+HTTPS. Every other address is rejected — including plain HTTP URLs, external
+hosts, other ports such as `9091`, and the public Thanos route URL — and the
+`DataConnectService` is marked `Degraded` with a message naming the failing
+trigger. To inspect a rejection:
+  ```bash
+  DCS_NAME="${DCS_NAME:-default-dataconnectservice}"
+
+  oc describe dataconnectservice "$DCS_NAME" -n "$DCH_NAMESPACE"
+  ```
 
 Do not set `replicas` on a service that has `autoScaling` configured. The
 controller rejects that combination because KEDA owns the Deployment replica

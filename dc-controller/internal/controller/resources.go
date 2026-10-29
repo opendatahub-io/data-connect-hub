@@ -549,7 +549,7 @@ func reconcileTraceEnv(resources []*unstructured.Unstructured, trace *dchv1alpha
 
 			// Add back the desired OTLP env vars
 			for _, v := range desiredVars {
-				newEnv = append(newEnv, map[string]any{"name": v.Name, "value": v.Value})
+				newEnv = append(newEnv, map[string]any{resourceNameField: v.Name, "value": v.Value})
 			}
 
 			if len(newEnv) != len(env) || len(desiredVars) > 0 {

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net/url"
 	"strings"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -53,6 +54,15 @@ const (
 	autoscalingNameField            = "name"
 	autoscalingKindField            = "kind"
 	autoscalingRBACGroup            = "rbac.authorization.k8s.io"
+
+	// The only serverAddress accepted for autoscaling triggers. The autoscaling
+	// service-account token is attached as a bearer token to every metrics poll,
+	// so it may only ever be sent to the cluster's built-in monitoring endpoint.
+	// Port 9092 is the tenancy query API: it grants namespace-scoped queries to
+	// service accounts holding the view role in the DataConnectService namespace,
+	// which is all the autoscaling service account has.
+	autoscalingMonitoringEndpoint = "https://thanos-querier.openshift-monitoring.svc.cluster.local:9092"
+	autoscalingMonitoringHost     = "thanos-querier.openshift-monitoring.svc.cluster.local:9092"
 )
 
 type autoscalingService struct {
@@ -88,8 +98,8 @@ func validateAutoscaling(cr *dchv1alpha1.DataConnectService) error {
 			if strings.TrimSpace(trigger.Name) == "" {
 				return fmt.Errorf("%s.autoScaling.triggers[%d].name is required", service.name, i)
 			}
-			if strings.TrimSpace(trigger.ServerAddress) == "" {
-				return fmt.Errorf("%s.autoScaling.triggers[%d].serverAddress is required", service.name, i)
+			if err := validateAutoscalingServerAddress(trigger.ServerAddress); err != nil {
+				return fmt.Errorf("%s.autoScaling.triggers[%d].serverAddress %w", service.name, i, err)
 			}
 			if strings.TrimSpace(trigger.Query) == "" {
 				return fmt.Errorf("%s.autoScaling.triggers[%d].query is required", service.name, i)
@@ -101,6 +111,22 @@ func validateAutoscaling(cr *dchv1alpha1.DataConnectService) error {
 				return fmt.Errorf("%s.autoScaling.triggers[%d].target.value is required", service.name, i)
 			}
 		}
+	}
+	return nil
+}
+
+// validateAutoscalingServerAddress ensures KEDA only ever sends the autoscaling
+// service-account token to the cluster's built-in monitoring endpoint. Any
+// other destination — plain HTTP, an external host, or a different port on the
+// monitoring service — must be rejected before the token or any autoscaling
+// resource exists.
+func validateAutoscalingServerAddress(address string) error {
+	parsed, err := url.Parse(strings.TrimSpace(address))
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return fmt.Errorf("must be an HTTPS URL, got %q", address)
+	}
+	if !strings.EqualFold(parsed.Host, autoscalingMonitoringHost) {
+		return fmt.Errorf("must be the cluster monitoring endpoint %s", autoscalingMonitoringEndpoint)
 	}
 	return nil
 }

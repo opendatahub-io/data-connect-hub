@@ -27,6 +27,10 @@ import (
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
+// autoscalingTestCRName matches the singleton DataConnectService name used
+// across the controller tests.
+const autoscalingTestCRName = "default-dataconnectservice"
+
 func TestValidateAutoscalingRejectsReplicaOverride(t *testing.T) {
 	t.Parallel()
 
@@ -53,7 +57,7 @@ func TestAutoscalingResourcesRenderRESTAndFlightTargets(t *testing.T) {
 	t.Parallel()
 
 	cr := &dchv1alpha1.DataConnectService{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice", Namespace: "dch-services"},
+		ObjectMeta: metav1.ObjectMeta{Name: autoscalingTestCRName, Namespace: "dch-services"},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
 			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
 			FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
@@ -122,6 +126,134 @@ func TestValidateAutoscalingRequiresServerAddress(t *testing.T) {
 	}
 }
 
+func restAutoscalingCRWithAddress(address string) *dchv1alpha1.DataConnectService {
+	trigger := validAutoscalingTrigger()
+	trigger.ServerAddress = address
+	return &dchv1alpha1.DataConnectService{Spec: dchv1alpha1.DataConnectServiceSpec{
+		RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: &dchv1alpha1.AutoScalingConfig{
+			MinReplicas: ptr.To(int32(1)),
+			MaxReplicas: ptr.To(int32(2)),
+			Triggers:    []dchv1alpha1.AutoscalingTrigger{trigger},
+		}},
+	}}
+}
+
+func flightAutoscalingCRWithAddress(address string) *dchv1alpha1.DataConnectService {
+	trigger := validAutoscalingTrigger()
+	trigger.ServerAddress = address
+	return &dchv1alpha1.DataConnectService{Spec: dchv1alpha1.DataConnectServiceSpec{
+		FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
+			AutoScaling: &dchv1alpha1.AutoScalingConfig{
+				MinReplicas: ptr.To(int32(1)),
+				MaxReplicas: ptr.To(int32(2)),
+				Triggers:    []dchv1alpha1.AutoscalingTrigger{trigger},
+			},
+		}},
+	}}
+}
+
+func TestValidateAutoscalingAcceptsBuiltInMonitoringEndpoint(t *testing.T) {
+	t.Parallel()
+
+	if err := validateAutoscaling(restAutoscalingCRWithAddress(autoscalingMonitoringEndpoint)); err != nil {
+		t.Fatalf("validateAutoscaling() error = %v, want nil", err)
+	}
+}
+
+func TestValidateAutoscalingServerAddressIsCaseAndWhitespaceInsensitive(t *testing.T) {
+	t.Parallel()
+
+	address := "  https://THANOS-QUERIER.openshift-monitoring.svc.cluster.local:9092  "
+	if err := validateAutoscaling(restAutoscalingCRWithAddress(address)); err != nil {
+		t.Fatalf("validateAutoscaling() error = %v, want nil", err)
+	}
+}
+
+func TestValidateAutoscalingRejectsPlainHTTPServerAddress(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{
+		"http://thanos-querier.openshift-monitoring.svc.cluster.local:9092",
+		"http://attacker.example",
+	} {
+		err := validateAutoscaling(restAutoscalingCRWithAddress(address))
+		if err == nil || !strings.Contains(err.Error(), "serverAddress") || !strings.Contains(err.Error(), "HTTPS") {
+			t.Fatalf("validateAutoscaling(%q) error = %v, want serverAddress HTTPS rejection", address, err)
+		}
+	}
+}
+
+func TestValidateAutoscalingRejectsUntrustedHTTPSHost(t *testing.T) {
+	t.Parallel()
+
+	err := validateAutoscaling(restAutoscalingCRWithAddress("https://attacker.example"))
+	if err == nil || !strings.Contains(err.Error(), "cluster monitoring endpoint") {
+		t.Fatalf("validateAutoscaling() error = %v, want untrusted host rejection", err)
+	}
+}
+
+func TestValidateAutoscalingRejectsMonitoringRouteURL(t *testing.T) {
+	t.Parallel()
+
+	err := validateAutoscaling(restAutoscalingCRWithAddress("https://thanos-querier-openshift-monitoring.apps.cluster.example.com"))
+	if err == nil || !strings.Contains(err.Error(), "cluster monitoring endpoint") {
+		t.Fatalf("validateAutoscaling() error = %v, want route URL rejection", err)
+	}
+}
+
+func TestValidateAutoscalingRejectsMalformedServerAddress(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{
+		"not a url",
+		"thanos-querier.openshift-monitoring.svc.cluster.local:9092",
+	} {
+		err := validateAutoscaling(restAutoscalingCRWithAddress(address))
+		if err == nil || !strings.Contains(err.Error(), "HTTPS") {
+			t.Fatalf("validateAutoscaling(%q) error = %v, want malformed URL rejection", address, err)
+		}
+	}
+}
+
+func TestValidateAutoscalingRejectsWrongOrMissingPort(t *testing.T) {
+	t.Parallel()
+
+	for _, address := range []string{
+		"https://thanos-querier.openshift-monitoring.svc.cluster.local:9091",
+		"https://thanos-querier.openshift-monitoring.svc.cluster.local:9090",
+		"https://thanos-querier.openshift-monitoring.svc.cluster.local",
+	} {
+		err := validateAutoscaling(restAutoscalingCRWithAddress(address))
+		if err == nil || !strings.Contains(err.Error(), "cluster monitoring endpoint") {
+			t.Fatalf("validateAutoscaling(%q) error = %v, want port rejection", address, err)
+		}
+	}
+}
+
+func TestValidateAutoscalingRejectsBadFlightServerAddress(t *testing.T) {
+	t.Parallel()
+
+	err := validateAutoscaling(flightAutoscalingCRWithAddress("http://attacker.example"))
+	if err == nil || !strings.Contains(err.Error(), "flightService.autoScaling.triggers[0].serverAddress") {
+		t.Fatalf("validateAutoscaling() error = %v, want flightService serverAddress rejection", err)
+	}
+}
+
+func TestValidateAutoscalingNamesFailingTriggerIndex(t *testing.T) {
+	t.Parallel()
+
+	cr := restAutoscalingCRWithAddress(autoscalingMonitoringEndpoint)
+	evil := validAutoscalingTrigger()
+	evil.Name = "evil"
+	evil.ServerAddress = "https://attacker.example"
+	cr.Spec.RestService.AutoScaling.Triggers = append(cr.Spec.RestService.AutoScaling.Triggers, evil)
+
+	err := validateAutoscaling(cr)
+	if err == nil || !strings.Contains(err.Error(), "triggers[1].serverAddress") {
+		t.Fatalf("validateAutoscaling() error = %v, want failing trigger index in message", err)
+	}
+}
+
 func validAutoscalingConfig() *dchv1alpha1.AutoScalingConfig {
 	return &dchv1alpha1.AutoScalingConfig{
 		MinReplicas: ptr.To(int32(1)),
@@ -132,10 +264,10 @@ func validAutoscalingConfig() *dchv1alpha1.AutoScalingConfig {
 
 func newReplicatedDeployment(name string) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "apps/v1",
-		"kind":       "Deployment",
-		"metadata":   map[string]any{"name": name},
-		"spec":       map[string]any{"replicas": int64(1)},
+		"apiVersion":    "apps/v1",
+		"kind":          "Deployment",
+		testMetadataKey: map[string]any{"name": name},
+		"spec":          map[string]any{"replicas": int64(1)},
 	}}
 }
 
@@ -143,7 +275,7 @@ func TestRemoveReplicasFromAutoscaledDeployments(t *testing.T) {
 	t.Parallel()
 
 	cr := &dchv1alpha1.DataConnectService{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice"},
+		ObjectMeta: metav1.ObjectMeta{Name: autoscalingTestCRName},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
 			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
 		},
@@ -170,7 +302,7 @@ func TestRemoveReplicasFromAutoscaledDeploymentsBothServices(t *testing.T) {
 	t.Parallel()
 
 	cr := &dchv1alpha1.DataConnectService{
-		ObjectMeta: metav1.ObjectMeta{Name: "default-dataconnectservice"},
+		ObjectMeta: metav1.ObjectMeta{Name: autoscalingTestCRName},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
 			RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
 			FlightService: &dchv1alpha1.FlightServiceConfig{ServiceOverrides: dchv1alpha1.ServiceOverrides{
@@ -194,7 +326,7 @@ func TestRemoveReplicasFromAutoscaledDeploymentsBothServices(t *testing.T) {
 func validAutoscalingTrigger() dchv1alpha1.AutoscalingTrigger {
 	return dchv1alpha1.AutoscalingTrigger{
 		Name:          "request-rate",
-		ServerAddress: "https://thanos.example.test",
+		ServerAddress: autoscalingMonitoringEndpoint,
 		Query:         "sum(rate(requests_total[2m]))",
 		Target:        dchv1alpha1.AutoscalingTarget{Type: "Value", Value: "0.4"},
 	}

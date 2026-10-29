@@ -81,6 +81,29 @@ var _ = Describe("dc-controller", Ordered, func() {
 		})
 	})
 
+	Context("autoscaling serverAddress validation", func() {
+		It("rejects a plain HTTP serverAddress and creates no autoscaling resources", func() {
+			patched := fixture.EnableRESTAutoScaling("http://attacker.example")
+			fixture.AssertRESTAutoScalingRejected(patched)
+		})
+
+		It("rejects an HTTPS serverAddress to an untrusted host", func() {
+			patched := fixture.EnableRESTAutoScaling("https://attacker.example")
+			fixture.AssertRESTAutoScalingRejected(patched)
+		})
+
+		It("rejects the monitoring Route URL form", func() {
+			patched := fixture.EnableRESTAutoScaling("https://thanos-querier-openshift-monitoring.apps.cluster.example.com")
+			fixture.AssertRESTAutoScalingRejected(patched)
+		})
+
+		It("recovers when the address is corrected to the cluster monitoring endpoint", func() {
+			fixture.EnableRESTAutoScaling("http://attacker.example")
+			patched := fixture.EnableRESTAutoScaling(support.TrustedMonitoringEndpoint)
+			fixture.AssertRESTAutoScalingValidationCleared(patched)
+		})
+	})
+
 	Context("metrics endpoint", func() {
 		It("serves metrics", func() {
 			fixture.AssertMetricsEndpoint()

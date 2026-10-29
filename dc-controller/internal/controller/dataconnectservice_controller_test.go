@@ -30,6 +30,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -397,6 +398,60 @@ var _ = Describe("DataConnectService Controller", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+	})
+
+	Context("When autoscaling is configured with an untrusted serverAddress", func() {
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should mark the CR Degraded and create no autoscaling resources", func() {
+			trigger := validAutoscalingTrigger()
+			trigger.ServerAddress = "http://attacker.example"
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: &dchv1alpha1.AutoScalingConfig{
+						MinReplicas: ptr.To(int32(1)),
+						MaxReplicas: ptr.To(int32(2)),
+						Triggers:    []dchv1alpha1.AutoscalingTrigger{trigger},
+					}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+			// The first reconcile only adds the finalizer; the second one runs
+			// validation and reports the failure on the status.
+			for range 3 {
+				_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal("Error"))
+
+			degraded := meta.FindStatusCondition(validated.Status.Conditions, conditionTypeDegraded)
+			Expect(degraded).NotTo(BeNil())
+			Expect(degraded.Status).To(Equal(metav1.ConditionTrue))
+			Expect(degraded.Reason).To(Equal("InvalidAutoscaling"))
+			Expect(degraded.Message).To(ContainSubstring("serverAddress"))
+
+			// The validation gate runs before the autoscaling token or any
+			// other autoscaling resource exists.
+			saErr := k8sClient.Get(ctx, types.NamespacedName{
+				Name: resourceName + "-autoscaling-sa", Namespace: targetNamespace,
+			}, &corev1.ServiceAccount{})
+			Expect(errors.IsNotFound(saErr)).To(BeTrue(), "autoscaling ServiceAccount must not exist")
+			secretErr := k8sClient.Get(ctx, types.NamespacedName{
+				Name: resourceName + "-autoscaling-token", Namespace: targetNamespace,
+			}, &corev1.Secret{})
+			Expect(errors.IsNotFound(secretErr)).To(BeTrue(), "autoscaling token Secret must not exist")
 		})
 	})
 
