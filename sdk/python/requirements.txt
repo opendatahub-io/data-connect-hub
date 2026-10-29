@@ -1,0 +1,5 @@
+# Tooling floor for SDK builds (CVE-2026-91403 / eMudhra CA compromise
+# remediation). Runtime dependencies live in pyproject.toml; uv is not
+# pinned because nothing in this SDK uses it.
+certifi>=2026.10.19
+pip>=26.2.2
