@@ -4,7 +4,7 @@ go 1.26.7
 
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1
-	github.com/onsi/gomega v1.39.1
+	github.com/onsi/gomega v1.44.0
 	github.com/opendatahub-io/odh-platform-utilities/framework v0.3.1
 	github.com/openshift/api v0.0.0-20261026215420-da0032bf0c5f
 	github.com/pelletier/go-toml/v2 v2.4.3
