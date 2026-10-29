@@ -373,7 +373,7 @@ func (r *DataConnectServiceReconciler) updateStatus(
 		return ctrl.Result{}, err
 	}
 	if cr.Generation != expectedGeneration {
-		return ctrl.Result{Requeue: true}, nil
+		return ctrl.Result{RequeueAfter: time.Nanosecond}, nil
 	}
 
 	cr.Status.Phase = phase

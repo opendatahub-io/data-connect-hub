@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -431,7 +432,7 @@ var _ = Describe("DataConnectService Controller", func() {
 				func(*dchv1alpha1.DataConnectService) {},
 			)
 			Expect(err).NotTo(HaveOccurred())
-			Expect(result.Requeue).To(BeTrue())
+			Expect(result.RequeueAfter).To(Equal(time.Nanosecond))
 
 			current := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, current)).To(Succeed())
