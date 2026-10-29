@@ -23,10 +23,10 @@ import (
 	cryptotls "crypto/tls"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,8 +36,11 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	apimachtypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -722,6 +725,183 @@ func resourcePriority(kind string) int {
 	}
 }
 
+// ResourceConflictError reports a pre-existing object at a generated resource
+// name that the controller refuses to manage because its ownership or content
+// conflicts with the desired state. Reconciliation keeps failing with this
+// error until the object is deleted or renamed, which lets the controller
+// recreate it safely.
+type ResourceConflictError struct {
+	Kind      string
+	Name      string
+	Namespace string
+	Detail    string
+}
+
+func (e *ResourceConflictError) Error() string {
+	location := e.Name
+	if e.Namespace != "" {
+		location = e.Namespace + "/" + e.Name
+	}
+	return fmt.Sprintf(
+		"refusing to manage pre-existing %s %q: %s; delete or rename the conflicting object so reconciliation can recreate it",
+		e.Kind, location, e.Detail)
+}
+
+func resourceConflictError(obj *unstructured.Unstructured, detail string) error {
+	return &ResourceConflictError{
+		Kind:      obj.GetKind(),
+		Name:      obj.GetName(),
+		Namespace: obj.GetNamespace(),
+		Detail:    detail,
+	}
+}
+
+// verifyAdoptable checks that a pre-existing object occupying a generated
+// resource name is safe for the controller to take over. Ownership is verified
+// first: any owner reference pointing at another controller makes the object
+// foreign and it is rejected regardless of its content. References to a
+// previous incarnation of the same DataConnectService are not foreign — the CR
+// may have been deleted and recreated before garbage collection removed its
+// old dependents — but such objects still have to pass the content checks, and
+// adoption replaces the stale reference. Unowned objects must match the
+// desired content exactly, including the controller's managed-by label. For
+// Secrets this covers the type, every rendered annotation (notably
+// kubernetes.io/service-account.name on token Secrets) and the data: a
+// repair-apply only rewrites fields the controller itself declares, so foreign
+// data — for example an attacker-chosen bearer token that KEDA would consume
+// for authenticated metric requests — would survive reconciliation and must be
+// rejected up front.
+func verifyAdoptable(existing, desired *unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) error {
+	for _, ref := range existing.GetOwnerReferences() {
+		if ref.UID == cr.GetUID() || isStaleOwnerReference(ref, cr) {
+			continue
+		}
+		return resourceConflictError(existing, fmt.Sprintf("it is owned by %s %q (uid %q)", ref.Kind, ref.Name, ref.UID))
+	}
+	if detail := secretAdoptionConflict(existing, desired); detail != "" {
+		return resourceConflictError(existing, detail)
+	}
+	if contentHash(existing) != contentHash(desired) {
+		return resourceConflictError(existing, "its content differs from the desired specification")
+	}
+	return nil
+}
+
+// contentHash hashes an object's content for adoption comparisons. Empty maps
+// and slices are dropped first: rendered manifests may declare them (e.g.
+// `data: {}`), while the API server omits them on stored objects, and that
+// difference is a serialization artifact rather than a content conflict. The
+// namespace is dropped as well: the existing object is fetched by the same
+// namespaced key, and the API server clears the namespace on cluster-scoped
+// objects after create.
+func contentHash(obj *unstructured.Unstructured) string {
+	content := dropEmptyCollections(obj.DeepCopy().UnstructuredContent())
+	if metadata, ok := content.(map[string]any)["metadata"].(map[string]any); ok {
+		delete(metadata, "namespace")
+	}
+	return specHash(&unstructured.Unstructured{Object: content.(map[string]any)})
+}
+
+func dropEmptyCollections(value any) any {
+	switch value := value.(type) {
+	case map[string]any:
+		if len(value) == 0 {
+			return nil
+		}
+		for key, child := range value {
+			value[key] = dropEmptyCollections(child)
+		}
+		return value
+	case []any:
+		if len(value) == 0 {
+			return nil
+		}
+		for i, child := range value {
+			value[i] = dropEmptyCollections(child)
+		}
+		return value
+	default:
+		return value
+	}
+}
+
+// isStaleOwnerReference reports whether ref points at a previous incarnation
+// of the reconciled DataConnectService: same group, kind, and name, but a
+// different UID. This mirrors how controller-runtime itself decides whether an
+// object is already owned, so a recreated CR can reclaim its old dependents
+// once garbage collection has caught up.
+func isStaleOwnerReference(ref metav1.OwnerReference, cr *dchv1alpha1.DataConnectService) bool {
+	refGroupVersion, err := schema.ParseGroupVersion(ref.APIVersion)
+	if err != nil {
+		return false
+	}
+	crGroupVersion := dchv1alpha1.GroupVersion
+	return refGroupVersion.Group == crGroupVersion.Group &&
+		ref.Kind == kindDataConnectService &&
+		ref.Name == cr.Name
+}
+
+// setAdoptionOwnerReference points the object's controller reference at the
+// reconciled CR, replacing any previous-incarnation reference. Callers must
+// have verified that no foreign owner references remain.
+func setAdoptionOwnerReference(existing *unstructured.Unstructured, cr *dchv1alpha1.DataConnectService) {
+	ref := metav1.OwnerReference{
+		APIVersion:         dchv1alpha1.GroupVersion.String(),
+		Kind:               kindDataConnectService,
+		Name:               cr.Name,
+		UID:                cr.UID,
+		Controller:         ptr.To(true),
+		BlockOwnerDeletion: ptr.To(true),
+	}
+	refs := existing.GetOwnerReferences()
+	for i, existingRef := range refs {
+		if isStaleOwnerReference(existingRef, cr) {
+			refs[i] = ref
+			existing.SetOwnerReferences(refs)
+			return
+		}
+	}
+	existing.SetOwnerReferences(append(refs, ref))
+}
+
+// secretAdoptionConflict returns a non-empty conflict detail when the existing
+// Secret is not safe to adopt. Kubernetes only ever populates data on Secrets
+// whose lifecycle it controls, so any pre-existing data on an unowned Secret is
+// foreign by definition. An empty type is normalized to Opaque, the API server
+// default, so untyped rendered Secrets compare correctly.
+func secretAdoptionConflict(existing, desired *unstructured.Unstructured) string {
+	if desired.GetKind() != kindSecret {
+		return ""
+	}
+	existingType, _, _ := unstructured.NestedString(existing.Object, "type")
+	desiredType, _, _ := unstructured.NestedString(desired.Object, "type")
+	if existingType == "" {
+		existingType = secretTypeOpaque
+	}
+	if desiredType == "" {
+		desiredType = secretTypeOpaque
+	}
+	if existingType != desiredType {
+		return fmt.Sprintf("its type is %q, want %q", existingType, desiredType)
+	}
+	for _, field := range []string{"data", "stringData"} {
+		if value, ok := existing.Object[field]; ok && value != nil {
+			if entries, isMap := value.(map[string]any); !isMap || len(entries) > 0 {
+				return fmt.Sprintf("it contains unexpected %s; the controller creates generated Secrets empty so Kubernetes can inject their data", field)
+			}
+		}
+	}
+	for key, want := range desired.GetAnnotations() {
+		if key == annotationSpecHash {
+			continue
+		}
+		if got := existing.GetAnnotations()[key]; got != want {
+			return fmt.Sprintf("annotation %s is %q, want %q", key, got, want)
+		}
+	}
+	return ""
+}
+
 func (r *DataConnectServiceReconciler) applyResources(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
@@ -773,9 +953,9 @@ func (r *DataConnectServiceReconciler) applyResources(
 			if !apierrors.IsAlreadyExists(createErr) {
 				return fmt.Errorf("creating %s %s: %w", obj.GetKind(), obj.GetName(), createErr)
 			}
-			// Lost a create race — fall through to the compare-and-update
-			// path so a foreign-owned object surfaces as an error instead of
-			// being silently skipped.
+			// Lost a create race — re-read the winner and run it through the
+			// same admission checks below so a foreign object surfaces as an
+			// error instead of being silently skipped or adopted.
 			if err := r.Get(ctx, client.ObjectKeyFromObject(obj), existing); err != nil {
 				return fmt.Errorf("getting %s %s: %w", obj.GetKind(), obj.GetName(), err)
 			}
@@ -783,36 +963,63 @@ func (r *DataConnectServiceReconciler) applyResources(
 			return fmt.Errorf("getting %s %s: %w", obj.GetKind(), obj.GetName(), err)
 		}
 
-		existingHash := ""
-		if existingAnn := existing.GetAnnotations(); existingAnn != nil {
-			existingHash = existingAnn[annotationSpecHash]
-		}
-		if existingHash == desiredHash {
-			if !hasControllerOwner(existing, cr.GetUID()) {
-				if err := controllerutil.SetControllerReference(cr, existing, r.Scheme); err != nil {
-					var alreadyOwned *controllerutil.AlreadyOwnedError
-					if errors.As(err, &alreadyOwned) {
-						return fmt.Errorf("claiming ownership of %s %s: %w", obj.GetKind(), obj.GetName(), err)
-					}
-					// Cluster-scoped objects cannot carry a reference to the
-					// namespaced CR; they are managed by label and cleaned up
-					// explicitly instead.
-					continue
-				}
-				if updateErr := r.Update(ctx, existing); updateErr != nil {
-					return fmt.Errorf("repairing owner ref on %s %s: %w", obj.GetKind(), obj.GetName(), updateErr)
-				}
+		// Objects the controller already owns are reconciled by spec-hash:
+		// unchanged objects are left untouched and drifted ones are repaired
+		// via SSA. Server-populated fields the controller does not declare
+		// (e.g. the token Kubernetes injects into the autoscaling token
+		// Secret) survive those repairs.
+		if hasControllerOwner(existing, cr.GetUID()) {
+			existingHash := ""
+			if existingAnn := existing.GetAnnotations(); existingAnn != nil {
+				existingHash = existingAnn[annotationSpecHash]
 			}
+			if existingHash == desiredHash {
+				continue
+			}
+			obj.SetResourceVersion("")
+			obj.SetManagedFields(nil)
+			if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner("dc-controller"), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
+				return fmt.Errorf("updating %s %s: %w", obj.GetKind(), obj.GetName(), err)
+			}
+			log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
 			continue
 		}
 
-		// Spec changed or first reconcile — apply via SSA.
-		obj.SetResourceVersion("")
-		obj.SetManagedFields(nil)
-		if err := r.Patch(ctx, obj, client.Apply, client.FieldOwner("dc-controller"), client.ForceOwnership); err != nil { //nolint:staticcheck // client.Apply is the standard SSA approach for unstructured objects
-			return fmt.Errorf("updating %s %s: %w", obj.GetKind(), obj.GetName(), err)
+		// Admission gate for objects the controller does not own yet: verify
+		// ownership and content before managing them, so a pre-existing
+		// object with a generated name is never silently trusted.
+		if err := verifyAdoptable(existing, obj, cr); err != nil {
+			return err
 		}
-		log.V(1).Info("updated resource", "kind", obj.GetKind(), "name", obj.GetName())
+
+		// Content verified — adopt the object by stamping lineage markers.
+		// The owner reference is upserted directly rather than through
+		// controllerutil: the admission gate has already established that no
+		// foreign references remain, and the standard helper cannot claim
+		// cluster-scoped objects, whose namespace the API server has already
+		// cleared. The explicit cluster-scoped cleanup deletes them by this
+		// reference.
+		before := existing.DeepCopy()
+		existingLabels := existing.GetLabels()
+		if existingLabels == nil {
+			existingLabels = map[string]string{}
+		}
+		existingLabels[labelManagedBy] = managedByDCHService
+		existing.SetLabels(existingLabels)
+		existingAnnotations := existing.GetAnnotations()
+		if existingAnnotations == nil {
+			existingAnnotations = map[string]string{}
+		}
+		existingAnnotations[annotationSpecHash] = desiredHash
+		existing.SetAnnotations(existingAnnotations)
+		setAdoptionOwnerReference(existing, cr)
+		if reflect.DeepEqual(before.Object, existing.Object) {
+			continue
+		}
+		if err := r.Update(ctx, existing); err != nil {
+			return fmt.Errorf("adopting %s %s: %w", obj.GetKind(), obj.GetName(), err)
+		}
+		log.V(1).Info("adopted pre-existing resource", "kind", obj.GetKind(), "name", obj.GetName())
 	}
 	return nil
 }

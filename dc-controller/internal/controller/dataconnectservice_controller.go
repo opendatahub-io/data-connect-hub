@@ -95,6 +95,11 @@ const (
 	kindDaemonSet          = "DaemonSet"
 	kindJob                = "Job"
 
+	kindDataConnectService = "DataConnectService"
+
+	// secretTypeOpaque is the API server default type for Secrets.
+	secretTypeOpaque = "Opaque"
+
 	valueTrue  = "true"
 	valueFalse = "false"
 
@@ -279,10 +284,15 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
 			log.Error(err, "failed to reconcile manifests")
+			reason := "ManifestError"
+			var conflict *ResourceConflictError
+			if errors.As(err, &conflict) {
+				reason = "ResourceConflict"
+			}
 			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "ManifestError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "ManifestError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "ManifestError", "Failed to apply manifests")
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
+				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, reason, "Failed to apply manifests")
 			})
 		}
 	}
@@ -293,6 +303,10 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		reason := "AutoscalingError"
 		if errors.Is(err, errAutoscalingProviderUnavailable) {
 			reason = "AutoscalingProviderUnavailable"
+		}
+		var conflict *ResourceConflictError
+		if errors.As(err, &conflict) {
+			reason = "ResourceConflict"
 		}
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())

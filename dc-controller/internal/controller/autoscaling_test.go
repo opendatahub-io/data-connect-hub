@@ -34,7 +34,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -42,6 +41,10 @@ import (
 // autoscalingTestCRName matches the singleton DataConnectService name used
 // across the controller tests.
 const autoscalingTestCRName = "default-dataconnectservice"
+
+// attackerTokenValue is the foreign bearer token planted in conflicting
+// Secret seeds.
+const attackerTokenValue = "attacker-bearer-token"
 
 func TestValidateAutoscalingRejectsReplicaOverride(t *testing.T) {
 	t.Parallel()
@@ -567,15 +570,15 @@ func TestPruneAutoscalingResourcesRemovesOnlyOwnedResources(t *testing.T) {
 	}
 }
 
-// --- applyResources: foreign owners and create races ---
+// --- applyResources: admission gate for pre-existing resources ---
 
 // seedForApply mirrors the metadata applyResources stamps on created objects
 // (namespace, managed-by label, spec-hash annotation) so a seeded object
-// reaches the hash-equality branch. Owner references and annotations are
-// excluded from the spec hash, so callers may set either afterwards.
-func seedForApply(obj *unstructured.Unstructured, namespace string) *unstructured.Unstructured {
+// matches the desired content. Owner references and annotations are excluded
+// from the content hash, so callers may set either afterwards.
+func seedForApply(obj *unstructured.Unstructured) *unstructured.Unstructured {
 	seed := obj.DeepCopy()
-	seed.SetNamespace(namespace)
+	seed.SetNamespace(autoscalingTestNamespace)
 	labels := seed.GetLabels()
 	if labels == nil {
 		labels = map[string]string{}
@@ -594,7 +597,7 @@ func seedForApply(obj *unstructured.Unstructured, namespace string) *unstructure
 func controllerOwnerRef(cr *dchv1alpha1.DataConnectService) metav1.OwnerReference {
 	return metav1.OwnerReference{
 		APIVersion: dchv1alpha1.GroupVersion.String(),
-		Kind:       "DataConnectService",
+		Kind:       kindDataConnectService,
 		Name:       cr.Name,
 		UID:        cr.UID,
 		Controller: ptr.To(true),
@@ -604,11 +607,19 @@ func controllerOwnerRef(cr *dchv1alpha1.DataConnectService) metav1.OwnerReferenc
 func foreignControllerOwnerRef() metav1.OwnerReference {
 	return metav1.OwnerReference{
 		APIVersion: dchv1alpha1.GroupVersion.String(),
-		Kind:       "DataConnectService",
+		Kind:       kindDataConnectService,
 		Name:       "other-dataconnectservice",
 		UID:        "uid-foreign",
 		Controller: ptr.To(true),
 	}
+}
+
+// staleControllerOwnerRef mimics a dependent left behind by a previous
+// incarnation of the CR: same group, kind, and name, different UID.
+func staleControllerOwnerRef(cr *dchv1alpha1.DataConnectService) metav1.OwnerReference {
+	ref := controllerOwnerRef(cr)
+	ref.UID = types.UID("uid-previous-incarnation")
+	return ref
 }
 
 func autoscalingServiceAccountOf(t *testing.T, cr *dchv1alpha1.DataConnectService) *unstructured.Unstructured {
@@ -622,24 +633,368 @@ func autoscalingServiceAccountOf(t *testing.T, cr *dchv1alpha1.DataConnectServic
 	return nil
 }
 
+func autoscalingSecretOf(t *testing.T, cr *dchv1alpha1.DataConnectService) *unstructured.Unstructured {
+	t.Helper()
+	for _, resource := range autoscalingResources(cr) {
+		if resource.GetKind() == kindSecret {
+			return resource
+		}
+	}
+	t.Fatal("no Secret in rendered autoscaling resources")
+	return nil
+}
+
+// requireResourceConflict asserts that applyResources rejected the given
+// resource with a ResourceConflictError naming it.
+func requireResourceConflict(t *testing.T, err error, resource *unstructured.Unstructured) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("applyResources() = nil error, want a resource conflict for %s %s", resource.GetKind(), resource.GetName())
+	}
+	var conflict *ResourceConflictError
+	if !errors.As(err, &conflict) {
+		t.Fatalf("applyResources() error = %v, want ResourceConflictError", err)
+	}
+	if conflict.Kind != resource.GetKind() || conflict.Name != resource.GetName() {
+		t.Fatalf("applyResources() conflict reports %s %q, want %s %q",
+			conflict.Kind, conflict.Name, resource.GetKind(), resource.GetName())
+	}
+}
+
+// addForeignLabel mutates the seed so its content differs from the rendered
+// desired state (labels are part of the spec hash).
+func addForeignLabel(obj *unstructured.Unstructured) {
+	labels := obj.GetLabels()
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	labels["conflict.example/foreign"] = "true"
+	obj.SetLabels(labels)
+}
+
+// TestApplyResourcesRejectsForeignOwnedResources covers every generated
+// autoscaling resource pre-created with a foreign controller owner and an
+// otherwise matching specification: reconciliation must reject the object
+// instead of adopting or overwriting it.
+func TestApplyResourcesRejectsForeignOwnedResources(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-foreign")
+	for _, resource := range autoscalingResources(cr) {
+		t.Run(resource.GetKind()+"/"+resource.GetName(), func(t *testing.T) {
+			t.Parallel()
+
+			seed := seedForApply(resource)
+			seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
+
+			r, _ := newAutoscalingReconciler(t, seed)
+			err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{resource.DeepCopy()})
+			requireResourceConflict(t, err, resource)
+		})
+	}
+}
+
+// TestApplyResourcesRejectsForeignOwnedResourcesWithDifferingSpec is the
+// combined case from the security review: conflicting ownership and a
+// conflicting specification at once. Ownership is verified before content, so
+// the object is rejected without ever being force-applied.
+func TestApplyResourcesRejectsForeignOwnedResourcesWithDifferingSpec(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-foreign-spec")
+	for _, resource := range autoscalingResources(cr) {
+		t.Run(resource.GetKind()+"/"+resource.GetName(), func(t *testing.T) {
+			t.Parallel()
+
+			seed := seedForApply(resource)
+			addForeignLabel(seed)
+			seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
+
+			r, _ := newAutoscalingReconciler(t, seed)
+			err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{resource.DeepCopy()})
+			requireResourceConflict(t, err, resource)
+		})
+	}
+}
+
+// TestApplyResourcesRejectsUnownedResourcesWithConflictingSpec covers every
+// generated autoscaling resource pre-created without any owner reference but
+// with content differing from the desired state — both an object the
+// controller never managed and one that drifted from a managed state.
+// Reconciliation must reject the object rather than silently overwriting or
+// trusting it.
+func TestApplyResourcesRejectsUnownedResourcesWithConflictingSpec(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-spec")
+	for _, resource := range autoscalingResources(cr) {
+		for _, seedKind := range []string{"unmanaged", "drifted"} {
+			t.Run(resource.GetKind()+"/"+resource.GetName()+"/"+seedKind, func(t *testing.T) {
+				t.Parallel()
+
+				var seed *unstructured.Unstructured
+				if seedKind == "unmanaged" {
+					seed = resource.DeepCopy()
+					seed.SetNamespace(autoscalingTestNamespace)
+				} else {
+					seed = seedForApply(resource)
+				}
+				addForeignLabel(seed)
+
+				r, _ := newAutoscalingReconciler(t, seed)
+				err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{resource.DeepCopy()})
+				requireResourceConflict(t, err, resource)
+			})
+		}
+	}
+}
+
+// TestApplyResourcesRejectsConflictingTokenSecret covers the failing scenario
+// from the security review: a pre-existing Secret with the deterministic
+// autoscaling token name containing attacker-controlled data, a wrong type, a
+// wrong service-account annotation, or a copied spec-hash annotation. KEDA's
+// TriggerAuthentication consumes this Secret as a bearer token, so
+// reconciliation must reject it rather than proceeding.
+func TestApplyResourcesRejectsConflictingTokenSecret(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-secret")
+	secret := autoscalingSecretOf(t, cr)
+
+	cases := []struct {
+		name    string
+		mutate  func(*unstructured.Unstructured)
+		wantMsg string
+	}{
+		{
+			name: "wrong type",
+			mutate: func(s *unstructured.Unstructured) {
+				s.Object["type"] = secretTypeOpaque
+			},
+			wantMsg: "type is",
+		},
+		{
+			name: "wrong service account annotation",
+			mutate: func(s *unstructured.Unstructured) {
+				annotations := s.GetAnnotations()
+				annotations["kubernetes.io/service-account.name"] = "attacker-sa"
+				s.SetAnnotations(annotations)
+			},
+			wantMsg: "annotation kubernetes.io/service-account.name",
+		},
+		{
+			name: "attacker-controlled token data",
+			mutate: func(s *unstructured.Unstructured) {
+				s.Object["data"] = map[string]any{autoscalingTokenKey: attackerTokenValue}
+			},
+			wantMsg: "unexpected data",
+		},
+		{
+			name: "foreign data with a copied spec-hash annotation",
+			mutate: func(s *unstructured.Unstructured) {
+				// Copy a plausible spec-hash annotation onto the foreign
+				// Secret: the hash-equality fast path must not trust the
+				// annotation without verifying the content.
+				annotations := s.GetAnnotations()
+				if annotations == nil {
+					annotations = map[string]string{}
+				}
+				annotations[annotationSpecHash] = specHash(s)
+				s.SetAnnotations(annotations)
+				s.Object["data"] = map[string]any{autoscalingTokenKey: attackerTokenValue}
+			},
+			wantMsg: "unexpected data",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			seed := secret.DeepCopy()
+			seed.SetNamespace(autoscalingTestNamespace)
+			tc.mutate(seed)
+
+			r, cli := newAutoscalingReconciler(t, seed)
+			// desired must be a per-subtest copy: applyResources stamps
+			// lineage markers on the objects it is given.
+			err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{secret.DeepCopy()})
+			requireResourceConflict(t, err, secret)
+			if !strings.Contains(err.Error(), tc.wantMsg) {
+				t.Fatalf("applyResources() error = %v, want it to mention %q", err, tc.wantMsg)
+			}
+
+			// The rejected Secret must be left untouched: no lineage
+			// markers are stamped and the foreign data survives intact.
+			live := getAutoscalingResource(t, cli, seed)
+			if len(live.GetOwnerReferences()) != 0 {
+				t.Error("rejected Secret was stamped with an owner reference")
+			}
+			if live.GetLabels()[labelManagedBy] != "" {
+				t.Error("rejected Secret was stamped with the managed-by label")
+			}
+			if token, _, _ := unstructured.NestedString(live.Object, "data", autoscalingTokenKey); seed.Object["data"] != nil && token != attackerTokenValue {
+				t.Errorf("rejected Secret data was modified: token = %q", token)
+			}
+		})
+	}
+}
+
+// TestApplyResourcesAdoptsExactMatchUnownedResources covers the benign
+// counterpart: an unowned object whose content exactly matches the desired
+// state — including the managed-by label the controller stamps on everything
+// it manages — is adopted, not rejected.
+func TestApplyResourcesAdoptsExactMatchUnownedResources(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-adopt")
+	for _, resource := range autoscalingResources(cr) {
+		t.Run(resource.GetKind()+"/"+resource.GetName(), func(t *testing.T) {
+			t.Parallel()
+
+			seed := seedForApply(resource)
+
+			r, cli := newAutoscalingReconciler(t, seed)
+			if err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{resource.DeepCopy()}); err != nil {
+				t.Fatalf("applyResources() failed on an exact-match unowned resource: %v", err)
+			}
+
+			live := getAutoscalingResource(t, cli, resource)
+			if !hasControllerOwner(live, cr.UID) {
+				t.Errorf("adopted %s %s has no controller owner reference", resource.GetKind(), resource.GetName())
+			}
+			if live.GetAnnotations()[annotationSpecHash] == "" {
+				t.Errorf("adopted %s %s has no spec-hash annotation", resource.GetKind(), resource.GetName())
+			}
+		})
+	}
+}
+
+// TestApplyResourcesReclaimsStaleIncarnationResources covers a CR that was
+// deleted and recreated before garbage collection removed its old dependents:
+// the stale controller reference names the same CR, so matching objects are
+// reclaimed and the stale reference is replaced with the current one.
+func TestApplyResourcesReclaimsStaleIncarnationResources(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-stale")
+	for _, resource := range autoscalingResources(cr) {
+		t.Run(resource.GetKind()+"/"+resource.GetName(), func(t *testing.T) {
+			t.Parallel()
+
+			seed := seedForApply(resource)
+			seed.SetOwnerReferences([]metav1.OwnerReference{staleControllerOwnerRef(cr)})
+
+			r, cli := newAutoscalingReconciler(t, seed)
+			if err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{resource.DeepCopy()}); err != nil {
+				t.Fatalf("applyResources() failed to reclaim a stale-incarnation resource: %v", err)
+			}
+
+			live := getAutoscalingResource(t, cli, resource)
+			if !hasControllerOwner(live, cr.UID) {
+				t.Errorf("reclaimed %s %s still carries the stale owner reference", resource.GetKind(), resource.GetName())
+			}
+		})
+	}
+}
+
+// TestApplyResourcesRejectsDriftedStaleIncarnationResource ensures the stale
+// incarnation tolerance is not a free pass: a stale reference plus drifted
+// content is still rejected, because the controller cannot know whether the
+// drift is benign.
+func TestApplyResourcesRejectsDriftedStaleIncarnationResource(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-stale-drift")
+	sa := autoscalingServiceAccountOf(t, cr)
+
+	seed := seedForApply(sa)
+	addForeignLabel(seed)
+	seed.SetOwnerReferences([]metav1.OwnerReference{staleControllerOwnerRef(cr)})
+
+	r, _ := newAutoscalingReconciler(t, seed)
+	err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa})
+	requireResourceConflict(t, err, sa)
+}
+
+// TestApplyResourcesKeepsInjectedTokenOnTrustedSecret ensures a Secret the
+// controller already owns is never flagged when Kubernetes has injected token
+// data into it: the injected token is expected server-side state, not drift.
+func TestApplyResourcesKeepsInjectedTokenOnTrustedSecret(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-trusted-secret")
+	secret := autoscalingSecretOf(t, cr)
+
+	seed := seedForApply(secret)
+	seed.SetOwnerReferences([]metav1.OwnerReference{controllerOwnerRef(cr)})
+	seed.Object["data"] = map[string]any{
+		"token":     "injected-service-account-token",
+		"ca.crt":    "ca-bundle",
+		"namespace": "dch-autoscaling-test",
+	}
+
+	r, cli := newAutoscalingReconciler(t, seed)
+	if err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{secret}); err != nil {
+		t.Fatalf("applyResources() rejected a trusted Secret with injected token data: %v", err)
+	}
+
+	live := getAutoscalingResource(t, cli, seed)
+	if token, _, _ := unstructured.NestedString(live.Object, "data", "token"); token != "injected-service-account-token" {
+		t.Errorf("injected token data was modified: token = %q", token)
+	}
+	if !hasControllerOwner(live, cr.UID) {
+		t.Error("trusted Secret lost its controller owner reference")
+	}
+}
+
+// TestApplyResourcesRepairsDriftedOwnedResource ensures an object the
+// controller owns is repaired via apply when its content drifted, without the
+// admission gate rejecting it. This uses the default field-managed fake
+// client because the plain tracker used elsewhere cannot serve apply patches.
+func TestApplyResourcesRepairsDriftedOwnedResource(t *testing.T) {
+	t.Parallel()
+
+	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-gate-drift")
+	sa := autoscalingServiceAccountOf(t, cr)
+
+	seed := sa.DeepCopy()
+	seed.SetNamespace(autoscalingTestNamespace)
+	seed.SetOwnerReferences([]metav1.OwnerReference{controllerOwnerRef(cr)})
+	addForeignLabel(seed)
+
+	scheme := autoscalingTestScheme(t)
+	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(seed).Build()
+	r := &DataConnectServiceReconciler{Client: cli, Scheme: scheme}
+
+	if err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa}); err != nil {
+		t.Fatalf("applyResources() failed to repair a drifted owned resource: %v", err)
+	}
+
+	live := getAutoscalingResource(t, cli, seed)
+	if !hasControllerOwner(live, cr.UID) {
+		t.Error("repaired ServiceAccount lost its controller owner reference")
+	}
+	if live.GetLabels()[labelManagedBy] != managedByDCHService {
+		t.Error("repaired ServiceAccount has no managed-by label")
+	}
+	if live.GetAnnotations()[annotationSpecHash] == "" {
+		t.Error("repaired ServiceAccount has no spec-hash annotation")
+	}
+}
+
 func TestApplyResourcesSurfacesForeignOwnedResource(t *testing.T) {
 	t.Parallel()
 
 	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-foreign-test")
 	sa := autoscalingServiceAccountOf(t, cr)
 
-	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed := seedForApply(sa)
 	seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
 
 	r, _ := newAutoscalingReconciler(t, seed)
 	err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa})
-	if err == nil {
-		t.Fatal("applyResources() = nil error, want error for a resource owned by another controller")
-	}
-	var ownerErr *controllerutil.AlreadyOwnedError
-	if !errors.As(err, &ownerErr) {
-		t.Fatalf("applyResources() error = %v, want AlreadyOwnedByAnotherControllerError", err)
-	}
+	requireResourceConflict(t, err, sa)
 }
 
 func TestApplyResourcesCreateRaceSurfacesForeignOwner(t *testing.T) {
@@ -648,7 +1003,7 @@ func TestApplyResourcesCreateRaceSurfacesForeignOwner(t *testing.T) {
 	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-race-test")
 	sa := autoscalingServiceAccountOf(t, cr)
 
-	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed := seedForApply(sa)
 	seed.SetOwnerReferences([]metav1.OwnerReference{foreignControllerOwnerRef()})
 
 	scheme := autoscalingTestScheme(t)
@@ -670,13 +1025,7 @@ func TestApplyResourcesCreateRaceSurfacesForeignOwner(t *testing.T) {
 	r := &DataConnectServiceReconciler{Client: cli, Scheme: scheme}
 
 	err := r.applyResources(context.Background(), cr, autoscalingTestNamespace, []*unstructured.Unstructured{sa})
-	if err == nil {
-		t.Fatal("applyResources() = nil error, want the create race to fall through and surface the foreign owner")
-	}
-	var ownerErr *controllerutil.AlreadyOwnedError
-	if !errors.As(err, &ownerErr) {
-		t.Fatalf("applyResources() error = %v, want AlreadyOwnedByAnotherControllerError", err)
-	}
+	requireResourceConflict(t, err, sa)
 }
 
 func TestApplyResourcesCreateRaceWithOwnResourceSucceeds(t *testing.T) {
@@ -685,7 +1034,7 @@ func TestApplyResourcesCreateRaceWithOwnResourceSucceeds(t *testing.T) {
 	cr := autoscalingEnabledCR(autoscalingTestCRName, "uid-race-own-test")
 	sa := autoscalingServiceAccountOf(t, cr)
 
-	seed := seedForApply(sa, autoscalingTestNamespace)
+	seed := seedForApply(sa)
 	seed.SetOwnerReferences([]metav1.OwnerReference{controllerOwnerRef(cr)})
 
 	scheme := autoscalingTestScheme(t)

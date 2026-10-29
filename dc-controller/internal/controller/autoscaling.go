@@ -55,6 +55,10 @@ const (
 	autoscalingKindField            = "kind"
 	autoscalingRBACGroup            = "rbac.authorization.k8s.io"
 
+	// Key of the bearer token inside the autoscaling token Secret and in the
+	// KEDA TriggerAuthentication that consumes it.
+	autoscalingTokenKey = "token"
+
 	// The only serverAddress accepted for autoscaling triggers. The autoscaling
 	// service-account token is attached as a bearer token to every metrics poll,
 	// so it may only ever be sent to the cluster's built-in monitoring endpoint.
@@ -225,7 +229,7 @@ func autoscalingResources(cr *dchv1alpha1.DataConnectService) []*unstructured.Un
 				"secretTargetRef": []any{map[string]any{
 					"parameter":          "bearerToken",
 					autoscalingNameField: secretName,
-					"key":                "token",
+					"key":                autoscalingTokenKey,
 				}},
 			},
 		}),

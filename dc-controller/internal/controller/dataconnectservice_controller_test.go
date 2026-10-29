@@ -122,18 +122,20 @@ var _ = Describe("DataConnectService Controller", func() {
 			np + "params",
 			np + nameRestService + "-config",
 			flightResourceName + "-config",
+			np + "flight-service-ca",
 			np + nameRestService + "-kube-rbac-proxy-config",
 		} {
 			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
-		for _, name := range []string{np + nameDataConnectHub + "-sa", flightResourceName + "-sa"} {
+		for _, name := range []string{np + nameDataConnectHub + "-sa", np + nameRestService + "-sa", flightResourceName + "-sa"} {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: targetNamespace}})
-		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "read", np + "read-write", np + "admin"} {
+		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "read", np + "read-write", np + "admin",
+			np + "rest-service-data-access", np + "rest-service-secret-access", np + "secret-export"} {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
-		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "flight-auth-delegator"} {
+		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "flight-auth-delegator", np + "rest-service-data-access"} {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: targetNamespace}})
@@ -452,6 +454,73 @@ var _ = Describe("DataConnectService Controller", func() {
 				Name: resourceName + "-autoscaling-token", Namespace: targetNamespace,
 			}, &corev1.Secret{})
 			Expect(errors.IsNotFound(secretErr)).To(BeTrue(), "autoscaling token Secret must not exist")
+		})
+	})
+
+	Context("When a pre-existing resource conflicts with a generated one", func() {
+		const conflictingConfigMap = np + nameRestService + "-config"
+
+		BeforeEach(func() {
+			createDatabaseSecret()
+
+			// Pre-create a rendered resource name with a foreign owner and
+			// content the controller did not produce.
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      conflictingConfigMap,
+					Namespace: targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: dchv1alpha1.GroupVersion.String(),
+						Kind:       kindDataConnectService,
+						Name:       "other-dataconnectservice",
+						UID:        "uid-foreign",
+						Controller: ptr.To(true),
+					}},
+				},
+				Data: map[string]string{"attacker-key": "attacker-value"},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should mark the CR Degraded with a ResourceConflict and leave the object untouched", func() {
+			for range 3 {
+				_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal("Error"))
+
+			degraded := meta.FindStatusCondition(validated.Status.Conditions, conditionTypeDegraded)
+			Expect(degraded).NotTo(BeNil())
+			Expect(degraded.Status).To(Equal(metav1.ConditionTrue))
+			Expect(degraded.Reason).To(Equal("ResourceConflict"))
+			Expect(degraded.Message).To(ContainSubstring("ConfigMap"))
+			Expect(degraded.Message).To(ContainSubstring(conflictingConfigMap))
+			Expect(degraded.Message).To(ContainSubstring("delete or rename"))
+
+			// The conflicting object must be neither adopted nor overwritten.
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: conflictingConfigMap, Namespace: targetNamespace}, cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("attacker-key", "attacker-value"))
+			Expect(cm.OwnerReferences).To(HaveLen(1))
+			Expect(string(cm.OwnerReferences[0].UID)).To(Equal("uid-foreign"))
+			Expect(cm.Labels).NotTo(HaveKey(labelManagedBy))
 		})
 	})
 
