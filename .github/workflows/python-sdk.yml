@@ -81,7 +81,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package tools
-        run: python -m pip install --upgrade build twine
+        run: python -m pip install --upgrade -r sdk/python/requirements.txt build twine
 
       - name: Build and validate distribution
         run: make sdk-package-check VIRTUAL_ENV=1
