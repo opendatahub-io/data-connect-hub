@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -529,8 +530,10 @@ func (r *DataConnectServiceReconciler) kindServed(ctx context.Context, group, ve
 }
 
 // ensureInitDataConnectionTypes reads connection type definitions from the
-// manifests directory and creates corresponding IDCT CRs in the DCS CR
-// namespace so they register under the correct (global) tenant.
+// manifests directory and converges the corresponding IDCT CRs in the DCS CR
+// namespace so they register under the correct (global) tenant. A CR whose
+// spec no longer matches the manifest is updated, which bumps its generation
+// and triggers the IDCT reconciler to patch the REST service.
 func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context.Context, cr *dchv1alpha1.DataConnectService) {
 	log := logf.FromContext(ctx)
 
@@ -562,25 +565,39 @@ func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context
 		}
 
 		name := strings.TrimSuffix(entry.Name(), ".yaml")
-		existing := &dchv1alpha1.InitDataConnectionType{}
 		key := types.NamespacedName{Name: name, Namespace: cr.Namespace}
-		if err := r.Get(ctx, key, existing); err == nil {
+		existing := &dchv1alpha1.InitDataConnectionType{}
+		if err := r.Get(ctx, key, existing); err != nil {
+			if !apierrors.IsNotFound(err) {
+				log.Error(err, "failed to get InitDataConnectionType", "name", name)
+				continue
+			}
+			idct := &dchv1alpha1.InitDataConnectionType{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: cr.Namespace,
+				},
+				Spec: spec.toIDCTSpec(),
+			}
+			if err := r.Create(ctx, idct); err != nil {
+				if !apierrors.IsAlreadyExists(err) {
+					log.Error(err, "failed to create InitDataConnectionType", "name", name)
+				}
+			} else {
+				log.Info("created InitDataConnectionType", "name", name, "namespace", cr.Namespace)
+			}
 			continue
 		}
 
-		idct := &dchv1alpha1.InitDataConnectionType{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: cr.Namespace,
-			},
-			Spec: spec.toIDCTSpec(),
+		desired := spec.toIDCTSpec()
+		if equality.Semantic.DeepEqual(existing.Spec, desired) {
+			continue
 		}
-		if err := r.Create(ctx, idct); err != nil {
-			if !apierrors.IsAlreadyExists(err) {
-				log.Error(err, "failed to create InitDataConnectionType", "name", name)
-			}
+		existing.Spec = desired
+		if err := r.Update(ctx, existing); err != nil {
+			log.Error(err, "failed to update InitDataConnectionType", "name", name)
 		} else {
-			log.Info("created InitDataConnectionType", "name", name, "namespace", cr.Namespace)
+			log.Info("updated InitDataConnectionType", "name", name, "namespace", cr.Namespace)
 		}
 	}
 }
@@ -623,7 +640,13 @@ func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec
 		Name:              f.Name,
 		Provider:          f.Provider,
 		CredentialsFields: fields,
-		Tags:              f.Tags,
+	}
+	// Leave Tags nil when the manifest omits it or lists it as empty: the
+	// field is omitempty, so an empty non-nil slice would round-trip as nil
+	// and make the deep-equality check in ensureInitDataConnectionTypes
+	// update the CR on every reconcile.
+	if len(f.Tags) > 0 {
+		spec.Tags = f.Tags
 	}
 	if f.Label != "" {
 		spec.Label = &f.Label
