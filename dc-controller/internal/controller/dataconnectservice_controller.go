@@ -95,6 +95,11 @@ const (
 	kindDaemonSet          = "DaemonSet"
 	kindJob                = "Job"
 
+	kindDataConnectService = "DataConnectService"
+
+	// secretTypeOpaque is the API server default type for Secrets.
+	secretTypeOpaque = "Opaque"
+
 	valueTrue  = "true"
 	valueFalse = "false"
 
@@ -196,10 +201,20 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=keda.sh,resources=scaledobjects;triggerauthentications,verbs=get;list;watch;create;update;patch;delete
+// The controller creates the autoscaling metrics-reader Role in tenant namespaces,
+// so it must hold the permissions it grants (RBAC escalation prevention).
+// +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch
+// +kubebuilder:rbac:groups=metrics.k8s.io,resources=pods,verbs=get;list;watch
+// The controller binds the autoscaling SA to the view ClusterRole for Thanos
+// queries; bind on that role satisfies RBAC escalation prevention without
+// granting the controller the view permissions themselves.
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=view,verbs=bind
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=operator.openshift.io,resources=ingresscontrollers,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 
@@ -239,13 +254,23 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	log.Info("reconciling DataConnectService", "name", cr.Name, "namespace", cr.Namespace)
 
+	if err := validateAutoscaling(&cr); err != nil {
+		log.Error(err, "autoscaling validation failed")
+		platCfg := r.readPlatformConfig(ctx, cr.Namespace)
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "InvalidAutoscaling", err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "InvalidAutoscaling", err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "InvalidAutoscaling", "Autoscaling configuration is invalid")
+		})
+	}
+
 	// Read platform configuration from ConfigMap in the CR's namespace
 	platCfg := r.readPlatformConfig(ctx, cr.Namespace)
 
 	// Phase 1: Validate database secret exists
 	if err := r.validateDatabaseSecret(ctx, cr.Namespace); err != nil {
 		log.Error(err, "database secret validation failed")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DatabaseSecretMissing", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "DatabaseSecretMissing",
@@ -259,22 +284,45 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
 			log.Error(err, "failed to reconcile manifests")
-			return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
-				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "ManifestError", err.Error())
-				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "ManifestError", err.Error())
-				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, "ManifestError", "Failed to apply manifests")
+			reason := "ManifestError"
+			var conflict *ResourceConflictError
+			if errors.As(err, &conflict) {
+				reason = "ResourceConflict"
+			}
+			return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
+				r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
+				r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
+				r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionFalse, reason, "Failed to apply manifests")
 			})
 		}
 	}
 
-	// Phase 3: Ensure InitDataConnectionType CRs exist in the DCS namespace
+	// Phase 3: Reconcile optional CMA/KEDA autoscaling resources.
+	if err := r.reconcileAutoscaling(ctx, &cr); err != nil {
+		log.Error(err, "failed to reconcile autoscaling")
+		reason := "AutoscalingError"
+		if errors.Is(err, errAutoscalingProviderUnavailable) {
+			reason = "AutoscalingProviderUnavailable"
+		}
+		var conflict *ResourceConflictError
+		if errors.As(err, &conflict) {
+			reason = "ResourceConflict"
+		}
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, reason, err.Error())
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, reason, err.Error())
+			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Service manifests were applied")
+		})
+	}
+
+	// Phase 4: Ensure InitDataConnectionType CRs exist in the DCS namespace
 	r.ensureInitDataConnectionTypes(ctx, &cr)
 
-	// Phase 4: Check all deployments are ready before declaring Ready
+	// Phase 5: Check all deployments are ready before declaring Ready
 	pendingDeployments, err := r.pendingDeployments(ctx, cr.Namespace, cr.UID)
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -283,7 +331,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if len(pendingDeployments) > 0 {
 		msg := fmt.Sprintf("Waiting for deployments: %v", pendingDeployments)
 		log.Info(msg)
-		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
 			r.gatewayStatus(ctx, cr, &platCfg)
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -295,7 +343,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// Phase 5: Register flight service instances
 	if err := r.registerFlightService(ctx, &cr); err != nil {
 		log.Error(err, "failed to register flight service")
-		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+		return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -303,7 +351,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// All ready
-	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
+	return r.updateStatus(ctx, req, &platCfg, cr.Generation, "Ready", func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -316,12 +364,16 @@ func (r *DataConnectServiceReconciler) updateStatus(
 	ctx context.Context,
 	req ctrl.Request,
 	platCfg *platformConfig,
+	expectedGeneration int64,
 	phase string,
 	mutate func(*dchv1alpha1.DataConnectService),
 ) (ctrl.Result, error) {
 	var cr dchv1alpha1.DataConnectService
 	if err := r.Get(ctx, req.NamespacedName, &cr); err != nil {
 		return ctrl.Result{}, err
+	}
+	if cr.Generation != expectedGeneration {
+		return ctrl.Result{RequeueAfter: time.Nanosecond}, nil
 	}
 
 	cr.Status.Phase = phase
@@ -462,6 +514,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		}
 		setKubeRbacProxyAudiences(resources, audiences)
 	}
+
+	removeReplicasFromAutoscaledDeployments(resources, cr)
 
 	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
 		return fmt.Errorf("annotating deployments with content hash: %w", err)

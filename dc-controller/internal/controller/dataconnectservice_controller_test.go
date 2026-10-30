@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -30,6 +31,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -121,18 +123,20 @@ var _ = Describe("DataConnectService Controller", func() {
 			np + "params",
 			np + nameRestService + "-config",
 			flightResourceName + "-config",
+			np + "flight-service-ca",
 			np + nameRestService + "-kube-rbac-proxy-config",
 		} {
 			_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
-		for _, name := range []string{np + nameDataConnectHub + "-sa", flightResourceName + "-sa"} {
+		for _, name := range []string{np + nameDataConnectHub + "-sa", np + nameRestService + "-sa", flightResourceName + "-sa"} {
 			_ = k8sClient.Delete(ctx, &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: nameDatabaseConfig, Namespace: targetNamespace}})
-		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "read", np + "read-write", np + "admin"} {
+		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "read", np + "read-write", np + "admin",
+			np + "rest-service-data-access", np + "rest-service-secret-access", np + "secret-export"} {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
-		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "flight-auth-delegator"} {
+		for _, name := range []string{np + "kube-rbac-proxy-auth-review", np + "flight-auth-delegator", np + "rest-service-data-access"} {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: targetNamespace}})
@@ -374,6 +378,231 @@ var _ = Describe("DataConnectService Controller", func() {
 			ciphers, ok := tls["ciphers"].([]any)
 			Expect(ok).To(BeTrue(), "expected projected cipher suites in flight config")
 			Expect(ciphers).To(ContainElement("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"))
+		})
+	})
+
+	Context("When autoscaling is configured without replicas", func() {
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should accept the CR through API server defaulting and CEL validation", func() {
+			// Regression test: replicas must not carry a structural-schema
+			// default, otherwise the API server defaults it before the CEL
+			// rule runs and every autoScaling configuration is rejected.
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: validAutoscalingConfig()},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+	})
+
+	Context("When autoscaling is configured with an untrusted serverAddress", func() {
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should not publish status from a stale reconciliation", func() {
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+			initialGeneration := cr.Generation
+
+			cr.Spec.RestService = &dchv1alpha1.ServiceOverrides{}
+			Expect(k8sClient.Update(ctx, cr)).To(Succeed())
+
+			result, err := reconciler().updateStatus(
+				ctx,
+				reconcile.Request{NamespacedName: crKey},
+				&platformConfig{},
+				initialGeneration,
+				conditionTypeReady,
+				func(*dchv1alpha1.DataConnectService) {},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(result.RequeueAfter).To(Equal(time.Nanosecond))
+
+			current := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, current)).To(Succeed())
+			Expect(current.Status.Phase).To(BeEmpty())
+		})
+
+		It("should mark the CR Degraded and create no autoscaling resources", func() {
+			trigger := validAutoscalingTrigger()
+			trigger.ServerAddress = "http://attacker.example"
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{
+					RestService: &dchv1alpha1.ServiceOverrides{AutoScaling: &dchv1alpha1.AutoScalingConfig{
+						MinReplicas: ptr.To(int32(1)),
+						MaxReplicas: ptr.To(int32(2)),
+						Triggers:    []dchv1alpha1.AutoscalingTrigger{trigger},
+					}},
+				},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+
+			// The first reconcile only adds the finalizer; the second one runs
+			// validation and reports the failure on the status.
+			for range 3 {
+				_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal("Error"))
+
+			degraded := meta.FindStatusCondition(validated.Status.Conditions, conditionTypeDegraded)
+			Expect(degraded).NotTo(BeNil())
+			Expect(degraded.Status).To(Equal(metav1.ConditionTrue))
+			Expect(degraded.Reason).To(Equal("InvalidAutoscaling"))
+			Expect(degraded.Message).To(ContainSubstring("serverAddress"))
+
+			// The validation gate runs before the autoscaling token or any
+			// other autoscaling resource exists.
+			saErr := k8sClient.Get(ctx, types.NamespacedName{
+				Name: resourceName + "-autoscaling-sa", Namespace: targetNamespace,
+			}, &corev1.ServiceAccount{})
+			Expect(errors.IsNotFound(saErr)).To(BeTrue(), "autoscaling ServiceAccount must not exist")
+			secretErr := k8sClient.Get(ctx, types.NamespacedName{
+				Name: resourceName + "-autoscaling-token", Namespace: targetNamespace,
+			}, &corev1.Secret{})
+			Expect(errors.IsNotFound(secretErr)).To(BeTrue(), "autoscaling token Secret must not exist")
+		})
+	})
+
+	Context("When a pre-existing resource conflicts with a generated one", func() {
+		const conflictingConfigMap = np + nameRestService + "-config"
+
+		BeforeEach(func() {
+			createDatabaseSecret()
+
+			// Pre-create a rendered resource name with a foreign owner and
+			// content the controller did not produce.
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      conflictingConfigMap,
+					Namespace: targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{{
+						APIVersion: dchv1alpha1.GroupVersion.String(),
+						Kind:       kindDataConnectService,
+						Name:       "other-dataconnectservice",
+						UID:        "uid-foreign",
+						Controller: ptr.To(true),
+					}},
+				},
+				Data: map[string]string{"attacker-key": "attacker-value"},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should mark the CR Degraded with a ResourceConflict and leave the object untouched", func() {
+			for range 3 {
+				_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal("Error"))
+
+			degraded := meta.FindStatusCondition(validated.Status.Conditions, conditionTypeDegraded)
+			Expect(degraded).NotTo(BeNil())
+			Expect(degraded.Status).To(Equal(metav1.ConditionTrue))
+			Expect(degraded.Reason).To(Equal("ResourceConflict"))
+			Expect(degraded.Message).To(ContainSubstring("ConfigMap"))
+			Expect(degraded.Message).To(ContainSubstring(conflictingConfigMap))
+			Expect(degraded.Message).To(ContainSubstring("delete or rename"))
+
+			// The conflicting object must be neither adopted nor overwritten.
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: conflictingConfigMap, Namespace: targetNamespace}, cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("attacker-key", "attacker-value"))
+			Expect(cm.OwnerReferences).To(HaveLen(1))
+			Expect(string(cm.OwnerReferences[0].UID)).To(Equal("uid-foreign"))
+			Expect(cm.Labels).NotTo(HaveKey(labelManagedBy))
+		})
+	})
+
+	Context("When deployment tooling pre-seeds a rendered resource", func() {
+		const seededCAConfigMap = np + "flight-service-ca"
+
+		BeforeEach(func() {
+			createDatabaseSecret()
+
+			// Deployment tooling (hack/ci/deploy-dch.sh) seeds the flight
+			// CA-bundle ConfigMap before creating the DataConnectService so
+			// the first Flight rollout can already mount the CA. The seeded
+			// object is unowned and its content differs from the rendered
+			// desired state.
+			cm := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      seededCAConfigMap,
+					Namespace: targetNamespace,
+				},
+				Data: map[string]string{"service-ca.crt": "seeded-ca-certificate"},
+			}
+			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
+
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      resourceName,
+					Namespace: targetNamespace,
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
+			}
+			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
+		})
+
+		AfterEach(func() {
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should reconcile over the seeded object and preserve its externally supplied data", func() {
+			reconcileUntilReady()
+
+			validated := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, validated)).To(Succeed())
+			Expect(validated.Status.Phase).To(Equal(conditionTypeReady))
+
+			cm := &corev1.ConfigMap{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: seededCAConfigMap, Namespace: targetNamespace}, cm)).To(Succeed())
+			Expect(cm.Data).To(HaveKeyWithValue("service-ca.crt", "seeded-ca-certificate"))
+			Expect(cm.Annotations).To(HaveKeyWithValue("service.beta.openshift.io/inject-cabundle", "true"))
+			Expect(cm.Labels).To(HaveKeyWithValue(labelManagedBy, managedByDCHService))
+			Expect(cm.OwnerReferences).To(HaveLen(1))
+			Expect(cm.OwnerReferences[0].UID).To(Equal(validated.UID))
 		})
 	})
 
