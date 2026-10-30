@@ -19,6 +19,13 @@ use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
 
+/// RESERVED_LOG_FIELDS names the fixed top-level keys `RestJsonFormat` sets on
+/// every log record. Event fields sharing one of these names are dropped
+/// rather than merged, so a field on the log call can never overwrite the
+/// severity, trace identity, or other fixed schema values.
+const RESERVED_LOG_FIELDS: &[&str] =
+    &["ts", "level", "logger", "service.name", "trace_id", "span_id", "request-path", "msg"];
+
 struct RestJsonFormat;
 
 #[derive(Default)]
@@ -96,25 +103,32 @@ where
             );
         }
 
-        if let Some(span) = event
-            .parent()
-            .and_then(|id| ctx.span(id))
-            .or_else(|| ctx.lookup_current())
-            && let Some(fields) = span.extensions().get::<FormattedFields<N>>()
-            && let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(&fields.fields)
-            && let Some(request_path) = fields.get("request.path").and_then(serde_json::Value::as_str)
-        {
-            log.insert(
-                "request-path".to_owned(),
-                serde_json::Value::String(request_path.to_owned()),
-            );
+        let request_path = ctx.event_scope().and_then(|mut scope| {
+            scope.find_map(|span| {
+                let extensions = span.extensions();
+                let fields = extensions.get::<FormattedFields<N>>()?;
+                let serde_json::Value::Object(fields) = serde_json::from_str(&fields.fields).ok()? else {
+                    return None;
+                };
+                fields
+                    .get("request.path")
+                    .and_then(serde_json::Value::as_str)
+                    .map(ToOwned::to_owned)
+            })
+        });
+        if let Some(request_path) = request_path {
+            log.insert("request-path".to_owned(), serde_json::Value::String(request_path));
         }
 
         if !fields.is_empty() {
             let mut fields = fields;
             let message = fields.remove("message").unwrap_or(serde_json::Value::Null);
             log.insert("msg".to_owned(), message);
-            log.extend(fields);
+            log.extend(
+                fields
+                    .into_iter()
+                    .filter(|(key, _)| !RESERVED_LOG_FIELDS.contains(&key.as_str())),
+            );
         } else {
             log.insert("msg".to_owned(), serde_json::Value::Null);
         }

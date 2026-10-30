@@ -99,7 +99,7 @@ func main() {
 	flag.StringVar(&manifestsPath, "manifests-path", "/manifests",
 		"Path to the kustomize manifests directory containing base/, db/, and gateway/ subdirectories")
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
