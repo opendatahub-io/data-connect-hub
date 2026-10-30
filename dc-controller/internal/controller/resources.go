@@ -233,6 +233,12 @@ func buildServicePatches(deploymentName, containerName string, overrides *dchv1a
 		patchParts = append(patchParts, fmt.Sprintf("spec:\n  replicas: %d", *overrides.Replicas))
 	}
 
+	if overrides.ImagePullPolicy != nil {
+		patchParts = append(patchParts, fmt.Sprintf(
+			"spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          imagePullPolicy: %s",
+			containerName, *overrides.ImagePullPolicy))
+	}
+
 	if overrides.Resources != nil {
 		resBytes, err := json.Marshal(overrides.Resources)
 		if err == nil {

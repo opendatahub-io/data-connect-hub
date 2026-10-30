@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
@@ -41,7 +42,14 @@ func (e *E2EFixture) CreateDataConnectService() {
 	dcs := &dchv1alpha1.DataConnectService{
 		ObjectMeta: metav1.ObjectMeta{Name: dcsName, Namespace: applicationNamespace},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
-			RestService:   &dchv1alpha1.ServiceOverrides{Replicas: &initialRestReplicas},
+			RestService: &dchv1alpha1.ServiceOverrides{
+				Replicas: &initialRestReplicas,
+				// The e2e suite builds and kind-loads this image locally under a fake
+				// tag rather than pushing it to a real registry, so Always (the
+				// production default, needed for disconnected-mirror freshness) would
+				// fail to pull it on every attempt.
+				ImagePullPolicy: ptr.To(corev1.PullIfNotPresent),
+			},
 			FlightService: &dchv1alpha1.FlightServiceConfig{},
 		},
 	}

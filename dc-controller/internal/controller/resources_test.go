@@ -404,6 +404,19 @@ func TestBuildServicePatchesUseSeparateDeploymentAndContainerNames(t *testing.T)
 	}
 }
 
+func TestBuildServicePatchesImagePullPolicy(t *testing.T) {
+	policy := corev1.PullIfNotPresent
+	patches := buildServicePatches(nameRestService, nameRestServiceContainer, &dchv1alpha1.ServiceOverrides{
+		ImagePullPolicy: &policy,
+	})
+	if len(patches) != 1 {
+		t.Fatalf("patch count = %d, want 1", len(patches))
+	}
+	if !strings.Contains(patches[0].Patch, "- name: "+nameRestServiceContainer+"\n          imagePullPolicy: IfNotPresent") {
+		t.Errorf("patch does not set imagePullPolicy on container %q:\n%s", nameRestServiceContainer, patches[0].Patch)
+	}
+}
+
 // TestRenderKustomizationManifestRoots renders each root the controller may
 // build, through the in-memory staging that production uses, so that a
 // kustomization reaching outside its own directory is caught here.

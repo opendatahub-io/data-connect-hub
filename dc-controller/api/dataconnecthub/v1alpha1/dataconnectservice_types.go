@@ -43,6 +43,11 @@ type ServiceOverrides struct {
 	// +optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 
+	// imagePullPolicy overrides the container's image pull policy
+	// +kubebuilder:validation:Enum=Always;IfNotPresent;Never
+	// +optional
+	ImagePullPolicy *corev1.PullPolicy `json:"imagePullPolicy,omitempty"`
+
 	// env is a list of additional environment variables to set on the container
 	// +optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
