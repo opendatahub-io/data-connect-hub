@@ -23,8 +23,16 @@ use tracing_subscriber::{EnvFilter, fmt};
 /// every log record. Event fields sharing one of these names are dropped
 /// rather than merged, so a field on the log call can never overwrite the
 /// severity, trace identity, or other fixed schema values.
-const RESERVED_LOG_FIELDS: &[&str] =
-    &["ts", "level", "logger", "service.name", "trace_id", "span_id", "request-path", "msg"];
+const RESERVED_LOG_FIELDS: &[&str] = &[
+    "ts",
+    "level",
+    "logger",
+    "service.name",
+    "trace_id",
+    "span_id",
+    "request-path",
+    "msg",
+];
 
 struct RestJsonFormat;
 
