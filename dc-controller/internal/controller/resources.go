@@ -53,6 +53,7 @@ import (
 
 const (
 	resourceNameField = "name"
+	imageField        = "image"
 
 	// RelatedImageRestService is the env var and params.env key for the REST image.
 	RelatedImageRestService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
@@ -232,6 +233,12 @@ func buildServicePatches(deploymentName, containerName string, overrides *dchv1a
 		patchParts = append(patchParts, fmt.Sprintf("spec:\n  replicas: %d", *overrides.Replicas))
 	}
 
+	if overrides.ImagePullPolicy != nil {
+		patchParts = append(patchParts, fmt.Sprintf(
+			"spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          imagePullPolicy: %s",
+			containerName, *overrides.ImagePullPolicy))
+	}
+
 	if overrides.Resources != nil {
 		resBytes, err := json.Marshal(overrides.Resources)
 		if err == nil {
@@ -357,6 +364,13 @@ func replaceStringValue(value any, old, new string) any {
 		return strings.ReplaceAll(value, old, new)
 	case map[string]any:
 		for key, child := range value {
+			if key == imageField {
+				// Container image references must not be rewritten by the
+				// service rename: an image whose repository contains the
+				// service name (e.g. example.com/dch-flight-service) would
+				// otherwise be corrupted into a nonexistent reference.
+				continue
+			}
 			value[key] = replaceStringValue(child, old, new)
 		}
 	case []any:
@@ -915,7 +929,13 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 			}
 			var args []any
 			if existing, ok := container["args"].([]any); ok {
-				args = existing
+				for _, value := range existing {
+					arg, ok := value.(string)
+					if ok && strings.HasPrefix(arg, "--auth-token-audiences=") {
+						continue
+					}
+					args = append(args, value)
+				}
 			}
 			args = append(args, arg)
 			container["args"] = args

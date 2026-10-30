@@ -404,6 +404,19 @@ func TestBuildServicePatchesUseSeparateDeploymentAndContainerNames(t *testing.T)
 	}
 }
 
+func TestBuildServicePatchesImagePullPolicy(t *testing.T) {
+	policy := corev1.PullIfNotPresent
+	patches := buildServicePatches(nameRestService, nameRestServiceContainer, &dchv1alpha1.ServiceOverrides{
+		ImagePullPolicy: &policy,
+	})
+	if len(patches) != 1 {
+		t.Fatalf("patch count = %d, want 1", len(patches))
+	}
+	if !strings.Contains(patches[0].Patch, "- name: "+nameRestServiceContainer+"\n          imagePullPolicy: IfNotPresent") {
+		t.Errorf("patch does not set imagePullPolicy on container %q:\n%s", nameRestServiceContainer, patches[0].Patch)
+	}
+}
+
 // TestRenderKustomizationManifestRoots renders each root the controller may
 // build, through the in-memory staging that production uses, so that a
 // kustomization reaching outside its own directory is caught here.
@@ -614,6 +627,35 @@ func TestSetKubeRbacProxyTLSOptsFallsBackToIntermediateWhenAPIServerObjectIsAbse
 	args := kubeRbacProxyArgs(t, deployment)
 	if !containsString(args, "--tls-min-version=VersionTLS12") || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
 		t.Fatalf("args = %v, want projected Intermediate fallback", args)
+	}
+}
+
+func TestSetKubeRbacProxyAudiencesIsIdempotent(t *testing.T) {
+	deployment := kubeRbacProxyDeployment(
+		"--secure-listen-address=0.0.0.0:8443",
+		"--auth-token-audiences=old-audience",
+	)
+	resources := []*unstructured.Unstructured{deployment}
+	audiences := []string{"new-audience", "another-audience"}
+
+	setKubeRbacProxyAudiences(resources, audiences)
+	setKubeRbacProxyAudiences(resources, audiences)
+
+	args := kubeRbacProxyArgs(t, deployment)
+	if len(args) == 0 {
+		t.Fatal("expected kube-rbac-proxy arguments")
+	}
+	count := 0
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--auth-token-audiences=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("audience argument count = %d, want 1; args = %v", count, args)
+	}
+	if !containsString(args, "--auth-token-audiences=new-audience,another-audience") {
+		t.Fatalf("args = %v, want updated audience argument", args)
 	}
 }
 
@@ -1137,6 +1179,51 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 	}
 }
 
+// TestRenderFlightServicePreservesContainerImages verifies that the per-CR
+// flight-service rename rewrites resource names and labels but leaves
+// container image references untouched, even when the repository contains
+// the "flight-service" substring.
+func TestRenderFlightServicePreservesContainerImages(t *testing.T) {
+	manifestsPath := filepath.Join("..", "..", "..", "config")
+	imageParams := map[string]string{
+		RelatedImageRestService:   "example.com/dch-rest-service:e2e",
+		RelatedImageFlightService: "example.com/dch-flight-service:e2e",
+		RelatedImageKubeRbacProxy: "example.com/odh-kube-rbac-proxy:e2e",
+	}
+	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, testBaseManifest), nil, imageParams)
+	if err != nil {
+		t.Fatalf("rendering base: %v", err)
+	}
+
+	crName := "e2e-dataconnectservice"
+	resources = renderFlightService(resources, crName)
+
+	var flightDeployment *unstructured.Unstructured
+	wantName := "dch-" + crName + "-flight"
+	for _, obj := range resources {
+		if obj.GetKind() == kindDeployment && obj.GetName() == wantName {
+			flightDeployment = obj
+			break
+		}
+	}
+	if flightDeployment == nil {
+		t.Fatalf("flight Deployment %q not found after rename", wantName)
+	}
+
+	labels, found, err := unstructured.NestedString(flightDeployment.Object, "spec", testTemplateKey, testMetadataKey, "labels", labelAppName)
+	if err != nil || !found || labels != crName+"-flight" {
+		t.Errorf("pod label %s = %q (found=%v, err=%v), want %q", labelAppName, labels, found, err, crName+"-flight")
+	}
+
+	gotImage, found := renderedContainerImage(resources, nameFlightServiceContainer)
+	if !found {
+		t.Fatalf("container %q not found in rendered Deployments", nameFlightServiceContainer)
+	}
+	if gotImage != imageParams[RelatedImageFlightService] {
+		t.Errorf("flight container image = %q, want %q (image references must survive the service rename)", gotImage, imageParams[RelatedImageFlightService])
+	}
+}
+
 func renderedContainerImage(resources []*unstructured.Unstructured, containerName string) (string, bool) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -1151,7 +1238,7 @@ func renderedContainerImage(resources []*unstructured.Unstructured, containerNam
 			if !ok || container[resourceNameField] != containerName {
 				continue
 			}
-			image, _ := container["image"].(string)
+			image, _ := container[imageField].(string)
 			return image, true
 		}
 	}
@@ -1298,7 +1385,7 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 					testContainersKey: []any{
 						map[string]any{
 							resourceNameField: nameFlightServiceContainer,
-							"image":           "localhost/dch-flight:test",
+							imageField:        "localhost/dch-flight:test",
 						},
 					},
 					"volumes": []any{
@@ -1386,7 +1473,7 @@ func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.
 			testTemplateKey: map[string]any{
 				testSpecKey: map[string]any{
 					testContainersKey: []any{
-						map[string]any{resourceNameField: nameRestServiceContainer, "image": "test:latest"},
+						map[string]any{resourceNameField: nameRestServiceContainer, imageField: "test:latest"},
 					},
 					"volumes": []any{
 						map[string]any{
