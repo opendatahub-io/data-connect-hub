@@ -113,6 +113,26 @@ func (e *E2EFixture) Setup(managerImage string) {
 	e.k8sClient, err = client.New(cfg, client.Options{Scheme: scheme})
 	Expect(err).NotTo(HaveOccurred())
 
+	// The kustomize default overlay replaces the manager image with the
+	// RELATED_IMAGE_ODH_DATA_CONNECT_HUB_CONTROLLER_IMAGE value from
+	// config/default/params.env, so `make deploy IMG=...` alone does not run
+	// the image built by this suite. Pin it explicitly: the suite must test
+	// the controller from the checkout, not the published odh-stable image.
+	By("pinning the controller-manager image to the suite build")
+	manager := &appsv1.Deployment{}
+	managerKey := types.NamespacedName{Name: managerDeployment, Namespace: namespace}
+	Expect(e.k8sClient.Get(e.ctx, managerKey, manager)).To(Succeed())
+	managerBase := manager.DeepCopy()
+	managerImagePinned := false
+	for i := range manager.Spec.Template.Spec.Containers {
+		if manager.Spec.Template.Spec.Containers[i].Name == "manager" {
+			manager.Spec.Template.Spec.Containers[i].Image = managerImage
+			managerImagePinned = true
+		}
+	}
+	Expect(managerImagePinned).To(BeTrue(), "expected a manager container in the controller-manager deployment")
+	Expect(e.k8sClient.Patch(e.ctx, manager, client.MergeFrom(managerBase))).To(Succeed())
+
 	By("creating an isolated application namespace")
 	Expect(e.k8sClient.Create(e.ctx, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: applicationNamespace},
@@ -161,8 +181,8 @@ func (e *E2EFixture) Setup(managerImage string) {
 	})).To(Succeed())
 
 	By("mounting the service CA into the controller-manager")
-	manager := &appsv1.Deployment{}
-	managerKey := types.NamespacedName{Name: managerDeployment, Namespace: namespace}
+	manager = &appsv1.Deployment{}
+	managerKey = types.NamespacedName{Name: managerDeployment, Namespace: namespace}
 	Expect(e.k8sClient.Get(e.ctx, managerKey, manager)).To(Succeed())
 	base := manager.DeepCopy()
 	manager.Spec.Template.Spec.Volumes = append(manager.Spec.Template.Spec.Volumes, corev1.Volume{

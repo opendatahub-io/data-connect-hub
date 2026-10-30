@@ -61,16 +61,23 @@ func (e *E2EFixture) EnableRESTAutoScaling(serverAddress string) *dchv1alpha1.Da
 
 // DisableRESTAutoScaling removes the REST autoscaling configuration, restores
 // the fixed replica count, and waits for the service to become Ready again.
+// Only REST state changes here; the Flight replica count is whatever the
+// earlier specs established, so the readiness wait uses the spec's value
+// instead of assuming a fixed count.
 func (e *E2EFixture) DisableRESTAutoScaling() {
 	current := &dchv1alpha1.DataConnectService{}
 	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
 	if current.Spec.RestService != nil && current.Spec.RestService.AutoScaling != nil {
+		flightReplicas := int32(1)
+		if current.Spec.FlightService != nil && current.Spec.FlightService.Replicas != nil {
+			flightReplicas = *current.Spec.FlightService.Replicas
+		}
 		By("removing REST autoscaling configuration")
 		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 			dcs.Spec.RestService.AutoScaling = nil
 			dcs.Spec.RestService.Replicas = ptr.To(int32(1))
 		})
-		e.waitForDCSReady(patched.Generation, 1, 1)
+		e.waitForDCSReady(patched.Generation, 1, flightReplicas)
 	}
 }
 
