@@ -106,16 +106,34 @@ fi
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
-# Detect OpenShift (has SecurityContextConstraints API) vs vanilla Kubernetes
-SECURITY_OPTS=""
+# PodSecurity "restricted" requires explicit privilege-escalation and seccomp
+# settings on every platform. The chart defaults already run as a non-root UID
+# and drop capabilities.
+SECURITY_OPTS="\
+    --set securityContext.seccompProfile.type=RuntimeDefault \
+    --set containerSecurityContext.allowPrivilegeEscalation=false \
+    --set containerSecurityContext.seccompProfile.type=RuntimeDefault"
+
+# Detect OpenShift (has SecurityContextConstraints API) vs vanilla Kubernetes.
+# OpenShift assigns each namespace a UID/GID range; use its base so the pod
+# stays within the SCC range on OCP 4 and carries an explicit non-root UID plus
+# a group that owns the data volume under the PodSecurity enforcement on OCP 5.
 if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
-    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
-    SECURITY_OPTS="\
-        --set securityContext.runAsUser=null \
-        --set securityContext.runAsGroup=null \
-        --set securityContext.fsGroup=null \
-        --set containerSecurityContext.runAsUser=null \
-        --set containerSecurityContext.runAsGroup=null"
+    echo "Detected OpenShift — using the namespace UID/GID range"
+    RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+        | cut -d/ -f1)
+    RUN_AS_GROUP=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.supplemental-groups}' 2>/dev/null \
+        | cut -d/ -f1)
+    : "${RUN_AS_USER:=1001}"
+    : "${RUN_AS_GROUP:=1001}"
+    SECURITY_OPTS="${SECURITY_OPTS} \
+        --set securityContext.runAsUser=$RUN_AS_USER \
+        --set securityContext.runAsGroup=$RUN_AS_GROUP \
+        --set securityContext.fsGroup=$RUN_AS_GROUP \
+        --set containerSecurityContext.runAsUser=$RUN_AS_USER \
+        --set containerSecurityContext.runAsGroup=$RUN_AS_GROUP"
 fi
 
 # ---------------------------------------------------------------------------

@@ -163,6 +163,7 @@ $(PYTHON_SDK_DIR)/.venv/bin/python3:
 sdk-venv: $(SDK_VENV_PREREQ)
 
 sdk-install: sdk-venv
+	$(SDK_PYTHON) -m pip install --upgrade -r "$(PYTHON_SDK_DIR)/requirements.txt"
 	$(SDK_PYTHON) -m pip install -e "$(PYTHON_SDK_DIR)[flight,dev]"
 
 sdk-test: sdk-venv

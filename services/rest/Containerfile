@@ -4,7 +4,7 @@
 # Stage 1: Build
 # ------------------------------------------------------------------------------
 
-FROM registry.access.redhat.com/ubi9-minimal@sha256:2d4c4551af6831dcd26bbf86108c4385de5183ec8fe6b5868f6f9640fe47f4ed AS builder
+FROM registry.access.redhat.com/ubi9-minimal@sha256:bba2b4bbf0ed15cfe7dd72a1e17ae7d2015a141f306b304e1a2785c41400e39c AS builder
 
 RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
     && microdnf clean all
@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # Stage 2: Runtime
 # ------------------------------------------------------------------------------
 
-FROM registry.access.redhat.com/ubi9-minimal@sha256:2d4c4551af6831dcd26bbf86108c4385de5183ec8fe6b5868f6f9640fe47f4ed
+FROM registry.access.redhat.com/ubi9-minimal@sha256:bba2b4bbf0ed15cfe7dd72a1e17ae7d2015a141f306b304e1a2785c41400e39c
 
 LABEL org.opencontainers.image.description="Data Connection Hub — REST Service (HTTP/actix-web)"
 

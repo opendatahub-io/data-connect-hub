@@ -158,44 +158,13 @@ kubectl create configmap "$RELEASE-nginx" \
     --from-literal="default.conf=$NGINX_CONFIG" \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-IS_OCP="false"
-if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
-    IS_OCP="true"
-fi
-
-OCP_VOLUME_MOUNTS=""
-OCP_VOLUMES=""
-OCP_SECURITY_CONTEXT=""
-if [[ "$IS_OCP" == "true" ]]; then
-    OCP_VOLUME_MOUNTS=$(cat <<'EOF'
-            - name: cache
-              mountPath: /var/cache/nginx
-            - name: tmp
-              mountPath: /tmp
-            - name: pid
-              mountPath: /var/run
-EOF
-    )
-    OCP_VOLUMES=$(cat <<'EOF'
-        - name: cache
-          emptyDir: {}
-        - name: tmp
-          emptyDir: {}
-        - name: pid
-          emptyDir: {}
-EOF
-    )
-    OCP_SECURITY_CONTEXT=$(cat <<'EOF'
-          securityContext:
-            allowPrivilegeEscalation: false
-            runAsNonRoot: true
-            seccompProfile:
-              type: RuntimeDefault
-            capabilities:
-              drop: ["ALL"]
-EOF
-    )
-fi
+# Use OpenShift's namespace-assigned base UID when available; fall back to the
+# nginx image user's UID on non-OpenShift clusters where kubelet needs a
+# numeric UID to verify runAsNonRoot (nginx:alpine runs as root by default).
+RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+    -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+    | cut -d/ -f1)
+: "${RUN_AS_USER:=101}"
 
 cat <<EOF | kubectl apply -n "$NAMESPACE" -f - >/dev/null
 apiVersion: apps/v1
@@ -214,13 +183,26 @@ spec:
       labels:
         app: $RELEASE
     spec:
+      # OpenShift namespaces enforce the PodSecurity "restricted" profile, which
+      # rejects workloads that do not set an explicit securityContext.
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: nginx
           image: $IMAGE
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: ${RUN_AS_USER}
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 8443
-$OCP_SECURITY_CONTEXT
           volumeMounts:
             - name: data
               mountPath: /data/api
@@ -231,7 +213,14 @@ $OCP_SECURITY_CONTEXT
             - name: tls
               mountPath: /etc/nginx/tls
               readOnly: true
-$OCP_VOLUME_MOUNTS
+            # nginx runs as an arbitrary non-root UID, so give it writable
+            # paths for its cache, pid file and temp files.
+            - name: cache
+              mountPath: /var/cache/nginx
+            - name: tmp
+              mountPath: /tmp
+            - name: pid
+              mountPath: /var/run
           readinessProbe:
             httpGet:
               scheme: HTTPS
@@ -249,7 +238,12 @@ $OCP_VOLUME_MOUNTS
         - name: tls
           secret:
             secretName: $RELEASE-tls
-$OCP_VOLUMES
+        - name: cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+        - name: pid
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service
