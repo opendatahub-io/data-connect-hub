@@ -44,7 +44,6 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	kustypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/yaml"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
@@ -66,19 +65,8 @@ const (
 	requeueOnError         = 30 * time.Second
 	requeueWhenReady       = 5 * time.Minute
 
-	nameRestService            = "rest-service"
-	nameRestServiceContainer   = "rest-server"
-	nameFlightService          = "flight-service"
-	nameFlightServiceContainer = "flight-server"
-	nameDataConnectHub         = "data-connect-hub"
-	nameDatabaseConfig         = "dch-database-config"
-	nameSecretConfigTOML       = "secret-config.toml"
-	nameKubeRbacProxy          = "kube-rbac-proxy"
-
-	// OTLP exporter environment variables carrying spec.trace to the service containers.
-	envOTLPEndpoint    = "OTEL_EXPORTER_OTLP_ENDPOINT"
-	envOTLPInsecure    = "OTEL_EXPORTER_OTLP_INSECURE"
-	envOTLPCertificate = "OTEL_EXPORTER_OTLP_CERTIFICATE"
+	nameDatabaseConfig   = "dch-database-config"
+	nameSecretConfigTOML = "secret-config.toml"
 
 	kindDeployment         = "Deployment"
 	kindConfigMap          = "ConfigMap"
@@ -95,8 +83,7 @@ const (
 	kindDaemonSet          = "DaemonSet"
 	kindJob                = "Job"
 
-	valueTrue  = "true"
-	valueFalse = "false"
+	valueTrue = "true"
 
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
@@ -110,6 +97,10 @@ const (
 	annotationSpecHash   = "dataconnecthub/spec-hash"
 	annotationConfigHash = "dataconnecthub/config-hash"
 
+	nameKubeRbacProxy = "kube-rbac-proxy"
+	nameRestService   = "rest-service"
+	nameFlightService = "flight-service"
+
 	releasePlatform = "platform"
 )
 
@@ -121,6 +112,7 @@ type DataConnectServiceReconciler struct {
 	client.Client
 	Scheme              *runtime.Scheme
 	ManifestsPath       string
+	ChartPath           string // override for tests; defaults to ManifestsPath/charts/data-connect-hub
 	RestImage           string
 	FlightImage         string
 	KubeRbacProxyImage  string
@@ -294,7 +286,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 
 	// Phase 5: Register flight service instances
 	if err := r.registerFlightService(ctx, &cr); err != nil {
-		log.Error(err, "failed to register flight service")
+		log.Error(err, "failed to register flight services")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightRegistrationError", err.Error())
@@ -385,41 +377,31 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
 ) error {
-	manifestPath := filepath.Join(r.ManifestsPath, "base")
-	if r.openShiftMonitoringAvailable(ctx) {
-		manifestPath = filepath.Join(r.ManifestsPath, "overlays", "openshift")
+	chartPath := r.ChartPath
+	if chartPath == "" {
+		chartPath = filepath.Join(r.ManifestsPath, "charts", "data-connect-hub")
+	}
+	renderer := NewHelmRenderer(chartPath)
+
+	opts := RenderOptions{
+		MonitoringAvailable: r.openShiftMonitoringAvailable(ctx),
 	}
 
-	gw := r.resolveGateway(cr, platCfg)
-	restPatches := buildServicePatches(nameRestService, nameRestServiceContainer, cr.Spec.RestService)
-	var flightPatches []kustypes.Patch
-	if cr.Spec.FlightService != nil {
-		flightPatches = buildServicePatches(nameFlightService, nameFlightServiceContainer, &cr.Spec.FlightService.ServiceOverrides)
-	}
-	gwPatches := buildGatewayPatches(&gw)
-
-	patches := make([]kustypes.Patch, 0, len(restPatches)+len(flightPatches)+len(gwPatches))
-	patches = append(patches, restPatches...)
-	patches = append(patches, flightPatches...)
-	patches = append(patches, gwPatches...)
-
-	paramsEnvOverrides := map[string]string{
-		RelatedImageRestService:   r.RestImage,
-		RelatedImageFlightService: r.FlightImage,
-		RelatedImageKubeRbacProxy: r.KubeRbacProxyImage,
-		"GATEWAY_NAME":            gw.Name,
-		"GATEWAY_NAMESPACE":       gw.Namespace,
-		"OPERAND_NAMESPACE":       cr.Namespace,
-	}
-	if r.ControllerNamespace != "" {
-		paramsEnvOverrides["CONTROLLER_NAMESPACE"] = r.ControllerNamespace
-	}
-	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, paramsEnvOverrides)
+	values, err := r.buildHelmValues(cr, platCfg, opts)
 	if err != nil {
-		return fmt.Errorf("rendering manifests: %w", err)
+		return fmt.Errorf("building helm values: %w", err)
 	}
 
-	resources = renderFlightService(resources, cr.Name)
+	resources, err := renderer.RenderChart(values, cr.Namespace)
+	if err != nil {
+		return fmt.Errorf("rendering chart: %w", err)
+	}
+
+	// Enforce the cluster TLS profile on the serving surfaces the rendered
+	// chart does not parameterize: the kube-rbac-proxy sidecar args and the
+	// Flight gRPC listener config. DCH is an adhering component, so the
+	// profile is resolved once here and projected regardless of adherence
+	// policy, failing the reconcile closed on read errors.
 	flightInstanceName := flightServiceResourceName(cr.Name)
 
 	tlsProfile, err := platformtls.LoadWithAdherence(ctx, r.Client)
@@ -428,39 +410,8 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("resolving cluster TLS profile for kube-rbac-proxy: %w", err)
 	}
 	setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec)
-
-	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
-		return fmt.Errorf("setting config namespace: %w", err)
-	}
-	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting discovery service account: %w", err)
-	}
-	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting flight service address: %w", err)
-	}
 	if err := setConfigMapFlightTLSProfile(ctx, resources, flightInstanceName, tlsProfile.Spec); err != nil {
 		return fmt.Errorf("setting flight TLS profile: %w", err)
-	}
-	if cr.Spec.FlightService != nil {
-		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
-			return fmt.Errorf("setting flight-service connector configuration: %w", err)
-		}
-	}
-
-	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestServiceContainer, nameFlightServiceContainer) {
-		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
-	}
-
-	audiences := r.resolveTokenReviewAudiences(cr, platCfg)
-	if len(audiences) > 0 {
-		updated, err := setConfigMapAudiences(resources, audiences)
-		if err != nil {
-			return fmt.Errorf("setting token review audiences: %w", err)
-		}
-		if !updated {
-			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
-		}
-		setKubeRbacProxyAudiences(resources, audiences)
 	}
 
 	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
@@ -475,6 +426,7 @@ func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context
 		return nil
 	}
 	log := logf.FromContext(ctx)
+
 	flightName := flightServiceResourceName(cr.Name)
 	flightFQDN := fmt.Sprintf("dch-%s.%s.svc", flightName, cr.Namespace)
 	internalURL := fmt.Sprintf("https://%s:8443", flightFQDN)
@@ -911,7 +863,7 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// generation or label changes. ConfigMap data-only updates do NOT pass
 	// this predicate, but that is fine: controller-rendered ConfigMaps
 	// (flight-service-config, rest-service-config, etc.) are only modified
-	// during reconcile from Kustomize output, so their hash is computed
+	// during reconcile from Helm output, so their hash is computed
 	// from the rendered desired state in the same reconcile cycle.
 	//
 	// Watches(ConfigMap, isPlatformConfig) — the platform configuration
