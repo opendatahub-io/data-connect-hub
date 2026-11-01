@@ -79,6 +79,9 @@ RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
 SEED_TMP="$(mktemp)"
 trap 'rm -f "$SEED_TMP"' EXIT
 cat > "$SEED_TMP" <<'SEED'
+# Fail the pod on any unexpected error (commands in "if" conditions are
+# exempt, which the optional pgvector probe below relies on).
+set -e
 if [ -n "${E2E_PG_CA_B64:-}" ]; then
     printf "%s" "$E2E_PG_CA_B64" | base64 -d > /tmp/postgresql-ca.crt
 fi
@@ -96,6 +99,48 @@ INSERT INTO dch_e2e.cities (name, country, population) VALUES
     ('London', 'United Kingdom',  8982000),
     ('Paris',  'France',          2161000);
 SQL
+
+# Optional pgvector seed data. test_flight_pgvector.py skips when
+# dch_e2e.embeddings is absent, so only warn when pgvector cannot be used.
+#
+# If pgvector is not installed, try to create it; it is not a trusted
+# extension, so this needs a superuser (hack/install-postgresql.sh --pgvector
+# pre-installs it). An unqualified CREATE EXTENSION installs into the current
+# schema. It is skipped when pgvector is already installed, possibly in
+# another schema, where IF NOT EXISTS would succeed without changing anything.
+#
+# Then seed only when vector, halfvec and sparsevec all resolve unqualified:
+# halfvec and sparsevec need pgvector >= 0.7.0, and DCH connects with the
+# same URI and user, so the e2e queries (type literals, the `<->` operator)
+# see the same default search_path as this session.
+version=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+available=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT 1 FROM pg_available_extensions WHERE name = 'vector'")
+if [ -z "$version" ] && [ -n "$available" ] &&
+    psql "$PGURI" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector"; then
+    version=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+fi
+resolved=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT count(*) FROM unnest(ARRAY['vector', 'halfvec', 'sparsevec']) AS t(name) WHERE to_regtype(name) IS NOT NULL")
+if [ "$resolved" = "3" ]; then
+    psql "$PGURI" -v ON_ERROR_STOP=1 <<SQL
+DROP TABLE IF EXISTS dch_e2e.embeddings;
+CREATE TABLE dch_e2e.embeddings (
+    id               INTEGER PRIMARY KEY,
+    content          TEXT NOT NULL,
+    embedding        vector(3),
+    half_embedding   halfvec(3),
+    sparse_embedding sparsevec(5)
+);
+INSERT INTO dch_e2e.embeddings VALUES
+    (1, 'cat',   '[0.1,0.2,0.3]', '[1,2,3]', '{1:1.5,3:2.5}/5'),
+    (2, 'dog',   '[1,-2,3.5]',    '[4,5,6]', '{2:9}/5'),
+    (3, 'empty', NULL,            NULL,      NULL);
+SQL
+elif [ -n "$version" ]; then
+    echo "WARNING: pgvector ${version} is installed, but vector, halfvec and sparsevec do not all resolve" \
+        "(requires pgvector >= 0.7.0 in a schema on search_path); skipping dch_e2e.embeddings seed" >&2
+else
+    echo "WARNING: pgvector extension unavailable or not installable; skipping dch_e2e.embeddings seed" >&2
+fi
 SEED
 
 kubectl delete pod "$POD_NAME" -n "$NAMESPACE" --ignore-not-found >/dev/null 2>&1 || true
