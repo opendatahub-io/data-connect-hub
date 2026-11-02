@@ -60,6 +60,10 @@ const (
 	conditionTypeDegraded              = "Degraded"
 	conditionTypeGRPCGatewaySupported  = "GRPCGatewaySupported"
 
+	// addressTypeHostname is the only address type the CR status publishes;
+	// see the Addresses type in the API.
+	addressTypeHostname = "hostname"
+
 	annotationHTTP2Enable = "ingress.operator.openshift.io/default-enable-http2"
 
 	requeueWaitingForReady = 10 * time.Second
@@ -195,6 +199,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
+// +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=config.openshift.io,resources=ingresses,verbs=get;list;watch
 // +kubebuilder:rbac:groups=config.openshift.io,resources=apiservers,verbs=get;list;watch
@@ -283,13 +288,22 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if len(pendingDeployments) > 0 {
 		msg := fmt.Sprintf("Waiting for deployments: %v", pendingDeployments)
 		log.Info(msg)
-		return r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
-			r.gatewayStatus(ctx, cr, &platCfg)
+		var gatewayErr error
+		result, err := r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
+			gatewayErr = r.gatewayStatus(ctx, cr, &platCfg)
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "WaitingForDeployments", "No errors")
 			r.checkGRPCGatewaySupport(ctx, cr)
 		})
+		if err != nil {
+			return result, err
+		}
+		if gatewayErr != nil {
+			log.Error(gatewayErr, "failed to resolve the gateway address, keeping the last-known value")
+			return ctrl.Result{RequeueAfter: requeueOnError}, nil
+		}
+		return result, nil
 	}
 
 	// Phase 5: Register flight service instances
@@ -303,13 +317,22 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// All ready
-	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
-		r.gatewayStatus(ctx, cr, &platCfg)
+	var gatewayErr error
+	result, err := r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
+		gatewayErr = r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
 		r.checkGRPCGatewaySupport(ctx, cr)
 	})
+	if err != nil {
+		return result, err
+	}
+	if gatewayErr != nil {
+		log.Error(gatewayErr, "failed to resolve the gateway address, keeping the last-known value")
+		return ctrl.Result{RequeueAfter: requeueOnError}, nil
+	}
+	return result, nil
 }
 
 func (r *DataConnectServiceReconciler) updateStatus(
@@ -745,20 +768,34 @@ func (r *DataConnectServiceReconciler) resolveTokenReviewAudiences(cr *dchv1alph
 	return platCfg.TokenReviewAudiences
 }
 
-func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) {
+// gatewayStatus records the gateway attachment and the client-usable address
+// in the CR status. When no hostname resolves, Addresses is cleared rather
+// than carrying an empty value -- an entry that looks like an address but
+// cannot be connected to is the trap this field exists to avoid. A transient
+// lookup failure is returned without touching Addresses, so the CR keeps its
+// last-known value and the caller can retry.
+func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) error {
 	gw := r.resolveGateway(cr, platCfg)
 	cr.Status.HttpRoute = httpRouteResourceName(cr.Name)
 	cr.Status.Gateway = &dchv1alpha1.Gateway{
 		Name:      gw.Name,
 		Namespace: gw.Namespace,
 	}
-	hostname := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
-	cr.Status.Addresses = []dchv1alpha1.Addresses{
-		{
-			Type:  "hostname",
-			Value: hostname,
-		},
+	hostname, err := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
+	if err != nil {
+		return err
 	}
+	if hostname != "" {
+		cr.Status.Addresses = []dchv1alpha1.Addresses{
+			{
+				Type:  addressTypeHostname,
+				Value: hostname,
+			},
+		}
+	} else {
+		cr.Status.Addresses = nil
+	}
+	return nil
 }
 
 // checkGRPCGatewaySupport sets an advisory condition -- and escalates Degraded --
@@ -829,7 +866,26 @@ func (r *DataConnectServiceReconciler) http2Enabled(ctx context.Context) (enable
 	return false, known
 }
 
-func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) string {
+// resolveGatewayHostname returns the hostname clients should use to reach the
+// gateway, preferring sources whose value is client-usable over the raw LB
+// address that Gateway status.addresses carries:
+//
+//  1. Gateway spec.listeners[*].hostname (first non-empty, non-wildcard) --
+//     the hostname Envoy's filter chains match on SNI and DNS points at in
+//     LoadBalancer mode; connections with any other SNI are dropped.
+//  2. spec.host of the Route the platform operator creates for the gateway in
+//     OcpRoute mode (same name and namespace as the Gateway) -- the
+//     router-assigned hostname.
+//  3. Gateway status.addresses[0].value -- the raw ELB address; last resort
+//     only, since it is not a usable SNI and goes stale when the gateway
+//     service is recreated.
+//
+// Lookups that mean "not there to use" -- the Gateway or Route not existing,
+// the API not being installed, and the documented Helm chart whose ClusterRole
+// does not yet grant Route reads -- resolve to an empty hostname, not an
+// error. Transient lookup failures are returned so the caller can retry
+// instead of publishing the fallback address as if it were resolved.
+func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Context, namespace, name string) (string, error) {
 	gw := &unstructured.Unstructured{}
 	gw.SetGroupVersionKind(schema.GroupVersionKind{
 		Group:   "gateway.networking.k8s.io",
@@ -837,9 +893,79 @@ func (r *DataConnectServiceReconciler) resolveGatewayHostname(ctx context.Contex
 		Kind:    "Gateway",
 	})
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, gw); err != nil {
-		return ""
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			// The Gateway (or the Gateway API itself) not being there yet is
+			// a normal provisioning state, not a lookup failure.
+			return "", nil
+		}
+		return "", fmt.Errorf("reading Gateway %s/%s: %w", namespace, name, err)
 	}
 
+	if hostname := firstListenerHostname(gw); hostname != "" {
+		return hostname, nil
+	}
+	host, err := r.gatewayRouteHost(ctx, namespace, name)
+	if err != nil {
+		return "", err
+	}
+	if host != "" {
+		return host, nil
+	}
+	return gatewayStatusAddress(gw), nil
+}
+
+// firstListenerHostname returns the first non-empty, non-wildcard listener
+// hostname of the Gateway. LoadBalancer-mode RHOAI gateways set one;
+// OcpRoute-mode listeners leave it unset because the Route owns the hostname
+// instead. Wildcard hostnames (e.g. *.example.com) are skipped: they describe
+// what the listener matches, not an address a client can connect to.
+func firstListenerHostname(gw *unstructured.Unstructured) string {
+	listeners, found, _ := unstructured.NestedSlice(gw.Object, "spec", "listeners")
+	if !found {
+		return ""
+	}
+	for _, l := range listeners {
+		listener, ok := l.(map[string]any)
+		if !ok {
+			continue
+		}
+		hostname, ok := listener["hostname"].(string)
+		if !ok || hostname == "" || strings.Contains(hostname, "*") {
+			continue
+		}
+		return hostname
+	}
+	return ""
+}
+
+// gatewayRouteHost returns spec.host of the OpenShift Route the platform
+// operator creates for the gateway in OcpRoute mode. The Route shares the
+// Gateway's name and namespace. Absent Route, absent Route API, and a
+// ClusterRole without Route reads (the documented Helm chart degrade case)
+// all return an empty host; any other lookup failure is returned as an error.
+func (r *DataConnectServiceReconciler) gatewayRouteHost(ctx context.Context, namespace, name string) (string, error) {
+	route := &unstructured.Unstructured{}
+	route.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "route.openshift.io",
+		Version: "v1",
+		Kind:    "Route",
+	})
+	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, route); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) || apierrors.IsForbidden(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading Route %s/%s: %w", namespace, name, err)
+	}
+	host, found, _ := unstructured.NestedString(route.Object, "spec", "host")
+	if !found {
+		return "", nil
+	}
+	return host, nil
+}
+
+// gatewayStatusAddress returns the first Gateway status address value, the
+// pre-existing fallback the raw LB hostname lands in.
+func gatewayStatusAddress(gw *unstructured.Unstructured) string {
 	addresses, found, _ := unstructured.NestedSlice(gw.Object, "status", "addresses")
 	if !found || len(addresses) == 0 {
 		return ""
