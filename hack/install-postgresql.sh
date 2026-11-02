@@ -3,6 +3,10 @@
 # Install PostgreSQL using a simple Kubernetes Deployment + Service.
 # Optionally enables SSL/TLS.
 #
+# With --pgvector, the pgvector extension is created in the target database
+# and the default image becomes pgvector/pgvector (the official postgres image
+# plus the extension). A custom -i image must then ship pgvector itself.
+#
 # When SSL is enabled, PostgreSQL is configured to REQUIRE TLS for
 # all TCP connections. Plain-text TCP connections are rejected.
 #
@@ -41,8 +45,12 @@ USERNAME="testuser"
 PASSWORD=""
 DATABASE="testdb"
 
-IMAGE="docker.io/library/postgres:16"
+IMAGE=""
+DEFAULT_IMAGE="docker.io/library/postgres:16"
+PGVECTOR_IMAGE="docker.io/pgvector/pgvector:pg16"
 TIMEOUT="300s"
+
+PGVECTOR_ENABLED=false
 
 SSL_ENABLED=false
 SSL_CERT=""
@@ -64,8 +72,10 @@ Options:
   -u USERNAME         database user               (default: testuser)
   -p PASSWORD         user password               (required)
   -d DATABASE         database name               (default: testdb)
-  -i IMAGE            postgres image              (default: docker.io/library/postgres:16)
+  -i IMAGE            postgres image              (default: ${DEFAULT_IMAGE},
+                                                   or ${PGVECTOR_IMAGE} with --pgvector)
   -t TIMEOUT          rollout timeout             (default: 300s)
+  --pgvector          create the pgvector extension in the database
   --ssl               enable SSL/TLS and require TLS
   --ssl-cert FILE     server certificate (PEM)
   --ssl-key FILE      server private key (PEM)
@@ -163,6 +173,10 @@ while [[ $# -gt 0 ]]; do
             SSL_ENABLED=true
             shift
             ;;
+        --pgvector)
+            PGVECTOR_ENABLED=true
+            shift
+            ;;
         --ssl-cert)
             require_arg "$@"
             SSL_CERT="$2"
@@ -191,6 +205,14 @@ done
 if [[ -z "${PASSWORD:-}" ]]; then
     echo "error: password is required; supply it with -p" >&2
     usage
+fi
+
+if [[ -z "$IMAGE" ]]; then
+    if [[ "$PGVECTOR_ENABLED" == "true" ]]; then
+        IMAGE="$PGVECTOR_IMAGE"
+    else
+        IMAGE="$DEFAULT_IMAGE"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -273,6 +295,30 @@ kubectl create secret generic "${RELEASE}-auth" \
     --dry-run=client \
     -o yaml |
     kubectl apply -f - >/dev/null
+
+# ---------------------------------------------------------------------------
+# pgvector
+#
+# Scripts in /docker-entrypoint-initdb.d run when the data directory is
+# initialized (every pod start, since it is an emptyDir) as POSTGRES_USER
+# against POSTGRES_DB. pgvector is not a trusted extension, so it must be
+# created by this superuser. If the image lacks pgvector, initialization fails
+# and the rollout below reports the error.
+# ---------------------------------------------------------------------------
+
+if [[ "$PGVECTOR_ENABLED" == "true" ]]; then
+    kubectl create configmap "${RELEASE}-initdb" \
+        -n "$NAMESPACE" \
+        --from-literal=01-pgvector.sql="CREATE EXTENSION IF NOT EXISTS vector;" \
+        --dry-run=client \
+        -o yaml |
+        kubectl apply -f - >/dev/null
+else
+    # Drop the ConfigMap left by a previous --pgvector install of this release.
+    kubectl delete configmap "${RELEASE}-initdb" \
+        -n "$NAMESPACE" \
+        --ignore-not-found >/dev/null
+fi
 
 # ---------------------------------------------------------------------------
 # SSL/TLS
@@ -602,6 +648,14 @@ EOF
               mountPath: /var/lib/postgresql/data
 EOF
 
+    if [[ "$PGVECTOR_ENABLED" == "true" ]]; then
+        cat <<EOF
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+EOF
+    fi
+
     if [[ "$SSL_ENABLED" == "true" ]]; then
         cat <<EOF
             - name: tls-certs
@@ -620,6 +674,14 @@ EOF
         - name: pgdata
           emptyDir: {}
 EOF
+
+    if [[ "$PGVECTOR_ENABLED" == "true" ]]; then
+        cat <<EOF
+        - name: initdb
+          configMap:
+            name: ${RELEASE}-initdb
+EOF
+    fi
 
     if [[ "$SSL_ENABLED" == "true" ]]; then
         cat <<EOF
@@ -692,6 +754,8 @@ echo "  host:      ${HOST}:5432"
 echo "  database:  ${DATABASE}"
 echo "  user:      ${USERNAME}"
 echo "  ssl:       ${SSL_ENABLED}"
+echo "  image:     ${IMAGE}"
+echo "  pgvector:  ${PGVECTOR_ENABLED}"
 
 if [[ "$SSL_ENABLED" == "true" ]]; then
     echo ""

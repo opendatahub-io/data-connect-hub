@@ -1,7 +1,7 @@
 """E2E test fixtures for Data Connect Hub.
 
 Configuration is read from environment variables, typically written
-by setup.sh into .env and loaded at the top of this file.
+by run-e2e.sh into .env and loaded at the top of this file.
 
     DCH_GATEWAY_ENDPOINT   Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
@@ -9,7 +9,7 @@ by setup.sh into .env and loaded at the top of this file.
     DCH_GATEWAY_AUTH_REQUIRED  Authenticate health checks at the platform Gateway
     DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
-    DCH_PG_SECRET          K8s secret name for PG    (set by setup.sh, enables query tests)
+    DCH_PG_SECRET          K8s secret name for PG    (set by run-e2e.sh, enables query tests)
 """
 
 from __future__ import annotations
@@ -450,11 +450,11 @@ def pg_flight_connection(
 ) -> str:
     """Create connection type + connection for Flight SQL query tests.
 
-    The K8s secret and test data are prepared by setup.sh.
+    The K8s secret and test data are prepared by run-e2e.sh.
     Returns the connection ID. Cleans up REST resources after the module.
     """
     if not pg_secret:
-        pytest.skip("DCH_PG_SECRET not set (run e2e/setup.sh first)")
+        pytest.skip("DCH_PG_SECRET not set (run e2e/run-e2e.sh first)")
 
     ct = _create_connection_type_with_retry(
         rest_client,
@@ -477,6 +477,38 @@ def pg_flight_connection(
         rest_client.delete_connection(conn.id)
     with contextlib.suppress(Exception):
         rest_client.delete_connection_type(ct.id)
+
+
+@pytest.fixture(scope="module")
+def pgvector_flight_connection(
+    pg_secret: str | None,
+    rest_client: DataConnectClient,
+) -> str:
+    """Create a connection using the out-of-box PGVector connection type.
+
+    Reuses the tenant PostgreSQL secret; run-e2e.sh seeds dch_e2e.embeddings
+    when pgvector is installed or installable (hack/install-postgresql.sh
+    --pgvector installs it).
+    Returns the connection ID. Cleans up the connection after the module.
+    """
+    if not pg_secret:
+        pytest.skip("DCH_PG_SECRET not set (run e2e/run-e2e.sh first)")
+
+    ct = _find_by_name(rest_client.list_connection_types(), "PGVector")
+    assert ct is not None, "out-of-box PGVector connection type not found"
+    conn = _create_connection_with_retry(
+        rest_client,
+        name=_unique_name("e2e-pgvector-conn"),
+        connection_type_id=ct.id,
+        data_format="tabular",
+        credentials_ref=CredentialsRef(secret=pg_secret),
+        properties={},
+    )
+
+    yield conn.id
+
+    with contextlib.suppress(Exception):
+        rest_client.delete_connection(conn.id)
 
 
 @pytest.fixture(scope="module")
