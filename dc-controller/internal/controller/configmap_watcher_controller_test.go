@@ -53,7 +53,7 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 				"category": `["Object storage"]`,
 				"fields": `[
 					{"type":"short-text","name":"Access key","envVar":"AWS_ACCESS_KEY_ID","required":true,"properties":{}},
-					{"type":"password","name":"Secret key","envVar":"AWS_SECRET_ACCESS_KEY","required":true,"properties":{}}
+					{"type":"hidden","name":"Secret key","envVar":"AWS_SECRET_ACCESS_KEY","required":true,"properties":{"deferInput":true}}
 				]`,
 			},
 		}
@@ -104,6 +104,9 @@ var _ = Describe("ConfigMap Watcher Controller", func() {
 		Expect(captured.CredentialsFields[0].Label).To(Equal("Access key"))
 		Expect(captured.CredentialsFields[0].Type).To(Equal("string"))
 		Expect(captured.CredentialsFields[0].Required).To(BeTrue())
+		Expect(captured.CredentialsFields[0].Sensitive).To(BeFalse())
+		Expect(captured.CredentialsFields[1].Name).To(Equal("AWS_SECRET_ACCESS_KEY"))
+		Expect(captured.CredentialsFields[1].Sensitive).To(BeTrue())
 
 		Expect(k8sClient.Get(ctx, cmKey, cm)).To(Succeed())
 		Expect(cm.Annotations[annotationDCHSynced]).To(Equal(valueSyncedTrue))

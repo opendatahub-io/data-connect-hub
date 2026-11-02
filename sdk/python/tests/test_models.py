@@ -329,6 +329,20 @@ class TestConnectionType:
         assert len(field.enum_values) == 2
         assert field.enum_values[0] == EnumValue(value="us-east-1", label="US East")
         assert field.enum_values[1].value == "eu-west-1"
+        assert field.sensitive is False
+
+    def test_credentials_field_sensitive(self) -> None:
+        ct = ConnectionType.model_validate(
+            {
+                "id": "ct-pg",
+                "name": "Postgres",
+                "provider": "postgres",
+                "credentials_fields": [
+                    {"name": "URI", "label": "URI", "required": True, "type": "string", "sensitive": True},
+                ],
+            }
+        )
+        assert ct.credentials_fields[0].sensitive is True
 
     def test_tags_present(self) -> None:
         data = {
