@@ -119,10 +119,12 @@ if [ -z "$version" ] && [ -n "$available" ] &&
     psql "$PGURI" -v ON_ERROR_STOP=1 -c "CREATE EXTENSION IF NOT EXISTS vector"; then
     version=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT extversion FROM pg_extension WHERE extname = 'vector'")
 fi
+# Drop unconditionally so a table seeded by an earlier run does not survive
+# a skip below and make the test fixture run against unresolvable types.
+psql "$PGURI" -v ON_ERROR_STOP=1 -c "DROP TABLE IF EXISTS dch_e2e.embeddings"
 resolved=$(psql "$PGURI" -v ON_ERROR_STOP=1 -tA -c "SELECT count(*) FROM unnest(ARRAY['vector', 'halfvec', 'sparsevec']) AS t(name) WHERE to_regtype(name) IS NOT NULL")
 if [ "$resolved" = "3" ]; then
     psql "$PGURI" -v ON_ERROR_STOP=1 <<SQL
-DROP TABLE IF EXISTS dch_e2e.embeddings;
 CREATE TABLE dch_e2e.embeddings (
     id               INTEGER PRIMARY KEY,
     content          TEXT NOT NULL,
