@@ -529,7 +529,8 @@ kubectl annotate secret e2e-legacy-uri-conn -n "$CI_TENANT_NAMESPACE" \
 
 if has_connector postgres; then
     echo "=== Deploying tenant PostgreSQL ==="
-    tenant_pg_args=(-n "$CI_TENANT_NAMESPACE" -r "$CI_TENANT_PG_HOST" -u "$CI_TENANT_PG_USER" -p "$CI_TENANT_PG_PASSWORD" -d "$CI_TENANT_PG_DATABASE" -t "180s")
+    # --pgvector: e2e/tests/test_flight_pgvector.py needs the extension.
+    tenant_pg_args=(-n "$CI_TENANT_NAMESPACE" -r "$CI_TENANT_PG_HOST" -u "$CI_TENANT_PG_USER" -p "$CI_TENANT_PG_PASSWORD" -d "$CI_TENANT_PG_DATABASE" -t "180s" --pgvector)
     if [[ "$CI_SSL_ENABLED" == "true" ]]; then
         tenant_pg_args+=(--ssl)
     fi
