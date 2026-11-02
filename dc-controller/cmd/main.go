@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 
+	gozap "go.uber.org/zap"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -97,12 +99,15 @@ func main() {
 	flag.StringVar(&manifestsPath, "manifests-path", "/manifests",
 		"Path to the kustomize manifests directory containing base/, db/, and gateway/ subdirectories")
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(zap.New(
+		zap.UseFlagOptions(&opts),
+		zap.RawZapOpts(gozap.Fields(gozap.String("service.name", "data-connect-hub"))),
+	).WithName("dc-controller"))
 
 	cfg := ctrl.GetConfigOrDie()
 	tlsResult, err := controllertls.Resolve(context.Background(), cfg)

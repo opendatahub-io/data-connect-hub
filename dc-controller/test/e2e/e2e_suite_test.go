@@ -34,6 +34,8 @@ import (
 var (
 	// managerImage is the manager image to be built and loaded for testing.
 	managerImage = "example.com/dc-controller:v0.0.1"
+	restImage    = "example.com/dch-rest-service:e2e"
+	flightImage  = "example.com/dch-flight-service:e2e"
 	// shouldCleanupCertManager tracks whether CertManager was installed by this suite.
 	shouldCleanupCertManager = false
 )
@@ -62,9 +64,23 @@ var _ = BeforeSuite(func() {
 	err = utils.LoadImageToKindClusterWithName(managerImage)
 	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load the manager image into Kind")
 
+	buildAndLoadImage(restImage, "../services/rest/Containerfile")
+	buildAndLoadImage(flightImage, "../services/flight/Containerfile")
+
 	configureKubectlKubeRC()
 	setupCertManager()
 })
+
+func buildAndLoadImage(image, containerfile string) {
+	By("building image " + image)
+	cmd := exec.Command("docker", "build", "-t", image, "-f", containerfile, "..")
+	_, err := utils.Run(cmd)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to build image "+image)
+
+	By("loading image " + image + " on Kind")
+	err = utils.LoadImageToKindClusterWithName(image)
+	ExpectWithOffset(1, err).NotTo(HaveOccurred(), "Failed to load image into Kind: "+image)
+}
 
 var _ = AfterSuite(func() {
 	teardownCertManager()

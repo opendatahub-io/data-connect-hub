@@ -303,6 +303,14 @@ spec:
                           x-kubernetes-map-type: atomic
                       type: object
                     type: array
+                  imagePullPolicy:
+                    description: imagePullPolicy overrides the container's image pull
+                      policy
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    type: string
                   replicas:
                     default: 1
                     description: replicas overrides the number of pods
@@ -2722,6 +2730,14 @@ spec:
                           x-kubernetes-map-type: atomic
                       type: object
                     type: array
+                  imagePullPolicy:
+                    description: imagePullPolicy overrides the container's image pull
+                      policy
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    type: string
                   replicas:
                     default: 1
                     description: replicas overrides the number of pods

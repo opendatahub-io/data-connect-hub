@@ -24,7 +24,7 @@ async fn main() -> Result<()> {
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
 
     let trace = TraceConfig::from_env();
-    let tracer_provider = commons::utils::init_tracing("custom-connector", args.json_logs, &trace)?;
+    let tracer_provider = commons::utils::init_tracing_json("custom-connector", args.json_logs, &trace)?;
     log_trace_exporter(&trace);
 
     tracing::info!("Starting custom connector Flight service");

@@ -99,6 +99,7 @@ spec:
           args:
             - --config
             - /config/config.toml
+            - --json-logs
           ports:
             - name: http
               containerPort: 8080

@@ -36,6 +36,7 @@ import (
 	clientconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/test/utils"
 )
 
@@ -79,7 +80,7 @@ func NewE2EFixture() *E2EFixture {
 }
 
 // Setup installs CRDs, deploys the controller, and provisions the suite dependencies.
-func (e *E2EFixture) Setup(managerImage string) {
+func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	By("creating manager namespace")
 	cmd := exec.Command("kubectl", "create", "ns", namespace)
 	_, err := utils.Run(cmd)
@@ -102,6 +103,22 @@ func (e *E2EFixture) Setup(managerImage string) {
 	cmd = exec.Command("make", "deploy", fmt.Sprintf("IMG=%s", managerImage))
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to deploy the controller-manager")
+
+	By("setting the controller-manager to use the locally built test image")
+	cmd = exec.Command("kubectl", "set", "image", "deployment/"+managerDeployment,
+		"manager="+managerImage, "-n", namespace)
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to set the controller-manager test image")
+	cmd = exec.Command("kubectl", "set", "env", "deployment/"+managerDeployment,
+		controller.RelatedImageRestService+"="+restImage,
+		controller.RelatedImageFlightService+"="+flightImage,
+		"-n", namespace)
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Failed to set the REST and Flight test images")
+	cmd = exec.Command("kubectl", "rollout", "status", "deployment/"+managerDeployment,
+		"-n", namespace, "--timeout=5m")
+	_, err = utils.Run(cmd)
+	Expect(err).NotTo(HaveOccurred(), "Controller-manager test image failed to become ready")
 
 	By("creating a Kubernetes Go client")
 	cfg, err := clientconfig.GetConfig()

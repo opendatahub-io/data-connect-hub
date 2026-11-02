@@ -33,6 +33,7 @@ spec:
           - --leader-elect
           {{- end }}
           - --health-probe-bind-address=:8081
+          - --zap-encoder=json
         env:
         - name: CONTROLLER_NAMESPACE
           valueFrom:

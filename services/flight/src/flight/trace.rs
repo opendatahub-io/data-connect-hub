@@ -92,6 +92,7 @@ where
             otel.name = %path.trim_start_matches('/'),
             otel.kind = "server",
             otel.status_code = Empty,
+            request.path = %path,
             rpc.system = "grpc",
             rpc.service = %service,
             rpc.method = %method,

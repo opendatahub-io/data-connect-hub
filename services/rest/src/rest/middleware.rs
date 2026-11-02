@@ -53,6 +53,7 @@ pub async fn trace_request(
         http.request.method = %method,
         http.route = %route,
         http.response.status_code = Empty,
+        request.path = %req.path(),
         url.path = %req.path(),
         tenant.id = HeaderExtractor(req.headers()).get(X_TENANT_ID).unwrap_or_default(),
     );

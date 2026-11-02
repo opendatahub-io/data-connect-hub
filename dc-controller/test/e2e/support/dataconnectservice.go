@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
@@ -41,7 +42,14 @@ func (e *E2EFixture) CreateDataConnectService() {
 	dcs := &dchv1alpha1.DataConnectService{
 		ObjectMeta: metav1.ObjectMeta{Name: dcsName, Namespace: applicationNamespace},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
-			RestService:   &dchv1alpha1.ServiceOverrides{Replicas: &initialRestReplicas},
+			RestService: &dchv1alpha1.ServiceOverrides{
+				Replicas: &initialRestReplicas,
+				// The e2e suite builds and kind-loads this image locally under a fake
+				// tag rather than pushing it to a real registry, so Always (the
+				// production default, needed for disconnected-mirror freshness) would
+				// fail to pull it on every attempt.
+				ImagePullPolicy: ptr.To(corev1.PullIfNotPresent),
+			},
 			FlightService: &dchv1alpha1.FlightServiceConfig{},
 		},
 	}
@@ -138,13 +146,16 @@ func (e *E2EFixture) ReconcileFlightConnectorConfig(
 	expected map[string]map[string]any,
 ) {
 	DeferCleanup(e.ResetFlightConnectorConfig)
+	// Set Recreate before the config patch: switching a Deployment to
+	// Recreate mid-rollout can deadlock it at the surge pod count, because
+	// the deployment controller never scales the new ReplicaSet back up.
+	e.useRecreateFlightDeploymentStrategy()
 	By("patching Flight connector configuration")
 	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 		dcs.Spec.FlightService.Connectors = connectors
 	})
 
 	e.waitForDCSObservedGeneration(patched.Generation)
-	e.useRecreateFlightDeploymentStrategy()
 
 	By("waiting for connector configuration to reconcile and become Ready")
 	e.waitForDCSReady(patched.Generation, 2, 2)
@@ -157,11 +168,11 @@ func (e *E2EFixture) ResetFlightConnectorConfig() {
 	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
 	if current.Spec.FlightService != nil && len(current.Spec.FlightService.Connectors) > 0 {
 		By("restoring default Flight connector configuration")
+		e.useRecreateFlightDeploymentStrategy()
 		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 			dcs.Spec.FlightService.Connectors = nil
 		})
 		e.waitForDCSObservedGeneration(patched.Generation)
-		e.useRecreateFlightDeploymentStrategy()
 		e.waitForDCSReady(patched.Generation, 2, 2)
 	}
 	e.restoreFlightDeploymentStrategy()

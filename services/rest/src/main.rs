@@ -11,7 +11,7 @@ use crate::state::ApiService;
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use commons::api::storage::MetaStore;
-use commons::utils::{TraceConfig, init_tracing, log_trace_exporter};
+use commons::utils::{TraceConfig, init_tracing_json, log_trace_exporter};
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
 use pg_meta_store::store::PgMetaStore;
@@ -191,7 +191,7 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
 
     let trace = TraceConfig::from_env();
-    let tracer_provider = init_tracing(SERVICE_NAME, args.json_logs, &trace)?;
+    let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
 
     tracing::info!("Starting DataConnectorHub API service");
     log_config_source(&args.config, "--config", true);
