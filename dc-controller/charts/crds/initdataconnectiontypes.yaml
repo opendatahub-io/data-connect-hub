@@ -22,6 +22,12 @@ spec:
     - jsonPath: .spec.provider
       name: Provider
       type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Synced")].status
+      name: Synced
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
