@@ -62,6 +62,10 @@ type CredentialsField struct {
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	DefaultValue *string `json:"defaultValue,omitempty"`
+
+	// sensitive indicates whether the field value should be masked in the UI
+	// +optional
+	Sensitive bool `json:"sensitive,omitempty"`
 }
 
 // InitDataConnectionTypeSpec defines the desired state of InitDataConnectionType.

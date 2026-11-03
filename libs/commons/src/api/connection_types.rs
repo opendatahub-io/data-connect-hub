@@ -23,6 +23,9 @@ pub struct Field {
     pub enum_values: Option<Vec<EnumValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_value: Option<String>,
+    /// Whether the field value is sensitive and should be masked in the UI.
+    #[serde(default)]
+    pub sensitive: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -119,6 +122,7 @@ mod tests {
                     d_type: "string".to_string(),
                     enum_values: None,
                     default_value: None,
+                    sensitive: true,
                 }],
                 tags: Some(vec!["domain: database".to_string(), "engine: postgresql".to_string()]),
             },
@@ -140,6 +144,7 @@ mod tests {
         assert_eq!(json["resource"]["credentials_fields"][0]["name"], "url");
         assert_eq!(json["resource"]["credentials_fields"][0]["type"], "string");
         assert_eq!(json["resource"]["credentials_fields"][0]["required"], true);
+        assert_eq!(json["resource"]["credentials_fields"][0]["sensitive"], true);
         assert_eq!(json["resource"]["tags"][0], "domain: database");
         assert_eq!(json["resource"]["tags"][1], "engine: postgresql");
 
@@ -148,6 +153,7 @@ mod tests {
         assert_eq!(deserialized.resource.provider, res.resource.provider);
         assert_eq!(deserialized.resource.credentials_fields.len(), 1);
         assert_eq!(deserialized.resource.credentials_fields[0].d_type, "string");
+        assert!(deserialized.resource.credentials_fields[0].sensitive);
         assert_eq!(deserialized.resource.tags.as_ref().unwrap().len(), 2);
     }
 
@@ -222,6 +228,7 @@ mod tests {
         let res: DataConnectionTypeResource = serde_json::from_value(json).unwrap();
         let field = &res.resource.credentials_fields[0];
         assert_eq!(field.d_type, "enum");
+        assert!(!field.sensitive, "sensitive defaults to false when omitted");
         let enums = field.enum_values.as_ref().unwrap();
         assert_eq!(enums.len(), 2);
         assert_eq!(enums[0].value, "us-east-1");
