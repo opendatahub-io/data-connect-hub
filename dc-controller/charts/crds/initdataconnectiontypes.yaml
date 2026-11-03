@@ -97,6 +97,11 @@ spec:
                       description: label is the human-readable label for the field
                       maxLength: 256
                       type: string
+                    multiple:
+                      description: |-
+                        multiple indicates whether more than one enum value may be selected;
+                        only meaningful when type is "enum"
+                      type: boolean
                     name:
                       description: name is the field identifier
                       maxLength: 253

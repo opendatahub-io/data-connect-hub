@@ -454,6 +454,7 @@ mod tests {
                         enum_values: None,
                         default_value: None,
                         sensitive: false,
+                        multiple: false,
                     })
                     .collect(),
                 tags: None,

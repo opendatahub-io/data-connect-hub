@@ -100,6 +100,7 @@ type Field struct {
 	EnumValues   []EnumValue `json:"enum_values,omitempty"`
 	DefaultValue *string     `json:"default_value,omitempty"`
 	Sensitive    bool        `json:"sensitive"`
+	Multiple     bool        `json:"multiple"`
 }
 
 // EnumValue mirrors the Rust EnumValue JSON structure.
