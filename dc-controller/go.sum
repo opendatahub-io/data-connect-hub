@@ -137,8 +137,8 @@ github.com/openshift/api v0.0.0-20261028163820-1f109e9eefc7 h1:hdo1AalEZcD6TG2LT
 github.com/openshift/api v0.0.0-20261028163820-1f109e9eefc7/go.mod h1:2oI3aXQFDjjl7l4xA9ZPSkB+l+lyfWLg7P2sWg9yEvM=
 github.com/openshift/controller-runtime-common v0.0.0-20261026124434-bdfc411d93cd h1:ryKoDx8pbVqytd/plQ5TvOeoTTC8l4akPB6O3FZULuQ=
 github.com/openshift/controller-runtime-common v0.0.0-20261026124434-bdfc411d93cd/go.mod h1:wRo2jx/+tZd6HnYYmKayArJgL3T6LLbovLr28DGukMg=
-github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7 h1:PDH/v+jap31Eb4N9q+Q3X05QHIXZA4sVyr4zb/n+Cv0=
-github.com/openshift/library-go v0.0.0-20261001144932-192662696fc7/go.mod h1:k0EA2kHPdvdKgyV38lWS1u1eIgMBgrpWkCl2ei4A3ug=
+github.com/openshift/library-go v0.0.0-20261030161254-298cf2d19148 h1:edQNNfcG5AF3X2TbVjaXd07UrpaOeAzwK/LttpMtp34=
+github.com/openshift/library-go v0.0.0-20261030161254-298cf2d19148/go.mod h1:SOmIJLGV4ubkJnA2rXH0M5davuY1QpattP3zotdIY3E=
 github.com/pelletier/go-toml/v2 v2.4.3 h1:GTRvJQutkOSftxIFD5xw9aepkYNuPWmVJpffdDPYVpY=
 github.com/pelletier/go-toml/v2 v2.4.3/go.mod h1:2gIqNv+qfxSVS7cM2xJQKtLSTLUE9V8t9Stt+h56mCY=
 github.com/pkg/errors v0.9.1 h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=
