@@ -80,6 +80,9 @@ class TestLegacyConnectionTypeImport:
         assert "AWS_ACCESS_KEY_ID" in field_names
         assert "AWS_SECRET_ACCESS_KEY" in field_names
         assert "AWS_S3_ENDPOINT" in field_names
+        sensitive = {f.name: f.sensitive for f in ct.credentials_fields}
+        assert sensitive["AWS_SECRET_ACCESS_KEY"] is True, "type: hidden must map to sensitive"
+        assert sensitive["AWS_ACCESS_KEY_ID"] is False
 
     def test_oci_v1_configmap_imported_as_connection_type(
         self, legacy_import_enabled, rest_client: DataConnectClient

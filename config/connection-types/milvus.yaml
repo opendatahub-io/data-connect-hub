@@ -7,11 +7,13 @@ credentials_fields:
     description: Milvus server URI
     required: true
     type: string
+    sensitive: true
   - name: TOKEN
     label: Token
     description: Milvus authentication token
     required: false
     type: string
+    sensitive: true
   - name: DATABASE
     label: Database
     description: Milvus database name

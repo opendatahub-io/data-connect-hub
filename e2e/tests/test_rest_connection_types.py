@@ -6,7 +6,7 @@ import time
 import uuid
 
 import pytest
-from data_connect_hub import DataConnectClient, DCHNotFoundError
+from data_connect_hub import CredentialField, DataConnectClient, DCHNotFoundError
 
 EXPECTED_OOB_CONNECTION_TYPES = {
     "Postgres": "postgres",
@@ -34,6 +34,10 @@ EXPECTED_CREDENTIAL_FIELDS = {
     "Milvus": {"URI", "TOKEN", "DATABASE", "CA_CERT"},
     "Neo4j": {"URI", "USERNAME", "PASSWORD", "DATABASE", "CA_CERT"},
 }
+
+# Credential fields that must be marked sensitive in every OOB type that has them.
+# URI is included because connection URIs may embed passwords.
+SENSITIVE_CREDENTIAL_FIELDS = {"URI", "PASSWORD", "TOKEN", "API_KEY"}
 
 
 class TestRestConnectionType:
@@ -67,6 +71,12 @@ class TestRestConnectionType:
         pgvector_schema = {(f.name, f.required, f.type) for f in by_name["PGVector"].credentials_fields}
         assert pgvector_schema == postgres_schema
 
+        # 2b. sensitive flags on credential fields
+        for name in EXPECTED_OOB_CONNECTION_TYPES:
+            for field in by_name[name].credentials_fields:
+                expected = field.name in SENSITIVE_CREDENTIAL_FIELDS
+                assert field.sensitive is expected, f"{name}.{field.name}: sensitive={field.sensitive}, want {expected}"
+
         # 3. supported_formats set correctly after flight registration
         for name, expected_formats in EXPECTED_SUPPORTED_FORMATS.items():
             ct = by_name[name]
@@ -80,6 +90,10 @@ class TestRestConnectionType:
             name="e2e-postgres-type",
             provider="postgres",
             description="e2e crud test type",
+            credentials_fields=[
+                CredentialField(name="URI", label="URI", required=True, type="string", sensitive=True),
+                CredentialField(name="CA_CERT", label="CA Certificate", required=False, type="string"),
+            ],
         )
 
         types = rest_client.list_connection_types()
@@ -89,6 +103,8 @@ class TestRestConnectionType:
         assert fetched.name == "e2e-postgres-type"
         assert fetched.provider == "postgres"
         assert fetched.description == "e2e crud test type"
+        sensitive = {f.name: f.sensitive for f in fetched.credentials_fields}
+        assert sensitive == {"URI": True, "CA_CERT": False}
 
     def test_delete(self, rest_client: DataConnectClient, create_connection_type) -> None:
         ct = create_connection_type(provider="postgres")
@@ -111,3 +127,19 @@ class TestRestConnectionType:
         ct = create_connection_type(provider="postgres")
         updated = rest_client.update_connection_type(ct.id, description="updated description")
         assert updated.description == "updated description"
+
+    def test_update_sensitive(self, rest_client: DataConnectClient, create_connection_type) -> None:
+        ct = create_connection_type(
+            provider="postgres",
+            credentials_fields=[CredentialField(name="TOKEN", label="Token", required=False, type="string")],
+        )
+        assert ct.credentials_fields[0].sensitive is False
+
+        rest_client.update_connection_type(
+            ct.id,
+            credentials_fields=[
+                CredentialField(name="TOKEN", label="Token", required=False, type="string", sensitive=True)
+            ],
+        )
+        fetched = rest_client.get_connection_type(ct.id)
+        assert fetched.credentials_fields[0].sensitive is True

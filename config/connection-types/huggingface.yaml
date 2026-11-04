@@ -7,9 +7,11 @@ credentials_fields:
     description: HuggingFace URI
     required: true
     type: string
+    sensitive: true
   - name: TOKEN
     label: Token
     description: Huggingface token
     required: false
     type: string
+    sensitive: true
 
