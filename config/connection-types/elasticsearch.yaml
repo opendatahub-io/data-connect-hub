@@ -7,6 +7,7 @@ credentials_fields:
     description: Elasticsearch server URI
     required: true
     type: string
+    sensitive: true
   - name: USERNAME
     label: Username
     description: Elasticsearch username
@@ -17,6 +18,7 @@ credentials_fields:
     description: Elasticsearch password
     required: false
     type: string
+    sensitive: true
   - name: CA_CERT
     label: CA Certificate
     description: CA certificate for TLS verification
@@ -27,3 +29,4 @@ credentials_fields:
     description: Elasticsearch API key (alternative to username/password)
     required: false
     type: string
+    sensitive: true

@@ -453,6 +453,7 @@ mod tests {
                         required: true,
                         enum_values: None,
                         default_value: None,
+                        sensitive: false,
                     })
                     .collect(),
                 tags: None,
