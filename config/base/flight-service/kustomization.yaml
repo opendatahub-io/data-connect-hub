@@ -4,6 +4,7 @@ kind: Kustomization
 resources:
   - data-clusterrole.yaml
   - data-clusterrolebinding.yaml
+  - secret-read-clusterrole.yaml
   - deployment.yaml
   - service.yaml
   - configmap.yaml

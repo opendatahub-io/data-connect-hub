@@ -205,6 +205,9 @@ async fn main() -> Result<()> {
         )
         .await?,
     );
+    // Only the REST service migrates: it is the writer of connection types,
+    // and running the migration in one service keeps it in one place.
+    pg_meta_store.sync_global_tenant().await?;
     let meta_store: Arc<dyn MetaStore + Send + Sync> = pg_meta_store.clone();
 
     let secret_store = KubeSecretStore::try_default().await?;

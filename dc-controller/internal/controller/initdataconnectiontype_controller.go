@@ -45,8 +45,9 @@ const (
 // on the REST service — the connection type lives on independently.
 type InitDataConnectionTypeReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	RestClient ConnectionTypeClient
+	Scheme          *runtime.Scheme
+	RestClient      ConnectionTypeClient
+	GlobalNamespace GlobalNamespaceConfig
 }
 
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=get;list;watch
@@ -70,8 +71,15 @@ func (r *InitDataConnectionTypeReconciler) Reconcile(ctx context.Context, req ct
 
 	log.Info("registering connection type", "name", cr.Spec.Name, "provider", cr.Spec.Provider)
 
+	// IDCTs live in the DataConnectService namespace and define global
+	// connection types, so they register under the global tenant.
+	tenant, err := connectionTypeTenantFor(ctx, r.Client, r.GlobalNamespace, cr.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	desired := specToConnectionType(&cr.Spec)
-	err := r.RestClient.CreateConnectionType(ctx, cr.Namespace, desired)
+	err = r.RestClient.CreateConnectionType(ctx, tenant, desired)
 
 	if err == nil {
 		log.Info("connection type registered", "name", cr.Spec.Name)

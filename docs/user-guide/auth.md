@@ -103,6 +103,59 @@ kubectl create rolebinding alice-secret-export \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
+### 2.5 Global namespace
+
+The global namespace is the single RHOAI-wide shared project an administrator designates for all components, the same project MLflow uses as its global workspace. Administrators curate connections there, and all platform users can discover and use them without being added to the namespace one by one. See [Global Namespace](global-namespace.md) for the end-to-end workflow.
+
+The dc-controller enables this when the platform `Auth` CRD (`services.platform.opendatahub.io`) is installed. It watches the Namespace label `opendatahub.io/global-data-registry-project`. The Dashboard does not apply this label yet, so apply it yourself:
+
+```bash
+GLOBAL_NAMESPACE=global-ai-assets
+kubectl label namespace "$GLOBAL_NAMESPACE" \
+  opendatahub.io/global-data-registry-project="$GLOBAL_NAMESPACE"
+```
+
+To follow the label the Dashboard applies today for the MLflow global workspace instead, set `GLOBAL_NAMESPACE_LABEL=opendatahub.io/global-mlflow-workspace` on the controller. In the labeled namespace the controller maintains these RoleBindings from the `Auth` CR named `auth`:
+
+| RoleBinding | Subjects | ClusterRole |
+|---|---|---|
+| `dch-global-read` | `spec.allowedGroups` and `spec.adminGroups` | `dch-read` |
+| `dch-global-read-write` | `spec.adminGroups` | `dch-read-write` |
+| `dch-global-rest-secret-access` | REST ServiceAccount | `dch-rest-service-secret-access` |
+| `dch-global-flight-secret-read` | Flight ServiceAccount | `dch-flight-secret-read` |
+
+As a result:
+
+- Members of `allowedGroups` can list and read connections and connection types, and ingest data through Flight and the binary endpoint. With the default `allowedGroups: [system:authenticated]`, that is every authenticated identity, including ServiceAccounts.
+- Members of `adminGroups` can also create, update, and delete connections and connection types.
+- Users get no access to Kubernetes Secrets in the global namespace. Ingestion reads credentials with the Flight ServiceAccount, so consumers never see them. Grant Secret access separately if a workload must mount the credentials itself; such a workload must run in the global namespace.
+- Connection types created in the global namespace are global: every tenant can see them. When the global namespace is designated, moved, or cleared, the REST service moves the existing global connection types to the new global tenant at startup.
+
+Clients reach global connections like any other tenant, for example `X-Tenant-Id: <global-namespace>`. The caller's own namespace does not matter.
+
+Only one global namespace is supported. If more than one namespace carries the label, the controller keeps the current one and reports `GlobalNamespaceReady=False` with reason `MultipleGlobalNamespaces` on the DataConnectService. The current state is in `status.globalNamespace` and the `GlobalNamespaceReady` condition.
+
+To let a group curate global connections without adding it to the platform `adminGroups`, bind `dch-read-write` to it yourself. The controller manages only the RoleBinding names above and leaves other bindings alone:
+
+```bash
+GLOBAL_NAMESPACE=global-ai-assets
+CURATOR_GROUP=global-data-curators
+
+kubectl create rolebinding dch-global-curators \
+  -n "$GLOBAL_NAMESPACE" \
+  --clusterrole=dch-read-write \
+  --group="$CURATOR_GROUP"
+```
+
+Controller settings:
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `ENABLE_GLOBAL_NAMESPACE` | unset | `true` requires the `Auth` CRD, `false` disables the feature, unset enables it only when the `Auth` CRD is installed |
+| `GLOBAL_NAMESPACE_LABEL` | `opendatahub.io/global-data-registry-project` | Namespace label that designates the global namespace |
+
+Permission changes in the global namespace can take up to the authorization cache TTL (5 minutes by default) to take effect, as with any tenant.
+
 ## 3. Authentication flow
 
 ### 3.1 Flight requests

@@ -51,8 +51,9 @@ const (
 // the ConfigMap is marked synced and skipped on future reconciles.
 type ConfigMapWatcherReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	RestClient ConnectionTypeClient
+	Scheme          *runtime.Scheme
+	RestClient      ConnectionTypeClient
+	GlobalNamespace GlobalNamespaceConfig
 }
 
 // +kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;update;patch
@@ -101,7 +102,11 @@ func (r *ConfigMapWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		log.Info("promoting ODH connection type", "name", ct.Name, "provider", ct.Provider, "namespace", cm.Namespace)
 	}
 
-	if err := r.RestClient.CreateConnectionType(ctx, cm.Namespace, ct); err != nil {
+	tenant, err := connectionTypeTenantFor(ctx, r.Client, r.GlobalNamespace, cm.Namespace)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.RestClient.CreateConnectionType(ctx, tenant, ct); err != nil {
 		if errors.Is(err, ErrConflict) {
 			if !alreadySynced {
 				log.Info("connection type already exists, marking synced", "name", ct.Name)

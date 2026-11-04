@@ -5034,6 +5034,13 @@ spec:
                 - name
                 - namespace
                 type: object
+              globalNamespace:
+                description: |-
+                  globalNamespace is the namespace designated as the RHOAI global
+                  project. Members of the platform Auth CR groups can use DCH connections
+                  in it, and it is the tenant of global connection types. Empty when no
+                  namespace is designated.
+                type: string
               httpRoute:
                 description: httpRoute is the name of the HTTPRoute resource created
                   for this service

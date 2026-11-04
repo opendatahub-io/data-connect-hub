@@ -28,6 +28,43 @@ pub struct PgMetaStore {
 
 const SECRETS_CA_CERT_PATH: &str = "/secrets/postgresql-ca.crt";
 
+/// `dch_settings` key holding the global connection type tenant that the
+/// stored records were last written under.
+const GLOBAL_TENANT_SETTING: &str = "global_connection_types.tenant_id";
+
+/// Advisory lock serializing [`PgMetaStore::sync_global_tenant`] across
+/// replicas starting at the same time.
+const GLOBAL_TENANT_SYNC_LOCK: i64 = 0x4443_485f_4754_4e54; // "DCH_GTNT"
+
+/// Moves global connection types from the previous global tenant ($1) to the
+/// new one ($2). A type whose name already exists in the new tenant is left in
+/// place, since the (name, tenant) pair is unique.
+const MIGRATE_GLOBAL_CONNECTION_TYPES: &str = "UPDATE data_connection_types AS t \
+     SET data = jsonb_set(t.data, '{metadata,tenant_id}', to_jsonb($2::text)) \
+     WHERE t.data->'metadata'->>'tenant_id' = $1 \
+     AND NOT EXISTS ( \
+         SELECT 1 FROM data_connection_types AS n \
+         WHERE n.data->'metadata'->>'tenant_id' = $2 \
+         AND n.data->'resource'->>'name' = t.data->'resource'->>'name')";
+
+/// Outcome of [`PgMetaStore::sync_global_tenant`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlobalTenantSync {
+    /// No tenant was recorded; the configured tenant is now recorded.
+    Initialized,
+    /// The configured tenant matches the recorded one.
+    Unchanged,
+    /// The global tenant changed and its connection types were moved.
+    Migrated {
+        previous: String,
+        /// Connection types moved to the new global tenant.
+        moved: u64,
+        /// Connection types left in the previous tenant because a type with
+        /// the same name already exists in the new one.
+        conflicts: i64,
+    },
+}
+
 fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
     if let sqlx::Error::Database(ref db_err) = e
         && db_err.code().as_deref() == Some("23505")
@@ -71,6 +108,106 @@ impl PgMetaStore {
         Self::init_schema(&pool).await?;
 
         Ok(Self { pool, global_tenant_id })
+    }
+
+    /// Reconciles the stored global connection type tenant with the
+    /// configured one.
+    ///
+    /// The global tenant is the RHOAI global namespace when one is
+    /// designated, otherwise the DataConnectService namespace, so it changes
+    /// when an administrator designates, moves, or clears the global
+    /// namespace. Global connection types are stored under the global tenant,
+    /// so without this migration they would turn into tenant-local types of
+    /// the previous namespace and connections in other tenants could no
+    /// longer resolve them. Connections are not moved: they stay in their own
+    /// tenant and keep referencing the types by id.
+    pub async fn sync_global_tenant(&self) -> Result<GlobalTenantSync, MetaStoreError> {
+        let mut tx = self.pool.begin().await.map_err(map_sqlx_error)?;
+
+        sqlx::query("SELECT pg_advisory_xact_lock($1)")
+            .bind(GLOBAL_TENANT_SYNC_LOCK)
+            .execute(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        let previous: Option<String> = sqlx::query_scalar("SELECT value FROM dch_settings WHERE key = $1")
+            .bind(GLOBAL_TENANT_SETTING)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(map_sqlx_error)?;
+
+        let outcome = match previous {
+            None => {
+                sqlx::query("INSERT INTO dch_settings (key, value) VALUES ($1, $2)")
+                    .bind(GLOBAL_TENANT_SETTING)
+                    .bind(&self.global_tenant_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_sqlx_error)?;
+                GlobalTenantSync::Initialized
+            },
+            Some(previous) if previous == self.global_tenant_id => GlobalTenantSync::Unchanged,
+            Some(previous) => {
+                let moved = sqlx::query(MIGRATE_GLOBAL_CONNECTION_TYPES)
+                    .bind(&previous)
+                    .bind(&self.global_tenant_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_sqlx_error)?
+                    .rows_affected();
+
+                let conflicts: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1",
+                )
+                .bind(&previous)
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(map_sqlx_error)?;
+
+                sqlx::query("UPDATE dch_settings SET value = $2 WHERE key = $1")
+                    .bind(GLOBAL_TENANT_SETTING)
+                    .bind(&self.global_tenant_id)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(map_sqlx_error)?;
+
+                GlobalTenantSync::Migrated {
+                    previous,
+                    moved,
+                    conflicts,
+                }
+            },
+        };
+
+        tx.commit().await.map_err(map_sqlx_error)?;
+
+        match &outcome {
+            GlobalTenantSync::Initialized => {
+                info!(tenant = %self.global_tenant_id, "recorded global connection type tenant");
+            },
+            GlobalTenantSync::Unchanged => {},
+            GlobalTenantSync::Migrated {
+                previous,
+                moved,
+                conflicts,
+            } => {
+                info!(
+                    previous = %previous,
+                    tenant = %self.global_tenant_id,
+                    moved,
+                    "moved global connection types to the new global tenant"
+                );
+                if *conflicts > 0 {
+                    warn!(
+                        previous = %previous,
+                        tenant = %self.global_tenant_id,
+                        conflicts,
+                        "connection types left in the previous global tenant because the new tenant already has types with the same names; they are no longer global"
+                    );
+                }
+            },
+        }
+        Ok(outcome)
     }
 
     async fn init_schema(pool: &PgPool) -> Result<(), MetaStoreError> {
@@ -1150,6 +1287,97 @@ impl FlightDiscoveryStore for PgMetaStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Runs against a real PostgreSQL database. It rewrites the global tenant
+    /// setting, so point it at a disposable database:
+    ///
+    /// ```text
+    /// DCH_TEST_DATABASE_URL=postgresql://postgres:pw@localhost:5432/postgres \
+    ///   cargo test -p pg-meta-store -- --ignored sync_global_tenant
+    /// ```
+    #[tokio::test]
+    #[ignore = "requires DCH_TEST_DATABASE_URL pointing at a disposable PostgreSQL database"]
+    async fn test_sync_global_tenant_migrates_connection_types() {
+        let url = std::env::var("DCH_TEST_DATABASE_URL").expect("DCH_TEST_DATABASE_URL must be set");
+        let suffix = Uuid::new_v4().simple().to_string();
+        let old_tenant = format!("dch-old-{suffix}");
+        let new_tenant = format!("dch-new-{suffix}");
+
+        let old_store = PgMetaStore::new(DatabaseConfig { url: url.clone() }, old_tenant.clone())
+            .await
+            .unwrap();
+        sqlx::query("DELETE FROM dch_settings WHERE key = $1")
+            .bind(GLOBAL_TENANT_SETTING)
+            .execute(&old_store.pool)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            old_store.sync_global_tenant().await.unwrap(),
+            GlobalTenantSync::Initialized
+        );
+        assert_eq!(
+            old_store.sync_global_tenant().await.unwrap(),
+            GlobalTenantSync::Unchanged
+        );
+
+        let insert = |id: String, tenant: String, name: &'static str| {
+            let pool = old_store.pool.clone();
+            async move {
+                sqlx::query("INSERT INTO data_connection_types (data) VALUES ($1)")
+                    .bind(serde_json::json!({
+                        "metadata": {"id": id, "tenant_id": tenant},
+                        "resource": {"name": name, "provider": "s3", "credentials_fields": []},
+                    }))
+                    .execute(&pool)
+                    .await
+                    .unwrap();
+            }
+        };
+        // S3 moves; URI conflicts with a type already in the new tenant.
+        insert(format!("s3-{suffix}"), old_tenant.clone(), "S3").await;
+        insert(format!("uri-old-{suffix}"), old_tenant.clone(), "URI").await;
+        insert(format!("uri-new-{suffix}"), new_tenant.clone(), "URI").await;
+
+        let new_store = PgMetaStore::new(DatabaseConfig { url }, new_tenant.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            new_store.sync_global_tenant().await.unwrap(),
+            GlobalTenantSync::Migrated {
+                previous: old_tenant.clone(),
+                moved: 1,
+                conflicts: 1,
+            }
+        );
+        assert_eq!(
+            new_store.sync_global_tenant().await.unwrap(),
+            GlobalTenantSync::Unchanged
+        );
+
+        let tenant_of = |id: String| {
+            let pool = new_store.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT data->'metadata'->>'tenant_id' FROM data_connection_types WHERE data->'metadata'->>'id' = $1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(tenant_of(format!("s3-{suffix}")).await, new_tenant);
+        assert_eq!(tenant_of(format!("uri-old-{suffix}")).await, old_tenant);
+        assert_eq!(tenant_of(format!("uri-new-{suffix}")).await, new_tenant);
+
+        sqlx::query("DELETE FROM data_connection_types WHERE data->'metadata'->>'tenant_id' IN ($1, $2)")
+            .bind(&old_tenant)
+            .bind(&new_tenant)
+            .execute(&new_store.pool)
+            .await
+            .unwrap();
+    }
 
     #[test]
     fn test_database_config_deserialize_json() {
