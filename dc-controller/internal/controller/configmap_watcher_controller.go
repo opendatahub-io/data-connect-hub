@@ -142,6 +142,9 @@ func (r *ConfigMapWatcherReconciler) markSynced(ctx context.Context, cm *corev1.
 const (
 	// odhFieldTypeHidden is a masked input (e.g. AWS_SECRET_ACCESS_KEY in s3).
 	odhFieldTypeHidden = "hidden"
+	// odhFieldTypeFile is an uploaded file (e.g. .dockerconfigjson in oci-v1)
+	// whose content may embed credentials.
+	odhFieldTypeFile = "file"
 	// odhFieldTypeDropdown is a select list; properties.items holds the options.
 	odhFieldTypeDropdown = "dropdown"
 	// odhFieldTypeSection is a form heading with no envVar; it carries no value.
@@ -221,7 +224,7 @@ func odhFieldToField(of odhField) Field {
 		Label:     of.Name,
 		Required:  of.Required,
 		Type:      fieldTypeString,
-		Sensitive: of.Type == odhFieldTypeHidden,
+		Sensitive: of.Type == odhFieldTypeHidden || of.Type == odhFieldTypeFile,
 	}
 
 	desc := of.Description

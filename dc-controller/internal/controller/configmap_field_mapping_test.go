@@ -67,6 +67,7 @@ func TestConfigMapToConnectionTypeOCIv1(t *testing.T) {
 			Label:       "Secret details",
 			Description: strPtr("Secret details are visible to users with access to the project."),
 			Type:        fieldTypeString,
+			Sensitive:   true,
 		},
 		{
 			Name:        "OCI_HOST",

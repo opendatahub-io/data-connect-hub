@@ -111,6 +111,7 @@ class TestLegacyConnectionTypeImport:
         docker_config = fields[".dockerconfigjson"]
         assert docker_config.type == "string"
         assert docker_config.description, "description or properties.helperText must be imported"
+        assert docker_config.sensitive is True, "type: file must map to sensitive"
 
     def test_uri_v1_configmap_not_imported_as_duplicate(
         self, legacy_import_enabled, rest_client: DataConnectClient
