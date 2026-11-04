@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - auth-delegator-rbac.yaml
+  - secret-access-clusterrole.yaml
   - deployment.yaml
   - service.yaml
   - configmap.yaml

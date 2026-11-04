@@ -23,7 +23,7 @@ pub struct DatabaseConfig {
 
 pub struct PgMetaStore {
     pool: PgPool,
-    global_tenant_id: String,
+    global_tenant_ids: Vec<String>,
 }
 
 const SECRETS_CA_CERT_PATH: &str = "/secrets/postgresql-ca.crt";
@@ -39,7 +39,7 @@ fn map_sqlx_error(e: sqlx::Error) -> MetaStoreError {
 }
 
 impl PgMetaStore {
-    pub async fn new(config: DatabaseConfig, global_tenant_id: String) -> Result<Self, MetaStoreError> {
+    pub async fn new(config: DatabaseConfig, global_tenant_ids: Vec<String>) -> Result<Self, MetaStoreError> {
         let mut options = PgConnectOptions::from_str(&config.url).map_err(|e| {
             error!("invalid database URL: {e}");
             MetaStoreError::Connection("invalid database URL".to_string())
@@ -70,7 +70,10 @@ impl PgMetaStore {
 
         Self::init_schema(&pool).await?;
 
-        Ok(Self { pool, global_tenant_id })
+        Ok(Self {
+            pool,
+            global_tenant_ids,
+        })
     }
 
     async fn init_schema(pool: &PgPool) -> Result<(), MetaStoreError> {
@@ -96,14 +99,14 @@ impl PgMetaStore {
     )]
     async fn validate_connection_type<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
         executor: E,
-        global_tenant_id: &str,
+        global_tenant_ids: &[String],
         tenant_id: &str,
         connection_type_id: &str,
     ) -> Result<(), MetaStoreError> {
-        sqlx::query("SELECT 1 FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3) FOR SHARE")
+        sqlx::query("SELECT 1 FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = ANY($3)) FOR SHARE")
             .bind(connection_type_id)
             .bind(tenant_id)
-            .bind(global_tenant_id)
+            .bind(global_tenant_ids)
             .fetch_one(executor)
             .await
             .map_err(|e| match e {
@@ -136,11 +139,14 @@ fn connection_type_in_use_message(uid: &str, count: i64) -> String {
 // returning the parsed resource or None if it is malformed. A blob that fails to
 // deserialize is logged and skipped so a single malformed row does not abort the
 // whole listing.
-fn deserialize_connection_type(value: serde_json::Value, global_tenant_id: &str) -> Option<DataConnectionTypeResource> {
+fn deserialize_connection_type(
+    value: serde_json::Value,
+    global_tenant_ids: &[String],
+) -> Option<DataConnectionTypeResource> {
     match serde_json::from_value::<DataConnectionTypeResource>(value.clone()) {
         Ok(mut dct) => {
-            if let Some(tenant) = dct.metadata.tenant_id.clone()
-                && tenant == global_tenant_id
+            if let Some(tenant) = dct.metadata.tenant_id.as_ref()
+                && global_tenant_ids.contains(tenant)
             {
                 // Discard the tenant field for global connection types
                 dct.metadata.tenant_id = None;
@@ -254,9 +260,9 @@ impl MetaStoreReader for PgMetaStore {
         &self,
         tenant_id: &str,
     ) -> Result<ResourceList<DataConnectionTypeResource>, MetaStoreError> {
-        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = $2")
+        let rows = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'tenant_id' = $1 OR data->'metadata'->>'tenant_id' = ANY($2)")
             .bind(tenant_id)
-            .bind(&self.global_tenant_id)
+            .bind(&self.global_tenant_ids)
             .fetch_all(&self.pool)
             .await
             .map_err(|e| {
@@ -274,7 +280,7 @@ impl MetaStoreReader for PgMetaStore {
                         return None;
                     },
                 };
-                deserialize_connection_type(value, &self.global_tenant_id)
+                deserialize_connection_type(value, &self.global_tenant_ids)
             })
             .collect();
 
@@ -301,10 +307,10 @@ impl MetaStoreReader for PgMetaStore {
         tenant_id: &str,
         id: &str,
     ) -> Result<DataConnectionTypeResource, MetaStoreError> {
-        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = $3)")
+        let row = sqlx::query("SELECT data FROM data_connection_types WHERE data->'metadata'->>'id' = $1 AND (data->'metadata'->>'tenant_id' = $2 OR data->'metadata'->>'tenant_id' = ANY($3))")
             .bind(id)
             .bind(tenant_id)
-            .bind(&self.global_tenant_id)
+            .bind(&self.global_tenant_ids)
             .fetch_one(&self.pool)
             .await
             .map_err(|e| match e {
@@ -353,7 +359,7 @@ impl MetaStore for PgMetaStore {
 
         Self::validate_connection_type(
             &mut *tx,
-            &self.global_tenant_id,
+            &self.global_tenant_ids,
             tenant_id,
             &data_connection.data_connection_type_id,
         )
@@ -441,7 +447,7 @@ impl MetaStore for PgMetaStore {
 
         Self::validate_connection_type(
             &mut *tx,
-            &self.global_tenant_id,
+            &self.global_tenant_ids,
             tenant_id,
             &data_connection.data_connection_type_id,
         )
@@ -627,8 +633,8 @@ impl MetaStore for PgMetaStore {
                         "failed to deserialize connection type; see service logs for details".to_string(),
                     )
                 })?;
-                if let Some(tenant) = dct.metadata.tenant_id.clone()
-                    && tenant == self.global_tenant_id
+                if let Some(tenant) = dct.metadata.tenant_id.as_ref()
+                    && self.global_tenant_ids.contains(tenant)
                 {
                     // Discard the tenant field for global connection types
                     dct.metadata.tenant_id = None;
@@ -1198,8 +1204,8 @@ mod tests {
 
     #[test]
     fn test_deserialize_connection_type_valid() {
-        let a = deserialize_connection_type(valid_connection_type_json("a", None), "global");
-        let b = deserialize_connection_type(valid_connection_type_json("b", None), "global");
+        let a = deserialize_connection_type(valid_connection_type_json("a", None), &["global".to_string()]);
+        let b = deserialize_connection_type(valid_connection_type_json("b", None), &["global".to_string()]);
         assert!(a.is_some());
         assert!(b.is_some());
     }
@@ -1218,9 +1224,9 @@ mod tests {
                 "credentials_fields": [],
             },
         });
-        assert!(deserialize_connection_type(invalid, "global").is_none());
+        assert!(deserialize_connection_type(invalid, &["global".to_string()]).is_none());
 
-        let good = deserialize_connection_type(valid_connection_type_json("good-1", None), "global");
+        let good = deserialize_connection_type(valid_connection_type_json("good-1", None), &["global".to_string()]);
         assert_eq!(good.unwrap().metadata.id, "good-1");
     }
 
@@ -1247,9 +1253,12 @@ mod tests {
     }
 
     #[test]
-    fn test_deserialize_connection_type_scrubs_global_tenant() {
-        let global = deserialize_connection_type(valid_connection_type_json("g", Some("global")), "global");
-        let tenant = deserialize_connection_type(valid_connection_type_json("t", Some("tenant-a")), "global");
+    fn test_deserialize_connection_type_scrubs_global_tenants() {
+        let globals = ["dch".to_string(), "global".to_string()];
+        let service = deserialize_connection_type(valid_connection_type_json("s", Some("dch")), &globals);
+        let global = deserialize_connection_type(valid_connection_type_json("g", Some("global")), &globals);
+        let tenant = deserialize_connection_type(valid_connection_type_json("t", Some("tenant-a")), &globals);
+        assert_eq!(service.unwrap().metadata.tenant_id, None);
         assert_eq!(global.unwrap().metadata.tenant_id, None);
         assert_eq!(tenant.unwrap().metadata.tenant_id, Some("tenant-a".to_string()));
     }

@@ -79,6 +79,23 @@ rules:
 - apiGroups: [dataconnecthub.opendatahub.io]
   resources: [flight-services]
   verbs: [create]
+- apiGroups: [""]
+  resources: [namespaces]
+  verbs: [get, list, watch]
+- apiGroups: [services.platform.opendatahub.io]
+  resources: [auths]
+  verbs: [get, list, watch]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings]
+  verbs: [create, get, list, watch]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings]
+  resourceNames: [dch-global-read, dch-global-read-write, dch-global-rest-service-secret-access, dch-global-flight-service-secret-access]
+  verbs: [delete, patch, update]
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [clusterroles]
+  resourceNames: [dch-read, dch-read-write, dch-rest-service-secret-access, dch-flight-service-secret-access]
+  verbs: [bind]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
