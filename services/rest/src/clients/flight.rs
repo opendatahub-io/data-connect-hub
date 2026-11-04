@@ -7,7 +7,7 @@ use arrow_flight::decode::FlightRecordBatchStream;
 use arrow_flight::error::FlightError;
 use arrow_flight::flight_service_client::FlightServiceClient;
 use commons::api::creds::TestCredentials;
-use commons::api::{AUTHORIZATION, X_DATA_CONNECTION_ID, X_TENANT_ID};
+use commons::api::{AUTHORIZATION, X_DATA_CONNECTION_ID, X_REMOTE_USER, X_REQUEST_ID, X_TENANT_ID};
 use futures::TryStreamExt;
 use opentelemetry::propagation::Injector;
 use prost::Message;
@@ -33,14 +33,36 @@ pub struct SupportedConnector {
 
 pub type BinaryStream = Pin<Box<dyn futures::Stream<Item = Result<RecordBatch, tonic::Status>> + Send>>;
 
+#[derive(Clone, Debug)]
+/// FlightRequestContext contains trusted REST request claims forwarded to Flight.
+pub struct FlightRequestContext {
+    /// tenant_id scopes the Flight operation.
+    pub tenant_id: String,
+    /// identity is the authenticated end-user name, when available.
+    pub identity: Option<String>,
+    /// request_id links Flight audit records to the parent REST request.
+    pub request_id: String,
+}
+
 #[async_trait::async_trait]
 pub trait FlightDataClient: Send + Sync {
-    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status>;
-    async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status>;
-    async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status>;
+    async fn get_supported_connectors(
+        &self,
+        context: &FlightRequestContext,
+    ) -> Result<Vec<SupportedConnector>, tonic::Status>;
+    async fn check_data_connection(
+        &self,
+        context: &FlightRequestContext,
+        connection_id: &str,
+    ) -> Result<(), tonic::Status>;
+    async fn test_credentials(
+        &self,
+        context: &FlightRequestContext,
+        creds: &TestCredentials,
+    ) -> Result<(), tonic::Status>;
     async fn download_binary(
         &self,
-        tenant_id: &str,
+        context: &FlightRequestContext,
         connection_id: &str,
         path: &str,
     ) -> Result<BinaryStream, tonic::Status>;
@@ -120,6 +142,18 @@ impl FlightClient {
         Ok(())
     }
 
+    fn attach_context_headers(
+        metadata: &mut tonic::metadata::MetadataMap,
+        context: &FlightRequestContext,
+    ) -> Result<(), tonic::Status> {
+        Self::attach_header(metadata, X_TENANT_ID, &context.tenant_id)?;
+        Self::attach_header(metadata, X_REQUEST_ID, &context.request_id)?;
+        if let Some(identity) = &context.identity {
+            Self::attach_header(metadata, X_REMOTE_USER, identity)?;
+        }
+        Ok(())
+    }
+
     async fn client(&self) -> Result<FlightServiceClient<Channel>, tonic::Status> {
         self.client
             .get_or_try_init(|| async {
@@ -146,13 +180,16 @@ impl FlightClient {
 
 #[async_trait::async_trait]
 impl FlightDataClient for FlightClient {
-    async fn get_supported_connectors(&self, tenant_id: &str) -> Result<Vec<SupportedConnector>, tonic::Status> {
+    async fn get_supported_connectors(
+        &self,
+        context: &FlightRequestContext,
+    ) -> Result<Vec<SupportedConnector>, tonic::Status> {
         let mut client = self.client().await?;
         let mut request = Self::traced_request(Action::new("GetSupportedConnectors", ""));
         let sa_token = self.read_sa_token().await?;
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
-        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
+        Self::attach_context_headers(metadata, context)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
         let result = stream
@@ -205,13 +242,17 @@ impl FlightDataClient for FlightClient {
             .collect())
     }
 
-    async fn check_data_connection(&self, tenant_id: &str, connection_id: &str) -> Result<(), tonic::Status> {
+    async fn check_data_connection(
+        &self,
+        context: &FlightRequestContext,
+        connection_id: &str,
+    ) -> Result<(), tonic::Status> {
         let mut client = self.client().await?;
         let mut request = Self::traced_request(Action::new(ACTION_CHECK_DATA_CONNECTION, ""));
         let sa_token = self.read_sa_token().await?;
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
-        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
+        Self::attach_context_headers(metadata, context)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
@@ -219,7 +260,11 @@ impl FlightDataClient for FlightClient {
         Ok(())
     }
 
-    async fn test_credentials(&self, tenant_id: &str, creds: &TestCredentials) -> Result<(), tonic::Status> {
+    async fn test_credentials(
+        &self,
+        context: &FlightRequestContext,
+        creds: &TestCredentials,
+    ) -> Result<(), tonic::Status> {
         let mut keys = vec!["data_connection_type_id".to_string()];
         let mut values = vec![creds.data_connection_type_id.clone()];
         for (k, v) in &creds.credentials {
@@ -249,7 +294,7 @@ impl FlightDataClient for FlightClient {
         let mut request = Self::traced_request(Action::new(ACTION_CHECK_CREDENTIALS, buf));
         let sa_token = self.read_sa_token().await?;
         Self::attach_header(request.metadata_mut(), AUTHORIZATION, &sa_token)?;
-        Self::attach_header(request.metadata_mut(), X_TENANT_ID, tenant_id)?;
+        Self::attach_context_headers(request.metadata_mut(), context)?;
 
         let mut stream = client.do_action(request).await?.into_inner();
         stream.message().await?;
@@ -258,7 +303,7 @@ impl FlightDataClient for FlightClient {
 
     async fn download_binary(
         &self,
-        tenant_id: &str,
+        context: &FlightRequestContext,
         connection_id: &str,
         path: &str,
     ) -> Result<BinaryStream, tonic::Status> {
@@ -275,7 +320,7 @@ impl FlightDataClient for FlightClient {
         let mut request = Self::traced_request(descriptor);
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
-        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
+        Self::attach_context_headers(metadata, context)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 
         let flight_info = client.get_flight_info(request).await?.into_inner();
@@ -290,7 +335,7 @@ impl FlightDataClient for FlightClient {
         let mut request = Self::traced_request(ticket);
         let metadata = request.metadata_mut();
         Self::attach_header(metadata, AUTHORIZATION, &sa_token)?;
-        Self::attach_header(metadata, X_TENANT_ID, tenant_id)?;
+        Self::attach_context_headers(metadata, context)?;
         Self::attach_header(metadata, X_DATA_CONNECTION_ID, connection_id)?;
 
         let flight_stream = client.do_get(request).await?.into_inner();
@@ -346,5 +391,36 @@ mod tests {
         let request = FlightClient::traced_request(Action::new("Noop", ""));
 
         assert!(request.metadata().get("traceparent").is_none());
+    }
+
+    #[test]
+    fn test_attach_context_headers_forwards_audit_context() {
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        let context = FlightRequestContext {
+            tenant_id: "tenant".to_string(),
+            identity: Some("alice".to_string()),
+            request_id: "request-id".to_string(),
+        };
+
+        FlightClient::attach_context_headers(&mut metadata, &context).unwrap();
+
+        assert_eq!(metadata.get(X_TENANT_ID).unwrap(), "tenant");
+        assert_eq!(metadata.get(X_REMOTE_USER).unwrap(), "alice");
+        assert_eq!(metadata.get(X_REQUEST_ID).unwrap(), "request-id");
+        assert!(metadata.get(commons::api::X_REMOTE_GROUPS).is_none());
+    }
+
+    #[test]
+    fn test_attach_context_headers_omits_missing_identity() {
+        let mut metadata = tonic::metadata::MetadataMap::new();
+        let context = FlightRequestContext {
+            tenant_id: "tenant".to_string(),
+            identity: None,
+            request_id: "request-id".to_string(),
+        };
+
+        FlightClient::attach_context_headers(&mut metadata, &context).unwrap();
+
+        assert!(metadata.get(X_REMOTE_USER).is_none());
     }
 }

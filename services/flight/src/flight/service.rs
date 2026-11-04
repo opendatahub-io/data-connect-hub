@@ -1,4 +1,5 @@
 use crate::flight::QueryContext;
+use crate::flight::audit::{AuditConfig, AuditContext, PendingAudit, do_get_operation};
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
@@ -69,6 +70,7 @@ pub struct DataIngestionService {
     secret_store: Arc<dyn SecretStore + Send + Sync>,
     sql_info: arrow_flight::sql::metadata::SqlInfoData,
     query_options: QueryOptions,
+    pub(crate) audit: AuditConfig,
 }
 
 impl DataIngestionService {
@@ -92,7 +94,23 @@ impl DataIngestionService {
             secret_store,
             sql_info: builder.build().expect("valid sql info"),
             query_options,
+            audit: AuditConfig::default(),
         }
+    }
+
+    /// with_audit applies the process-level audit logging configuration.
+    pub fn with_audit(mut self, audit: AuditConfig) -> Self {
+        self.audit = audit;
+        self
+    }
+
+    pub(crate) fn audit_config(&self) -> AuditConfig {
+        self.audit
+    }
+
+    fn pending_do_get_audit(&self, operation: &'static str, context: AuditContext, started: Instant) -> PendingAudit {
+        let (resource, action) = do_get_operation(operation);
+        PendingAudit::new(self.audit.enabled, context, resource, action, started)
     }
 
     fn query_to_string(query: &CommandGetSqlInfo) -> Vec<String> {
@@ -187,6 +205,8 @@ impl DataIngestionService {
     fn handle_do_get_sql_info(
         &self,
         query: CommandGetSqlInfo,
+        context: AuditContext,
+        started: Instant,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let requested: Vec<String> = Self::query_to_string(&query);
         info!("do_get_sql_info: {:?}", requested);
@@ -205,9 +225,13 @@ impl DataIngestionService {
                 Status::internal("failed to encode sql_info response")
             });
 
-        Ok(Response::new(
-            Box::pin(TracedStream::new(OPERATION_SQL_INFO, flight_stream)) as <Self as FlightService>::DoGetStream,
-        ))
+        Ok(Response::new(Box::pin(TracedStream::new_audited(
+            OPERATION_SQL_INFO,
+            flight_stream,
+            self.audit.enabled,
+            context,
+            started,
+        )) as <Self as FlightService>::DoGetStream))
     }
 
     #[tracing::instrument(skip_all)]
@@ -241,6 +265,8 @@ impl DataIngestionService {
         &self,
         query: CommandGetTables,
         request: Request<Ticket>,
+        context: AuditContext,
+        started: Instant,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         debug!("do_get_tables: include_schema={}", query.include_schema);
 
@@ -294,9 +320,13 @@ impl DataIngestionService {
                 Status::internal("failed to encode tables response")
             });
 
-        Ok(Response::new(
-            Box::pin(TracedStream::new(OPERATION_TABLES, flight_stream)) as <Self as FlightService>::DoGetStream,
-        ))
+        Ok(Response::new(Box::pin(TracedStream::new_audited(
+            OPERATION_TABLES,
+            flight_stream,
+            self.audit.enabled,
+            context,
+            started,
+        )) as <Self as FlightService>::DoGetStream))
     }
 
     #[tracing::instrument(skip_all)]
@@ -346,6 +376,8 @@ impl DataIngestionService {
         &self,
         ticket: TicketStatementQuery,
         request: Request<Ticket>,
+        context: AuditContext,
+        started: Instant,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let query = String::from_utf8(ticket.statement_handle.to_vec())
             .map_err(|_| Status::invalid_argument("Invalid statement handle"))?;
@@ -388,9 +420,13 @@ impl DataIngestionService {
                 },
             });
 
-        Ok(Response::new(
-            Box::pin(TracedStream::new(OPERATION_STATEMENT, flight_stream)) as <Self as FlightService>::DoGetStream,
-        ))
+        Ok(Response::new(Box::pin(TracedStream::new_audited(
+            OPERATION_STATEMENT,
+            flight_stream,
+            self.audit.enabled,
+            context,
+            started,
+        )) as <Self as FlightService>::DoGetStream))
     }
 
     #[tracing::instrument(skip_all)]
@@ -452,8 +488,17 @@ impl DataIngestionService {
         &self,
         request: Request<Ticket>,
         message: arrow_flight::sql::Any,
+        context: AuditContext,
+        started: Instant,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         info!("do_get_fallback: {:?}", message);
+
+        if message.type_url != DOWNLOAD_TYPE_URL {
+            return Err(Status::unimplemented(format!(
+                "unknown command type: {}",
+                message.type_url
+            )));
+        }
 
         let metadata = request.metadata();
 
@@ -494,9 +539,13 @@ impl DataIngestionService {
                 },
             });
 
-        Ok(Response::new(
-            Box::pin(TracedStream::new(OPERATION_BINARY, flight_stream)) as <Self as FlightService>::DoGetStream,
-        ))
+        Ok(Response::new(Box::pin(TracedStream::new_audited(
+            OPERATION_BINARY,
+            flight_stream,
+            self.audit.enabled,
+            context,
+            started,
+        )) as <Self as FlightService>::DoGetStream))
     }
 }
 
@@ -536,16 +585,22 @@ impl FlightSqlService for DataIngestionService {
     async fn do_get_sql_info(
         &self,
         query: CommandGetSqlInfo,
-        _request: Request<Ticket>,
+        request: Request<Ticket>,
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_SQL_INFO);
         let started = Instant::now();
-        let result = self.handle_do_get_sql_info(query);
+        let context = AuditContext::from_request(&request);
+        let mut audit = self.pending_do_get_audit(OPERATION_SQL_INFO, context.clone(), started);
+        let result = self.handle_do_get_sql_info(query, context.clone(), started);
         let status = match &result {
             Ok(_) => STATUS_OK,
             Err(e) => grpc_status_label(e),
         };
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_SQL_INFO, status, started.elapsed());
+        match &result {
+            Ok(_) => audit.transfer_to_stream(),
+            Err(status) => audit.complete(Some(status)),
+        }
         result
     }
 
@@ -572,12 +627,20 @@ impl FlightSqlService for DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_TABLES);
         let started = Instant::now();
-        let result = self.handle_do_get_tables(query, request).await;
+        let context = AuditContext::from_request(&request);
+        let mut audit = self.pending_do_get_audit(OPERATION_TABLES, context.clone(), started);
+        let result = self
+            .handle_do_get_tables(query, request, context.clone(), started)
+            .await;
         let status = match &result {
             Ok(_) => STATUS_OK,
             Err(e) => grpc_status_label(e),
         };
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_TABLES, status, started.elapsed());
+        match &result {
+            Ok(_) => audit.transfer_to_stream(),
+            Err(status) => audit.complete(Some(status)),
+        }
         result
     }
 
@@ -604,13 +667,21 @@ impl FlightSqlService for DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_STATEMENT);
         let started = Instant::now();
-        let result = self.handle_do_get_statement(ticket, request).await;
+        let context = AuditContext::from_request(&request);
+        let mut audit = self.pending_do_get_audit(OPERATION_STATEMENT, context.clone(), started);
+        let result = self
+            .handle_do_get_statement(ticket, request, context.clone(), started)
+            .await;
         let status = match &result {
             Ok(_) => STATUS_OK,
             Err(e) => grpc_status_label(e),
         };
 
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_STATEMENT, status, started.elapsed());
+        match &result {
+            Ok(_) => audit.transfer_to_stream(),
+            Err(status) => audit.complete(Some(status)),
+        }
         result
     }
 
@@ -638,13 +709,26 @@ impl FlightSqlService for DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_BINARY);
         let started = Instant::now();
-        let result = self.handle_do_get_fallback(request, message).await;
+        let context = AuditContext::from_request(&request);
+        let audit_operation = if message.type_url == DOWNLOAD_TYPE_URL {
+            OPERATION_BINARY
+        } else {
+            "unknown"
+        };
+        let mut audit = self.pending_do_get_audit(audit_operation, context.clone(), started);
+        let result = self
+            .handle_do_get_fallback(request, message, context.clone(), started)
+            .await;
         let status = match &result {
             Ok(_) => STATUS_OK,
             Err(e) => grpc_status_label(e),
         };
 
         metrics::observe_rpc(METHOD_DO_GET, OPERATION_BINARY, status, started.elapsed());
+        match &result {
+            Ok(_) => audit.transfer_to_stream(),
+            Err(status) => audit.complete(Some(status)),
+        }
         result
     }
 }

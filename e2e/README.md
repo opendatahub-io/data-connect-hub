@@ -37,6 +37,11 @@ To pass extra pytest arguments:
 ./e2e/run-e2e.sh e2e/env.local --tb=short -x
 ```
 
+Audit-log tests run only when the deployed `DataConnectService` already has
+`spec.audit.enabled: true`. Set `DCH_AUDIT_ENABLED=true` in `env.local`, then
+run `./e2e/run-e2e.sh e2e/env.local -k audit`. These tests read pod logs from
+`DCH_SERVICE_NAMESPACE` using the current `kubectl` context.
+
 The runner creates a tenant-local `dch-rest-service-secret-access` RoleBinding to the predefined ClusterRole of the same name. This grants the REST ServiceAccount `get`, `create`, `patch`, and `delete` on secrets in `DCH_TENANT_ID` for inline credentials, failed-creation cleanup, readiness, and export. It also grants Flight read access to configured connector secrets. Service RBAC setup runs even when `DCH_AUTH_TOKEN` is supplied; the Kubernetes identity running the script must be allowed to create the Roles and RoleBindings and grant their referenced permissions.
 
 The DCH controller must install the predefined ClusterRoles before running the suite. Tenant RoleBindings are created by the runner, not the default DCH deployment. Passing E2E tests does not establish secret access in other tenants. See [REST service secret permissions](../docs/user-guide/auth.md#23-grant-rest-service-permission-to-manage-connection-secrets) for tenant setup and [troubleshooting](../docs/user-guide/auth.md#4-troubleshooting) for permission failures.

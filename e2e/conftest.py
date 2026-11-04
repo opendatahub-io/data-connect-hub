@@ -15,11 +15,13 @@ by run-e2e.sh into .env and loaded at the top of this file.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import subprocess
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
@@ -86,6 +88,76 @@ def rest_metrics_url() -> str | None:
 @pytest.fixture(scope="session")
 def jaeger_query_url() -> str | None:
     return os.environ.get("DCH_JAEGER_QUERY_URL") or None
+
+
+@pytest.fixture(scope="session")
+def audit_enabled() -> bool:
+    return os.environ.get("DCH_AUDIT_ENABLED", "false").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture(scope="session")
+def service_namespace() -> str:
+    return os.environ.get("DCH_SERVICE_NAMESPACE", "")
+
+
+@pytest.fixture(scope="session")
+def pod_logs_since(service_namespace: str):
+    """Return parsed JSON logs for a service emitted after a UTC timestamp."""
+
+    def _read(service: str, since: datetime) -> list[dict]:
+        if not service_namespace:
+            pytest.fail("DCH_SERVICE_NAMESPACE is required to read audit logs")
+        container = {"rest-service": "rest-server", "flight-service": "flight-server"}.get(service)
+        if container is None:
+            pytest.fail(f"unsupported DCH service log source: {service}")
+        since_utc = since.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        pod_result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "--namespace",
+                service_namespace,
+                "--selector=app.kubernetes.io/part-of=data-connect-hub",
+                "--output=json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        pods = [
+            item["metadata"]["name"]
+            for item in json.loads(pod_result.stdout).get("items", [])
+            if any(spec.get("name") == container for spec in item.get("spec", {}).get("containers", []))
+        ]
+        if not pods:
+            pytest.fail(f"no pod with container {container!r} found in {service_namespace!r}")
+
+        records = []
+        for pod in pods:
+            result = subprocess.run(
+                [
+                    "kubectl",
+                    "logs",
+                    pod,
+                    "--namespace",
+                    service_namespace,
+                    f"--container={container}",
+                    f"--since-time={since_utc}",
+                    "--tail=-1",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            for line in result.stdout.splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    record = json.loads(line)
+                    if isinstance(record, dict):
+                        records.append(record)
+        return records
+
+    return _read
 
 
 @pytest.fixture(scope="session")

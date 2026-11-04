@@ -7,6 +7,8 @@ use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use serde::Serialize;
+use serde::ser::SerializeMap;
 use tonic::transport::{Certificate, ClientTlsConfig};
 use tracing::info;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -30,9 +32,63 @@ const RESERVED_LOG_FIELDS: &[&str] = &[
     "service.name",
     "trace_id",
     "span_id",
+    "request_id",
     "request-path",
     "msg",
 ];
+
+const AUDIT_LOG_FIELD_ORDER: &[&str] = &[
+    "ts",
+    "logger",
+    "service.name",
+    "request_id",
+    "parent_request_id",
+    "trace_id",
+    "span_id",
+    "actor",
+    "caller_principal",
+    "request-path",
+    "tenant_id",
+    "resource",
+    "action",
+    "resource_id",
+    "status_code",
+    "grpc_status",
+    "error_code",
+    "error_message",
+    "duration_ms",
+];
+
+struct OrderedAuditLog<'a>(&'a serde_json::Map<String, serde_json::Value>);
+
+impl Serialize for OrderedAuditLog<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let field_count = self.0.len() - usize::from(self.0.contains_key("msg"));
+        let mut map = serializer.serialize_map(Some(field_count))?;
+        for key in AUDIT_LOG_FIELD_ORDER {
+            if let Some(value) = self.0.get(*key) {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        for (key, value) in self.0 {
+            if key != "msg" && !AUDIT_LOG_FIELD_ORDER.contains(&key.as_str()) {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        map.end()
+    }
+}
+
+fn serialize_log(log: &serde_json::Map<String, serde_json::Value>, audit: bool) -> serde_json::Result<String> {
+    if audit {
+        serde_json::to_string(&OrderedAuditLog(log))
+    } else {
+        serde_json::to_string(log)
+    }
+}
 
 struct RestJsonFormat;
 
@@ -78,6 +134,7 @@ where
         mut writer: Writer<'_>,
         event: &tracing::Event<'_>,
     ) -> std::fmt::Result {
+        let audit = event.metadata().target() == "audit";
         let mut visitor = RestJsonVisitor::default();
         event.record(&mut visitor);
         let fields = visitor.0;
@@ -86,10 +143,12 @@ where
         let mut timestamp = String::new();
         tracing_subscriber::fmt::time::SystemTime.format_time(&mut Writer::new(&mut timestamp))?;
         log.insert("ts".to_owned(), serde_json::Value::String(timestamp));
-        log.insert(
-            "level".to_owned(),
-            serde_json::Value::String(event.metadata().level().to_string()),
-        );
+        if !audit {
+            log.insert(
+                "level".to_owned(),
+                serde_json::Value::String(event.metadata().level().to_string()),
+            );
+        }
         log.insert(
             "logger".to_owned(),
             serde_json::Value::String(event.metadata().target().to_owned()),
@@ -111,37 +170,61 @@ where
             );
         }
 
-        let request_path = ctx.event_scope().and_then(|mut scope| {
-            scope.find_map(|span| {
+        let span_fields = ctx.event_scope().map(|scope| {
+            let mut request_path = None;
+            let mut request_id = None;
+            for span in scope {
                 let extensions = span.extensions();
-                let fields = extensions.get::<FormattedFields<N>>()?;
-                let serde_json::Value::Object(fields) = serde_json::from_str(&fields.fields).ok()? else {
-                    return None;
+                let Some(fields) = extensions.get::<FormattedFields<N>>() else {
+                    continue;
                 };
-                fields
-                    .get("request.path")
-                    .and_then(serde_json::Value::as_str)
-                    .map(ToOwned::to_owned)
-            })
+                let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(&fields.fields) else {
+                    continue;
+                };
+                request_path = request_path.or_else(|| {
+                    fields
+                        .get("request.path")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                });
+                request_id = request_id.or_else(|| {
+                    fields
+                        .get("request_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                });
+                if request_path.is_some() && request_id.is_some() {
+                    break;
+                }
+            }
+            (request_path, request_id)
         });
-        if let Some(request_path) = request_path {
-            log.insert("request-path".to_owned(), serde_json::Value::String(request_path));
+        if let Some((Some(request_path), _)) = &span_fields {
+            log.insert(
+                "request-path".to_owned(),
+                serde_json::Value::String(request_path.clone()),
+            );
+        }
+        if let Some((_, Some(request_id))) = span_fields {
+            log.insert("request_id".to_owned(), serde_json::Value::String(request_id));
         }
 
         if !fields.is_empty() {
             let mut fields = fields;
             let message = fields.remove("message").unwrap_or(serde_json::Value::Null);
-            log.insert("msg".to_owned(), message);
+            if !audit {
+                log.insert("msg".to_owned(), message);
+            }
             log.extend(
                 fields
                     .into_iter()
                     .filter(|(key, _)| !RESERVED_LOG_FIELDS.contains(&key.as_str())),
             );
-        } else {
+        } else if !audit {
             log.insert("msg".to_owned(), serde_json::Value::Null);
         }
 
-        writer.write_str(&serde_json::to_string(&log).map_err(|_| std::fmt::Error)?)?;
+        writer.write_str(&serialize_log(&log, audit).map_err(|_| std::fmt::Error)?)?;
         writer.write_char('\n')
     }
 }
@@ -342,5 +425,23 @@ mod tests {
         assert_eq!(resolve_endpoint("https://otel:4317", true), "http://otel:4317");
         assert_eq!(resolve_endpoint("https://otel:4317", false), "https://otel:4317");
         assert_eq!(resolve_endpoint("http://otel:4317", true), "http://otel:4317");
+    }
+
+    #[test]
+    fn test_audit_log_uses_documented_field_order() {
+        let mut log = serde_json::Map::new();
+        for key in AUDIT_LOG_FIELD_ORDER.iter().rev() {
+            log.insert((*key).to_string(), serde_json::Value::String((*key).to_string()));
+        }
+        log.insert("msg".to_string(), serde_json::Value::String("access".to_string()));
+
+        let serialized = serialize_log(&log, true).unwrap();
+        let positions: Vec<_> = AUDIT_LOG_FIELD_ORDER
+            .iter()
+            .map(|key| serialized.find(&format!("\"{key}\":")).unwrap())
+            .collect();
+
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(!serialized.contains("\"msg\":"));
     }
 }
