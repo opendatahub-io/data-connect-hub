@@ -138,6 +138,10 @@ func (r *ConfigMapWatcherReconciler) markSynced(ctx context.Context, cm *corev1.
 	return ctrl.Result{}, nil
 }
 
+// odhFieldTypeHidden is the ODH Dashboard field type for masked inputs
+// (e.g. AWS_SECRET_ACCESS_KEY in the s3 connection type).
+const odhFieldTypeHidden = "hidden"
+
 // odhField represents a single field entry in an ODH connection-type ConfigMap's data.fields JSON.
 type odhField struct {
 	Type     string `json:"type"`
@@ -163,10 +167,11 @@ func configMapToConnectionType(cm *corev1.ConfigMap, fieldsJSON string) (Connect
 	fields := make([]Field, len(odhFields))
 	for i, of := range odhFields {
 		fields[i] = Field{
-			Name:     of.EnvVar,
-			Label:    of.Name,
-			Required: of.Required,
-			Type:     "string",
+			Name:      of.EnvVar,
+			Label:     of.Name,
+			Required:  of.Required,
+			Type:      "string",
+			Sensitive: of.Type == odhFieldTypeHidden,
 		}
 	}
 

@@ -1040,6 +1040,11 @@
           "default_value": {
             "type": "string",
             "nullable": true
+          },
+          "sensitive": {
+            "type": "boolean",
+            "default": false,
+            "description": "Whether the field value is sensitive (e.g. password, token) and should be masked in the UI.\n"
           }
         }
       },

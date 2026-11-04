@@ -104,6 +104,10 @@ spec:
                     required:
                       description: required indicates whether the field must be provided
                       type: boolean
+                    sensitive:
+                      description: sensitive indicates whether the field value should
+                        be masked in the UI
+                      type: boolean
                     type:
                       description: type is the data type of the field
                       enum:
