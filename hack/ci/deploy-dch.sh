@@ -263,6 +263,28 @@ kubectl rollout status deployment/jaeger -n "$CI_SVC_NAMESPACE" --timeout=120s
 kubectl rollout status deployment/otel-collector -n "$CI_SVC_NAMESPACE" --timeout=120s
 
 # ===================================================================
+# Platform Auth CRD and CR
+# ===================================================================
+
+# On RHOAI the opendatahub-operator installs the Auth CRD and creates the
+# "auth" CR before DCH. dc-controller enables global namespaces only when the
+# CRD exists at startup, so both must be in place before it is installed.
+# adminGroups names a group no e2e identity belongs to; the e2e user curates
+# the global namespace through its own RoleBinding (see e2e/run-e2e.sh).
+echo "=== Installing platform Auth CRD and CR ==="
+kubectl apply -f "$CI_REPO_ROOT/dc-controller/internal/controller/testdata/crd/services.platform.opendatahub.io_auths.yaml"
+kubectl wait --for=condition=Established crd/auths.services.platform.opendatahub.io --timeout=60s
+kubectl apply -f - <<EOF
+apiVersion: services.platform.opendatahub.io/v1alpha1
+kind: Auth
+metadata:
+  name: auth
+spec:
+  adminGroups: ["dch-e2e-global-admins"]
+  allowedGroups: ["system:authenticated"]
+EOF
+
+# ===================================================================
 # dc-controller (Helm)
 # ===================================================================
 
@@ -336,6 +358,17 @@ echo "=== Waiting for DCH rollout ==="
 kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl get po -n "$CI_SVC_NAMESPACE"
+
+# The single Kind node has no CPU left for a RollingUpdate surge pod once the
+# connector backends are up, so a config rollout (e.g. the global namespace
+# e2e test changing the label) would leave the new pod Pending. Recreate
+# avoids the surge. dc-controller does not manage the strategy field, so the
+# patch persists. Set it only after the rollout above has finished: switching
+# mid-rollout can leave the Deployment stuck at the surge pod count.
+for deployment in "$CI_FLIGHT_SERVICE_NAME" "$CI_REST_SERVICE_NAME"; do
+    kubectl patch "deployment/${deployment}" -n "$CI_SVC_NAMESPACE" --type=merge \
+        -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+done
 
 echo "=== Verifying DCH deployment images ==="
 assert_deployment_image \

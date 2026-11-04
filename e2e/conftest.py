@@ -11,6 +11,8 @@ by run-e2e.sh into .env and loaded at the top of this file.
     DCH_INSECURE           Skip TLS verify           (default: false)
     DCH_CA_CERT            CA cert path              (optional)
     DCH_PG_SECRET          K8s secret name for PG    (set by run-e2e.sh, enables query tests)
+    DCH_GLOBAL_NAMESPACE   Namespace the global namespace tests label as global
+                           (set by run-e2e.sh when the platform Auth CR exists)
 """
 
 from __future__ import annotations
@@ -190,6 +192,22 @@ def neighbor_tenant_id() -> str:
     invisible when the same caller switches ``X-Tenant-Id`` to this tenant.
     """
     return os.environ.get("DCH_NEIGHBOR_TENANT_ID", "")
+
+
+@pytest.fixture(scope="session")
+def global_namespace_id() -> str:
+    """Namespace the global namespace tests label as global; empty when not prepared."""
+    return os.environ.get("DCH_GLOBAL_NAMESPACE", "")
+
+
+@pytest.fixture(scope="session")
+def rest_service_account() -> str:
+    return os.environ.get("DCH_REST_SA", "")
+
+
+@pytest.fixture(scope="session")
+def flight_service_account() -> str:
+    return os.environ.get("DCH_FLIGHT_SA", "")
 
 
 @pytest.fixture(scope="session")

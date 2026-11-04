@@ -218,15 +218,25 @@ func main() {
 	}
 	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
+	globalNamespaceConfig, err := controller.NewGlobalNamespaceConfig(controller.PlatformAuthCRDAvailable(cfg))
+	if err != nil {
+		setupLog.Error(err, "Failed to configure the global namespace")
+		os.Exit(1)
+	}
+	setupLog.Info("Global namespace configuration",
+		"enabled", globalNamespaceConfig.Enabled,
+		"label", globalNamespaceConfig.LabelKey)
+
 	if err := (&controller.DataConnectServiceReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		ManifestsPath:       manifestsPath,
-		RestImage:           requiredEnv(controller.RelatedImageRestService),
-		FlightImage:         requiredEnv(controller.RelatedImageFlightService),
-		KubeRbacProxyImage:  requiredEnv(controller.RelatedImageKubeRbacProxy),
-		ControllerNamespace: controller.ResolveControllerNamespace(),
-		FlightServiceClient: controller.NewHTTPFlightServiceClient(restURLResolver),
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		ManifestsPath:         manifestsPath,
+		RestImage:             requiredEnv(controller.RelatedImageRestService),
+		FlightImage:           requiredEnv(controller.RelatedImageFlightService),
+		KubeRbacProxyImage:    requiredEnv(controller.RelatedImageKubeRbacProxy),
+		ControllerNamespace:   controller.ResolveControllerNamespace(),
+		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver),
+		GlobalNamespaceConfig: globalNamespaceConfig,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
@@ -264,6 +274,15 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)
+	}
+	if globalNamespaceConfig.Enabled {
+		if err := (&controller.GlobalNamespaceReconciler{
+			Client: mgr.GetClient(),
+			Config: globalNamespaceConfig,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", "globalnamespace")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 
