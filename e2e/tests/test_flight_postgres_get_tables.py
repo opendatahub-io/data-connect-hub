@@ -6,7 +6,6 @@ Requires run-e2e.sh to have seeded dch_e2e.cities and set DCH_PG_SECRET.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from data_connect_hub import DataConnectClient
 

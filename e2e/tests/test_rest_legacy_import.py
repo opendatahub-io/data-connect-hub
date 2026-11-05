@@ -17,8 +17,8 @@ from __future__ import annotations
 import time
 
 import pytest
-from data_connect_hub import DataConnectClient
 
+from data_connect_hub import DataConnectClient
 
 LEGACY_S3_CM_NAME = "s3"
 LEGACY_S3_SECRET_NAME = "e2e-legacy-s3-conn"
@@ -122,8 +122,7 @@ class TestLegacyConnectionTypeImport:
         types = rest_client.list_connection_types()
         uri_v1_types = [ct for ct in types if ct.name == URI_V1_CM_NAME]
         assert len(uri_v1_types) == 0, (
-            f"uri-v1 should not be imported as a separate connection type, "
-            f"but found: {uri_v1_types}"
+            f"uri-v1 should not be imported as a separate connection type, but found: {uri_v1_types}"
         )
         uri_types = [ct for ct in types if ct.name == "URI"]
         assert len(uri_types) == 1, "built-in URI connection type should exist"
@@ -132,9 +131,7 @@ class TestLegacyConnectionTypeImport:
 class TestLegacyConnectionImport:
     """Verify that ODH connection Secrets are imported."""
 
-    def test_s3_secret_imported_as_connection(
-        self, legacy_import_enabled, rest_client: DataConnectClient
-    ) -> None:
+    def test_s3_secret_imported_as_connection(self, legacy_import_enabled, rest_client: DataConnectClient) -> None:
         """A Secret with opendatahub.io/dashboard label and
         connection-type-ref=s3 should be imported as a connection."""
         conn = _poll_connection(rest_client, "E2E Legacy S3 Connection")
@@ -145,9 +142,7 @@ class TestLegacyConnectionImport:
         assert conn.credentials_ref is not None
         assert conn.credentials_ref.secret == LEGACY_S3_SECRET_NAME
 
-    def test_oci_v1_secret_imported_as_connection(
-        self, legacy_import_enabled, rest_client: DataConnectClient
-    ) -> None:
+    def test_oci_v1_secret_imported_as_connection(self, legacy_import_enabled, rest_client: DataConnectClient) -> None:
         """A Secret with connection-type-ref=oci-v1 should be imported as a
         connection referencing the imported oci-v1 type."""
         conn = _poll_connection(rest_client, "E2E Legacy OCI Connection")

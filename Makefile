@@ -24,6 +24,7 @@ endif
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
 	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
+	e2e-venv e2e-lint e2e-fmt \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -190,6 +191,37 @@ sdk-package-check: sdk-build
 sdk-all: sdk-lint sdk-typecheck sdk-test sdk-package-check
 
 # -------------------------------------------------------------------
+# E2E
+# -------------------------------------------------------------------
+
+E2E_DIR := e2e
+
+ifdef VIRTUAL_ENV
+  E2E_PYTHON      := python3
+  E2E_BIN         :=
+  E2E_VENV_PREREQ :=
+else
+  E2E_PYTHON      := $(E2E_DIR)/.venv/bin/python3
+  E2E_BIN         := .venv/bin/
+  E2E_VENV_PREREQ := $(E2E_PYTHON)
+endif
+
+$(E2E_DIR)/.venv/bin/python3:
+	python3 -m venv $(E2E_DIR)/.venv
+
+e2e-venv: $(E2E_VENV_PREREQ)
+
+e2e-lint: e2e-venv
+	$(E2E_PYTHON) -m pip install --quiet "ruff>=0.5"
+	cd $(E2E_DIR) && $(E2E_BIN)ruff check tests/ scenarios/ conftest.py
+	cd $(E2E_DIR) && $(E2E_BIN)ruff format --check tests/ scenarios/ conftest.py
+
+e2e-fmt: e2e-venv
+	$(E2E_PYTHON) -m pip install --quiet "ruff>=0.5"
+	cd $(E2E_DIR) && $(E2E_BIN)ruff format tests/ scenarios/ conftest.py
+	cd $(E2E_DIR) && $(E2E_BIN)ruff check --fix tests/ scenarios/ conftest.py
+
+# -------------------------------------------------------------------
 # OpenAPI docs
 # -------------------------------------------------------------------
 
@@ -299,3 +331,7 @@ help:
 	@echo "  sdk-build            build SDK wheel and source distribution"
 	@echo "  sdk-package-check    build and validate SDK distribution metadata"
 	@echo "  sdk-all              lint + typecheck + test + package check SDK"
+	@echo ""
+	@echo "E2E:"
+	@echo "  e2e-lint             lint and format-check E2E tests"
+	@echo "  e2e-fmt              format and auto-fix E2E tests"

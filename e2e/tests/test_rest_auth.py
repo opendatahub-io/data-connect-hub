@@ -5,10 +5,10 @@ from __future__ import annotations
 import pytest
 
 from data_connect_hub import (
+    DataConnectClient,
     DCHAuthenticationError,
     DCHConfigError,
     DCHForbiddenError,
-    DataConnectClient,
 )
 
 
