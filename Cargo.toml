@@ -43,7 +43,10 @@ tonic = "0.14"
 tonic-health = "0.14"
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal", "net", "io-util"] }
 tokio-stream = "0.1"
-tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "aws_lc_rs"] }
+# No crypto backend feature: the provider is installed at runtime (rustls-ossl),
+# so rustls dispatches to the system OpenSSL rather than a statically linked
+# Rust implementation. See ODH-ADR-0003.
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
 rcgen = "0.13"
 futures = "0.3"
 prost = "0.14"
@@ -51,20 +54,44 @@ serde = { version = "1.0", features = ["derive", "rc"] }
 serde_json = "1.0"
 tempfile = "3.27"
 json-patch = "4"
-actix-web = "4.18.1"
+# Default features minus "ws": the WebSocket feature is the only thing that
+# pulls the optional `sha1` dependency into actix-http, and nothing here uses
+# WebSockets.
+actix-web = { version = "4.18.1", default-features = false, features = [
+    "macros",
+    "compress-brotli",
+    "compress-gzip",
+    "compress-zstd",
+    "cookies",
+    "http2",
+    "unicode",
+    "compat",
+] }
 actix-cors = "0.7"
 thiserror = "2.0"
 anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "json"] }
 clap = { version = "4.6", features = ["derive"] }
-sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "chrono", "uuid", "json", "bigdecimal", "tls-rustls"] }
+# tls-native-tls, not tls-rustls: sqlx-core calls
+# ClientConfig::builder_with_provider(ring) and so ignores the process-default
+# provider. native-tls is OpenSSL on Linux.
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "chrono", "uuid", "json", "bigdecimal", "tls-native-tls"] }
 bigdecimal = "0.4"
 async-trait = "0.1"
 async-stream = "0.3"
 bytes = "1.0"
 config = "0.15"
-kube = { version = "4.2.0", features = ["client", "runtime"] }
+# default-features = false drops "ring". rustls-tls builds its config with
+# ClientConfig::builder(), which resolves the process-default provider
+# (rustls-ossl); kube only installs a provider of its own under the
+# "aws-lc-rs" feature, which is off.
+#
+# Not openssl-tls: hyper-openssl's SSL_CTX is created in a library context
+# that never loads /etc/pki/tls/openssl.cnf, so the crypto-policies group
+# list does not apply and OpenSSL 3.5 falls back to offering X25519 and
+# ML-KEM — none of which the frozen 3.0.7 FIPS provider can supply.
+kube = { version = "4.2.0", default-features = false, features = ["client", "runtime", "rustls-tls"] }
 k8s-openapi = { version = "0.28.0", features = ["latest"] }
 moka = "0.12"
 tower = "0.5"
@@ -84,7 +111,11 @@ arrow-cast = "60.2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 mime = "0.3"
 url = "2.5"
-rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] }
+rustls = { version = "0.23", default-features = false, features = ["std", "logging", "tls12"] }
+# rustls CryptoProvider backed by OpenSSL 3's provider layer, reaching the
+# RHEL FIPS provider. Pinned exactly: published at 0.0.1, so semver gives no
+# compatibility guarantee.
+rustls-ossl = "=0.0.1"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 opentelemetry = "0.32"
@@ -92,7 +123,10 @@ opentelemetry_sdk = "0.32"
 opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "grpc-tonic",
     "trace",
-    "tls-aws-lc",
+    # tls-provider-agnostic rather than tls-aws-lc: it enables tonic's TLS
+    # without selecting a crypto backend, so the exporter uses the
+    # process-default provider (rustls-ossl) like everything else.
+    "tls-provider-agnostic",
     "tls-roots",
     # Without this the exporter's own error logging is compiled out, so a
     # failing OTLP connection is completely silent.

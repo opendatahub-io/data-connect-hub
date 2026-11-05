@@ -2,7 +2,12 @@ ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:5e9a0970f7
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS builder
 
-RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+# openssl-devel: the binary links the system OpenSSL dynamically so that
+# cryptography is performed by the RHEL FIPS provider rather than a statically
+# linked Rust implementation. Installing it also aligns openssl-libs with the
+# runtime image. See ODH-ADR-0003.
+# clang: required by bindgen (used by openssl-sys and other native bindings)
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal openssl-devel clang \
     && microdnf clean all
 
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -32,6 +37,16 @@ RUN microdnf install -y ca-certificates \
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /app/rest-service
+
+COPY --chown=root:root --chmod=0444 \
+    services/rest/openssl-fips.cnf /etc/pki/tls/openssl-fips.cnf
+
+# Intended to route every library context through the validated FIPS provider;
+# see the file itself for why the stock config does not. Not yet effective:
+# the provider still reports fips=false with this in place, so DCH_REQUIRE_FIPS
+# is deliberately NOT set here — it would refuse to start. Set it on the
+# deployment once the configuration below actually takes effect.
+ENV OPENSSL_CONF=/etc/pki/tls/openssl-fips.cnf
 
 USER 1001:1001
 

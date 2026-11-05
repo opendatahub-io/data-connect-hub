@@ -182,11 +182,83 @@ async fn read_ca_cert(config: &ServerConfig) -> Result<Option<Vec<u8>>, anyhow::
     }
 }
 
+/// Installs the OpenSSL-backed rustls provider as the process default, so
+/// that TLS cryptography is performed by the system OpenSSL — and therefore,
+/// on a FIPS-mode host, by the validated FIPS provider — rather than by a
+/// statically linked Rust implementation.
+///
+/// Key exchange groups are restricted to the NIST curves first. `rustls`
+/// computes `CryptoProvider::fips()` as an `all()` across every configured
+/// component, and derives `ClientConfig::require_ems` from that value, so a
+/// single component reporting non-FIPS would silently disable Extended Master
+/// Secret — mandatory for the TLS 1.2 KDF under FIPS 140-3 IG section D.Q.
+///
+/// When `DCH_REQUIRE_FIPS` is set, a configuration that does not report FIPS
+/// is treated as fatal rather than degrading quietly.
+///
+/// The status is returned rather than logged: this has to run before
+/// `init_tracing_json`, which may open an OTLP exporter over TLS, so no
+/// subscriber exists yet and anything logged here would be discarded.
+struct CryptoStatus {
+    provider_fips: bool,
+    config_fips: bool,
+    kx_groups: Vec<rustls::NamedGroup>,
+}
+
+impl CryptoStatus {
+    fn log(&self) {
+        tracing::info!(
+            provider_fips = self.provider_fips,
+            config_fips = self.config_fips,
+            kx_groups = ?self.kx_groups,
+            "installed OpenSSL-backed rustls crypto provider"
+        );
+    }
+}
+
+fn install_crypto_provider() -> Result<CryptoStatus> {
+    use rustls::crypto::CryptoProvider;
+
+    let mut provider = rustls_ossl::default_provider();
+    provider.kx_groups.retain(|group| {
+        matches!(
+            group.name(),
+            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1 | rustls::NamedGroup::secp521r1
+        )
+    });
+
+    let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
+    let provider_fips = provider.fips();
+
+    CryptoProvider::install_default(provider)
+        .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
+
+    // Build a throwaway client configuration purely to read the config-level
+    // FIPS status: it folds in `require_ems`, which the provider-level flag
+    // does not cover. tonic builds its own configurations internally, so
+    // there is no live one to inspect here.
+    let probe = rustls::ClientConfig::builder()
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    let config_fips = probe.fips();
+
+    if std::env::var_os("DCH_REQUIRE_FIPS").is_some() && !config_fips {
+        return Err(anyhow::anyhow!(
+            "DCH_REQUIRE_FIPS is set but the TLS configuration does not report FIPS \
+             (provider_fips={provider_fips}, config_fips={config_fips}); refusing to start"
+        ));
+    }
+
+    Ok(CryptoStatus {
+        provider_fips,
+        config_fips,
+        kx_groups,
+    })
+}
+
 #[actix_web::main]
 async fn main() -> Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
+    let crypto_status = install_crypto_provider()?;
 
     let args = CommandLineArgs::parse();
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
@@ -194,6 +266,8 @@ async fn main() -> Result<()> {
     let trace = TraceConfig::from_env();
     let audit = AuditConfig::from_env();
     let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
+
+    crypto_status.log();
 
     tracing::info!("Starting DataConnectorHub API service");
     tracing::info!(

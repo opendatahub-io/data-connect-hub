@@ -23,8 +23,9 @@ futures = { workspace = true }
 prost = { workspace = true }
 commons = { workspace = true }
 pg-meta-store = { workspace = true }
-tonic = { workspace = true, features = ["tls-aws-lc"] }
+tonic = { workspace = true, features = ["tls-native-roots"] }
 rustls = { workspace = true }
+rustls-ossl = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
