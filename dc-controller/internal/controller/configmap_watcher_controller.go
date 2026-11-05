@@ -138,16 +138,45 @@ func (r *ConfigMapWatcherReconciler) markSynced(ctx context.Context, cm *corev1.
 	return ctrl.Result{}, nil
 }
 
-// odhFieldTypeHidden is the ODH Dashboard field type for masked inputs
-// (e.g. AWS_SECRET_ACCESS_KEY in the s3 connection type).
-const odhFieldTypeHidden = "hidden"
+// ODH Dashboard field types that need special handling on import.
+const (
+	// odhFieldTypeHidden is a masked input (e.g. AWS_SECRET_ACCESS_KEY in s3).
+	odhFieldTypeHidden = "hidden"
+	// odhFieldTypeFile is an uploaded file (e.g. .dockerconfigjson in oci-v1)
+	// whose content may embed credentials.
+	odhFieldTypeFile = "file"
+	// odhFieldTypeDropdown is a select list; properties.items holds the options.
+	odhFieldTypeDropdown = "dropdown"
+	// odhFieldTypeSection is a form heading with no envVar; it carries no value.
+	odhFieldTypeSection = "section"
+
+	odhDropdownVariantMulti = "multi"
+
+	fieldTypeString = "string"
+	fieldTypeEnum   = "enum"
+)
 
 // odhField represents a single field entry in an ODH connection-type ConfigMap's data.fields JSON.
 type odhField struct {
-	Type     string `json:"type"`
-	Name     string `json:"name"`
-	EnvVar   string `json:"envVar"`
-	Required bool   `json:"required"`
+	Type        string             `json:"type"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	EnvVar      string             `json:"envVar"`
+	Required    bool               `json:"required"`
+	Properties  odhFieldProperties `json:"properties"`
+}
+
+// odhFieldProperties holds the subset of ODH field properties that DCH maps.
+type odhFieldProperties struct {
+	HelperText string            `json:"helperText"`
+	Variant    string            `json:"variant"`
+	Items      []odhDropdownItem `json:"items"`
+}
+
+// odhDropdownItem is a single option of an ODH dropdown field.
+type odhDropdownItem struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
 }
 
 // builtinProviderAliases maps legacy ConfigMap names (key) to the
@@ -164,15 +193,12 @@ func configMapToConnectionType(cm *corev1.ConfigMap, fieldsJSON string) (Connect
 		return ConnectionType{}, err
 	}
 
-	fields := make([]Field, len(odhFields))
-	for i, of := range odhFields {
-		fields[i] = Field{
-			Name:      of.EnvVar,
-			Label:     of.Name,
-			Required:  of.Required,
-			Type:      "string",
-			Sensitive: of.Type == odhFieldTypeHidden,
+	fields := make([]Field, 0, len(odhFields))
+	for _, of := range odhFields {
+		if of.Type == odhFieldTypeSection || of.EnvVar == "" {
+			continue
 		}
+		fields = append(fields, odhFieldToField(of))
 	}
 
 	ct := ConnectionType{
@@ -186,6 +212,47 @@ func configMapToConnectionType(cm *corev1.ConfigMap, fieldsJSON string) (Connect
 	}
 
 	return ct, nil
+}
+
+// odhFieldToField maps an ODH Dashboard field to a DCH credentials field.
+// Dropdowns become enums; Dashboard stores the selection as a JSON array
+// string for both variants, so "multi" only sets Multiple. A dropdown with
+// no usable items falls back to a plain string field.
+func odhFieldToField(of odhField) Field {
+	f := Field{
+		Name:      of.EnvVar,
+		Label:     of.Name,
+		Required:  of.Required,
+		Type:      fieldTypeString,
+		Sensitive: of.Type == odhFieldTypeHidden || of.Type == odhFieldTypeFile,
+	}
+
+	desc := of.Description
+	if desc == "" {
+		desc = of.Properties.HelperText
+	}
+	if desc != "" {
+		f.Description = &desc
+	}
+
+	if of.Type == odhFieldTypeDropdown {
+		for _, item := range of.Properties.Items {
+			if item.Value == "" {
+				continue
+			}
+			label := item.Label
+			if label == "" {
+				label = item.Value
+			}
+			f.EnumValues = append(f.EnumValues, EnumValue{Value: item.Value, Label: label})
+		}
+		if len(f.EnumValues) > 0 {
+			f.Type = fieldTypeEnum
+			f.Multiple = of.Properties.Variant == odhDropdownVariantMulti
+		}
+	}
+
+	return f
 }
 
 // SetupWithManager sets up the controller with the Manager.

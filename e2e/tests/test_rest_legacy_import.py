@@ -95,8 +95,23 @@ class TestLegacyConnectionTypeImport:
             "controller may not have reconciled the ConfigMap"
         )
         assert ct.provider == LEGACY_OCI_CM_NAME
-        field_names = {f.name for f in ct.credentials_fields}
-        assert "OCI_HOST" in field_names
+        fields = {f.name: f for f in ct.credentials_fields}
+        assert "OCI_HOST" in fields
+
+        access_type = fields["ACCESS_TYPE"]
+        assert access_type.type == "enum", "type: dropdown must map to enum"
+        assert access_type.multiple is True, "variant: multi must map to multiple"
+        assert access_type.enum_values is not None
+        assert [(e.value, e.label) for e in access_type.enum_values] == [
+            ("Push", "Push secret"),
+            ("Pull", "Pull secret"),
+        ]
+        assert access_type.description, "field description must be imported"
+
+        docker_config = fields[".dockerconfigjson"]
+        assert docker_config.type == "string"
+        assert docker_config.description, "description or properties.helperText must be imported"
+        assert docker_config.sensitive is True, "type: file must map to sensitive"
 
     def test_uri_v1_configmap_not_imported_as_duplicate(
         self, legacy_import_enabled, rest_client: DataConnectClient

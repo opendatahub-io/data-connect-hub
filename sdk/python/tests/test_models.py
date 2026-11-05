@@ -330,6 +330,30 @@ class TestConnectionType:
         assert field.enum_values[0] == EnumValue(value="us-east-1", label="US East")
         assert field.enum_values[1].value == "eu-west-1"
         assert field.sensitive is False
+        assert field.multiple is False
+
+    def test_credentials_field_multiple(self) -> None:
+        ct = ConnectionType.model_validate(
+            {
+                "id": "ct-oci",
+                "name": "oci-v1",
+                "provider": "oci-v1",
+                "credentials_fields": [
+                    {
+                        "name": "ACCESS_TYPE",
+                        "label": "Access type",
+                        "required": False,
+                        "type": "enum",
+                        "multiple": True,
+                        "enum_values": [
+                            {"value": "Push", "label": "Push secret"},
+                            {"value": "Pull", "label": "Pull secret"},
+                        ],
+                    }
+                ],
+            }
+        )
+        assert ct.credentials_fields[0].multiple is True
 
     def test_credentials_field_sensitive(self) -> None:
         ct = ConnectionType.model_validate(

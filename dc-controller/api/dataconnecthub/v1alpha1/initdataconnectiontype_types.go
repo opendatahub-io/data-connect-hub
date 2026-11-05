@@ -66,6 +66,11 @@ type CredentialsField struct {
 	// sensitive indicates whether the field value should be masked in the UI
 	// +optional
 	Sensitive bool `json:"sensitive,omitempty"`
+
+	// multiple indicates whether more than one enum value may be selected;
+	// only meaningful when type is "enum"
+	// +optional
+	Multiple bool `json:"multiple,omitempty"`
 }
 
 // InitDataConnectionTypeSpec defines the desired state of InitDataConnectionType.
