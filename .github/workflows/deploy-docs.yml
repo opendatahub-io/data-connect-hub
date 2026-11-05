@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # GitHub Pages is only configured on the canonical repository; skip on forks.
+    if: github.repository == 'opendatahub-io/data-connect-hub'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
