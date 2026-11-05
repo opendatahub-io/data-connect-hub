@@ -56,6 +56,7 @@ CREATE INDEX IF NOT EXISTS idx_data_connections_type_id ON data_connections ((da
 --             label         string          — display label
 --         default_value     string | null   — optional default
 --         sensitive         boolean         — whether the value should be masked in the UI (default false)
+--         multiple          boolean         — whether more than one enum value may be selected (default false)
 --     label                 string | null   — optional display label
 --     tags                  array | null    — optional free-form labels
 CREATE TABLE IF NOT EXISTS data_connection_types (

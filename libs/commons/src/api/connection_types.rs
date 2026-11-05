@@ -26,6 +26,10 @@ pub struct Field {
     /// Whether the field value is sensitive and should be masked in the UI.
     #[serde(default)]
     pub sensitive: bool,
+    /// Whether more than one enum value may be selected. Only meaningful
+    /// when `type` is `enum`.
+    #[serde(default)]
+    pub multiple: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -123,6 +127,7 @@ mod tests {
                     enum_values: None,
                     default_value: None,
                     sensitive: true,
+                    multiple: false,
                 }],
                 tags: Some(vec!["domain: database".to_string(), "engine: postgresql".to_string()]),
             },
@@ -229,6 +234,7 @@ mod tests {
         let field = &res.resource.credentials_fields[0];
         assert_eq!(field.d_type, "enum");
         assert!(!field.sensitive, "sensitive defaults to false when omitted");
+        assert!(!field.multiple, "multiple defaults to false when omitted");
         let enums = field.enum_values.as_ref().unwrap();
         assert_eq!(enums.len(), 2);
         assert_eq!(enums[0].value, "us-east-1");

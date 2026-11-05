@@ -37,6 +37,7 @@ const (
 	testFieldAWSSecretAccessKey = "AWS_SECRET_ACCESS_KEY"
 	testFieldAWSS3Endpoint      = "AWS_S3_ENDPOINT"
 	testFieldAccessType         = "ACCESS_TYPE"
+	testFieldDockerConfigJSON   = ".dockerconfigjson"
 )
 
 // builtinSensitiveFields lists credential field names that must be marked
@@ -87,13 +88,14 @@ func TestBuiltinConnectionTypesSensitiveFields(t *testing.T) {
 
 func TestConfigMapToConnectionTypeSensitive(t *testing.T) {
 	// Fields adapted from the RHOAI Dashboard s3, oci-v1, and uri-v1 ConfigMaps.
-	// Only the dashboard's "hidden" type maps to sensitive; "uri" fields do not,
-	// even though the built-in URI connection type marks its URI field sensitive.
+	// The dashboard's "hidden" and "file" types map to sensitive; "uri" fields do
+	// not, even though the built-in URI connection type marks its URI field sensitive.
 	fieldsJSON := `[
 		{"type":"short-text","name":"Access key","envVar":"AWS_ACCESS_KEY_ID","properties":{},"required":true},
 		{"type":"hidden","name":"Secret key","envVar":"AWS_SECRET_ACCESS_KEY","required":true,"properties":{"deferInput":true}},
 		{"type":"short-text","name":"Endpoint","envVar":"AWS_S3_ENDPOINT","required":true,"properties":{}},
 		{"type":"dropdown","name":"Access type","envVar":"ACCESS_TYPE","properties":{"variant":"multi","items":[{"label":"Push secret","value":"Push"}]}},
+		{"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{"deferInput":true}},
 		{"type":"uri","name":"URI","envVar":"URI","required":true,"properties":{}}
 	]`
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "s3"}}
@@ -108,6 +110,7 @@ func TestConfigMapToConnectionTypeSensitive(t *testing.T) {
 		testFieldAWSSecretAccessKey: true,
 		testFieldAWSS3Endpoint:      false,
 		testFieldAccessType:         false,
+		testFieldDockerConfigJSON:   true,
 		testFieldURI:                false,
 	}
 	if len(ct.CredentialsFields) != len(want) {
