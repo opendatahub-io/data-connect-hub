@@ -450,7 +450,9 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		logf.FromContext(ctx).Error(err, "failed to resolve cluster TLS profile for kube-rbac-proxy")
 		return fmt.Errorf("resolving cluster TLS profile for kube-rbac-proxy: %w", err)
 	}
-	setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec)
+	if err := setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec); err != nil {
+		return fmt.Errorf("projecting TLS profile to kube-rbac-proxy: %w", err)
+	}
 
 	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
 		return fmt.Errorf("setting config namespace: %w", err)

@@ -531,10 +531,12 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 
 func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 	tests := []struct {
-		name     string
-		profile  configv1.TLSProfileSpec
-		wantMin  string
-		wantSuit string
+		name       string
+		profile    configv1.TLSProfileSpec
+		wantMin    string
+		wantSuit   string
+		wantNoSuit bool
+		wantErr    string
 	}{
 		{
 			name:    "Modern profile only sets TLS 1.3 minimum",
@@ -547,6 +549,39 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			wantMin:  "--tls-min-version=VersionTLS12",
 			wantSuit: "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
 		},
+		{
+			name: "TLS 1.2 AES-256-only profile is rejected",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+				Ciphers:       []string{"ECDHE-RSA-AES256-GCM-SHA384"},
+			},
+			wantErr: "cluster TLS profile: kube-rbac-proxy cannot serve HTTP/2 with cipher list",
+		},
+		{
+			name: "TLS 1.2 AES-128-GCM profile is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+				Ciphers:       []string{"ECDHE-RSA-AES128-GCM-SHA256"},
+			},
+			wantMin:  "--tls-min-version=VersionTLS12",
+			wantSuit: "--tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+		},
+		{
+			name: "empty cipher list is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+			},
+			wantMin: "--tls-min-version=VersionTLS12",
+		},
+		{
+			name: "TLS 1.3 profile is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS13,
+				Ciphers:       []string{"ECDHE-RSA-AES256-GCM-SHA384"},
+			},
+			wantMin:    "--tls-min-version=VersionTLS13",
+			wantNoSuit: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -555,8 +590,19 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			args := kubeRbacProxyArgs(t, deployment)
 			args = append(args, "--tls-min-version", "old", "--tls-cipher-suites", "old")
 			setKubeRbacProxyArgs(t, deployment, args)
-			setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
-			setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
+			err := setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("setKubeRbacProxyTLSOpts() error = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("setKubeRbacProxyTLSOpts() error = %v", err)
+			}
+			if err := setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile); err != nil {
+				t.Fatalf("second setKubeRbacProxyTLSOpts() error = %v", err)
+			}
 			args = kubeRbacProxyArgs(t, deployment)
 			if !containsString(args, tt.wantMin) {
 				t.Errorf("args %v do not contain %q", args, tt.wantMin)
@@ -564,7 +610,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			if tt.wantSuit != "" && !containsString(args, tt.wantSuit) {
 				t.Errorf("args %v do not contain %q", args, tt.wantSuit)
 			}
-			if tt.wantSuit == "" && containsArgPrefix(args, "--tls-cipher-suites=") {
+			if tt.wantNoSuit && containsArgPrefix(args, "--tls-cipher-suites=") {
 				t.Errorf("TLS 1.3 args unexpectedly include cipher suites: %v", args)
 			}
 			if containsString(args, "--tls-min-version") || containsString(args, "--tls-cipher-suites") || containsString(args, "old") {
@@ -600,7 +646,9 @@ func TestSetKubeRbacProxyTLSOptsProjectsLenientProfiles(t *testing.T) {
 				t.Fatalf("LoadWithAdherence() under %s: %v", policy, err)
 			}
 			deployment := kubeRbacProxyDeployment("--secure-listen-address=0.0.0.0:8443", "--tls-min-version=custom", "--tls-cipher-suites=custom")
-			setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec)
+			if err := setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec); err != nil {
+				t.Fatalf("setKubeRbacProxyTLSOpts() under %s: %v", policy, err)
+			}
 			args := kubeRbacProxyArgs(t, deployment)
 			if !containsString(args, "--tls-min-version=VersionTLS13") || containsArgPrefix(args, "--tls-cipher-suites=") || containsString(args, "custom") {
 				t.Fatalf("args = %v, want projected Modern profile without stale TLS flags", args)
@@ -623,7 +671,9 @@ func TestSetKubeRbacProxyTLSOptsFallsBackToIntermediateWhenAPIServerObjectIsAbse
 		t.Fatal("expected the Intermediate fallback when the APIServer object is absent")
 	}
 	deployment := kubeRbacProxyDeployment("--secure-listen-address=0.0.0.0:8443")
-	setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec)
+	if err := setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec); err != nil {
+		t.Fatalf("setKubeRbacProxyTLSOpts(): %v", err)
+	}
 	args := kubeRbacProxyArgs(t, deployment)
 	if !containsString(args, "--tls-min-version=VersionTLS12") || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
 		t.Fatalf("args = %v, want projected Intermediate fallback", args)
