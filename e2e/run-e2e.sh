@@ -60,6 +60,16 @@ set +a
 DCH_INSECURE="${DCH_INSECURE:-true}"
 DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
+DCH_NEIGHBOR_TENANT_ID="${DCH_NEIGHBOR_TENANT_ID:-dch-e2e-neighbor}"
+
+# Tenancy tests need three distinct namespaces: the runner grants the e2e user
+# access to the tenant and the neighbor tenant, and none in the no-access one.
+if [[ "$DCH_TENANT_ID" == "$DCH_NEIGHBOR_TENANT_ID" ||
+      "$DCH_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ||
+      "$DCH_NEIGHBOR_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ]]; then
+    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, and DCH_NO_ACCESS_NAMESPACE must be distinct" >&2
+    exit 1
+fi
 
 # AWS S3 connector
 DCH_S3_SEED_DATASET="${DCH_S3_SEED_DATASET:-false}"
@@ -95,6 +105,7 @@ ENV_FILE="$SCRIPT_DIR/.env"
 setup_namespaces() {
     kubectl create namespace "$DCH_TENANT_ID" 2>/dev/null || true
     kubectl create namespace "$DCH_NO_ACCESS_NAMESPACE" 2>/dev/null || true
+    kubectl create namespace "$DCH_NEIGHBOR_TENANT_ID" 2>/dev/null || true
 }
 
 setup_user_accounts() {
@@ -113,18 +124,24 @@ setup_user_accounts() {
 
 setup_user_rbac() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
-        # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
-        kubectl delete rolebinding dch-e2e-user-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl create rolebinding dch-e2e-user-access \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-read-write \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
-        # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
-        kubectl create rolebinding dch-e2e-user-export-secret-rb \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-secret-export \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        # The e2e user gets the same API access in the tenant and the neighbor
+        # tenant, so tenancy tests can prove isolation comes from X-Tenant-Id
+        # scoping rather than from a missing RoleBinding.
+        local ns
+        for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+            # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
+            kubectl delete rolebinding dch-e2e-user-access -n "$ns" --ignore-not-found >/dev/null
+            kubectl create rolebinding dch-e2e-user-access \
+                -n "$ns" \
+                --clusterrole=dch-read-write \
+                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+            # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
+            kubectl create rolebinding dch-e2e-user-export-secret-rb \
+                -n "$ns" \
+                --clusterrole=dch-secret-export \
+                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+                --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        done
     fi
 
     if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
@@ -183,11 +200,16 @@ setup_service_rbac() {
     fi
 
     # Grant REST tenant secret access for inline credentials, rollback, readiness, and export.
-    kubectl create rolebinding dch-e2e-rest-service-secret-access \
-        -n "$DCH_TENANT_ID" \
-        --clusterrole=dch-rest-service-secret-access \
-        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    # The neighbor tenant needs it too, so tenancy tests can create inline
+    # credentials there and check the secret lands in the neighbor namespace.
+    local ns
+    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        kubectl create rolebinding dch-e2e-rest-service-secret-access \
+            -n "$ns" \
+            --clusterrole=dch-rest-service-secret-access \
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    done
 }
 
 # -------------------------------------------------------------------
@@ -483,6 +505,7 @@ DCH_GATEWAY_ENDPOINT=${DCH_GATEWAY_ENDPOINT}
 DCH_SERVICE_NAMESPACE=${DCH_SERVICE_NAMESPACE}
 DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
+DCH_NEIGHBOR_TENANT_ID=${DCH_NEIGHBOR_TENANT_ID}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
 DCH_SECRET_READER_AUTH_TOKEN=${DCH_SECRET_READER_AUTH_TOKEN}
 DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
