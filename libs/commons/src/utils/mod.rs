@@ -33,7 +33,7 @@ const RESERVED_LOG_FIELDS: &[&str] = &[
     "trace_id",
     "span_id",
     "request_id",
-    "request-path",
+    "request_path",
     "msg",
 ];
 
@@ -47,10 +47,11 @@ const AUDIT_LOG_FIELD_ORDER: &[&str] = &[
     "span_id",
     "audit.actor",
     "caller_principal",
-    "request-path",
+    "request_path",
     "audit.tenant_id",
     "audit.resource",
     "audit.action",
+    "audit.query",
     "resource_id",
     "status_code",
     "grpc_status",
@@ -201,7 +202,7 @@ where
         });
         if let Some((Some(request_path), _)) = &span_fields {
             log.insert(
-                "request-path".to_owned(),
+                "request_path".to_owned(),
                 serde_json::Value::String(request_path.clone()),
             );
         }
@@ -511,6 +512,6 @@ mod tests {
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0]["request_id"], "span-1");
-        assert_eq!(records[0]["request-path"], "/api");
+        assert_eq!(records[0]["request_path"], "/api");
     }
 }

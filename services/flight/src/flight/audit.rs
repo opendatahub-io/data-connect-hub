@@ -62,6 +62,9 @@ pub(crate) struct AuditContext {
     pub caller_principal: String,
     pub tenant_id: String,
     pub resource_id: Option<String>,
+    /// query records what the request actually read: the SQL statement for
+    /// query operations or the file path for binary downloads.
+    pub query: Option<String>,
     pub(crate) state: Option<Arc<RpcAuditState>>,
 }
 
@@ -92,6 +95,7 @@ impl AuditContext {
                 .unwrap_or_else(|| "unknown".to_string()),
             tenant_id: metadata_value(request, X_TENANT_ID).unwrap_or_default(),
             resource_id: metadata_value(request, X_DATA_CONNECTION_ID),
+            query: None,
             state,
         }
     }
@@ -118,6 +122,7 @@ impl AuditContext {
                 .unwrap_or_else(|| "unknown".to_string()),
             tenant_id,
             resource_id,
+            query: None,
             state: Some(state),
         }
     }
@@ -152,6 +157,25 @@ pub(crate) fn grpc_status_label(code: Code) -> &'static str {
         Code::DataLoss => "DataLoss",
         Code::Unauthenticated => "Unauthenticated",
     }
+}
+
+/// MAX_AUDIT_QUERY_LEN bounds the `audit.query` field so an unusually large
+/// SQL statement cannot flood the shared log stream.
+const MAX_AUDIT_QUERY_LEN: usize = 4096;
+
+/// bounded_query returns `query` unchanged when it fits MAX_AUDIT_QUERY_LEN
+/// and a truncated copy marked with an ellipsis otherwise.
+pub(crate) fn bounded_query(query: String) -> String {
+    if query.len() <= MAX_AUDIT_QUERY_LEN {
+        return query;
+    }
+    let mut end = MAX_AUDIT_QUERY_LEN;
+    while end > 0 && !query.is_char_boundary(end) {
+        end -= 1;
+    }
+    let mut truncated = query[..end].to_owned();
+    truncated.push_str("...[truncated]");
+    truncated
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -197,6 +221,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             resource_id,
             grpc_status,
             error_code = grpc_status,
@@ -212,6 +237,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             resource_id,
             grpc_status,
             duration_ms
@@ -225,6 +251,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             grpc_status,
             error_code = grpc_status,
             error_message = "gRPC request failed",
@@ -239,6 +266,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             grpc_status,
             duration_ms
         ),
@@ -250,6 +278,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             resource_id,
             grpc_status,
             error_code = grpc_status,
@@ -264,6 +293,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             resource_id,
             grpc_status,
             duration_ms
@@ -276,6 +306,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             grpc_status,
             error_code = grpc_status,
             error_message = "gRPC request failed",
@@ -289,6 +320,7 @@ pub(crate) fn log_rpc(
             audit.tenant_id = %context.tenant_id,
             audit.resource = resource,
             audit.action = action,
+            audit.query = context.query.as_deref(),
             grpc_status,
             duration_ms
         ),
@@ -409,5 +441,21 @@ mod tests {
 
         assert!(state.claim());
         assert!(!state.claim());
+    }
+
+    #[test]
+    fn bounded_query_keeps_short_queries_intact() {
+        assert_eq!(bounded_query("SELECT 1".to_string()), "SELECT 1");
+    }
+
+    #[test]
+    fn bounded_query_truncates_long_queries_on_char_boundary() {
+        let query = format!("x{}", "é".repeat(MAX_AUDIT_QUERY_LEN));
+        let bounded = bounded_query(query);
+
+        assert!(bounded.ends_with("...[truncated]"));
+        let kept = bounded.strip_suffix("...[truncated]").unwrap();
+        assert!(kept.chars().count() < MAX_AUDIT_QUERY_LEN);
+        assert!(kept.chars().last().is_some_and(|c| c == 'é'));
     }
 }

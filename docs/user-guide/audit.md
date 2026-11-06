@@ -66,7 +66,7 @@ Example:
   "service.name":"data-connect-hub",
   "request_id":"d2d56a23-baee-4cf0-b485-003ec20acb99",
   "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
-  "request-path":"/api/v1alpha1/data/connection-types",
+  "request_path":"/api/v1alpha1/data/connection-types",
   "audit.tenant_id":"dch-tenant-a",
   "audit.resource":"connection_type",
   "audit.action":"list",
@@ -83,7 +83,7 @@ Example with errors:
   "service.name":"data-connect-hub",
   "request_id":"f2dec0fa-4d86-446a-a816-d6e4559b4a7a",
   "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
-  "request-path":"/api/v1alpha1/data/connections",
+  "request_path":"/api/v1alpha1/data/connections",
   "audit.tenant_id":"dch-tenant-a",
   "audit.resource":"connection",
   "audit.action":"create",
@@ -105,15 +105,21 @@ Example with errors:
   "request_id":"4297ad4e-5180-4adc-bd74-afbabb63ec3e",
   "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "caller_principal":"system:serviceaccount:dch-tenant-a:dch-test-user",
-  "request-path":"/arrow.flight.protocol.FlightService/DoGet",
+  "request_path":"/arrow.flight.protocol.FlightService/DoGet",
   "audit.tenant_id":"dch-tenant-a",
   "audit.resource":"connection",
   "audit.action":"query",
+  "audit.query":"SELECT city, population FROM dch_e2e.cities",
   "resource_id":"339e4f76-be20-4df4-82c4-8e046e463f90",
   "grpc_status":"OK",
   "duration_ms":16
 }
 ```
+
+The `audit.query` field records what was actually read: the SQL statement
+for `query` operations, or the path of the file being downloaded for
+`download` (REST) and `download_binary` (Flight) operations. Statements
+longer than 4 KiB are truncated with a `...[truncated]` marker.
 
 - Example of Flight call from REST. Here's the audit record from REST service:
 ```json
@@ -123,7 +129,7 @@ Example with errors:
   "service.name":"data-connect-hub",
   "request_id":"678fd57f-0435-46a9-bf8f-e1cb291c1a5a", <==
   "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
-  "request-path":"/api/v1alpha1/data/test/credentials",
+  "request_path":"/api/v1alpha1/data/test/credentials",
   "audit.tenant_id":"dch-tenant-a",
   "audit.resource":"credentials",
   "audit.action":"test","status_code":502,
@@ -144,7 +150,7 @@ Here's the corresponding audit record from Flight service:
   "parent_request_id":"678fd57f-0435-46a9-bf8f-e1cb291c1a5a",  <===
   "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",  <===
   "caller_principal":"system:serviceaccount:dch-services:dch-rest-service-sa", <===
-  "request-path":"/arrow.flight.protocol.FlightService/DoAction",
+  "request_path":"/arrow.flight.protocol.FlightService/DoAction",
   "audit.tenant_id":"dch-tenant-a",
   "audit.resource":"credentials",
   "audit.action":"check",
@@ -166,6 +172,7 @@ Each field tells you something specific:
 | `parent_request_id` | Flight only: the trusted REST request ID that caused an internal Flight call |
 | `audit.tenant_id` | Which tenant the request was scoped to |
 | `audit.resource` / `audit.action` | What was accessed and what was done to it, e.g. `connection` / `create` |
+| `audit.query` | What was actually queried: the SQL statement for `query`, or the file path for `download` / `download_binary`. Truncated past 4 KiB |
 | `resource_id` | The specific connection/resource affected, when applicable |
 | `status_code` (REST) / `grpc_status` (Flight) | The technical result code |
 | `error_code` / `error_message` | Present only when the request failed |
@@ -225,13 +232,13 @@ only the layer and `audit.action` differ.
 - `update` — update a connection
 - `delete` — delete a connection
 - `check_readiness` — check a connection is reachable (internally calls Flight's `CheckDataConnection`, below)
-- `download` — download a file through a connection (internally calls Flight's `do_get_fallback`, below)
+- `download` — download a file through a connection; the file path is recorded in `audit.query` (internally calls Flight's `do_get_fallback`, below)
 
 **On the Flight service** — actually touching the connection's data:
 
 - `list_tables` — `do_get_tables`: lists the tables available through the connection
 - `query` — `do_get_statement`: runs a query and streams back the results — the main data-fetch path
-- `download_binary` — `do_get_fallback`: streams a file through the connection (this is what REST's `download` triggers)
+- `download_binary` — `do_get_fallback`: streams a file through the connection and records its path in `audit.query` (this is what REST's `download` triggers)
 - `check_readiness` — `DoAction: CheckDataConnection`: checks the connection is reachable/healthy (this is what REST's `check_readiness` triggers)
 
 When REST reaches the audited Flight operation, `check_readiness` and

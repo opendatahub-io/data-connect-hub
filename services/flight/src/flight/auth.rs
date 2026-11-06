@@ -185,6 +185,7 @@ fn pending_auth_audit<B>(
         caller_principal: principal.to_string(),
         tenant_id: header_value(req, X_TENANT_ID).unwrap_or_default(),
         resource_id: None,
+        query: None,
         state: req
             .extensions()
             .get::<Arc<crate::flight::audit::RpcAuditState>>()

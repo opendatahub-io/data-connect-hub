@@ -25,6 +25,12 @@ impl AuditConfig {
 #[derive(Clone, Debug)]
 pub struct RequestId(pub String);
 
+/// AuditQuery carries what the request actually read, set by a handler so the
+/// audit middleware can record it in the `audit.query` field. For binary
+/// downloads this is the path of the file being downloaded.
+#[derive(Clone, Debug)]
+pub struct AuditQuery(pub String);
+
 /// AuditError contains the safe error details recorded in an audit event.
 #[derive(Clone, Debug)]
 pub struct AuditError {
@@ -67,6 +73,7 @@ pub fn log_request(
     actor: &str,
     resource: &str,
     action: &str,
+    query: Option<&str>,
     resource_id: Option<&str>,
     status_code: u16,
     error: Option<&AuditError>,
@@ -82,6 +89,7 @@ pub fn log_request(
             audit.actor = actor,
             audit.resource = resource,
             audit.action = action,
+            audit.query = query,
             resource_id,
             status_code,
             error_code = %error.code,
@@ -95,6 +103,7 @@ pub fn log_request(
             audit.actor = actor,
             audit.resource = resource,
             audit.action = action,
+            audit.query = query,
             resource_id,
             status_code,
             duration_ms
@@ -106,6 +115,7 @@ pub fn log_request(
             audit.actor = actor,
             audit.resource = resource,
             audit.action = action,
+            audit.query = query,
             status_code,
             error_code = %error.code,
             error_message = %error.message,
@@ -118,6 +128,7 @@ pub fn log_request(
             audit.actor = actor,
             audit.resource = resource,
             audit.action = action,
+            audit.query = query,
             status_code,
             duration_ms
         ),

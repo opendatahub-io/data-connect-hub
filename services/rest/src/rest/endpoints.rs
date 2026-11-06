@@ -6,7 +6,7 @@ use crate::clients::flight::FlightRequestContext;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
-use actix_web::{HttpResponse, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use arrow::array::{Array, AsArray};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
@@ -299,9 +299,12 @@ pub struct BinaryDownloadQuery {
 pub async fn get_binary_data(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
+    req: HttpRequest,
     id: web::Path<String>,
     query: web::Query<BinaryDownloadQuery>,
 ) -> Result<HttpResponse, RestErrorResponse> {
+    req.extensions_mut()
+        .insert(super::access_log::AuditQuery(query.path.clone()));
     let flight = flight_service_by_connection(service.as_ref(), ctx.tenant_id.as_str(), id.as_str()).await?;
 
     let batch_stream = service

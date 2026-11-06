@@ -448,6 +448,7 @@ mod tests {
             caller_principal: "rest-service".to_string(),
             tenant_id: "tenant".to_string(),
             resource_id: Some("connection".to_string()),
+            query: Some("SELECT 1 AS audit_test".to_string()),
             state: None,
         }
     }
@@ -552,6 +553,10 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
         assert_eq!(events[0].get("audit.action").map(String::as_str), Some("query"));
+        assert_eq!(
+            events[0].get("audit.query").map(String::as_str),
+            Some("SELECT 1 AS audit_test")
+        );
         assert_eq!(events[0].get("grpc_status").map(String::as_str), Some("OK"));
         assert!(!events[0].contains_key("error_code"));
     }

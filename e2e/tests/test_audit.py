@@ -145,7 +145,7 @@ def test_health_check_is_not_audited(
 
     records = pod_logs_since("rest-service", started)
     health_audits = [
-        record for record in records if record.get("logger") == "audit" and record.get("request-path") == "/health"
+        record for record in records if record.get("logger") == "audit" and record.get("request_path") == "/health"
     ]
     assert health_audits == []
 
@@ -171,13 +171,14 @@ def test_flight_query_audit_record(
         **{
             "audit.resource": "connection",
             "audit.action": "query",
+            "audit.query": "SELECT 1 AS audit_test",
             "audit.tenant_id": tenant_id,
         },
     )
     assert uuid.UUID(record["request_id"]).version == 4
     assert record["audit.actor"] not in ("", "unknown")
     assert record["caller_principal"] == record["audit.actor"]
-    assert record["request-path"] == "/arrow.flight.protocol.FlightService/DoGet"
+    assert record["request_path"] == "/arrow.flight.protocol.FlightService/DoGet"
     assert record["duration_ms"] >= 0
     assert "parent_request_id" not in record
     assert "error_code" not in record
@@ -250,6 +251,7 @@ def test_rest_binary_download_links_flight_audit_record(
         **{
             "audit.resource": "connection",
             "audit.action": "download",
+            "audit.query": "api/binary.dat",
         },
     )
     flight_record = _wait_for_record(
@@ -262,6 +264,7 @@ def test_rest_binary_download_links_flight_audit_record(
         **{
             "audit.resource": "connection",
             "audit.action": "download_binary",
+            "audit.query": "api/binary.dat",
         },
     )
     assert flight_record["parent_request_id"] == rest_record["request_id"]
@@ -291,6 +294,7 @@ def test_flight_query_failure_audit_is_sanitized(
         **{
             "audit.resource": "connection",
             "audit.action": "query",
+            "audit.query": "SELECT 1 / (id - id) AS audit_failure FROM dch_e2e.cities",
         },
     )
     assert record["grpc_status"] != "OK"
@@ -394,6 +398,6 @@ def test_flight_health_check_is_not_audited(
     health_audits = [
         record
         for record in records
-        if record.get("logger") == "audit" and str(record.get("request-path", "")).startswith("/grpc.health")
+        if record.get("logger") == "audit" and str(record.get("request_path", "")).startswith("/grpc.health")
     ]
     assert health_audits == []

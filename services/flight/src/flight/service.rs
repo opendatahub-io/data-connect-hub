@@ -1,5 +1,5 @@
 use crate::flight::QueryContext;
-use crate::flight::audit::{AuditConfig, AuditContext, PendingAudit, do_get_operation};
+use crate::flight::audit::{AuditConfig, AuditContext, PendingAudit, bounded_query, do_get_operation};
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
@@ -667,7 +667,10 @@ impl FlightSqlService for DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_STATEMENT);
         let started = Instant::now();
-        let context = AuditContext::from_request(&request);
+        let mut context = AuditContext::from_request(&request);
+        context.query = String::from_utf8(ticket.statement_handle.to_vec())
+            .ok()
+            .map(bounded_query);
         let mut audit = self.pending_do_get_audit(OPERATION_STATEMENT, context.clone(), started);
         let result = self
             .handle_do_get_statement(ticket, request, context.clone(), started)
@@ -709,12 +712,12 @@ impl FlightSqlService for DataIngestionService {
     ) -> Result<Response<<Self as FlightService>::DoGetStream>, Status> {
         let _guard = metrics::InFlightGuard::new(METHOD_DO_GET, OPERATION_BINARY);
         let started = Instant::now();
-        let context = AuditContext::from_request(&request);
-        let audit_operation = if message.type_url == DOWNLOAD_TYPE_URL {
-            OPERATION_BINARY
-        } else {
-            "unknown"
-        };
+        let is_download = message.type_url == DOWNLOAD_TYPE_URL;
+        let mut context = AuditContext::from_request(&request);
+        if is_download {
+            context.query = String::from_utf8(message.value.to_vec()).ok().map(bounded_query);
+        }
+        let audit_operation = if is_download { OPERATION_BINARY } else { "unknown" };
         let mut audit = self.pending_do_get_audit(audit_operation, context.clone(), started);
         let result = self
             .handle_do_get_fallback(request, message, context.clone(), started)

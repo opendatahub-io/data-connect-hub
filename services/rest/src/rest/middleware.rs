@@ -5,7 +5,7 @@ use actix_web::middleware::Next;
 use actix_web::{HttpMessage, HttpResponse, ResponseError, web};
 use std::time::Instant;
 
-use super::access_log::{AuditConfig, AuditError, RequestId, log_request, resource_action_for};
+use super::access_log::{AuditConfig, AuditError, AuditQuery, RequestId, log_request, resource_action_for};
 use super::endpoints::ApiContext;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
@@ -62,7 +62,6 @@ pub async fn trace_request(
         .filter(|actor| !actor.is_empty())
         .unwrap_or("anonymous")
         .to_string();
-    let resource_id = req.match_info().get("id").map(ToOwned::to_owned);
     req.extensions_mut().insert(RequestId(request_id.clone()));
 
     let span = tracing::info_span!(
@@ -89,6 +88,22 @@ pub async fn trace_request(
     let _ = span.set_parent(parent);
 
     let response = next.call(req).instrument(span.clone()).await;
+
+    // A handler can record what the request actually read (for example the
+    // path of a binary download) in the request extensions as `AuditQuery`,
+    // so the audit event can carry it alongside the connection ID. Route
+    // parameters are also only available after routing has dispatched the
+    // request to a handler, so the connection ID is read from the returned
+    // request rather than the incoming one.
+    let query = response
+        .as_ref()
+        .ok()
+        .and_then(|res| res.request().extensions().get::<AuditQuery>().cloned())
+        .map(|query| query.0);
+    let resource_id = response
+        .as_ref()
+        .ok()
+        .and_then(|res| res.request().match_info().get("id").map(ToOwned::to_owned));
 
     match &response {
         Ok(res) => {
@@ -137,6 +152,7 @@ pub async fn trace_request(
             &actor,
             resource,
             action,
+            query.as_deref(),
             resource_id.as_deref(),
             status_code,
             error.as_ref(),
@@ -349,5 +365,48 @@ mod tests {
                 .get("request_id")
                 .is_some_and(|value| Uuid::parse_str(value).is_ok())
         );
+    }
+
+    #[actix_web::test]
+    async fn test_audit_download_records_query_path() {
+        let capture = AuditCapture::default();
+        let subscriber = Registry::default().with(capture.clone());
+
+        async {
+            let app = awtest::init_service(
+                App::new()
+                    .app_data(web::Data::new(AuditConfig { enabled: true }))
+                    .service(
+                        web::scope("/api/v1alpha1/data")
+                            .wrap(actix_web::middleware::from_fn(validate_headers))
+                            .wrap(actix_web::middleware::from_fn(trace_request))
+                            .route(
+                                "/connections/{id}/binary",
+                                web::get().to(|req: actix_web::HttpRequest| async move {
+                                    req.extensions_mut().insert(AuditQuery("reports/q3.csv".to_string()));
+                                    HttpResponse::Ok().finish()
+                                }),
+                            ),
+                    ),
+            )
+            .await;
+            let request = awtest::TestRequest::get()
+                .uri("/api/v1alpha1/data/connections/conn-1/binary?path=reports%2Fq3.csv")
+                .insert_header((X_TENANT_ID, "tenant"))
+                .insert_header((X_REMOTE_USER, "alice"))
+                .to_request();
+
+            let response = awtest::call_service(&app, request).await;
+            assert_eq!(response.status(), 200);
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let events = capture.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
+        assert_eq!(events[0].get("audit.action").map(String::as_str), Some("download"));
+        assert_eq!(events[0].get("audit.query").map(String::as_str), Some("reports/q3.csv"));
+        assert_eq!(events[0].get("resource_id").map(String::as_str), Some("conn-1"));
     }
 }
