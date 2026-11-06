@@ -529,6 +529,10 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 	}
 }
 
+// tlsMinVersionTLS12Arg is the kube-rbac-proxy flag value pinned by several
+// table entries; a constant keeps goconst satisfied.
+const tlsMinVersionTLS12Arg = "--tls-min-version=VersionTLS12"
+
 func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -546,7 +550,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 		{
 			name:     "Intermediate profile sets minimum and IANA cipher suites",
 			profile:  *configv1.TLSProfiles[configv1.TLSProfileIntermediateType],
-			wantMin:  "--tls-min-version=VersionTLS12",
+			wantMin:  tlsMinVersionTLS12Arg,
 			wantSuit: "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
 		},
 		{
@@ -563,7 +567,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 				MinTLSVersion: configv1.VersionTLS12,
 				Ciphers:       []string{"ECDHE-RSA-AES128-GCM-SHA256"},
 			},
-			wantMin:  "--tls-min-version=VersionTLS12",
+			wantMin:  tlsMinVersionTLS12Arg,
 			wantSuit: "--tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
 		},
 		{
@@ -571,7 +575,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			profile: configv1.TLSProfileSpec{
 				MinTLSVersion: configv1.VersionTLS12,
 			},
-			wantMin: "--tls-min-version=VersionTLS12",
+			wantMin: tlsMinVersionTLS12Arg,
 		},
 		{
 			name: "TLS 1.3 profile is accepted",
@@ -675,7 +679,7 @@ func TestSetKubeRbacProxyTLSOptsFallsBackToIntermediateWhenAPIServerObjectIsAbse
 		t.Fatalf("setKubeRbacProxyTLSOpts(): %v", err)
 	}
 	args := kubeRbacProxyArgs(t, deployment)
-	if !containsString(args, "--tls-min-version=VersionTLS12") || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
+	if !containsString(args, tlsMinVersionTLS12Arg) || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
 		t.Fatalf("args = %v, want projected Intermediate fallback", args)
 	}
 }
