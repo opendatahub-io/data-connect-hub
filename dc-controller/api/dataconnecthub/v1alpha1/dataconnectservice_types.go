@@ -156,6 +156,16 @@ type Trace struct {
 	Certificate string `json:"certificate,omitempty"`
 }
 
+// Audit configures audit logging for the REST and Flight services.
+type Audit struct {
+	// enabled turns on audit logging (who accessed what, and whether it
+	// succeeded or failed) in the REST and Flight service logs.
+	// Sets AUDIT_ENABLED on the rest-server and flight-server containers.
+	// +kubebuilder:default=false
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+}
+
 // DataConnectServiceSpec defines the desired state of DataConnectService
 type DataConnectServiceSpec struct {
 	// restService configures the REST API deployment
@@ -186,6 +196,11 @@ type DataConnectServiceSpec struct {
 	// When omitted, tracing is disabled.
 	// +optional
 	Trace *Trace `json:"trace,omitempty"`
+
+	// audit configures audit logging for the services.
+	// Audit logging is disabled by default.
+	// +optional
+	Audit *Audit `json:"audit,omitempty"`
 }
 
 // Addresses identifies an address where the service is reachable

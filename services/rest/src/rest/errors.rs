@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 use thiserror::Error;
 
+use super::access_log::AuditError;
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct RestErrorResponse {
     pub code: String,
@@ -70,7 +72,15 @@ impl ResponseError for RestErrorResponse {
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponse::build(self.status_code()).json(self)
+        let status = self.status_code();
+        let mut response = HttpResponse::build(status).json(self);
+        response.extensions_mut().insert(AuditError {
+            code: self.code.clone(),
+            // Audit records can be more widely accessible than API responses.
+            // Do not copy backend-provided details into the audit stream.
+            message: status.canonical_reason().unwrap_or("Request failed").to_string(),
+        });
+        response
     }
 }
 
@@ -306,5 +316,27 @@ impl From<ValidationError> for RestErrorResponse {
                 status: 400,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn error_response_attaches_sanitized_audit_details() {
+        let error = RestErrorResponse {
+            code: "connection".to_string(),
+            message: "postgres://user:secret@example.invalid".to_string(),
+            status: 503,
+        };
+
+        let response = error.error_response();
+        let extensions = response.extensions();
+        let audit_error = extensions.get::<AuditError>().unwrap();
+
+        assert_eq!(audit_error.code, "connection");
+        assert_eq!(audit_error.message, "Service Unavailable");
+        assert!(!audit_error.message.contains("secret"));
     }
 }
