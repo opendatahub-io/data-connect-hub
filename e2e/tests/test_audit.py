@@ -54,13 +54,15 @@ def test_rest_success_audit_record(
         "rest-service",
         started,
         logger="audit",
-        resource="connection_type",
-        action="list",
         status_code=200,
-        tenant_id=tenant_id,
+        **{
+            "audit.resource": "connection_type",
+            "audit.action": "list",
+            "audit.tenant_id": tenant_id,
+        },
     )
     assert uuid.UUID(record["request_id"]).version == 4
-    assert record["actor"] not in ("", "anonymous")
+    assert record["audit.actor"] not in ("", "anonymous")
     assert record["duration_ms"] >= 0
     assert "level" not in record
     assert "method" not in record
@@ -90,11 +92,13 @@ def test_rest_failure_audit_record(
         "rest-service",
         started,
         logger="audit",
-        resource="connection",
-        action="get",
         resource_id=missing_id,
         status_code=404,
-        tenant_id=tenant_id,
+        **{
+            "audit.resource": "connection",
+            "audit.action": "get",
+            "audit.tenant_id": tenant_id,
+        },
     )
     assert record["error_code"] == "not_found"
     assert record["error_message"] == "Not Found"
@@ -115,10 +119,12 @@ def test_rest_get_audit_record_contains_resource_id(
         "rest-service",
         started,
         logger="audit",
-        resource="connection_type",
-        action="get",
         resource_id=connection_type.id,
         status_code=200,
+        **{
+            "audit.resource": "connection_type",
+            "audit.action": "get",
+        },
     )
     assert record["resource_id"] == connection_type.id
 
@@ -161,15 +167,17 @@ def test_flight_query_audit_record(
         "flight-service",
         started,
         logger="audit",
-        resource="connection",
-        action="query",
         resource_id=pg_flight_connection,
         grpc_status="OK",
-        tenant_id=tenant_id,
+        **{
+            "audit.resource": "connection",
+            "audit.action": "query",
+            "audit.tenant_id": tenant_id,
+        },
     )
     assert uuid.UUID(record["request_id"]).version == 4
-    assert record["actor"] not in ("", "unknown")
-    assert record["caller_principal"] == record["actor"]
+    assert record["audit.actor"] not in ("", "unknown")
+    assert record["caller_principal"] == record["audit.actor"]
     assert record["request-path"] == "/arrow.flight.protocol.FlightService/DoGet"
     assert record["duration_ms"] >= 0
     assert "parent_request_id" not in record
@@ -199,24 +207,28 @@ def test_rest_readiness_links_flight_audit_record(
         "rest-service",
         started,
         logger="audit",
-        resource="connection",
-        action="check_readiness",
         resource_id=pg_flight_connection,
         status_code=204,
+        **{
+            "audit.resource": "connection",
+            "audit.action": "check_readiness",
+        },
     )
     flight_record = _wait_for_record(
         pod_logs_since,
         "flight-service",
         started,
         logger="audit",
-        resource="connection",
-        action="check_readiness",
         resource_id=pg_flight_connection,
         grpc_status="OK",
+        **{
+            "audit.resource": "connection",
+            "audit.action": "check_readiness",
+        },
     )
     assert flight_record["parent_request_id"] == rest_record["request_id"]
-    assert flight_record["actor"] == rest_record["actor"]
-    assert flight_record["caller_principal"] != flight_record["actor"]
+    assert flight_record["audit.actor"] == rest_record["audit.actor"]
+    assert flight_record["caller_principal"] != flight_record["audit.actor"]
 
 
 def test_rest_binary_download_links_flight_audit_record(
@@ -234,24 +246,28 @@ def test_rest_binary_download_links_flight_audit_record(
         "rest-service",
         started,
         logger="audit",
-        resource="connection",
-        action="download",
         resource_id=uri_flight_connection,
         status_code=200,
+        **{
+            "audit.resource": "connection",
+            "audit.action": "download",
+        },
     )
     flight_record = _wait_for_record(
         pod_logs_since,
         "flight-service",
         started,
         logger="audit",
-        resource="connection",
-        action="download_binary",
         resource_id=uri_flight_connection,
         grpc_status="OK",
+        **{
+            "audit.resource": "connection",
+            "audit.action": "download_binary",
+        },
     )
     assert flight_record["parent_request_id"] == rest_record["request_id"]
-    assert flight_record["actor"] == rest_record["actor"]
-    assert flight_record["caller_principal"] != flight_record["actor"]
+    assert flight_record["audit.actor"] == rest_record["audit.actor"]
+    assert flight_record["caller_principal"] != flight_record["audit.actor"]
 
 
 def test_flight_query_failure_audit_is_sanitized(
@@ -272,9 +288,11 @@ def test_flight_query_failure_audit_is_sanitized(
         "flight-service",
         started,
         logger="audit",
-        resource="connection",
-        action="query",
         resource_id=pg_flight_connection,
+        **{
+            "audit.resource": "connection",
+            "audit.action": "query",
+        },
     )
     assert record["grpc_status"] != "OK"
     assert record["error_code"] == record["grpc_status"]
@@ -302,11 +320,13 @@ def test_flight_unauthenticated_do_get_audit_record(
         "flight-service",
         started,
         logger="audit",
-        resource="flight_server",
-        action="authenticate",
         grpc_status="Unauthenticated",
+        **{
+            "audit.resource": "flight_server",
+            "audit.action": "authenticate",
+        },
     )
-    assert record["actor"] == "unknown"
+    assert record["audit.actor"] == "unknown"
     assert record["caller_principal"] == "unknown"
     assert record["error_code"] == "Unauthenticated"
     assert record["error_message"] == "gRPC request failed"
@@ -338,13 +358,15 @@ def test_flight_direct_caller_cannot_spoof_forwarded_identity(
         "flight-service",
         started,
         logger="audit",
-        resource="connection",
-        action="query",
         resource_id=pg_flight_connection,
         grpc_status="OK",
+        **{
+            "audit.resource": "connection",
+            "audit.action": "query",
+        },
     )
-    assert record["actor"] != "spoofed-user"
-    assert record["caller_principal"] == record["actor"]
+    assert record["audit.actor"] != "spoofed-user"
+    assert record["caller_principal"] == record["audit.actor"]
     assert record.get("parent_request_id") != spoofed_parent
 
 

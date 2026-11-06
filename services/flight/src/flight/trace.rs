@@ -550,8 +550,8 @@ mod tests {
 
         let events = capture.0.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].get("resource").map(String::as_str), Some("connection"));
-        assert_eq!(events[0].get("action").map(String::as_str), Some("query"));
+        assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
+        assert_eq!(events[0].get("audit.action").map(String::as_str), Some("query"));
         assert_eq!(events[0].get("grpc_status").map(String::as_str), Some("OK"));
         assert!(!events[0].contains_key("error_code"));
     }

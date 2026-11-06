@@ -336,10 +336,10 @@ mod tests {
 
         let events = capture.0.lock().unwrap();
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].get("tenant_id").map(String::as_str), Some("tenant"));
-        assert_eq!(events[0].get("actor").map(String::as_str), Some("alice"));
-        assert_eq!(events[0].get("resource").map(String::as_str), Some("connection"));
-        assert_eq!(events[0].get("action").map(String::as_str), Some("list"));
+        assert_eq!(events[0].get("audit.tenant_id").map(String::as_str), Some("tenant"));
+        assert_eq!(events[0].get("audit.actor").map(String::as_str), Some("alice"));
+        assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
+        assert_eq!(events[0].get("audit.action").map(String::as_str), Some("list"));
         assert!(!events[0].contains_key("method"));
         assert!(!events[0].contains_key("route"));
         assert!(!events[0].contains_key("outcome"));

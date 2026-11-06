@@ -65,11 +65,11 @@ Example:
   "logger":"audit",
   "service.name":"data-connect-hub",
   "request_id":"d2d56a23-baee-4cf0-b485-003ec20acb99",
-  "actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
+  "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "request-path":"/api/v1alpha1/data/connection-types",
-  "tenant_id":"dch-tenant-a",
-  "resource":"connection_type",
-  "action":"list",
+  "audit.tenant_id":"dch-tenant-a",
+  "audit.resource":"connection_type",
+  "audit.action":"list",
   "status_code":200,
   "duration_ms":7
 }
@@ -82,11 +82,11 @@ Example with errors:
   "logger":"audit",
   "service.name":"data-connect-hub",
   "request_id":"f2dec0fa-4d86-446a-a816-d6e4559b4a7a",
-  "actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
+  "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "request-path":"/api/v1alpha1/data/connections",
-  "tenant_id":"dch-tenant-a",
-  "resource":"connection",
-  "action":"create",
+  "audit.tenant_id":"dch-tenant-a",
+  "audit.resource":"connection",
+  "audit.action":"create",
   "status_code":422,
   "error_code":"unprocessable_entity",
   "error_message":"Unprocessable Entity",
@@ -103,12 +103,12 @@ Example with errors:
   "logger":"audit",
   "service.name":"data-connect-hub",
   "request_id":"4297ad4e-5180-4adc-bd74-afbabb63ec3e",
-  "actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
+  "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "caller_principal":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "request-path":"/arrow.flight.protocol.FlightService/DoGet",
-  "tenant_id":"dch-tenant-a",
-  "resource":"connection",
-  "action":"query",
+  "audit.tenant_id":"dch-tenant-a",
+  "audit.resource":"connection",
+  "audit.action":"query",
   "resource_id":"339e4f76-be20-4df4-82c4-8e046e463f90",
   "grpc_status":"OK",
   "duration_ms":16
@@ -122,11 +122,11 @@ Example with errors:
   "logger":"audit",
   "service.name":"data-connect-hub",
   "request_id":"678fd57f-0435-46a9-bf8f-e1cb291c1a5a", <==
-  "actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
+  "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",
   "request-path":"/api/v1alpha1/data/test/credentials",
-  "tenant_id":"dch-tenant-a",
-  "resource":"credentials",
-  "action":"test","status_code":502,
+  "audit.tenant_id":"dch-tenant-a",
+  "audit.resource":"credentials",
+  "audit.action":"test","status_code":502,
   "error_code":"connection_check_failed",
   "error_message":"Bad Gateway",
   "duration_ms":74
@@ -142,12 +142,12 @@ Here's the corresponding audit record from Flight service:
   "service.name":"data-connect-hub",
   "request_id":"eec9ee27-9f25-461d-935b-3fab474596ff",
   "parent_request_id":"678fd57f-0435-46a9-bf8f-e1cb291c1a5a",  <===
-  "actor":"system:serviceaccount:dch-tenant-a:dch-test-user",  <===
+  "audit.actor":"system:serviceaccount:dch-tenant-a:dch-test-user",  <===
   "caller_principal":"system:serviceaccount:dch-services:dch-rest-service-sa", <===
   "request-path":"/arrow.flight.protocol.FlightService/DoAction",
-  "tenant_id":"dch-tenant-a",
-  "resource":"credentials",
-  "action":"check",
+  "audit.tenant_id":"dch-tenant-a",
+  "audit.resource":"credentials",
+  "audit.action":"check",
   "grpc_status":"InvalidArgument",
   "error_code":"InvalidArgument",
   "error_message":"gRPC request failed",
@@ -161,11 +161,11 @@ Each field tells you something specific:
 | Field | Meaning |
 |---|---|
 | `ts` | When the request happened (UTC, ISO 8601) |
-| `actor` | Who is responsible for the request. REST uses `"anonymous"` when its proxy-set user header is missing. Flight uses `"unknown"` only before a principal can be authenticated. |
+| `audit.actor` | Who is responsible for the request. REST uses `"anonymous"` when its proxy-set user header is missing. Flight uses `"unknown"` only before a principal can be authenticated. |
 | `caller_principal` | Flight only: the bearer-token principal that was authenticated and authorized |
 | `parent_request_id` | Flight only: the trusted REST request ID that caused an internal Flight call |
-| `tenant_id` | Which tenant the request was scoped to |
-| `resource` / `action` | What was accessed and what was done to it, e.g. `connection` / `create` |
+| `audit.tenant_id` | Which tenant the request was scoped to |
+| `audit.resource` / `audit.action` | What was accessed and what was done to it, e.g. `connection` / `create` |
 | `resource_id` | The specific connection/resource affected, when applicable |
 | `status_code` (REST) / `grpc_status` (Flight) | The technical result code |
 | `error_code` / `error_message` | Present only when the request failed |
@@ -177,12 +177,13 @@ A single action taken through the REST API (for example, downloading data)
 can trigger a follow-up call to the Flight service internally. When the call
 comes from the configured REST service account, Flight trusts the forwarded
 actor and valid UUID request ID. The Flight record then has a
-`parent_request_id` matching the REST record's `request_id`, and its `actor`
+`parent_request_id` matching the REST record's `request_id`, and its
+`audit.actor`
 shows the original REST user. `caller_principal` still identifies the REST
 service account that directly called Flight.
 
 Direct Flight callers use their authenticated bearer-token principal as both
-`actor` and `caller_principal`. Flight ignores forwarded actor and request-ID
+`audit.actor` and `caller_principal`. Flight ignores forwarded actor and request-ID
 headers from every other principal, preventing a direct caller from spoofing
 another user or linking itself to an unrelated REST request. If the trusted
 REST service account does not forward an actor, Flight uses that service
@@ -194,12 +195,12 @@ body was transferred successfully. Use the corresponding Flight
 `download_binary` record to determine the final transfer status and full
 stream duration.
 
-## What `resource` and `action` values you'll see
+## What `audit.resource` and `audit.action` values you'll see
 
-Every audit record's `resource` tells you *what kind of thing* was touched,
-and `action` tells you *what was done to it*. Here's the full list:
+Every audit record's `audit.resource` tells you *what kind of thing* was touched,
+and `audit.action` tells you *what was done to it*. Here's the full list:
 
-| `resource` | What it is | `action` values you may see |
+| `audit.resource` | What it is | `audit.action` values you may see |
 |---|---|---|
 | `connection_type` | A type of data source DCH supports (e.g. Postgres, S3). REST only. | `list`, `create`, `get`, `update`, `delete` |
 | `connection` | A configured connection to a data source. Shows up from **both** REST and Flight — see the breakdown just below the table, since the two layers log different actions against it. | `list`, `create`, `get`, `update`, `delete`, `check_readiness`, `download`, `query`, `list_tables`, `download_binary` |
@@ -212,9 +213,9 @@ and `action` tells you *what was done to it*. Here's the full list:
 ### `connection`: REST vs. Flight actions
 
 The `connection` resource is the one place where both services log against
-the same resource name, so it's worth spelling out separately. The `actor`,
-`tenant_id`, and `resource_id` (which connection) stay the same across both;
-only the layer and `action` differ.
+the same resource name, so it's worth spelling out separately. The `audit.actor`,
+`audit.tenant_id`, and `resource_id` (which connection) stay the same across both;
+only the layer and `audit.action` differ.
 
 **On the REST service** — managing a connection's configuration:
 
@@ -270,7 +271,7 @@ you can filter down to just audit records with a query like:
 ```
 
 Add further filters the same way you would for any other DCH log — for
-example, by `actor`, `resource`, or HTTP failure status:
+example, by `audit.actor`, `audit.resource`, or HTTP failure status:
 
 ```logql
 {kubernetes_namespace_name="dch-services"}
