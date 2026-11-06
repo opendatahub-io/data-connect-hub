@@ -7,6 +7,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+
 from data_connect_hub import DataConnectClient, DCHHTTPError
 
 

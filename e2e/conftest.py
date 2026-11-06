@@ -27,6 +27,7 @@ from typing import TypeVar
 
 import httpx
 import pytest
+
 from data_connect_hub import (
     ConnectionType,
     CredentialField,
@@ -492,6 +493,7 @@ def flight_client_factory(
 ):
     """Factory that creates a raw pyarrow.flight client with headers for a given connection."""
     import pyarrow.flight as flight
+
     from data_connect_hub.client import _build_urls
 
     _, flight_url = _build_urls(gateway_endpoint)

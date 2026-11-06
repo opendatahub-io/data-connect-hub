@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 
 import pytest
+
 from data_connect_hub import DataConnectClient, DCHForbiddenError, DCHHTTPError
 
 
