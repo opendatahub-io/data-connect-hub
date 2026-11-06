@@ -6,6 +6,7 @@ import time
 import uuid
 
 import pytest
+
 from data_connect_hub import CredentialField, DataConnectClient, DCHNotFoundError
 
 EXPECTED_OOB_CONNECTION_TYPES = {
@@ -47,10 +48,7 @@ class TestRestConnectionType:
         listed_types = []
         while time.monotonic() < deadline:
             listed_types = rest_client.list_connection_types()
-            if all(
-                sum(ct.name == name for ct in listed_types) == 1
-                for name in EXPECTED_OOB_CONNECTION_TYPES
-            ):
+            if all(sum(ct.name == name for ct in listed_types) == 1 for name in EXPECTED_OOB_CONNECTION_TYPES):
                 break
             time.sleep(1)
 
@@ -81,8 +79,7 @@ class TestRestConnectionType:
         for name, expected_formats in EXPECTED_SUPPORTED_FORMATS.items():
             ct = by_name[name]
             assert sorted(ct.status.supported_formats) == sorted(expected_formats), (
-                f"{name}: expected supported_formats={expected_formats}, "
-                f"got {ct.status.supported_formats}"
+                f"{name}: expected supported_formats={expected_formats}, got {ct.status.supported_formats}"
             )
 
     def test_crud(self, rest_client: DataConnectClient, create_connection_type) -> None:

@@ -86,7 +86,7 @@ class TestFlightPostgresTypeMapping:
 
     def test_timestamptz_values(self, dch_client: DataConnectClient, pg_flight_connection: str) -> None:
         row = self._read(dch_client, pg_flight_connection).to_pylist()[0]
-        expected_utc = datetime.datetime(2026, 8, 17, 12, 34, 56, 123456, tzinfo=datetime.timezone.utc)
+        expected_utc = datetime.datetime(2026, 8, 17, 12, 34, 56, 123456, tzinfo=datetime.UTC)
 
         assert row["tstz"] == expected_utc
         assert row["tstz_null"] is None
