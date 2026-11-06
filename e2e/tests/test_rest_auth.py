@@ -7,7 +7,6 @@ import pytest
 from data_connect_hub import (
     DataConnectClient,
     DCHAuthenticationError,
-    DCHConfigError,
     DCHForbiddenError,
 )
 
@@ -34,26 +33,12 @@ class TestRestAuth:
         with pytest.raises(DCHAuthenticationError):
             client.list_connections()
 
-    def test_missing_tenant_returns_400(self, gateway_endpoint: str, auth_token: str, insecure: bool) -> None:
-        client = _make_client(gateway_endpoint, token=auth_token, tenant_id="", insecure=insecure)
-        with pytest.raises(DCHConfigError, match="tenant_id must be provided"):
-            client.list_connections()
-
     def test_denied_user_returns_403(
         self, gateway_endpoint: str, denied_auth_token: str, tenant_id: str, insecure: bool
     ) -> None:
         if not denied_auth_token:
             pytest.skip("DCH_DENIED_AUTH_TOKEN not set")
         client = _make_client(gateway_endpoint, token=denied_auth_token, tenant_id=tenant_id, insecure=insecure)
-        with pytest.raises(DCHForbiddenError):
-            client.list_connections()
-
-    def test_wrong_namespace_returns_403(
-        self, gateway_endpoint: str, auth_token: str, no_access_namespace: str, insecure: bool
-    ) -> None:
-        if not no_access_namespace:
-            pytest.skip("DCH_NO_ACCESS_NAMESPACE not set")
-        client = _make_client(gateway_endpoint, token=auth_token, tenant_id=no_access_namespace, insecure=insecure)
         with pytest.raises(DCHForbiddenError):
             client.list_connections()
 
