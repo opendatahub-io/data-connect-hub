@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 import httpx
 import pyarrow.flight as flight
 import pytest
+
 from data_connect_hub import DataConnectClient, DCHNotFoundError, DCHQueryError
 
 _LOG_POLL_TIMEOUT = 15
@@ -144,9 +145,7 @@ def test_health_check_is_not_audited(
 
     records = pod_logs_since("rest-service", started)
     health_audits = [
-        record
-        for record in records
-        if record.get("logger") == "audit" and record.get("request-path") == "/health"
+        record for record in records if record.get("logger") == "audit" and record.get("request-path") == "/health"
     ]
     assert health_audits == []
 
