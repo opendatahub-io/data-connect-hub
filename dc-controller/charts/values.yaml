@@ -15,7 +15,7 @@ controllerManager:
 relatedImages:
   restService: quay.io/opendatahub/odh-data-connect-hub-rest:odh-3.6
   flightService: quay.io/opendatahub/odh-data-connect-hub-flight:odh-3.6
-  kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy:odh-3.6
+  kubeRbacProxy: quay.io/opendatahub/odh-kube-rbac-proxy:v3.6.0
 
 leaderElection: true
 
