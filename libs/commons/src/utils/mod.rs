@@ -211,6 +211,12 @@ where
 
         if !fields.is_empty() {
             let mut fields = fields;
+            if audit
+                && !log.contains_key("request_id")
+                && let Some(id) = fields.get("request_id").cloned()
+            {
+                log.insert("request_id".to_owned(), id);
+            }
             let message = fields.remove("message").unwrap_or(serde_json::Value::Null);
             if !audit {
                 log.insert("msg".to_owned(), message);
@@ -443,5 +449,68 @@ mod tests {
 
         assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
         assert!(!serialized.contains("\"msg\":"));
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedBuf {
+        type Writer = SharedBuf;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn format_with_rest_json_logger(emit: impl FnOnce()) -> Vec<serde_json::Value> {
+        let buf = SharedBuf::default();
+        let subscriber = Registry::default().with(
+            fmt::layer()
+                .event_format(RestJsonFormat)
+                .fmt_fields(JsonFields::new())
+                .with_writer(buf.clone()),
+        );
+        let _guard = tracing::subscriber::set_default(subscriber);
+        emit();
+        let written = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn test_audit_event_keeps_event_request_id_without_span() {
+        let records = format_with_rest_json_logger(|| {
+            tracing::info!(target: "audit", request_id = "evt-1", audit.resource = "connection");
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["request_id"], "evt-1");
+        assert_eq!(records[0]["audit.resource"], "connection");
+    }
+
+    #[test]
+    fn test_audit_event_prefers_span_request_id_over_event_field() {
+        let records = format_with_rest_json_logger(|| {
+            let span = tracing::info_span!("http_request", request_id = "span-1", request.path = "/api");
+            let _guard = span.enter();
+            tracing::info!(target: "audit", request_id = "evt-1");
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["request_id"], "span-1");
+        assert_eq!(records[0]["request-path"], "/api");
     }
 }

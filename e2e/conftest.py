@@ -126,6 +126,7 @@ def pod_logs_since(service_namespace: str):
             check=True,
             capture_output=True,
             text=True,
+            timeout=10,
         )
         pods = [
             item["metadata"]["name"]
@@ -136,27 +137,41 @@ def pod_logs_since(service_namespace: str):
             pytest.fail(f"no pod with container {container!r} found in {service_namespace!r}")
 
         records = []
+        errors: list[str] = []
+        read_any = False
         for pod in pods:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "logs",
-                    pod,
-                    "--namespace",
-                    service_namespace,
-                    f"--container={container}",
-                    f"--since-time={since_utc}",
-                    "--tail=-1",
-                ],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
+            try:
+                result = subprocess.run(
+                    [
+                        "kubectl",
+                        "logs",
+                        pod,
+                        "--namespace",
+                        service_namespace,
+                        f"--container={container}",
+                        f"--since-time={since_utc}",
+                        "--tail=-1",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except subprocess.CalledProcessError as error:
+                detail = (error.stderr or "").strip() or f"exit status {error.returncode}"
+                errors.append(f"{pod}: {detail}")
+                continue
+            except subprocess.TimeoutExpired as error:
+                errors.append(f"{pod}: timed out after {error.timeout} seconds")
+                continue
+            read_any = True
             for line in result.stdout.splitlines():
                 with contextlib.suppress(json.JSONDecodeError):
                     record = json.loads(line)
                     if isinstance(record, dict):
                         records.append(record)
+        if not read_any:
+            pytest.fail(f"could not read {container!r} logs from any pod in {service_namespace!r}: {'; '.join(errors)}")
         return records
 
     return _read

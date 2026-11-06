@@ -89,6 +89,10 @@ var _ = Describe("dc-controller", Ordered, func() {
 		})
 
 		Context("audit logging", func() {
+			BeforeAll(func() {
+				DeferCleanup(fixture.ResetAudit)
+			})
+
 			It("is disabled by default when the CR has no audit section", func() {
 				fixture.AssertAuditDisabled()
 			})

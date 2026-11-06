@@ -186,7 +186,6 @@ func (e *E2EFixture) AssertAuditDisabled() {
 
 // EnableAudit patches spec.audit.enabled=true and verifies reconciliation.
 func (e *E2EFixture) EnableAudit() {
-	DeferCleanup(e.ResetAudit)
 	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
 	e.useRecreateFlightDeploymentStrategy()
 	By("enabling audit logging")
@@ -203,7 +202,6 @@ func (e *E2EFixture) EnableAudit() {
 
 // DisableAudit patches spec.audit.enabled=false and verifies reconciliation.
 func (e *E2EFixture) DisableAudit() {
-	DeferCleanup(e.ResetAudit)
 	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
 	e.useRecreateFlightDeploymentStrategy()
 	By("disabling audit logging")
