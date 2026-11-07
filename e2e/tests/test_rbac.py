@@ -93,7 +93,7 @@ def connection(create_connection, connection_type: ConnectionType) -> DataConnec
     """
     return create_connection(
         connection_type_id=connection_type.id,
-        credentials_ref=CredentialsRef(secret="dch-e2e-rbac-unused"), # notsecret
+        credentials_ref=CredentialsRef(secret="dch-e2e-rbac-unused"),  # notsecret
     )
 
 
@@ -159,7 +159,7 @@ class TestReaderRole:
                     name=name,
                     connection_type_id=connection_type.id,
                     data_format="tabular",
-                    credentials_ref=CredentialsRef(secret="dch-e2e-rbac-unused"), # notsecret
+                    credentials_ref=CredentialsRef(secret="dch-e2e-rbac-unused"),  # notsecret
                 )
         finally:
             # Only reached if authorization is broken; keep the tenant clean.
