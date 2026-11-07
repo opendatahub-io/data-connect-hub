@@ -19,6 +19,17 @@ relatedImages:
 
 leaderElection: true
 
+# Global namespace: the RHOAI-wide shared project designated from the
+# Dashboard. Members of the platform Auth CR groups get access to DCH
+# connections in it, and it holds the global connection types.
+globalNamespace:
+  # "true" requires the platform Auth CRD, "false" disables the feature, and
+  # an empty value enables it only when the Auth CRD is installed.
+  enabled: ""
+  # Namespace label that designates the global namespace. Empty uses the
+  # controller default (opendatahub.io/global-data-registry-project).
+  label: ""
+
 serviceCA:
   # Enable this for OpenShift installs. Non-OpenShift installs can rely on
   # the system trust store or provide their own CA through the environment.

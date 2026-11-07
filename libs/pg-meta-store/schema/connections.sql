@@ -76,3 +76,12 @@ CREATE TABLE IF NOT EXISTS flight_services (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_services_ns_name ON flight_services ((data->'resource'->>'namespace'), (data->'resource'->>'name'));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_flight_services_id ON flight_services ((data->'metadata'->>'id'));
+
+-- Key/value settings the services persist across restarts.
+--   global_connection_types.tenant_id — the global connection type tenant the
+--   records were last written under; a change triggers a migration (see
+--   PgMetaStore::sync_global_tenant).
+CREATE TABLE IF NOT EXISTS dch_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);

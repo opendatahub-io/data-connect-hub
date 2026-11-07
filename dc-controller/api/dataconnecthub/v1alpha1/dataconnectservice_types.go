@@ -229,6 +229,13 @@ type DataConnectServiceStatus struct {
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
 
+	// globalNamespace is the namespace designated as the RHOAI global
+	// project. Members of the platform Auth CR groups can use DCH connections
+	// in it, and it is the tenant of global connection types. Empty when no
+	// namespace is designated.
+	// +optional
+	GlobalNamespace string `json:"globalNamespace,omitempty"`
+
 	// conditions represent the current state of the DataConnectService resource.
 	// +listType=map
 	// +listMapKey=type

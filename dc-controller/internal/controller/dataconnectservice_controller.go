@@ -44,6 +44,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	kustypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/yaml"
 
@@ -130,6 +131,7 @@ type DataConnectServiceReconciler struct {
 	KubeRbacProxyImage  string
 	ControllerNamespace string
 	FlightServiceClient FlightServiceClient
+	GlobalNamespace     GlobalNamespaceConfig
 }
 
 type platformConfig struct {
@@ -452,7 +454,11 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	}
 	setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec)
 
-	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
+	globalTenant, err := globalTenantFor(ctx, r, r.GlobalNamespace, cr)
+	if err != nil {
+		return fmt.Errorf("resolving global connection type tenant: %w", err)
+	}
+	if err := setConfigMapGlobalNamespace(resources, globalTenant); err != nil {
 		return fmt.Errorf("setting config namespace: %w", err)
 	}
 	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
@@ -1051,7 +1057,11 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// service-ca-operator) are NOT explicitly watched. Changes to these
 	// resources are detected on the next periodic reconcile (~5 min) via
 	// content-hash recomputation in annotateDeploymentsWithContentHash.
-	return ctrl.NewControllerManagedBy(mgr).
+	//
+	// Watches(Namespace, global namespace label) — designating, moving, or
+	// clearing the global namespace changes the global connection type tenant
+	// rendered into the service ConfigMaps.
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dchv1alpha1.DataConnectService{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&corev1.Service{}, builder.WithPredicates(ownsPredicate)).
@@ -1062,9 +1072,16 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.platformConfigToReconcile),
 			builder.WithPredicates(isPlatformConfig),
-		).
-		Named(managedByDCHService).
-		Complete(r)
+		)
+	if r.GlobalNamespace.Enabled {
+		b = b.WatchesRawSource(source.Kind(mgr.GetCache(), &corev1.Namespace{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, ns *corev1.Namespace) []reconcile.Request {
+				return r.platformConfigToReconcile(ctx, ns)
+			}),
+			labelKeyPredicate[*corev1.Namespace](r.GlobalNamespace.LabelKey),
+		))
+	}
+	return b.Named(managedByDCHService).Complete(r)
 }
 
 func (r *DataConnectServiceReconciler) platformConfigToReconcile(ctx context.Context, obj client.Object) []reconcile.Request {

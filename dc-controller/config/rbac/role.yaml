@@ -20,6 +20,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -172,8 +180,49 @@ rules:
   - update
   - watch
 - apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-flight-secret-read
+  - dch-read
+  - dch-read-write
+  - dch-rest-service-secret-access
+  resources:
+  - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-global-flight-secret-read
+  - dch-global-read
+  - dch-global-read-write
+  - dch-global-rest-secret-access
+  resources:
+  - rolebindings
+  verbs:
+  - delete
+  - patch
+  - update
+- apiGroups:
   - route.openshift.io
   resources:
   - routes
   verbs:
   - get
+- apiGroups:
+  - services.platform.opendatahub.io
+  resources:
+  - auths
+  verbs:
+  - get
+  - list
+  - watch

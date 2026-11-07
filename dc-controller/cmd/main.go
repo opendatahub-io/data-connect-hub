@@ -218,6 +218,13 @@ func main() {
 	}
 	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
+	globalNamespace, err := controller.LoadGlobalNamespaceConfig(controller.AuthCRDAvailable(cfg))
+	if err != nil {
+		setupLog.Error(err, "Failed to configure the global namespace")
+		os.Exit(1)
+	}
+	setupLog.Info("Global namespace configuration", "enabled", globalNamespace.Enabled, "label", globalNamespace.LabelKey)
+
 	if err := (&controller.DataConnectServiceReconciler{
 		Client:              mgr.GetClient(),
 		Scheme:              mgr.GetScheme(),
@@ -227,15 +234,17 @@ func main() {
 		KubeRbacProxyImage:  requiredEnv(controller.RelatedImageKubeRbacProxy),
 		ControllerNamespace: controller.ResolveControllerNamespace(),
 		FlightServiceClient: controller.NewHTTPFlightServiceClient(restURLResolver),
+		GlobalNamespace:     globalNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
 	}
 
 	if err := (&controller.InitDataConnectionTypeReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		RestClient:      controller.NewHTTPConnectionTypeClient(restURLResolver),
+		GlobalNamespace: globalNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)
@@ -249,9 +258,10 @@ func main() {
 	}
 
 	if err := (&controller.ConfigMapWatcherReconciler{
-		Client:     mgr.GetClient(),
-		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		Client:          mgr.GetClient(),
+		Scheme:          mgr.GetScheme(),
+		RestClient:      controller.NewHTTPConnectionTypeClient(restURLResolver),
+		GlobalNamespace: globalNamespace,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "configmapwatcher")
 		os.Exit(1)
@@ -264,6 +274,15 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)
+	}
+	if globalNamespace.Enabled {
+		if err := (&controller.GlobalNamespaceReconciler{
+			Client: mgr.GetClient(),
+			Config: globalNamespace,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", "globalnamespace")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

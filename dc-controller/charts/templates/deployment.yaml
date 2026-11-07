@@ -45,6 +45,14 @@ spec:
           value: {{ .Values.relatedImages.flightService | quote }}
         - name: RELATED_IMAGE_ODH_KUBE_RBAC_PROXY_IMAGE
           value: {{ .Values.relatedImages.kubeRbacProxy | quote }}
+        {{- if ne (toString .Values.globalNamespace.enabled) "" }}
+        - name: ENABLE_GLOBAL_NAMESPACE
+          value: {{ toString .Values.globalNamespace.enabled | quote }}
+        {{- end }}
+        {{- with .Values.globalNamespace.label }}
+        - name: GLOBAL_NAMESPACE_LABEL
+          value: {{ . | quote }}
+        {{- end }}
         ports:
         - name: health
           containerPort: 8081
