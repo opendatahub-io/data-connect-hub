@@ -59,7 +59,7 @@ kubectl create rolebinding dch-rest-service-secret-access \
 
 ### 2.4 Grant users access to Flight and REST APIs
 
-DCH authorization falls into three categories:
+DCH authorization falls into three categories, following the resource model in [ODH-ADR-0001](https://github.com/opendatahub-io/architecture-decision-records/blob/main/architecture-decision-records/data-connect-hub/ODH-ADR-0001-data-connect-hub.md#dch-kube-resources-for-data-plane-apis):
 
 - **Metadata**: reading or changing connections and connection types requires the matching verb on `data-connections` or `data-connection-types`. Readiness checks and credential tests count as `create` on `data-connections`.
 - **Data ingestion**: binary download and every tenant-scoped Flight call require `get` on `data-store`. Only health checks and the internal connector discovery call are exempt.
@@ -85,25 +85,7 @@ Minimum role by operation:
 | Export connection secret | `dch-secret-export` + `get` on the connection's credentials Secret |
 | Flight queries (all Flight calls) | `dch-read` |
 
-To build custom Roles, grant the resource and verb each endpoint requires in the tenant namespace. DCH resources use API group `dataconnecthub.opendatahub.io`; `secrets` is in the core group. REST paths are relative to `/api/v1alpha1/data`.
-
-| Endpoint | Resource | Verb |
-|---|---|---|
-| `POST /connections` | `data-connections` | `create` |
-| `GET /connections` | `data-connections` | `get` |
-| `GET /connections/{id}` | `data-connections` | `get` |
-| `PATCH /connections/{id}` | `data-connections` | `patch` |
-| `DELETE /connections/{id}` | `data-connections` | `delete` |
-| `POST /connections/{id}/readiness` | `data-connections` | `create` |
-| `POST /test/credentials` | `data-connections` | `create` |
-| `PUT /connections/{id}/exports/secrets/{secret_name}` | `secrets` | `create`, plus `get` on the connection's credentials Secret |
-| `POST /connection-types` | `data-connection-types` | `create` |
-| `GET /connection-types` | `data-connection-types` | `get` |
-| `GET /connection-types/{id}` | `data-connection-types` | `get` |
-| `PATCH /connection-types/{id}` | `data-connection-types` | `patch` |
-| `DELETE /connection-types/{id}` | `data-connection-types` | `delete` |
-| `GET /connections/{id}/binary` | `data-store` | `get` |
-| (gRPC) `/arrow.flight.protocol.FlightService` | `data-store` | `get` |
+The predefined ClusterRoles cover most cases. To grant finer-grained access, see [5.1 Custom Roles](#51-custom-roles).
 
 Create one RoleBinding per user and tenant. Example: grant Alice read access in `team-alpha`:
 
@@ -199,3 +181,27 @@ An HTTP 403 from kube-rbac-proxy instead points to caller authorization. Check t
 ### Connection creation succeeds, but readiness reports `Secret cannot be read`
 
 Creating a connection with `credentials_ref` stores metadata without reading or creating the secret. Readiness requires REST to read it, and Flight needs read access to use the connection. Verify that the secret exists in the tenant namespace and both ServiceAccounts have `get` on that secret. A successful credential test also does not prove secret access: it passes credentials directly without storing them.
+
+## 5. Reference
+
+### 5.1 Custom Roles
+
+To build custom Roles, grant the resource and verb each endpoint requires in the tenant namespace. DCH resources use API group `dataconnecthub.opendatahub.io`; `secrets` is in the core group. REST paths are relative to `/api/v1alpha1/data`.
+
+| Endpoint | Resource | Verb |
+|---|---|---|
+| `POST /connections` | `data-connections` | `create` |
+| `GET /connections` | `data-connections` | `get` |
+| `GET /connections/{id}` | `data-connections` | `get` |
+| `PATCH /connections/{id}` | `data-connections` | `patch` |
+| `DELETE /connections/{id}` | `data-connections` | `delete` |
+| `POST /connections/{id}/readiness` | `data-connections` | `create` |
+| `POST /test/credentials` | `data-connections` | `create` |
+| `PUT /connections/{id}/exports/secrets/{secret_name}` | `secrets` | `create`, plus `get` on the connection's credentials Secret |
+| `POST /connection-types` | `data-connection-types` | `create` |
+| `GET /connection-types` | `data-connection-types` | `get` |
+| `GET /connection-types/{id}` | `data-connection-types` | `get` |
+| `PATCH /connection-types/{id}` | `data-connection-types` | `patch` |
+| `DELETE /connection-types/{id}` | `data-connection-types` | `delete` |
+| `GET /connections/{id}/binary` | `data-store` | `get` |
+| (gRPC) `/arrow.flight.protocol.FlightService` | `data-store` | `get` |
