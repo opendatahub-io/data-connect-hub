@@ -13,6 +13,9 @@ use tracing::{debug, warn};
 const HEALTH_PATH_PREFIX: &str = "/grpc.health.v1.Health/";
 const DO_ACTION_PATH: &str = "/arrow.flight.protocol.FlightService/DoAction";
 const BEARER_PREFIX: &str = "Bearer ";
+/// DCH resource guarding data reads; per ADR-0001, every Flight call requires `get` on it.
+const DATA_STORE_RESOURCE: &str = "data-store";
+const DATA_STORE_VERB: &str = "get";
 
 #[derive(Clone)]
 pub struct AuthLayer {
@@ -107,7 +110,9 @@ where
             }
 
             if let Some(tenant_id) = tenant_id
-                && let Err(e) = auth_service.authorize(&auth_info, &tenant_id, "get").await
+                && let Err(e) = auth_service
+                    .authorize(&auth_info, &tenant_id, DATA_STORE_RESOURCE, DATA_STORE_VERB)
+                    .await
             {
                 return Ok(grpc_error_response(auth_error_to_status(&e)));
             }
