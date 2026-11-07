@@ -1,11 +1,14 @@
+# REST calls Flight with its own ServiceAccount token, and Flight authorizes
+# every call against `get` on `data-store` in the tenant namespace. Callers are
+# already authorized by kube-rbac-proxy before their requests reach REST.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: rest-service-data-access
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "create", "update"]
+    resources: ["data-store"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -28,12 +31,3 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "create", "patch", "delete"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
-metadata:
-  name: secret-export
-rules:
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["create"]

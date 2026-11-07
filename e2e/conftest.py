@@ -121,6 +121,24 @@ def denied_auth_token() -> str:
 
 
 @pytest.fixture(scope="session")
+def reader_auth_token() -> str:
+    """Token for an SA bound to the predefined ``dch-read`` ClusterRole."""
+    return os.environ.get("DCH_READER_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def metadata_only_auth_token() -> str:
+    """Token for an SA with connection metadata access but no ``data-store``."""
+    return os.environ.get("DCH_METADATA_ONLY_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def data_store_only_auth_token() -> str:
+    """Token for an SA with ``data-store`` access but no connection metadata."""
+    return os.environ.get("DCH_DATA_STORE_ONLY_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
 def no_access_namespace() -> str:
     return os.environ.get("DCH_NO_ACCESS_NAMESPACE", "")
 

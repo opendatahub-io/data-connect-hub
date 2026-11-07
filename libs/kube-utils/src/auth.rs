@@ -43,7 +43,6 @@ pub struct KubeAuthClient {
 }
 
 const API_GROUP: &str = "dataconnecthub.opendatahub.io";
-const RESOURCE: &str = "data-connections";
 
 impl KubeAuthClient {
     pub fn new(client: Client, cache_ttl: Duration, token_review_audiences: Vec<String>) -> Self {
@@ -116,34 +115,34 @@ impl KubeAuthClient {
             .map_err(|e: Arc<AuthError>| e.as_ref().clone())?
     }
 
-    pub async fn authorize(&self, auth_info: &AuthInfo, tenant_id: &str, verb: &str) -> Result<(), AuthError> {
-        let key = format!(
-            "conn:{}:{:?}:{}:{}",
-            auth_info.username, auth_info.groups, tenant_id, verb
-        );
+    /// authorize checks that the requesting user holds `verb` on the DCH
+    /// `resource` (in the `dataconnecthub.opendatahub.io` API group) in the
+    /// tenant namespace.
+    pub async fn authorize(
+        &self,
+        auth_info: &AuthInfo,
+        tenant_id: &str,
+        resource: &str,
+        verb: &str,
+    ) -> Result<(), AuthError> {
+        let key = resource_cache_key(auth_info, tenant_id, resource, verb);
+        let spec = resource_review_spec(auth_info, tenant_id, resource, verb);
         let client = self.client.clone();
-        let username = auth_info.username.clone();
-        let groups = auth_info.groups.clone();
-        let ns = tenant_id.to_string();
-        let v = verb.to_string();
 
         let allowed = self
             .sar_cache
             .try_get_with(key, async move {
-                debug!("Performing SubjectAccessReview for user={username} namespace={ns} verb={v}");
+                if let Some(attrs) = spec.resource_attributes.as_ref() {
+                    debug!(
+                        "Performing SubjectAccessReview for user={} namespace={} resource={} verb={}",
+                        spec.user.as_deref().unwrap_or_default(),
+                        attrs.namespace.as_deref().unwrap_or_default(),
+                        attrs.resource.as_deref().unwrap_or_default(),
+                        attrs.verb.as_deref().unwrap_or_default()
+                    );
+                }
                 let sar = SubjectAccessReview {
-                    spec: SubjectAccessReviewSpec {
-                        user: Some(username),
-                        groups: Some(groups),
-                        resource_attributes: Some(ResourceAttributes {
-                            namespace: Some(ns),
-                            verb: Some(v),
-                            group: Some(API_GROUP.into()),
-                            resource: Some(RESOURCE.into()),
-                            ..Default::default()
-                        }),
-                        ..Default::default()
-                    },
+                    spec,
                     ..Default::default()
                 };
 
@@ -167,7 +166,7 @@ impl KubeAuthClient {
             Ok(())
         } else {
             Err(AuthError::Forbidden(format!(
-                "access denied for {RESOURCE} in namespace {tenant_id}"
+                "access denied for {resource} in namespace {tenant_id}"
             )))
         }
     }
@@ -235,6 +234,28 @@ impl KubeAuthClient {
     }
 }
 
+fn resource_cache_key(auth_info: &AuthInfo, tenant_id: &str, resource: &str, verb: &str) -> String {
+    format!(
+        "resource:{}:{:?}:{}:{}:{}",
+        auth_info.username, auth_info.groups, tenant_id, resource, verb
+    )
+}
+
+fn resource_review_spec(auth_info: &AuthInfo, tenant_id: &str, resource: &str, verb: &str) -> SubjectAccessReviewSpec {
+    SubjectAccessReviewSpec {
+        user: Some(auth_info.username.clone()),
+        groups: Some(auth_info.groups.clone()),
+        resource_attributes: Some(ResourceAttributes {
+            namespace: Some(tenant_id.to_string()),
+            verb: Some(verb.to_string()),
+            group: Some(API_GROUP.into()),
+            resource: Some(resource.to_string()),
+            ..Default::default()
+        }),
+        ..Default::default()
+    }
+}
+
 fn secret_cache_key(auth_info: &AuthInfo, tenant_id: &str, secret_name: &str) -> String {
     format!(
         "secret:{}:{:?}:{}:secrets:get:{}",
@@ -271,7 +292,7 @@ fn has_compatible_audience(requested: &[String], returned: Option<&[String]>) ->
 
 #[cfg(test)]
 mod tests {
-    use super::{AuthInfo, has_compatible_audience, secret_review_spec};
+    use super::{AuthInfo, has_compatible_audience, resource_review_spec, secret_review_spec};
 
     fn auth_info() -> AuthInfo {
         AuthInfo {
@@ -324,6 +345,35 @@ mod tests {
     }
 
     #[test]
+    fn resource_review_spec_targets_dch_resource_in_tenant() {
+        let spec = resource_review_spec(&auth_info(), "tenant-a", "data-store", "get");
+
+        let attrs = spec.resource_attributes.expect("resource attributes");
+        assert_eq!(attrs.namespace.as_deref(), Some("tenant-a"));
+        assert_eq!(attrs.verb.as_deref(), Some("get"));
+        assert_eq!(attrs.group.as_deref(), Some("dataconnecthub.opendatahub.io"));
+        assert_eq!(attrs.resource.as_deref(), Some("data-store"));
+        assert_eq!(attrs.name, None);
+        assert_eq!(
+            spec.user.as_deref(),
+            Some("system:serviceaccount:tenant-a:dch-test-user")
+        );
+        assert_eq!(spec.groups, Some(vec!["system:serviceaccounts".to_string()]));
+    }
+
+    #[test]
+    fn resource_cache_key_scopes_by_resource_and_verb() {
+        let store_get = super::resource_cache_key(&auth_info(), "tenant-a", "data-store", "get");
+        let conn_get = super::resource_cache_key(&auth_info(), "tenant-a", "data-connections", "get");
+        let store_create = super::resource_cache_key(&auth_info(), "tenant-a", "data-store", "create");
+        let other_tenant = super::resource_cache_key(&auth_info(), "tenant-b", "data-store", "get");
+
+        assert_ne!(store_get, conn_get);
+        assert_ne!(store_get, store_create);
+        assert_ne!(store_get, other_tenant);
+    }
+
+    #[test]
     fn secret_review_spec_scopes_cache_key_by_secret_name() {
         let first = super::secret_cache_key(&auth_info(), "tenant-a", "db-secret");
         let second = super::secret_cache_key(&auth_info(), "tenant-a", "other-secret");
@@ -334,20 +384,15 @@ mod tests {
     }
 
     #[test]
-    fn secret_cache_key_is_namespaced_apart_from_tenant_cache_keys() {
-        // The conn-level authorize() key is "conn:{user}:{groups}:{tenant}:{verb}";
-        // the two key families share one cache, so they must be structurally
-        // disjoint even for identical users, tenants, and verbs.
-        let secret_key = super::secret_cache_key(&auth_info(), "tenant-a", "get");
-        let conn_key = format!(
-            "conn:{}:{:?}:{}:{}",
-            auth_info().username,
-            auth_info().groups,
-            "tenant-a",
-            "get"
-        );
+    fn secret_cache_key_is_namespaced_apart_from_resource_cache_keys() {
+        // authorize() and authorize_secret() share one cache, so their key
+        // families must be structurally disjoint even when a secret name
+        // collides with a resource name and the verb matches.
+        let secret_key = super::secret_cache_key(&auth_info(), "tenant-a", "secrets");
+        let resource_key = super::resource_cache_key(&auth_info(), "tenant-a", "secrets", "get");
 
         assert!(secret_key.starts_with("secret:"));
-        assert_ne!(secret_key, conn_key);
+        assert!(resource_key.starts_with("resource:"));
+        assert_ne!(secret_key, resource_key);
     }
 }

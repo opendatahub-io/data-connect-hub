@@ -1,3 +1,7 @@
+# Predefined ClusterRoles for granting users access to the DCH data plane APIs
+# (REST via kube-rbac-proxy, Flight via in-service SubjectAccessReview).
+# Bind them per tenant with a RoleBinding in the tenant namespace.
+# See docs/user-guide/auth.md for the operation-to-role mapping.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -14,7 +18,7 @@ metadata:
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -23,4 +27,13 @@ metadata:
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "post", "put"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: secret-export
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]

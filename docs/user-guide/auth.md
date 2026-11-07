@@ -59,6 +59,14 @@ kubectl create rolebinding dch-rest-service-secret-access \
 
 ### 2.4 Grant users access to Flight and REST APIs
 
+DCH authorization falls into three categories:
+
+- **Metadata**: reading or changing connections and connection types requires the matching verb on `data-connections` or `data-connection-types`. Readiness checks and credential tests count as `create` on `data-connections`.
+- **Data ingestion**: binary download and every Flight call require `get` on `data-store`.
+- **Secrets**: exporting credentials requires `create` on core `secrets`, plus `get` on the connection's credentials Secret.
+
+Ingesting data does not require any access to Secrets; this is by design. DCH resolves a connection's credentials with its own ServiceAccounts (see 2.2 and 2.3) and never returns them to the caller, so a user with `get` on `data-store` can read data without being able to read the credentials behind it. Export is the exception: it copies credentials into a Secret the caller can read, so DCH requires the caller to be able to read the source Secret already.
+
 DCH provides these ClusterRoles:
 
 | Predefined ClusterRole | Access |
@@ -74,7 +82,28 @@ Minimum role by operation:
 | List or get connections, connection types, binary data | `dch-read` |
 | Create, update, or delete connections and connection types | `dch-read-write` |
 | Readiness check, credential test | `dch-read-write` |
-| Export connection secret | `dch-read-write` + `dch-secret-export` |
+| Export connection secret | `dch-read-write` + `dch-secret-export` + `get` on the connection's credentials Secret |
+| Flight queries (all Flight calls) | `dch-read` |
+
+To build custom Roles, grant the resource and verb each endpoint requires in the tenant namespace. DCH resources use API group `dataconnecthub.opendatahub.io`; `secrets` is in the core group. REST paths are relative to `/api/v1alpha1/data`.
+
+| Endpoint | Resource | Verb |
+|---|---|---|
+| `POST /connections` | `data-connections` | `create` |
+| `GET /connections` | `data-connections` | `get` |
+| `GET /connections/{id}` | `data-connections` | `get` |
+| `PATCH /connections/{id}` | `data-connections` | `patch` |
+| `DELETE /connections/{id}` | `data-connections` | `delete` |
+| `POST /connections/{id}/readiness` | `data-connections` | `create` |
+| `POST /test/credentials` | `data-connections` | `create` |
+| `PUT /connections/{id}/exports/secrets/{secret_name}` | `secrets` | `create`, plus `get` on the connection's credentials Secret |
+| `POST /connection-types` | `data-connection-types` | `create` |
+| `GET /connection-types` | `data-connection-types` | `get` |
+| `GET /connection-types/{id}` | `data-connection-types` | `get` |
+| `PATCH /connection-types/{id}` | `data-connection-types` | `patch` |
+| `DELETE /connection-types/{id}` | `data-connection-types` | `delete` |
+| `GET /connections/{id}/binary` | `data-store` | `get` |
+| (gRPC) `/arrow.flight.protocol.FlightService` | `data-store` | `get` |
 
 Create one RoleBinding per user and tenant. Example: grant Alice read access in `team-alpha`:
 
@@ -109,7 +138,7 @@ kubectl create rolebinding alice-secret-export \
 
 1. Send `Authorization: Bearer <token>` and `X-Tenant-Id: <namespace>`.
 2. DCH validates the token and identifies the caller.
-3. DCH checks the caller has `get` access to `data-connections` in the tenant namespace. `dch-read` is sufficient for all Flight operations (see 2.4).
+3. DCH checks the caller has `get` access to `data-store` in the tenant namespace. `dch-read` is sufficient for all Flight operations (see 2.4).
 4. For a saved connection, Flight reads its Secret using the service permission from 2.2.
 
 #### Flight errors

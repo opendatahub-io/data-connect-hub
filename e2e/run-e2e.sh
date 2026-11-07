@@ -88,6 +88,9 @@ DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 E2E_SA_NAME="dch-e2e-user"
 E2E_SECRET_READER_SA_NAME="dch-e2e-secret-reader"
 E2E_DENIED_SA_NAME="dch-e2e-denied-user"
+E2E_READER_SA_NAME="dch-e2e-reader"
+E2E_METADATA_ONLY_SA_NAME="dch-e2e-metadata-only"
+E2E_DATA_STORE_ONLY_SA_NAME="dch-e2e-data-store-only"
 PG_SECRET="dch-e2e-pg-creds"
 S3_SECRET="dch-e2e-s3-creds"
 MILVUS_SECRET="dch-e2e-milvus-creds"
@@ -119,6 +122,66 @@ setup_user_accounts() {
 
     if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$E2E_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$E2E_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$E2E_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+}
+
+# apply_dch_role creates or updates a tenant Role granting <verbs> on DCH
+# data plane <resources> (comma-separated), then binds it to <sa>.
+# kubectl create role cannot be used: it rejects resources that are not served
+# by the API server, and DCH resources exist only for SubjectAccessReview.
+apply_dch_role() {
+    local name="$1" sa="$2" resources="$3" verbs="$4"
+    kubectl apply -f - >/dev/null <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${name}
+  namespace: ${DCH_TENANT_ID}
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: [${resources}]
+    verbs: [${verbs}]
+EOF
+    kubectl create rolebinding "${name}-rb" \
+        -n "$DCH_TENANT_ID" \
+        --role="$name" \
+        --serviceaccount="${DCH_TENANT_ID}:${sa}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+}
+
+# setup_permission_rbac grants each permission-test persona (tests/test_rbac.py)
+# a fixed slice of the DCH data plane resources in the tenant namespace.
+setup_permission_rbac() {
+    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create rolebinding dch-e2e-reader-access \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_READER_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+
+    # Connection metadata without data-store: Flight and binary download must be denied.
+    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-metadata-only "$E2E_METADATA_ONLY_SA_NAME" \
+            "data-connections, data-connection-types" "get, list"
+    fi
+
+    # data-store without connection metadata: Flight allowed, REST listing denied.
+    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-data-store-only "$E2E_DATA_STORE_ONLY_SA_NAME" \
+            "data-store" "get"
     fi
 }
 
@@ -493,6 +556,15 @@ generate_tokens() {
     if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
         DCH_DENIED_AUTH_TOKEN=$(kubectl create token "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
+    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_READER_AUTH_TOKEN=$(kubectl create token "$E2E_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_METADATA_ONLY_AUTH_TOKEN=$(kubectl create token "$E2E_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_DATA_STORE_ONLY_AUTH_TOKEN=$(kubectl create token "$E2E_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
 }
 
 # -------------------------------------------------------------------
@@ -508,6 +580,9 @@ DCH_NEIGHBOR_TENANT_ID=${DCH_NEIGHBOR_TENANT_ID}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
 DCH_SECRET_READER_AUTH_TOKEN=${DCH_SECRET_READER_AUTH_TOKEN}
 DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
+DCH_READER_AUTH_TOKEN=${DCH_READER_AUTH_TOKEN}
+DCH_METADATA_ONLY_AUTH_TOKEN=${DCH_METADATA_ONLY_AUTH_TOKEN}
+DCH_DATA_STORE_ONLY_AUTH_TOKEN=${DCH_DATA_STORE_ONLY_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
 EOF
@@ -605,6 +680,7 @@ setup_user_accounts
 echo "[3/11] Service accounts ready"
 
 setup_user_rbac
+setup_permission_rbac
 echo "[4/11] SA RBAC ready"
 
 # 4. Credential secrets
