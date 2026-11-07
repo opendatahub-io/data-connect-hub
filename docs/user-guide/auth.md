@@ -62,7 +62,7 @@ kubectl create rolebinding dch-rest-service-secret-access \
 DCH authorization falls into three categories:
 
 - **Metadata**: reading or changing connections and connection types requires the matching verb on `data-connections` or `data-connection-types`. Readiness checks and credential tests count as `create` on `data-connections`.
-- **Data ingestion**: binary download and every Flight call require `get` on `data-store`.
+- **Data ingestion**: binary download and every tenant-scoped Flight call require `get` on `data-store`. Only health checks and the internal connector discovery call are exempt.
 - **Secrets**: exporting credentials requires `create` on core `secrets`, plus `get` on the connection's credentials Secret.
 
 Ingesting data does not require any access to Secrets; this is by design. DCH resolves a connection's credentials with its own ServiceAccounts (see 2.2 and 2.3) and never returns them to the caller, so a user with `get` on `data-store` can read data without being able to read the credentials behind it. Export is the exception: it copies credentials into a Secret the caller can read, so DCH requires the caller to be able to read the source Secret already.
@@ -82,7 +82,7 @@ Minimum role by operation:
 | List or get connections, connection types, binary data | `dch-read` |
 | Create, update, or delete connections and connection types | `dch-read-write` |
 | Readiness check, credential test | `dch-read-write` |
-| Export connection secret | `dch-read-write` + `dch-secret-export` + `get` on the connection's credentials Secret |
+| Export connection secret | `dch-secret-export` + `get` on the connection's credentials Secret |
 | Flight queries (all Flight calls) | `dch-read` |
 
 To build custom Roles, grant the resource and verb each endpoint requires in the tenant namespace. DCH resources use API group `dataconnecthub.opendatahub.io`; `secrets` is in the core group. REST paths are relative to `/api/v1alpha1/data`.
