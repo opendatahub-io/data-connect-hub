@@ -1,6 +1,6 @@
 module github.com/opendatahub-io/data-connect-hub/dc-controller
 
-go 1.26.7
+go 1.27
 
 require (
 	github.com/onsi/ginkgo/v2 v2.28.1
