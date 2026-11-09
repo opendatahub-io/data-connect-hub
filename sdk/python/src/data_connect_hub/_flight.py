@@ -106,8 +106,13 @@ class FlightClient:
         prefixed = {f"{ADBC_HEADER_PREFIX}{k.lower()}": v for k, v in self._headers().items()}
         return {**self._adbc_opts, **prefixed}
 
+    def _flight_headers(self) -> list[tuple[bytes, bytes]]:
+        # Callers that need extra headers must extend this list instead of reading
+        # FlightCallOptions.headers, which only exists in pyarrow >= 22.
+        return [(k.lower().encode(), v.encode()) for k, v in self._headers().items()]
+
     def _call_options(self) -> flight.FlightCallOptions:
-        return flight.FlightCallOptions(headers=[(k.lower().encode(), v.encode()) for k, v in self._headers().items()])
+        return flight.FlightCallOptions(headers=self._flight_headers())
 
     def _flight_connect(self) -> flight.FlightClient:
         kwargs: dict[str, Any] = {}
@@ -282,11 +287,9 @@ class FlightClient:
             include_schema=include_schema,
         )
 
-        headers = [
-            *self._call_options().headers,
-            (b"x-data-connection-id", connection_id.encode()),
-        ]
-        opts = flight.FlightCallOptions(headers=headers)
+        opts = flight.FlightCallOptions(
+            headers=[*self._flight_headers(), (b"x-data-connection-id", connection_id.encode())]
+        )
 
         client = self._flight_connect()
         try:

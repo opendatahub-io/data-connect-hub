@@ -23,7 +23,7 @@ endif
 	container-run-flight container-run-rest \
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
-	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
+	sdk-install sdk-test sdk-test-min sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
 	e2e-venv e2e-lint e2e-fmt \
 	setup-hooks help
 
@@ -169,6 +169,21 @@ sdk-install: sdk-venv
 
 sdk-test: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)pytest tests/ -v --cov=data_connect_hub --cov-report=term-missing --cov-report=html:htmlcov
+
+# Separate venv so the pinned minimum versions never downgrade the dev venv.
+# Uses the oldest supported Python: the pinned pyarrow/pandas have no wheels for
+# newer ones. Override on the command line, e.g.
+# make sdk-test-min SDK_MIN_PYTHON="$(uv python find 3.11)"
+SDK_MIN_VENV   := $(PYTHON_SDK_DIR)/.venv-min
+SDK_MIN_PYTHON ?= python3.11
+
+$(SDK_MIN_VENV)/bin/python3:
+	"$(SDK_MIN_PYTHON)" -m venv "$(SDK_MIN_VENV)"
+
+sdk-test-min: $(SDK_MIN_VENV)/bin/python3
+	$(SDK_MIN_VENV)/bin/python3 -m pip install --upgrade -r "$(PYTHON_SDK_DIR)/requirements.txt"
+	$(SDK_MIN_VENV)/bin/python3 -m pip install -e "$(PYTHON_SDK_DIR)[flight,dev]" -c "$(PYTHON_SDK_DIR)/constraints-min.txt"
+	cd $(PYTHON_SDK_DIR) && "$(abspath $(SDK_MIN_VENV))/bin/pytest" tests/ -v
 
 sdk-lint: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check src/ tests/ examples/*.py
@@ -325,6 +340,7 @@ help:
 	@echo "Python SDK:"
 	@echo "  sdk-install          install SDK in editable mode with dev deps"
 	@echo "  sdk-test             run SDK unit tests with coverage"
+	@echo "  sdk-test-min         run SDK unit tests on minimum dependency versions"
 	@echo "  sdk-lint             lint and format-check SDK"
 	@echo "  sdk-fmt              format SDK code"
 	@echo "  sdk-typecheck        run mypy on SDK"

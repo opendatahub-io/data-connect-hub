@@ -51,20 +51,12 @@ def _uri_field() -> list[CredentialField]:
     return [CredentialField(name="URI", label="URI", required=True, type="string")]
 
 
-def _flight_headers(client: DataConnectClient) -> list[tuple[bytes, bytes]]:
-    """Return the Flight request headers the SDK sends for *client*.
-
-    Built from the SDK header dict because ``FlightCallOptions.headers`` is not
-    readable on older PyArrow releases.
-    """
-    return [(k.lower().encode(), v.encode()) for k, v in client._require_flight()._headers().items()]
-
-
 def _check_data_connection(client: DataConnectClient, connection_id: str) -> None:
     """Run the Flight ``CheckDataConnection`` action in *client*'s tenant."""
-    raw = client._require_flight()._flight_connect()
+    fc = client._require_flight()
+    raw = fc._flight_connect()
     options = flight.FlightCallOptions(
-        headers=[*_flight_headers(client), (b"x-data-connection-id", connection_id.encode())]
+        headers=[*fc._flight_headers(), (b"x-data-connection-id", connection_id.encode())]
     )
     try:
         list(raw.do_action(flight.Action(CHECK_DATA_CONNECTION, b""), options))
@@ -140,8 +132,9 @@ class TestTenantHeaderRequired:
         assert resp.status_code in (400, 403), resp.text
 
     def test_flight_rejects_request_without_tenant(self, dch_client: DataConnectClient) -> None:
-        raw = dch_client._require_flight()._flight_connect()
-        headers = [(k, v) for k, v in _flight_headers(dch_client) if k != b"x-tenant-id"]
+        fc = dch_client._require_flight()
+        raw = fc._flight_connect()
+        headers = [(k, v) for k, v in fc._flight_headers() if k != b"x-tenant-id"]
         try:
             with pytest.raises(flight.FlightUnauthorizedError, match="x-tenant-id header is required"):
                 list(raw.list_actions(flight.FlightCallOptions(headers=headers)))
