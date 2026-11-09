@@ -210,6 +210,16 @@ upgrade_to_current() {
     kubectl rollout status deployment/dc-controller-manager \
         -n "$CI_CONTROLLER_NAMESPACE" --timeout=300s
 
+    # The upgraded controller-manager reconciles its operands asynchronously:
+    # it must acquire the leader-election lease before it rolls the REST and
+    # Flight deployments to the upgraded relatedImages. The DataConnectService
+    # CR is still Ready from the baseline, so its phase cannot be used to
+    # detect the post-upgrade operand rollout — wait for the images directly.
+    wait_deployment_image "$CI_REST_SERVICE_NAME" "$CI_SVC_NAMESPACE" \
+        rest-server "$CI_REST_IMAGE"
+    wait_deployment_image "$CI_FLIGHT_SERVICE_NAME" "$CI_SVC_NAMESPACE" \
+        flight-server "$CI_FLIGHT_IMAGE"
+
     if ! kubectl wait --for=jsonpath='{.status.phase}'=Ready "$DCS_RESOURCE" \
         -n "$CI_SVC_NAMESPACE" --timeout=180s; then
         kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" -o yaml || true

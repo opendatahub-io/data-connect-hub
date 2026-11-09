@@ -142,6 +142,38 @@ assert_deployment_image() {
 }
 
 # ---------------------------------------------------------------------------
+# wait_deployment_image <deployment> <namespace> <container> <expected_image> [timeout_seconds]
+#
+# Polls until the deployment's container reports the expected image. Unlike
+# assert_deployment_image, this tolerates the image arriving asynchronously:
+# the controller-manager rolls its operand deployments only after it acquires
+# the leader-election lease, so an upgraded controller keeps the previous
+# images for a while.
+# ---------------------------------------------------------------------------
+wait_deployment_image() {
+    local deployment="$1"
+    local namespace="$2"
+    local container="$3"
+    local expected_image="$4"
+    local timeout_seconds="${5:-180}"
+
+    local deadline=$(( SECONDS + timeout_seconds ))
+    local actual_image=""
+    while (( SECONDS < deadline )); do
+        actual_image="$(kubectl get deployment "$deployment" -n "$namespace" \
+            -o "jsonpath={.spec.template.spec.containers[?(@.name=='${container}')].image}" 2>/dev/null)" || true
+        if [[ "$actual_image" == "$expected_image" ]]; then
+            echo "deployment/${deployment} container ${container} now runs ${expected_image}"
+            return 0
+        fi
+        sleep 2
+    done
+
+    echo "ERROR: timed out after ${timeout_seconds}s waiting for deployment/${deployment} container ${container} to use '${expected_image}' (still '${actual_image}')" >&2
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # deploy_system_postgres — deploy the DCH metadata store PostgreSQL and the
 # dch-database-config secret into $CI_SVC_NAMESPACE.
 # ---------------------------------------------------------------------------
