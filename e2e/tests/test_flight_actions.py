@@ -37,11 +37,7 @@ def _flight_client_and_options(
 
 def _connection_headers(dch_client: DataConnectClient, connection_id: str) -> flight.FlightCallOptions:
     fc = dch_client._require_flight()
-    headers = [
-        *fc._call_options().headers,
-        (b"x-data-connection-id", connection_id.encode()),
-    ]
-    return flight.FlightCallOptions(headers=headers)
+    return flight.FlightCallOptions(headers=[*fc._flight_headers(), (b"x-data-connection-id", connection_id.encode())])
 
 
 def _credentials_body(dct_id: str, secret_uri: str, ca_cert: str | None = None) -> bytes:
