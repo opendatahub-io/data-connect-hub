@@ -273,6 +273,7 @@ Run `make help` for the full list. Key targets:
 | `setup-hooks`         | Install git pre-commit hooks                       |
 | `sdk-install`         | Install SDK in editable mode with dev deps         |
 | `sdk-test`            | Run SDK unit tests with coverage                   |
+| `sdk-test-min`        | Run SDK unit tests on minimum dependency versions  |
 | `sdk-lint`            | Lint and format-check SDK                          |
 | `sdk-fmt`             | Format SDK code                                    |
 | `sdk-typecheck`       | Run mypy on SDK                                    |
