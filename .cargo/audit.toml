@@ -27,4 +27,12 @@ ignore = [
     "RUSTSEC-2024-0436",
     # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
     "RUSTSEC-2025-0134",
+    # libsqlite3-sys 0.30.1 bundles SQLite < 3.54.0; a crafted database
+    # file with a sibling WAL file of differing page size can make
+    # queries return uninitialized page-cache memory (CVE-2026-119375).
+    # Fixed only in libsqlite3-sys 0.39.0 (SQLite 3.54.0), but
+    # sqlx-sqlite caps libsqlite3-sys <0.38 and no sqlx release allows
+    # 0.39 yet; the upper-bound bump (sqlx#4502) is merged but
+    # unreleased. Also ignored in deny.toml.
+    "RUSTSEC-2026-0459",
 ]
