@@ -949,11 +949,18 @@ func setKubeRbacProxyTLSOpts(
 	ctx context.Context,
 	resources []*unstructured.Unstructured,
 	spec configv1.TLSProfileSpec,
-) {
+) error {
 	minVersion := platformtls.MinVersionFromSpec(ctx, &spec, platformtls.FormatGo)
 	cipherSuites := ""
 	if spec.MinTLSVersion != configv1.VersionTLS13 {
 		cipherSuites = platformtls.CipherSuitesFromSpec(ctx, &spec)
+	}
+	if minVersion != "VersionTLS13" && cipherSuites != "" {
+		cipherNames := strings.Split(cipherSuites, ",")
+		if !slices.Contains(cipherNames, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") &&
+			!slices.Contains(cipherNames, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
+			return fmt.Errorf("cluster TLS profile: kube-rbac-proxy cannot serve HTTP/2 with cipher list %q", cipherSuites)
+		}
 	}
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -991,6 +998,7 @@ func setKubeRbacProxyTLSOpts(
 		}
 		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
 	}
+	return nil
 }
 
 // setConfigMapFlightTLSProfile projects the resolved cluster TLS profile into
