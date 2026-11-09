@@ -99,8 +99,155 @@ CI_ENABLED_CONNECTORS="${CI_ENABLED_CONNECTORS:-postgres sqlite s3 elasticsearch
 CI_DISABLED_CONNECTORS="${CI_DISABLED_CONNECTORS:-}"
 CI_SSL_ENABLED="${CI_SSL_ENABLED:-true}"
 
+# Upgrade test — the released baseline that hack/ci/upgrade-test.sh upgrades
+# from, following docs/user-guide/upgrade.md.
+CI_UPGRADE_BASE_REPO="${CI_UPGRADE_BASE_REPO:-https://github.com/opendatahub-io/data-connect-hub.git}"
+CI_UPGRADE_BASE_REF="${CI_UPGRADE_BASE_REF:-odh-3.6}"
+CI_UPGRADE_BASE_TAG="${CI_UPGRADE_BASE_TAG:-odh-3.6}"
+CI_UPGRADE_BASE_CONTROLLER_IMAGE="quay.io/opendatahub/odh-data-connect-hub-controller:${CI_UPGRADE_BASE_TAG}"
+CI_UPGRADE_BASE_REST_IMAGE="quay.io/opendatahub/odh-data-connect-hub-rest:${CI_UPGRADE_BASE_TAG}"
+CI_UPGRADE_BASE_FLIGHT_IMAGE="quay.io/opendatahub/odh-data-connect-hub-flight:${CI_UPGRADE_BASE_TAG}"
+CI_UPGRADE_BASE_KUBE_RBAC_PROXY_IMAGE="${CI_UPGRADE_BASE_KUBE_RBAC_PROXY_IMAGE:-quay.io/opendatahub/odh-kube-rbac-proxy:v3.6.0}"
+CI_UPGRADE_STATE_FILE="${CI_UPGRADE_STATE_FILE:-${CI_TEMP_DIR}/upgrade-state.json}"
+
 # has_connector <name> — true if <name> is in CI_ENABLED_CONNECTORS.
 has_connector() { [[ " $CI_ENABLED_CONNECTORS " == *" $1 "* ]]; }
+
+# ---------------------------------------------------------------------------
+# assert_deployment_image <deployment> <namespace> <container> <expected_image>
+# ---------------------------------------------------------------------------
+assert_deployment_image() {
+    local deployment="$1"
+    local namespace="$2"
+    local container="$3"
+    local expected_image="$4"
+    local actual_image
+
+    if ! actual_image="$(kubectl get deployment "$deployment" -n "$namespace" \
+        -o "jsonpath={.spec.template.spec.containers[?(@.name=='${container}')].image}" 2>/dev/null)"; then
+        echo "ERROR: failed to inspect image for deployment/${deployment} in namespace ${namespace}" >&2
+        kubectl get deployment "$deployment" -n "$namespace" -o yaml 2>/dev/null || true
+        return 1
+    fi
+
+    if [[ "$actual_image" != "$expected_image" ]]; then
+        echo "ERROR: deployment/${deployment} container ${container} uses '${actual_image}', expected '${expected_image}'" >&2
+        kubectl get deployment "$deployment" -n "$namespace" \
+            -o 'jsonpath={range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' \
+            2>/dev/null || true
+        return 1
+    fi
+
+    echo "Verified deployment/${deployment} container ${container} uses ${expected_image}"
+}
+
+# ---------------------------------------------------------------------------
+# deploy_system_postgres — deploy the DCH metadata store PostgreSQL and the
+# dch-database-config secret into $CI_SVC_NAMESPACE.
+# ---------------------------------------------------------------------------
+deploy_system_postgres() {
+    local sys_pg_url="postgresql://${CI_SYS_PG_USER}:${CI_SYS_PG_PASSWORD}@${CI_SYS_PG_HOST}:5432/${CI_SYS_PG_DATABASE}"
+
+    local -a sys_pg_args=(-n "$CI_SVC_NAMESPACE" -r "$CI_SYS_PG_HOST" -u "$CI_SYS_PG_USER" -p "$CI_SYS_PG_PASSWORD" -d "$CI_SYS_PG_DATABASE" -t "180s")
+    if [[ "$CI_SSL_ENABLED" == "true" ]]; then
+        sys_pg_args+=(--ssl)
+        sys_pg_url="${sys_pg_url}?sslmode=verify-ca"
+    fi
+    bash "$CI_REPO_ROOT/hack/install-postgresql.sh" "${sys_pg_args[@]}"
+
+    local -a sys_pg_secret_args=()
+    if [[ "$CI_SSL_ENABLED" == "true" ]]; then
+        kubectl get secret "${CI_SYS_PG_HOST}-tls" -n "$CI_SVC_NAMESPACE" \
+            -o jsonpath='{.data.ca\.crt}' | base64 -d > "${CI_TEMP_DIR}/postgresql-ca.crt"
+        sys_pg_secret_args+=(--from-file=postgresql-ca.crt="${CI_TEMP_DIR}/postgresql-ca.crt")
+    fi
+
+    local dch_secret_config_file="${CI_TEMP_DIR}/dch-secret-config.toml"
+    cat > "$dch_secret_config_file" <<EOF
+[database]
+url = "${sys_pg_url}"
+EOF
+
+    kubectl create secret generic dch-database-config -n "$CI_SVC_NAMESPACE" \
+        --from-file=secret-config.toml="$dch_secret_config_file" \
+        "${sys_pg_secret_args[@]}" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    rm -f "$dch_secret_config_file"
+}
+
+# ---------------------------------------------------------------------------
+# create_service_tls_secrets — create the REST and Flight TLS secrets and the
+# CA configmaps consumed by the controller-manager and the REST service
+# (rest-to-flight mTLS).
+# ---------------------------------------------------------------------------
+create_service_tls_secrets() {
+    local svc tls_secret_name
+    for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
+        openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout "${CI_TEMP_DIR}/${svc}-tls.key" \
+            -out "${CI_TEMP_DIR}/${svc}-tls.crt" \
+            -subj "/CN=${svc}.${CI_SVC_NAMESPACE}.svc" \
+            -addext "basicConstraints=critical,CA:FALSE" \
+            -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
+            -addext "extendedKeyUsage=serverAuth" \
+            -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
+            -days 365 2>/dev/null
+
+        tls_secret_name="${svc#dch-}-tls"
+        kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
+            --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
+            --key="${CI_TEMP_DIR}/${svc}-tls.key" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    done
+
+    kubectl create configmap dch-rest-service-ca -n "$CI_CONTROLLER_NAMESPACE" \
+        --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_REST_SERVICE_NAME}-tls.crt" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+    # Flight service CA configmap (rest-to-flight mTLS)
+    kubectl create configmap dch-flight-service-ca -n "$CI_SVC_NAMESPACE" \
+        --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_FLIGHT_SERVICE_NAME}-tls.crt" \
+        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
+    rm -f "${CI_TEMP_DIR}"/*-tls.key "${CI_TEMP_DIR}"/*-tls.crt
+}
+
+# ---------------------------------------------------------------------------
+# create_gateway_destination_rules — Istio originates TLS to the REST and
+# Flight backends. The rules live in $CI_SVC_NAMESPACE and must be recreated
+# whenever that namespace is recreated.
+# ---------------------------------------------------------------------------
+create_gateway_destination_rules() {
+    kubectl apply -n "$CI_SVC_NAMESPACE" -f - <<EOF
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ${CI_REST_SERVICE_NAME}-tls
+spec:
+  host: ${CI_REST_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
+  trafficPolicy:
+    portLevelSettings:
+      - port:
+          number: 8443
+        tls:
+          mode: SIMPLE
+          insecureSkipVerify: true
+---
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: ${CI_FLIGHT_SERVICE_NAME}-tls
+spec:
+  host: ${CI_FLIGHT_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
+  trafficPolicy:
+    portLevelSettings:
+      - port:
+          number: 8443
+        tls:
+          mode: SIMPLE
+          insecureSkipVerify: true
+EOF
+}
 
 # ---------------------------------------------------------------------------
 # dump_cluster — print diagnostics for the given namespaces.

@@ -151,35 +151,9 @@ EOF
 # DestinationRules — Istio originates TLS to backend services
 # ---------------------------------------------------------------------------
 
-kubectl apply -n "$CI_SVC_NAMESPACE" -f - <<EOF
-apiVersion: networking.istio.io/v1
-kind: DestinationRule
-metadata:
-  name: ${CI_REST_SERVICE_NAME}-tls
-spec:
-  host: ${CI_REST_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
-  trafficPolicy:
-    portLevelSettings:
-      - port:
-          number: 8443
-        tls:
-          mode: SIMPLE
-          insecureSkipVerify: true
----
-apiVersion: networking.istio.io/v1
-kind: DestinationRule
-metadata:
-  name: ${CI_FLIGHT_SERVICE_NAME}-tls
-spec:
-  host: ${CI_FLIGHT_SERVICE_NAME}.${CI_SVC_NAMESPACE}.svc.cluster.local
-  trafficPolicy:
-    portLevelSettings:
-      - port:
-          number: 8443
-        tls:
-          mode: SIMPLE
-          insecureSkipVerify: true
-EOF
+echo "=== Creating gateway DestinationRules ==="
+
+create_gateway_destination_rules
 
 rm -f "${CI_TEMP_DIR}/gateway-tls.key" "${CI_TEMP_DIR}/gateway-tls.crt"
 

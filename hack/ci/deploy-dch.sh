@@ -52,65 +52,13 @@ docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
 docker exec "${CI_KIND_CLUSTER_NAME}-control-plane" \
     ctr --namespace=k8s.io images pull "$CI_JAEGER_IMAGE"
 
-assert_deployment_image() {
-    local deployment="$1"
-    local namespace="$2"
-    local container="$3"
-    local expected_image="$4"
-    local actual_image
-
-    if ! actual_image="$(kubectl get deployment "$deployment" -n "$namespace" \
-        -o "jsonpath={.spec.template.spec.containers[?(@.name=='${container}')].image}" 2>/dev/null)"; then
-        echo "ERROR: failed to inspect image for deployment/${deployment} in namespace ${namespace}" >&2
-        kubectl get deployment "$deployment" -n "$namespace" -o yaml 2>/dev/null || true
-        return 1
-    fi
-
-    if [[ "$actual_image" != "$expected_image" ]]; then
-        echo "ERROR: deployment/${deployment} container ${container} uses '${actual_image}', expected '${expected_image}'" >&2
-        kubectl get deployment "$deployment" -n "$namespace" \
-            -o 'jsonpath={range .spec.template.spec.containers[*]}{.name}{"="}{.image}{"\n"}{end}' \
-            2>/dev/null || true
-        return 1
-    fi
-
-    echo "Verified deployment/${deployment} container ${container} uses ${expected_image}"
-}
-
 # ===================================================================
 # System PostgreSQL
 # ===================================================================
 
 echo "=== Deploying system PostgreSQL ==="
 
-sys_pg_url="postgresql://${CI_SYS_PG_USER}:${CI_SYS_PG_PASSWORD}@${CI_SYS_PG_HOST}:5432/${CI_SYS_PG_DATABASE}"
-
-sys_pg_args=(-n "$CI_SVC_NAMESPACE" -r "$CI_SYS_PG_HOST" -u "$CI_SYS_PG_USER" -p "$CI_SYS_PG_PASSWORD" -d "$CI_SYS_PG_DATABASE" -t "180s")
-if [[ "$CI_SSL_ENABLED" == "true" ]]; then
-    sys_pg_args+=(--ssl)
-    sys_pg_url="${sys_pg_url}?sslmode=verify-ca"
-fi
-bash "$CI_REPO_ROOT/hack/install-postgresql.sh" "${sys_pg_args[@]}"
-
-# dch-database-config secret
-sys_pg_secret_args=()
-if [[ "$CI_SSL_ENABLED" == "true" ]]; then
-    kubectl get secret "${CI_SYS_PG_HOST}-tls" -n "$CI_SVC_NAMESPACE" \
-        -o jsonpath='{.data.ca\.crt}' | base64 -d > "${CI_TEMP_DIR}/postgresql-ca.crt"
-    sys_pg_secret_args+=(--from-file=postgresql-ca.crt="${CI_TEMP_DIR}/postgresql-ca.crt")
-fi
-
-dch_secret_config_file="${CI_TEMP_DIR}/dch-secret-config.toml"
-cat > "$dch_secret_config_file" <<EOF
-[database]
-url = "${sys_pg_url}"
-EOF
-
-kubectl create secret generic dch-database-config -n "$CI_SVC_NAMESPACE" \
-    --from-file=secret-config.toml="$dch_secret_config_file" \
-    "${sys_pg_secret_args[@]}" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-rm -f "$dch_secret_config_file"
+deploy_system_postgres
 
 # ===================================================================
 # Service TLS secrets
@@ -118,34 +66,7 @@ rm -f "$dch_secret_config_file"
 
 echo "=== Creating service TLS secrets ==="
 
-for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
-    openssl req -x509 -nodes -newkey rsa:2048 \
-        -keyout "${CI_TEMP_DIR}/${svc}-tls.key" \
-        -out "${CI_TEMP_DIR}/${svc}-tls.crt" \
-        -subj "/CN=${svc}.${CI_SVC_NAMESPACE}.svc" \
-        -addext "basicConstraints=critical,CA:FALSE" \
-        -addext "keyUsage=critical,digitalSignature,keyEncipherment" \
-        -addext "extendedKeyUsage=serverAuth" \
-        -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
-        -days 365 2>/dev/null
-
-    tls_secret_name="${svc#dch-}-tls"
-    kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
-        --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
-        --key="${CI_TEMP_DIR}/${svc}-tls.key" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-done
-
-kubectl create configmap dch-rest-service-ca -n "$CI_CONTROLLER_NAMESPACE" \
-    --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_REST_SERVICE_NAME}-tls.crt" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-# Flight service CA configmap (rest-to-flight mTLS)
-kubectl create configmap dch-flight-service-ca -n "$CI_SVC_NAMESPACE" \
-    --from-file=service-ca.crt="${CI_TEMP_DIR}/${CI_FLIGHT_SERVICE_NAME}-tls.crt" \
-    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-
-rm -f "${CI_TEMP_DIR}"/*-tls.key "${CI_TEMP_DIR}"/*-tls.crt
+create_service_tls_secrets
 
 # ===================================================================
 # Tracing: OTEL Collector + Jaeger
