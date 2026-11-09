@@ -4,7 +4,7 @@ use commons::api::connections::CredentialsRef;
 use commons::api::connections::DataConnectionResource;
 use commons::api::storage::{MetaStore, MetaStoreReader};
 
-use crate::clients::flight::FlightDataClient;
+use crate::clients::flight::{FlightDataClient, FlightRequestContext};
 
 use crate::rest::errors::ValidationError;
 use crate::state::ApiService;
@@ -40,9 +40,10 @@ async fn set_data_connection_status(
 
 pub async fn audit_data_connection(
     api_service: &ApiService,
-    tenant_id: &str,
+    context: &FlightRequestContext,
     data_connection_id: &str,
 ) -> Result<(), ValidationError> {
+    let tenant_id = &context.tenant_id;
     let meta_store = api_service.meta_store.clone();
     let secret_store = api_service.secret_store.clone();
 
@@ -101,7 +102,7 @@ pub async fn audit_data_connection(
 
     let result = api_service
         .flight_client(flight.resource.internal_url.as_str())
-        .check_data_connection(tenant_id, &connection_id)
+        .check_data_connection(context, &connection_id)
         .await;
 
     match result {
@@ -480,13 +481,21 @@ mod tests {
         ApiService::new(meta, secrets, None, None, "test-tenant".to_string())
     }
 
+    fn request_context() -> FlightRequestContext {
+        FlightRequestContext {
+            tenant_id: "tenant".to_string(),
+            identity: Some("test-user".to_string()),
+            request_id: "test-request".to_string(),
+        }
+    }
+
     #[tokio::test]
     async fn test_connection_not_found() {
         let meta = Arc::new(MockMetaStore::not_found()) as Arc<dyn MetaStore + Send + Sync>;
         let secrets = Arc::new(MockSecretStore { secret: None }) as Arc<dyn SecretStore + Send + Sync>;
         let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection(&api_service, "tenant", "missing").await;
+        let result = audit_data_connection(&api_service, &request_context(), "missing").await;
         assert!(matches!(result, Err(ValidationError::InvalidDataConnectionId(_))));
     }
 
@@ -500,7 +509,7 @@ mod tests {
         let secrets = Arc::new(MockSecretStore { secret: None });
         let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let result = audit_data_connection(&api_service, &request_context(), "conn-1").await;
         assert!(matches!(result, Err(ValidationError::InvalidSecret)));
     }
 
@@ -516,7 +525,7 @@ mod tests {
         });
         let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let result = audit_data_connection(&api_service, &request_context(), "conn-1").await;
         assert!(matches!(result, Err(ValidationError::CredentialsCheckFailed(_))));
     }
 
@@ -532,7 +541,7 @@ mod tests {
         });
         let api_service = make_api_service(meta, secrets);
 
-        let result = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let result = audit_data_connection(&api_service, &request_context(), "conn-1").await;
         assert!(matches!(result, Err(ValidationError::ConnectionCheckFailed(_))));
     }
 
@@ -546,7 +555,7 @@ mod tests {
         let secrets = Arc::new(MockSecretStore { secret: None });
         let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let _ = audit_data_connection(&api_service, &request_context(), "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");
@@ -566,7 +575,7 @@ mod tests {
         });
         let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let _ = audit_data_connection(&api_service, &request_context(), "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");
@@ -586,7 +595,7 @@ mod tests {
         });
         let api_service = make_api_service(meta.clone(), secrets);
 
-        let _ = audit_data_connection(&api_service, "tenant", "conn-1").await;
+        let _ = audit_data_connection(&api_service, &request_context(), "conn-1").await;
 
         let status = meta.last_status.read().unwrap();
         let status = status.as_ref().expect("status should have been updated");

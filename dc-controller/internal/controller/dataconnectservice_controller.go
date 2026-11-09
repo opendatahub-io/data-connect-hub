@@ -84,6 +84,9 @@ const (
 	envOTLPInsecure    = "OTEL_EXPORTER_OTLP_INSECURE"
 	envOTLPCertificate = "OTEL_EXPORTER_OTLP_CERTIFICATE"
 
+	// envAuditEnabled carries spec.audit.enabled to the service containers.
+	envAuditEnabled = "AUDIT_ENABLED"
+
 	kindDeployment         = "Deployment"
 	kindConfigMap          = "ConfigMap"
 	kindService            = "Service"
@@ -474,6 +477,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 
 	if !reconcileTraceEnv(resources, cr.Spec.Trace, nameRestServiceContainer, nameFlightServiceContainer) {
 		logf.FromContext(ctx).V(1).Info("trace reconciliation: no service container found in rendered manifests")
+	}
+
+	if !reconcileAuditEnv(resources, cr.Spec.Audit, nameRestServiceContainer, nameFlightServiceContainer) {
+		logf.FromContext(ctx).V(1).Info("audit reconciliation: no service container found in rendered manifests")
 	}
 
 	audiences := r.resolveTokenReviewAudiences(cr, platCfg)

@@ -51,6 +51,19 @@ spec:
           spec:
             description: spec defines the desired state of DataConnectService
             properties:
+              audit:
+                description: |-
+                  audit configures audit logging for the services.
+                  Audit logging is disabled by default.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      enabled turns on audit logging (who accessed what, and whether it
+                      succeeded or failed) in the REST and Flight service logs.
+                      Sets AUDIT_ENABLED on the rest-server and flight-server containers.
+                    type: boolean
+                type: object
               flightService:
                 description: flightService configures the Flight gRPC API deployment
                   or deployments.

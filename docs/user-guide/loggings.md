@@ -23,7 +23,7 @@ Request-scoped REST and Flight logs can also include:
 {
   "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
   "span_id": "00f067aa0ba902b7",
-  "request-path": "/api/v1alpha1/data/connection-types"
+  "request_path": "/api/v1alpha1/data/connection-types"
 }
 ```
 
@@ -55,7 +55,7 @@ Filter REST logs by request path:
 | line_format `{{.message}}`
 | json
 | logger =~ "rest_service.*"
-|= `"request-path":"/api/v1alpha1/data/connection-types"`
+|= `"request_path":"/api/v1alpha1/data/connection-types"`
 ```
 
 ## Flight Queries
