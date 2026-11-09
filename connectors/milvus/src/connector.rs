@@ -20,6 +20,8 @@ const KEY_TOKEN: &str = "TOKEN";
 const KEY_DATABASE: &str = "DATABASE";
 const KEY_CA_CERT: &str = "CA_CERT";
 
+const HEADER_ALLOW_INT64: &str = "Accept-Type-Allow-Int64";
+
 #[derive(Clone)]
 struct MilvusClient {
     http: reqwest::Client,
@@ -35,7 +37,10 @@ impl MilvusClient {
         }
 
         let url = format!("{}{}", self.base_url.trim_end_matches('/'), path);
-        let mut req = self.http.post(&url);
+        // Without this header, Milvus falls back to the server setting
+        // `proxy.http.acceptTypeAllowInt64`; when that is false, Int64 values
+        // (including primary keys) are serialized as JSON strings.
+        let mut req = self.http.post(&url).header(HEADER_ALLOW_INT64, "true");
         if let Some(ref token) = self.token {
             req = req.bearer_auth(token);
         }
@@ -602,6 +607,16 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("score"), "should name the field: {msg}");
         assert!(msg.contains("300"), "should include the value: {msg}");
+    }
+
+    #[test]
+    fn test_rows_to_record_batch_int64_as_string() {
+        // Shape Milvus returns when Int64 values are serialized as strings.
+        let schema = Arc::new(Schema::new(vec![Field::new("id", ArrowDataType::Int64, true)]));
+        let rows = vec![serde_json::json!({"id": "9223372036854775807"})];
+        let batch = rows_to_record_batch(&schema, &rows).unwrap();
+        let id_arr = batch.column(0).as_any().downcast_ref::<Int64Array>().unwrap();
+        assert_eq!(id_arr.value(0), i64::MAX);
     }
 
     #[test]

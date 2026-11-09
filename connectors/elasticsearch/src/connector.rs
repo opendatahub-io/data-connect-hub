@@ -391,7 +391,9 @@ fn resolve_path<'a>(value: &'a serde_json::Value, path: &str) -> Option<&'a serd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use arrow::array::{Array, Int64Array, StringArray, TimestampMillisecondArray};
+    use arrow::array::{
+        Array, BooleanArray, Float64Array, Int32Array, Int64Array, StringArray, TimestampMillisecondArray,
+    };
     use arrow::datatypes::{Field, TimeUnit};
 
     #[test]
@@ -512,6 +514,39 @@ mod tests {
 
         let missing_arr = batch.column(1).as_any().downcast_ref::<StringArray>().unwrap();
         assert!(missing_arr.is_null(0));
+    }
+
+    #[test]
+    fn test_hits_to_record_batch_coerces_like_elasticsearch() {
+        // `_source` keeps values as written; ES coerces them at index time.
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("count", ArrowDataType::Int32, true),
+            Field::new("price", ArrowDataType::Float64, true),
+            Field::new("active", ArrowDataType::Boolean, true),
+        ]));
+        let hits = vec![
+            serde_json::json!({"_source": {"count": "300", "price": "1.5", "active": "true"}}),
+            serde_json::json!({"_source": {"count": 3.7, "price": 2, "active": ""}}),
+        ];
+        let batch = hits_to_record_batch(&schema, &hits).unwrap();
+
+        let count_arr = batch.column(0).as_any().downcast_ref::<Int32Array>().unwrap();
+        assert_eq!(count_arr.values(), &[300, 3]);
+        let price_arr = batch.column(1).as_any().downcast_ref::<Float64Array>().unwrap();
+        assert_eq!(price_arr.values(), &[1.5, 2.0]);
+        let active_arr = batch.column(2).as_any().downcast_ref::<BooleanArray>().unwrap();
+        assert!(active_arr.value(0));
+        assert!(!active_arr.value(1));
+    }
+
+    #[test]
+    fn test_hits_to_record_batch_malformed_value_propagates() {
+        // Reachable only with `ignore_malformed`, which keeps the raw value in `_source`.
+        let schema = Arc::new(Schema::new(vec![Field::new("count", ArrowDataType::Int32, true)]));
+        let hits = vec![serde_json::json!({"_source": {"count": "abc"}})];
+        let msg = hits_to_record_batch(&schema, &hits).unwrap_err().to_string();
+        assert!(msg.contains("count"), "should name the field: {msg}");
+        assert!(msg.contains("abc"), "should include the value: {msg}");
     }
 
     #[test]
