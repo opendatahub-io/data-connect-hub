@@ -70,7 +70,7 @@ rules:
   verbs: [create]
 - apiGroups: [dataconnecthub.opendatahub.io]
   resources: [data-connections, data-connection-types, data-store, flight-services]
-  verbs: [create, delete, get, list, patch, post, put, update, watch]
+  verbs: [create, delete, get, list, patch, update, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
