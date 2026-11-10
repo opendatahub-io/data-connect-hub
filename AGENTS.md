@@ -22,6 +22,8 @@ make lint           # clippy + fmt check
 make doc            # rustdoc with -D warnings
 make audit          # cargo audit + cargo deny check
 make container-all  # build all container images
+make build-samples  # build the custom-connector sample
+make lint-samples   # clippy + fmt check the custom-connector sample
 ```
 
 Run a single test:
