@@ -968,12 +968,12 @@ Value Prompt for reasoning type is:Solve the bat and ball problem
 
 # REST API
 
-The documentation fo the REST API for Data Connect Hub can be found here:  
+The documentation for the REST API for Data Connect Hub can be found here:  
 [https\://opendatahub-io.github.io/data-connect-hub/](https://opendatahub-io.github.io/data-connect-hub/)
 
 # Python SDK
 
-The documentation fo the Python SDK for Data Connect Hub can be found here:  
+The documentation for the Python SDK for Data Connect Hub can be found here:  
 [https\://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python](https://github.com/opendatahub-io/data-connect-hub/tree/main/sdk/python)
 
 # Connectors
