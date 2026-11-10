@@ -1,6 +1,8 @@
 use crate::flight::QueryContext;
+use crate::flight::audit::{AuditContext, PendingAudit, action_operation};
 use crate::flight::errors::map_connector_error;
 use crate::flight::service::DataIngestionService;
+use crate::flight::trace::{StreamAudit, TracedStream};
 use arrow::array::{Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use arrow_flight::{Action, ActionType, flight_service_server::FlightService};
@@ -14,8 +16,8 @@ use commons::api::connector::CredentialsResolver;
 use commons::api::errors::ConnectorError;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 use tonic::{Request, Response, Status};
-use tracing::info;
 use uuid::Uuid;
 
 const ACTION_GET_SUPPORTED_CONNECTORS: &str = "GetSupportedConnectors";
@@ -61,12 +63,31 @@ impl DataIngestionService {
         &self,
         request: Request<Action>,
     ) -> Result<Response<<Self as FlightService>::DoActionStream>, Status> {
-        let action = request.get_ref();
-        match action.r#type.as_str() {
+        let started = Instant::now();
+        let context = AuditContext::from_request(&request);
+        let action = request.get_ref().r#type.clone();
+        let (resource, audit_action) = action_operation(&action);
+        let mut audit = PendingAudit::new(self.audit.enabled, context.clone(), resource, audit_action, started);
+        let result = match action.as_str() {
             ACTION_CHECK_DATA_CONNECTION => self.action_check_connection(&request).await,
             ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
             ACTION_CHECK_CREDENTIALS => self.action_check_credentials(&request).await,
-            _ => Err(Status::invalid_argument(format!("Unknown action: {}", action.r#type))),
+            _ => Err(Status::invalid_argument(format!("Unknown action: {action}"))),
+        };
+        match result {
+            Ok(response) => {
+                audit.transfer_to_stream();
+                Ok(Response::new(Box::pin(TracedStream::new_audited_operation(
+                    "action",
+                    response.into_inner(),
+                    StreamAudit::new(self.audit.enabled, context, resource, audit_action, started),
+                ))
+                    as <Self as FlightService>::DoActionStream))
+            },
+            Err(status) => {
+                audit.complete(Some(&status));
+                Err(status)
+            },
         }
     }
 
@@ -147,7 +168,6 @@ impl DataIngestionService {
             .map_err(map_connector_error)?;
 
         reader.check_connection().await.map_err(map_connector_error)?;
-        info!("Connection checked successfully");
         let result = arrow_flight::Result {
             body: Vec::new().into(),
         };

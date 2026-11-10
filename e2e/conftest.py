@@ -5,6 +5,7 @@ by run-e2e.sh into .env and loaded at the top of this file.
 
     DCH_GATEWAY_ENDPOINT   Gateway host or host:port (REST + Flight)
     DCH_TENANT_ID          Tenant namespace
+    DCH_NEIGHBOR_TENANT_ID Second tenant namespace the e2e user can also access (tenancy tests)
     DCH_AUTH_TOKEN          Bearer token
     DCH_GATEWAY_AUTH_REQUIRED  Authenticate health checks at the platform Gateway
     DCH_INSECURE           Skip TLS verify           (default: false)
@@ -15,16 +16,19 @@ by run-e2e.sh into .env and loaded at the top of this file.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import subprocess
 import time
 import uuid
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypeVar
 
 import httpx
 import pytest
+
 from data_connect_hub import (
     ConnectionType,
     CredentialField,
@@ -89,8 +93,103 @@ def jaeger_query_url() -> str | None:
 
 
 @pytest.fixture(scope="session")
+def audit_enabled() -> bool:
+    return os.environ.get("DCH_AUDIT_ENABLED", "false").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture(scope="session")
+def service_namespace() -> str:
+    return os.environ.get("DCH_SERVICE_NAMESPACE", "")
+
+
+@pytest.fixture(scope="session")
+def pod_logs_since(service_namespace: str):
+    """Return parsed JSON logs for a service emitted after a UTC timestamp."""
+
+    def _read(service: str, since: datetime) -> list[dict]:
+        if not service_namespace:
+            pytest.fail("DCH_SERVICE_NAMESPACE is required to read audit logs")
+        container = {"rest-service": "rest-server", "flight-service": "flight-server"}.get(service)
+        if container is None:
+            pytest.fail(f"unsupported DCH service log source: {service}")
+        since_utc = since.astimezone(UTC).isoformat().replace("+00:00", "Z")
+        pod_result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "pods",
+                "--namespace",
+                service_namespace,
+                "--selector=app.kubernetes.io/part-of=data-connect-hub",
+                "--output=json",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        pods = [
+            item["metadata"]["name"]
+            for item in json.loads(pod_result.stdout).get("items", [])
+            if any(spec.get("name") == container for spec in item.get("spec", {}).get("containers", []))
+        ]
+        if not pods:
+            pytest.fail(f"no pod with container {container!r} found in {service_namespace!r}")
+
+        records = []
+        errors: list[str] = []
+        read_any = False
+        for pod in pods:
+            try:
+                result = subprocess.run(
+                    [
+                        "kubectl",
+                        "logs",
+                        pod,
+                        "--namespace",
+                        service_namespace,
+                        f"--container={container}",
+                        f"--since-time={since_utc}",
+                        "--tail=-1",
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+            except subprocess.CalledProcessError as error:
+                detail = (error.stderr or "").strip() or f"exit status {error.returncode}"
+                errors.append(f"{pod}: {detail}")
+                continue
+            except subprocess.TimeoutExpired as error:
+                errors.append(f"{pod}: timed out after {error.timeout} seconds")
+                continue
+            read_any = True
+            for line in result.stdout.splitlines():
+                with contextlib.suppress(json.JSONDecodeError):
+                    record = json.loads(line)
+                    if isinstance(record, dict):
+                        records.append(record)
+        if not read_any:
+            pytest.fail(f"could not read {container!r} logs from any pod in {service_namespace!r}: {'; '.join(errors)}")
+        return records
+
+    return _read
+
+
+@pytest.fixture(scope="session")
 def tenant_id() -> str:
     return os.environ.get("DCH_TENANT_ID", "e2e-test")
+
+
+@pytest.fixture(scope="session")
+def neighbor_tenant_id() -> str:
+    """A second tenant the e2e user can access, sharing the same DCH service.
+
+    Tenancy tests use it to verify that resources in ``tenant_id`` stay
+    invisible when the same caller switches ``X-Tenant-Id`` to this tenant.
+    """
+    return os.environ.get("DCH_NEIGHBOR_TENANT_ID", "")
 
 
 @pytest.fixture(scope="session")
@@ -106,6 +205,24 @@ def secret_reader_auth_token() -> str:
 @pytest.fixture(scope="session")
 def denied_auth_token() -> str:
     return os.environ.get("DCH_DENIED_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def reader_auth_token() -> str:
+    """Token for an SA bound to the predefined ``dch-read`` ClusterRole."""
+    return os.environ.get("DCH_READER_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def metadata_only_auth_token() -> str:
+    """Token for an SA with connection metadata access but no ``data-store``."""
+    return os.environ.get("DCH_METADATA_ONLY_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def data_store_only_auth_token() -> str:
+    """Token for an SA with ``data-store`` access but no connection metadata."""
+    return os.environ.get("DCH_DATA_STORE_ONLY_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
@@ -218,6 +335,30 @@ def dch_client(
 def rest_client(dch_client: DataConnectClient) -> DataConnectClient:
     """Alias of ``dch_client``, kept for readability in REST-only tests."""
     return dch_client
+
+
+@pytest.fixture(scope="session")
+def neighbor_client(
+    gateway_endpoint: str,
+    neighbor_tenant_id: str,
+    auth_token: str,
+    ca_cert: str | None,
+    insecure: bool,
+) -> DataConnectClient:
+    """Client for the e2e user acting in the neighbor tenant."""
+    if not neighbor_tenant_id:
+        pytest.skip("DCH_NEIGHBOR_TENANT_ID not set")
+    client = DataConnectClient(
+        gateway_endpoint,
+        token=auth_token,
+        tenant_id=neighbor_tenant_id,
+        ca_cert=ca_cert,
+        insecure=insecure,
+        max_retries=3,
+        rest_timeout=15.0,
+    )
+    yield client  # type: ignore[misc]
+    client.close()
 
 
 @pytest.fixture(scope="session")
@@ -337,9 +478,9 @@ def _delete_secret(namespace: str, name: str) -> None:
     )
 
 
-@pytest.fixture()
-def create_connection_type(rest_client: DataConnectClient):
-    """Factory: creates connection types, deletes them after the test."""
+@contextlib.contextmanager
+def _connection_type_factory(client: DataConnectClient):
+    """Yield a connection type factory bound to *client*; delete created types on exit."""
     created_ids: list[str] = []
 
     def _factory(
@@ -350,7 +491,7 @@ def create_connection_type(rest_client: DataConnectClient):
         credentials_fields: list[CredentialField] | None = None,
     ):
         ct = _create_connection_type_with_retry(
-            rest_client,
+            client,
             name or _unique_name("e2e-ct"),
             provider=provider,
             description=description,
@@ -359,16 +500,21 @@ def create_connection_type(rest_client: DataConnectClient):
         created_ids.append(ct.id)
         return ct
 
-    yield _factory
+    try:
+        yield _factory
+    finally:
+        for ct_id in reversed(created_ids):
+            with contextlib.suppress(Exception):
+                client.delete_connection_type(ct_id)
 
-    for ct_id in reversed(created_ids):
-        with contextlib.suppress(Exception):
-            rest_client.delete_connection_type(ct_id)
 
+@contextlib.contextmanager
+def _connection_factory(client: DataConnectClient, namespace: str):
+    """Yield a connection factory bound to *client*; delete created connections on exit.
 
-@pytest.fixture()
-def create_connection(rest_client: DataConnectClient, tenant_id: str):
-    """Factory: creates connections, deletes them after the test."""
+    *namespace* is the client's tenant namespace, where inline-credential
+    secrets are created and therefore cleaned up.
+    """
     created_ids: list[str] = []
     inline_secret_names: list[str] = []
 
@@ -382,7 +528,7 @@ def create_connection(rest_client: DataConnectClient, tenant_id: str):
         properties: dict[str, str] | None = None,
     ):
         conn = _create_connection_with_retry(
-            rest_client,
+            client,
             name or _unique_name("e2e-conn"),
             connection_type_id=connection_type_id,
             data_format=data_format,
@@ -395,14 +541,43 @@ def create_connection(rest_client: DataConnectClient, tenant_id: str):
             inline_secret_names.append(credentials.secret)
         return conn
 
-    yield _factory
+    try:
+        yield _factory
+    finally:
+        for conn_id in reversed(created_ids):
+            with contextlib.suppress(Exception):
+                client.delete_connection(conn_id)
 
-    for conn_id in reversed(created_ids):
-        with contextlib.suppress(Exception):
-            rest_client.delete_connection(conn_id)
+        for secret_name in reversed(inline_secret_names):
+            _delete_secret(namespace, secret_name)
 
-    for secret_name in reversed(inline_secret_names):
-        _delete_secret(tenant_id, secret_name)
+
+@pytest.fixture()
+def create_connection_type(rest_client: DataConnectClient):
+    """Factory: creates connection types, deletes them after the test."""
+    with _connection_type_factory(rest_client) as factory:
+        yield factory
+
+
+@pytest.fixture()
+def create_connection(rest_client: DataConnectClient, tenant_id: str):
+    """Factory: creates connections, deletes them after the test."""
+    with _connection_factory(rest_client, tenant_id) as factory:
+        yield factory
+
+
+@pytest.fixture()
+def create_neighbor_connection_type(neighbor_client: DataConnectClient):
+    """Factory: creates connection types in the neighbor tenant, deletes them after the test."""
+    with _connection_type_factory(neighbor_client) as factory:
+        yield factory
+
+
+@pytest.fixture()
+def create_neighbor_connection(neighbor_client: DataConnectClient, neighbor_tenant_id: str):
+    """Factory: creates connections in the neighbor tenant, deletes them after the test."""
+    with _connection_factory(neighbor_client, neighbor_tenant_id) as factory:
+        yield factory
 
 
 # ---------------------------------------------------------------------------
@@ -420,6 +595,7 @@ def flight_client_factory(
 ):
     """Factory that creates a raw pyarrow.flight client with headers for a given connection."""
     import pyarrow.flight as flight
+
     from data_connect_hub.client import _build_urls
 
     _, flight_url = _build_urls(gateway_endpoint)

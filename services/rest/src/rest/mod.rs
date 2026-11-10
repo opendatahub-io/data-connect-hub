@@ -1,3 +1,4 @@
+pub mod access_log;
 pub mod endpoints;
 pub mod errors;
 pub mod metrics;

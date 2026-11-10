@@ -3,6 +3,7 @@ use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
 use crate::rest::API_VERSION;
+use crate::rest::access_log::AuditConfig;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::metrics::{install_prometheus_recorder, observe_http_request, spawn_metrics_server};
@@ -191,9 +192,15 @@ async fn main() -> Result<()> {
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);
 
     let trace = TraceConfig::from_env();
+    let audit = AuditConfig::from_env();
     let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
 
     tracing::info!("Starting DataConnectorHub API service");
+    tracing::info!(
+        audit_enabled = audit.enabled,
+        "Audit logging is {}",
+        if audit.enabled { "enabled" } else { "disabled" }
+    );
     log_config_source(&args.config, "--config", true);
     log_config_source(&args.secret_config, "--secret-config", false);
     log_trace_exporter(&trace);
@@ -262,6 +269,7 @@ async fn main() -> Result<()> {
                 middleware::from_fn(observe_http_request),
             ))
             .app_data(web::Data::from(service.clone()))
+            .app_data(web::Data::new(audit))
             .app_data(json_config())
             .app_data(query_config())
             .app_data(path_config())

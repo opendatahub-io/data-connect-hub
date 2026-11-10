@@ -17,7 +17,10 @@ from data_connect_hub import DataConnectClient
 class TestFlightNeo4j:
     def test_neo4j_return_all_cities(self, dch_client: DataConnectClient, neo4j_flight_connection: str) -> None:
         """Query all City nodes."""
-        query = "MATCH (c:City) WHERE c.dch_e2e = true RETURN c.name AS name, c.country AS country, c.population AS population ORDER BY c.name"
+        query = (
+            "MATCH (c:City) WHERE c.dch_e2e = true "
+            "RETURN c.name AS name, c.country AS country, c.population AS population ORDER BY c.name"
+        )
         table = dch_client.read(query, neo4j_flight_connection)
         assert isinstance(table, pa.Table)
         assert table.num_rows == 5
@@ -27,7 +30,10 @@ class TestFlightNeo4j:
 
     def test_neo4j_filter_by_property(self, dch_client: DataConnectClient, neo4j_flight_connection: str) -> None:
         """Query with a property filter."""
-        query = "MATCH (c:City) WHERE c.country = 'Japan' AND c.dch_e2e = true RETURN c.name AS name, c.population AS population"
+        query = (
+            "MATCH (c:City) WHERE c.country = 'Japan' AND c.dch_e2e = true "
+            "RETURN c.name AS name, c.population AS population"
+        )
         table = dch_client.read(query, neo4j_flight_connection)
         assert isinstance(table, pa.Table)
         assert table.num_rows == 1
@@ -46,12 +52,15 @@ class TestFlightNeo4j:
 
     def test_neo4j_relationship_query(self, dch_client: DataConnectClient, neo4j_flight_connection: str) -> None:
         """Query across relationships."""
-        query = "MATCH (p:Person)-[:LIVES_IN]->(c:City) WHERE p.dch_e2e = true RETURN p.name AS person, c.name AS city ORDER BY p.name"
+        query = (
+            "MATCH (p:Person)-[:LIVES_IN]->(c:City) WHERE p.dch_e2e = true "
+            "RETURN p.name AS person, c.name AS city ORDER BY p.name"
+        )
         table = dch_client.read(query, neo4j_flight_connection)
         assert isinstance(table, pa.Table)
         assert table.num_rows == 3
         rows = table.to_pydict()
-        pairs = set(zip(rows["person"], rows["city"]))
+        pairs = set(zip(rows["person"], rows["city"], strict=True))
         assert ("Alice", "Tokyo") in pairs
         assert ("Bob", "London") in pairs
         assert ("Carol", "Paris") in pairs
@@ -63,9 +72,14 @@ class TestFlightNeo4j:
         assert isinstance(table, pa.Table)
         assert table.num_rows == 2
 
-    def test_neo4j_relationship_with_properties(self, dch_client: DataConnectClient, neo4j_flight_connection: str) -> None:
+    def test_neo4j_relationship_with_properties(
+        self, dch_client: DataConnectClient, neo4j_flight_connection: str
+    ) -> None:
         """Query relationship properties."""
-        query = "MATCH (a:City)-[f:FLIGHT_TO]->(b:City) WHERE a.dch_e2e = true RETURN a.name AS origin, b.name AS destination, f.distance_km AS distance_km ORDER BY f.distance_km"
+        query = (
+            "MATCH (a:City)-[f:FLIGHT_TO]->(b:City) WHERE a.dch_e2e = true "
+            "RETURN a.name AS origin, b.name AS destination, f.distance_km AS distance_km ORDER BY f.distance_km"
+        )
         table = dch_client.read(query, neo4j_flight_connection)
         assert isinstance(table, pa.Table)
         assert table.num_rows == 5

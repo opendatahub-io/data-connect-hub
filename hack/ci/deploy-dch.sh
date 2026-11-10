@@ -459,8 +459,8 @@ data:
   category: '["Container registry"]'
   fields: |
     [
-      {"type":"dropdown","name":"Access type","envVar":"ACCESS_TYPE","properties":{}},
-      {"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{}},
+      {"type":"dropdown","name":"Access type","description":"Use the push access type for uploading data, pull for accessing resources, or both.","envVar":"ACCESS_TYPE","properties":{"variant":"multi","items":[{"label":"Push secret","value":"Push"},{"label":"Pull secret","value":"Pull"}]}},
+      {"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{"deferInput":true,"extensions":[".dockerconfigjson",".json"],"helperText":"Secret details are visible to users with access to the project."}},
       {"type":"short-text","name":"Registry host","envVar":"OCI_HOST","properties":{}}
     ]
 EOF
@@ -501,7 +501,7 @@ kubectl annotate secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
 # Legacy OCI connection Secret
 kubectl create secret generic e2e-legacy-oci-conn \
     -n "$CI_TENANT_NAMESPACE" \
-    --from-literal=ACCESS_TYPE=Pull \
+    --from-literal=ACCESS_TYPE='["Pull"]' \
     --from-literal=OCI_HOST=registry.example.com \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl label secret e2e-legacy-oci-conn -n "$CI_TENANT_NAMESPACE" \

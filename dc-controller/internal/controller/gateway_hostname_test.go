@@ -21,10 +21,13 @@ import (
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -41,7 +44,8 @@ const (
 	httpsListener   = "https"
 	metricsListener = "metrics"
 
-	testDCSName = "test-dcs"
+	testDCSName      = "test-dcs"
+	testExplicitCert = "explicit certificate"
 
 	// The listener hostname a LoadBalancer-mode RHOAI gateway publishes --
 	// correct for both SNI and DNS.
@@ -59,15 +63,17 @@ const (
 
 var (
 	gatewayGVK = schema.GroupVersionKind{
-		Group:   "gateway.networking.k8s.io",
+		Group:   gatewayAPIGroup,
 		Version: "v1",
-		Kind:    "Gateway",
+		Kind:    gatewayKind,
 	}
 	routeGVK = schema.GroupVersionKind{
 		Group:   "route.openshift.io",
 		Version: "v1",
 		Kind:    "Route",
 	}
+	ingressGVK           = schema.GroupVersionKind{Group: openshiftConfigGroup, Version: "v1", Kind: "Ingress"}
+	ingressControllerGVK = schema.GroupVersionKind{Group: "operator.openshift.io", Version: "v1", Kind: "IngressController"}
 )
 
 // hostnameTestClient returns a fake client serving the unstructured Gateway
@@ -80,7 +86,7 @@ func hostnameTestClient(objects ...client.Object) client.Client {
 // lookups.
 func hostnameTestClientWith(funcs interceptor.Funcs, objects ...client.Object) client.Client {
 	scheme := runtime.NewScheme()
-	for _, gvk := range []schema.GroupVersionKind{gatewayGVK, routeGVK} {
+	for _, gvk := range []schema.GroupVersionKind{gatewayGVK, routeGVK, ingressGVK, ingressControllerGVK} {
 		scheme.AddKnownTypeWithName(gvk, &unstructured.Unstructured{})
 		scheme.AddKnownTypeWithName(gvk.GroupVersion().WithKind(gvk.Kind+"List"), &unstructured.UnstructuredList{})
 	}
@@ -318,6 +324,95 @@ func TestGatewayStatusOmitsAddressWhenUnresolvable(t *testing.T) {
 	}
 	if cr.Status.Gateway == nil {
 		t.Fatal("Status.Gateway = nil, want the gateway reference even without an address")
+	}
+}
+
+func TestCheckGRPCGatewaySupport(t *testing.T) {
+	tests := []struct {
+		name, cert, key, termination, reason string
+		http2, hasRoute                      bool
+		want                                 metav1.ConditionStatus
+	}{
+		{"inherited ingress certificate", "", "", routeTerminationReencrypt, reasonRouteCertNotConfigured, true, true, metav1.ConditionFalse},
+		{"explicit certificate and key", testExplicitCert, "explicit key", routeTerminationReencrypt, reasonRouteHTTP2Configured, true, true, metav1.ConditionTrue},
+		{"certificate without key", testExplicitCert, "", routeTerminationReencrypt, reasonRouteCertNotConfigured, true, true, metav1.ConditionFalse},
+		{"HTTP2 disabled", testExplicitCert, "explicit key", routeTerminationReencrypt, reasonHTTP2Disabled, false, true, metav1.ConditionFalse},
+		{"Route unavailable", "", "", routeTerminationReencrypt, "GatewayRouteUnavailable", true, false, metav1.ConditionUnknown},
+		{"passthrough Route", "", "", "passthrough", "GatewayRouteNotTLSTerminated", true, true, metav1.ConditionUnknown},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ingress := &unstructured.Unstructured{}
+			ingress.SetGroupVersionKind(ingressGVK)
+			ingress.SetName("cluster")
+			controller := &unstructured.Unstructured{}
+			controller.SetGroupVersionKind(ingressControllerGVK)
+			controller.SetNamespace("openshift-ingress-operator")
+			controller.SetName("default")
+			if tc.http2 {
+				controller.SetAnnotations(map[string]string{annotationHTTP2Enable: valueTrue})
+			}
+			objects := []client.Object{ingress, controller}
+			if tc.hasRoute {
+				route := testRoute(testRouteHostname)
+				route.Object["spec"].(map[string]any)["tls"] = map[string]any{
+					"termination": tc.termination, "certificate": tc.cert, "key": tc.key,
+				}
+				objects = append(objects, route)
+			}
+			r := &DataConnectServiceReconciler{Client: hostnameTestClient(objects...)}
+			cr := &dchv1alpha1.DataConnectService{}
+			cr.Status.Phase = conditionTypeReady
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "Ready")
+			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
+			r.checkGRPCGatewaySupport(context.Background(), cr, &platformConfig{GatewayName: testGatewayName, GatewayNamespace: testOpenShiftGatewayNamespace})
+
+			condition := meta.FindStatusCondition(cr.Status.Conditions, conditionTypeGRPCGatewaySupported)
+			if condition == nil || condition.Status != tc.want || condition.Reason != tc.reason {
+				t.Fatalf("GRPCGatewaySupported = %+v, want %s/%s", condition, tc.want, tc.reason)
+			}
+			if tc.want == metav1.ConditionFalse {
+				if cr.Status.Phase == conditionTypeReady || meta.FindStatusCondition(cr.Status.Conditions, conditionTypeReady).Status != metav1.ConditionFalse || meta.FindStatusCondition(cr.Status.Conditions, conditionTypeDegraded).Status != metav1.ConditionTrue {
+					t.Fatalf("failed gateway must make status Not Ready/Degraded: %+v", cr.Status)
+				}
+			} else if cr.Status.Phase != conditionTypeReady {
+				t.Errorf("unverified/supported gateway changed the phase: %q", cr.Status.Phase)
+			}
+		})
+	}
+}
+
+func TestUpdateStatusUsesFinalGatewayPhaseForRelease(t *testing.T) {
+	cr := &dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: testDCSName, Namespace: testNamespace}}
+	scheme := runtime.NewScheme()
+	if err := dchv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(&dchv1alpha1.DataConnectService{}).WithObjects(cr).Build()
+	r := &DataConnectServiceReconciler{Client: k8sClient}
+	request := types.NamespacedName{Name: cr.Name, Namespace: cr.Namespace}
+	result, err := r.updateStatus(context.Background(), ctrl.Request{NamespacedName: request},
+		&platformConfig{PlatformVersion: "3.7.0"}, conditionTypeReady, func(cr *dchv1alpha1.DataConnectService) {
+			r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "Ready")
+			r.unsupportedGRPCGateway(cr, reasonRouteCertNotConfigured, reasonRouteCertNotConfigured, "Route certificate missing")
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RequeueAfter != requeueWhenReady {
+		t.Errorf("requeue = %s, want %s", result.RequeueAfter, requeueWhenReady)
+	}
+	got := &dchv1alpha1.DataConnectService{}
+	if err := k8sClient.Get(context.Background(), request, got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Status.Phase == conditionTypeReady {
+		t.Error("platform must not be Ready when the gateway is unsupported")
+	}
+	for _, release := range got.Status.Releases {
+		if release.Name == releasePlatform && release.Version != "" {
+			t.Errorf("platform release advanced while gateway is Not Ready: %+v", release)
+		}
 	}
 }
 

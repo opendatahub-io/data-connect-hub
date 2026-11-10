@@ -123,6 +123,7 @@ class CredentialField(BaseModel):
     enum_values: list[EnumValue] | None = None
     default_value: str | None = None
     sensitive: bool = False
+    multiple: bool = False
 
 
 class ConnectionTypeStatus(BaseModel):

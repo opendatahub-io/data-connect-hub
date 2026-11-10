@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.flight as flight
 import pytest
 
 from data_connect_hub._flight import FlightClient, _encode_varint
@@ -383,6 +384,57 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-data-connection-id"] == "my-conn"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer tok"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
+
+
+def _mock_get_tables_client(table: pa.Table) -> MagicMock:
+    mock_client = MagicMock()
+    mock_client.get_flight_info.return_value.endpoints = [MagicMock()]
+    mock_client.do_get.return_value.read_all.return_value = table
+    return mock_client
+
+
+class TestGetTables:
+    # Real FlightCallOptions (wrapped only to record its arguments), so the
+    # minimum-dependency CI job catches pyarrow APIs missing from old releases.
+    def test_sends_auth_tenant_and_connection_headers(self, flight_client: FlightClient) -> None:
+        table = pa.table({"table_name": ["cities"]})
+        mock_client = _mock_get_tables_client(table)
+        with (
+            patch("data_connect_hub._flight.flight.connect", return_value=mock_client),
+            patch("data_connect_hub._flight.flight.FlightCallOptions", wraps=flight.FlightCallOptions) as call_options,
+        ):
+            result = flight_client.get_tables("my-conn")
+
+        assert result is table
+        call_options.assert_called_once()
+        assert sorted(call_options.call_args.kwargs["headers"]) == [
+            (b"authorization", b"Bearer tok"),
+            (b"x-data-connection-id", b"my-conn"),
+            (b"x-tenant-id", b"t1"),
+        ]
+        opts = mock_client.get_flight_info.call_args.args[1]
+        assert isinstance(opts, flight.FlightCallOptions)
+        assert mock_client.do_get.call_args.args[1] is opts
+        mock_client.close.assert_called_once()
+
+    @pytest.mark.parametrize("failure_point", ["get_flight_info", "do_get"])
+    def test_auth_error_refreshes_token_and_retries(self, failure_point: str) -> None:
+        tokens = iter(["old-tok", "new-tok"])
+        client = FlightClient(url="grpc://localhost:50051", tenant_id="t1", token_provider=lambda: next(tokens))
+        table = pa.table({"table_name": ["cities"]})
+        rejected = _mock_get_tables_client(table)
+        getattr(rejected, failure_point).side_effect = Exception("Unauthenticated: token expired")
+        accepted = _mock_get_tables_client(table)
+        with (
+            patch("data_connect_hub._flight.flight.connect", side_effect=[rejected, accepted]),
+            patch("data_connect_hub._flight.flight.FlightCallOptions", wraps=flight.FlightCallOptions) as call_options,
+        ):
+            result = client.get_tables("my-conn")
+
+        assert result is table
+        sent_tokens = [dict(c.kwargs["headers"])[b"authorization"] for c in call_options.call_args_list]
+        assert sent_tokens == [b"Bearer old-tok", b"Bearer new-tok"]
+        rejected.close.assert_called_once()
 
 
 class TestTokenProviderGuard:

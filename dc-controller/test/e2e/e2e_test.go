@@ -87,6 +87,24 @@ var _ = Describe("dc-controller", Ordered, func() {
 				fixture.OverrideFlightConnectorDefaults("postgres")
 			})
 		})
+
+		Context("audit logging", func() {
+			BeforeAll(func() {
+				DeferCleanup(fixture.ResetAudit)
+			})
+
+			It("is disabled by default when the CR has no audit section", func() {
+				fixture.AssertAuditDisabled()
+			})
+
+			It("sets AUDIT_ENABLED=true on both services when enabled", func() {
+				fixture.EnableAudit()
+			})
+
+			It("removes AUDIT_ENABLED when disabled again", func() {
+				fixture.DisableAudit()
+			})
+		})
 	})
 
 	Context("metrics endpoint", func() {

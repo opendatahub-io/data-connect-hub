@@ -18,6 +18,7 @@ import os
 import pyarrow as pa
 import pyarrow.flight as flight
 import pytest
+
 from data_connect_hub import DataConnectClient
 
 CHECK_DATA_CONNECTION = "CheckDataConnection"
@@ -36,11 +37,7 @@ def _flight_client_and_options(
 
 def _connection_headers(dch_client: DataConnectClient, connection_id: str) -> flight.FlightCallOptions:
     fc = dch_client._require_flight()
-    headers = [
-        *fc._call_options().headers,
-        (b"x-data-connection-id", connection_id.encode()),
-    ]
-    return flight.FlightCallOptions(headers=headers)
+    return flight.FlightCallOptions(headers=[*fc._flight_headers(), (b"x-data-connection-id", connection_id.encode())])
 
 
 def _credentials_body(dct_id: str, secret_uri: str, ca_cert: str | None = None) -> bytes:
@@ -63,9 +60,7 @@ def _credentials_body(dct_id: str, secret_uri: str, ca_cert: str | None = None) 
     return sink.getvalue().to_pybytes()
 
 
-def _get_supported_connectors(
-    client: flight.FlightClient, options: flight.FlightCallOptions
-) -> list[str]:
+def _get_supported_connectors(client: flight.FlightClient, options: flight.FlightCallOptions) -> list[str]:
     """Run the GetSupportedConnectors action and return the connector names.
 
     The action body is an Arrow IPC stream with ``name``/``description``
@@ -80,9 +75,7 @@ def _get_supported_connectors(
 
 
 class TestFlightActions:
-    def test_list_actions_includes_check_data_connection(
-        self, dch_client: DataConnectClient
-    ) -> None:
+    def test_list_actions_includes_check_data_connection(self, dch_client: DataConnectClient) -> None:
         client, options = _flight_client_and_options(dch_client)
         try:
             actions = list(client.list_actions(options))
@@ -93,9 +86,7 @@ class TestFlightActions:
         finally:
             client.close()
 
-    def test_get_supported_connectors_returns_expected_connectors(
-        self, dch_client: DataConnectClient
-    ) -> None:
+    def test_get_supported_connectors_returns_expected_connectors(self, dch_client: DataConnectClient) -> None:
         """Actually run the GetSupportedConnectors action handler.
 
         Unlike ``list_actions`` (which only declares actions), this triggers
@@ -118,9 +109,7 @@ class TestFlightActions:
         finally:
             client.close()
 
-    def test_check_data_connection_existing(
-        self, dch_client: DataConnectClient, pg_flight_connection: str
-    ) -> None:
+    def test_check_data_connection_existing(self, dch_client: DataConnectClient, pg_flight_connection: str) -> None:
         client = _flight_connect(dch_client)
         options = _connection_headers(dch_client, pg_flight_connection)
         try:
@@ -129,13 +118,9 @@ class TestFlightActions:
         finally:
             client.close()
 
-    def test_check_data_connection_nonexistent_fails(
-        self, dch_client: DataConnectClient
-    ) -> None:
+    def test_check_data_connection_nonexistent_fails(self, dch_client: DataConnectClient) -> None:
         client = _flight_connect(dch_client)
-        options = _connection_headers(
-            dch_client, "00000000-0000-0000-0000-000000000000"
-        )
+        options = _connection_headers(dch_client, "00000000-0000-0000-0000-000000000000")
         try:
             with pytest.raises((flight.FlightServerError, pa.ArrowKeyError)):
                 list(client.do_action(flight.Action(CHECK_DATA_CONNECTION, b""), options))
@@ -187,9 +172,7 @@ class TestFlightActions:
         finally:
             client.close()
 
-    def test_unknown_action_fails(
-        self, dch_client: DataConnectClient
-    ) -> None:
+    def test_unknown_action_fails(self, dch_client: DataConnectClient) -> None:
         client, options = _flight_client_and_options(dch_client)
         try:
             with pytest.raises((flight.FlightServerError, pa.ArrowInvalid)):
