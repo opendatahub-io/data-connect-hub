@@ -6,7 +6,8 @@
 # flow, and verifies the post-upgrade expectations:
 #
 #   - controller, REST, and Flight deployments run the upgraded images
-#   - the DataConnectService CR keeps its identity (same uid) and is Ready
+#   - the DataConnectService CR keeps its identity (same uid) and returns
+#     to its pre-upgrade status
 #   - connection types created before the upgrade are preserved
 #   - data created before the upgrade is still queryable afterwards
 #
@@ -172,6 +173,8 @@ seed_pre_upgrade_data() {
         -o jsonpath='{.metadata.uid}' > "${CI_TEMP_DIR}/upgrade-dchs-uid"
     kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" \
         -o jsonpath='{.metadata.creationTimestamp}' > "${CI_TEMP_DIR}/upgrade-dchs-created"
+    kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" \
+        -o jsonpath='{.status.phase}' > "${CI_TEMP_DIR}/upgrade-dchs-phase"
 }
 
 # ---------------------------------------------------------------------------
@@ -185,12 +188,14 @@ upgrade_to_current() {
     controller_tag="${CI_CONTROLLER_IMAGE##*:}"
 
     # The single-node Kind cluster cannot run both the old and new
-    # one-replica Flight deployments during a rolling update. Use Recreate
-    # so Kubernetes stops the old pod before starting the new one.
-    kubectl patch deployment "$CI_FLIGHT_SERVICE_NAME" \
-        -n "$CI_SVC_NAMESPACE" \
-        --type=merge \
-        -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+    # one-replica REST and Flight deployments during a rolling update. Use
+    # Recreate so Kubernetes stops the old pod before starting the new one.
+    for deployment in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
+        kubectl patch deployment "$deployment" \
+            -n "$CI_SVC_NAMESPACE" \
+            --type=merge \
+            -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+    done
 
     # Helm does not upgrade CRDs shipped in crds/ on helm upgrade; apply the
     # new CRD versions explicitly, as documented in the upgrade guide.
@@ -219,13 +224,6 @@ upgrade_to_current() {
         rest-server "$CI_REST_IMAGE"
     wait_deployment_image "$CI_FLIGHT_SERVICE_NAME" "$CI_SVC_NAMESPACE" \
         flight-server "$CI_FLIGHT_IMAGE"
-
-    if ! kubectl wait --for=jsonpath='{.status.phase}'=Ready "$DCS_RESOURCE" \
-        -n "$CI_SVC_NAMESPACE" --timeout=180s; then
-        kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" -o yaml || true
-        echo "ERROR: DataConnectService did not become Ready after the upgrade" >&2
-        exit 1
-    fi
 
     kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
     kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
@@ -276,6 +274,18 @@ verify_upgrade() {
         exit 1
     }
     echo "Verified DataConnectService kept its uid (${current_uid})"
+
+    echo "=== Verifying the DataConnectService status ==="
+    local current_phase expected_phase
+    expected_phase="$(<"${CI_TEMP_DIR}/upgrade-dchs-phase")"
+    if ! kubectl wait --for=jsonpath='{.status.phase}'="${expected_phase}" "$DCS_RESOURCE" \
+        -n "$CI_SVC_NAMESPACE" --timeout=120s; then
+        current_phase="$(kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" -o jsonpath='{.status.phase}')"
+        kubectl get "$DCS_RESOURCE" -n "$CI_SVC_NAMESPACE" -o yaml || true
+        echo "ERROR: DataConnectService status is '${current_phase}', expected it to return to its pre-upgrade status '${expected_phase}'" >&2
+        exit 1
+    fi
+    echo "Verified DataConnectService returned to its pre-upgrade status (${expected_phase})"
 
     echo "=== Running post-upgrade data checks ==="
     DCH_UPGRADE_PHASE=post \
