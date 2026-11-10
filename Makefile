@@ -24,6 +24,7 @@ endif
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
 	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
+	build-samples lint-samples \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -140,6 +141,19 @@ audit:
 
 check-dco:
 	@bash hack/check-dco.sh
+
+# -------------------------------------------------------------------
+# Samples
+# -------------------------------------------------------------------
+
+SAMPLES_DIR := samples/custom-connector
+
+build-samples:
+	cargo build --manifest-path $(SAMPLES_DIR)/Cargo.toml
+
+lint-samples:
+	cargo clippy --manifest-path $(SAMPLES_DIR)/Cargo.toml --all-targets -- -D warnings
+	cargo fmt --manifest-path $(SAMPLES_DIR)/Cargo.toml -- --check
 
 # -------------------------------------------------------------------
 # Python SDK
@@ -289,6 +303,10 @@ help:
 	@echo "  oc-build-flight      start flight-service build on cluster"
 	@echo "  oc-build-rest        start rest-service build on cluster"
 	@echo "  oc-build-all         build all services on cluster"
+	@echo ""
+	@echo "Samples:"
+	@echo "  build-samples       build the custom-connector sample"
+	@echo "  lint-samples        clippy + rustfmt check the custom-connector sample"
 	@echo ""
 	@echo "Python SDK:"
 	@echo "  sdk-install          install SDK in editable mode with dev deps"
