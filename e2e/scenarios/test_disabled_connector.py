@@ -6,6 +6,7 @@ import json
 import os
 
 import pytest
+
 from data_connect_hub import CredentialsRef, DataConnectClient, DCHQueryError, DCHServerError
 
 

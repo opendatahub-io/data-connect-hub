@@ -21,6 +21,9 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Typing :: Typed",
 ]
+# Lower bounds of runtime dependencies (including the flight extra) are pinned in
+# constraints-min.txt and tested by `make sdk-test-min`; update both together
+# (tests/test_constraints_min.py fails on drift).
 dependencies = [
     "certifi>=2026.10.19",
     "httpx>=0.27,<1",

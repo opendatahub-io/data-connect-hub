@@ -871,6 +871,16 @@ components:
         default_value:
           type: string
           nullable: true
+        sensitive:
+          type: boolean
+          default: false
+          description: |
+            Whether the field value is sensitive (e.g. password, token) and should be masked in the UI.
+        multiple:
+          type: boolean
+          default: false
+          description: |
+            Whether more than one value from ``enum_values`` may be selected; only meaningful when ``type`` is ``enum``. The selected values are stored in the credentials as a JSON array string for both single and multiple selection (e.g. ``["Pull"]``, ``["Push","Pull"]``), matching the ODH Dashboard format.
     DataConnectionType:
       type: object
       required:

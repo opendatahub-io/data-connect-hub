@@ -58,21 +58,8 @@ rules:
   - data-connection-types
   - data-connections
   - data-store
-  - flight-services
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - post
-  - put
-  - update
-  - watch
-- apiGroups:
-  - dataconnecthub.opendatahub.io
-  resources:
   - dataconnectservices
+  - flight-services
   verbs:
   - create
   - delete

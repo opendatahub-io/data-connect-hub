@@ -80,6 +80,14 @@ client = DataConnectClient(
 
 Use `insecure=True` only for development environments where certificate verification is intentionally disabled.
 
+### FIPS environments
+
+The SDK is installed into your Python environment, not shipped in a Data Connect Hub service image. The SDK itself does not implement cryptography, but its TLS connections depend on the cryptographic libraries in that environment. The default, REST-only installation uses `httpx` and Python's TLS stack; it is **not independently FIPS-validated**. If FIPS-validated cryptography is required, use a Python runtime configured to use a validated module in its approved mode and verify that configuration for your environment. `httpx` normally uses the `certifi` CA bundle; use `ca_cert` or an appropriate trust-store configuration if your deployment requires different trusted CAs. The trust store does not determine whether the TLS cryptographic module is FIPS-validated.
+
+**Do not use the standard PyPI `[flight]` wheels when TLS must use a FIPS-validated module.** The Flight SQL paths use native dependencies: the inspected Linux `adbc-driver-flightsql` wheels (1.12.0) contain Go's `crypto/tls`, and the inspected `pyarrow` wheels (26.0.0) contain statically linked OpenSSL in Arrow Flight. Neither delegates Flight TLS to the host's validated OpenSSL module merely because the host runs in FIPS mode. This finding covers the inspected wheel versions and platforms (CPython 3.11, Linux x86_64 and aarch64), not independently built dependencies.
+
+`insecure=True` disables peer certificate verification, **not** TLS encryption or FIPS checks; do not use it to address a FIPS limitation.
+
 ### Configure a Data Source
 
 Before querying data:
@@ -140,6 +148,7 @@ connection_type = client.create_connection_type(
             label="Connection URI",
             required=True,
             type="string",
+            sensitive=True,
         )
     ],
 )
@@ -185,17 +194,19 @@ Describes a single input field in the connection credential form.
 | `type` | `str` | Rendering hint for the form (see below) |
 | `enum_values` | `list[EnumValue] \| None` | Allowed values when `type` is `"enum"` |
 | `default_value` | `str \| None` | Optional default value |
+| `sensitive` | `bool` | Whether the value is sensitive (e.g. password, token) and should be masked in the UI. Defaults to `False` |
+| `multiple` | `bool` | Whether more than one of `enum_values` may be selected; only meaningful when `type` is `"enum"`. Defaults to `False` |
 
-`EnumValue` has two fields: `value` (the stored string) and `label` (the display string).
+`EnumValue` has two fields: `value` (the stored string) and `label` (the display string). An enum selection is stored in the credentials as a JSON array string, for both single and multiple selection (e.g. `'["Pull"]'`, `'["Push","Pull"]'`), matching the ODH Dashboard format.
 
 **`type` values:**
 
 | Value | Meaning |
 |---|---|
 | `"string"` | Free-text single-line input |
-| `"enum"` | One of `enum_values` |
+| `"enum"` | One of `enum_values`, or several when `multiple=True` |
 
-`type` is a client-side rendering hint for credential forms — the server stores it but does not validate or use it when connecting. Backend behavior is determined by the connection type's `provider` field (e.g. `"postgres"`, `"s3"`), not by `CredentialField.type`. The server's credential check is only that every field with `required=True` is present in the submitted secret. Every [built-in connection type](https://github.com/opendatahub-io/data-connect-hub/tree/main/config/connection-types) uses `"string"` for `type`; your own may use any other value (e.g. `"password"` to hint that input should be masked), and clients that do not recognize it should treat it as `"string"`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
+`type` is a client-side rendering hint for credential forms — the server stores it but does not validate or use it when connecting. Backend behavior is determined by the connection type's `provider` field (e.g. `"postgres"`, `"s3"`), not by `CredentialField.type`. The server's credential check is only that every field with `required=True` is present in the submitted secret. Every [built-in connection type](https://github.com/opendatahub-io/data-connect-hub/tree/main/config/connection-types) uses `"string"` for `type`; your own may use any other value, and clients that do not recognize it should treat it as `"string"`. To mask a value in the UI, set `sensitive=True` instead of relying on `type`. The authoritative definition is the `Field` schema in the [REST API reference](https://opendatahub-io.github.io/data-connect-hub/).
 
 ### Connection Management (REST)
 

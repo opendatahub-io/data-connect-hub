@@ -23,8 +23,8 @@ endif
 	container-run-flight container-run-rest \
 	oc-setup-flight oc-setup-rest oc-setup-all \
 	oc-build-flight oc-build-rest oc-build-all \
-	sdk-install sdk-test sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
-	build-samples lint-samples \
+	sdk-install sdk-test sdk-test-min sdk-lint sdk-fmt sdk-typecheck sdk-build sdk-package-check sdk-all \
+	e2e-venv e2e-lint e2e-fmt build-samples lint-samples \
 	setup-hooks help
 
 # -------------------------------------------------------------------
@@ -183,6 +183,21 @@ sdk-install: sdk-venv
 sdk-test: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)pytest tests/ -v --cov=data_connect_hub --cov-report=term-missing --cov-report=html:htmlcov
 
+# Separate venv so the pinned minimum versions never downgrade the dev venv.
+# Uses the oldest supported Python: the pinned pyarrow/pandas have no wheels for
+# newer ones. Override on the command line, e.g.
+# make sdk-test-min SDK_MIN_PYTHON="$(uv python find 3.11)"
+SDK_MIN_VENV   := $(PYTHON_SDK_DIR)/.venv-min
+SDK_MIN_PYTHON ?= python3.11
+
+$(SDK_MIN_VENV)/bin/python3:
+	"$(SDK_MIN_PYTHON)" -m venv "$(SDK_MIN_VENV)"
+
+sdk-test-min: $(SDK_MIN_VENV)/bin/python3
+	$(SDK_MIN_VENV)/bin/python3 -m pip install --upgrade -r "$(PYTHON_SDK_DIR)/requirements.txt"
+	$(SDK_MIN_VENV)/bin/python3 -m pip install -e "$(PYTHON_SDK_DIR)[flight,dev]" -c "$(PYTHON_SDK_DIR)/constraints-min.txt"
+	cd $(PYTHON_SDK_DIR) && "$(abspath $(SDK_MIN_VENV))/bin/pytest" tests/ -v
+
 sdk-lint: sdk-venv
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff check src/ tests/ examples/*.py
 	cd $(PYTHON_SDK_DIR) && $(SDK_BIN)ruff format --check src/ tests/ examples/*.py
@@ -202,6 +217,37 @@ sdk-package-check: sdk-build
 	"$(SDK_PYTHON)" -m twine check "$(PYTHON_SDK_DIR)"/dist/*
 
 sdk-all: sdk-lint sdk-typecheck sdk-test sdk-package-check
+
+# -------------------------------------------------------------------
+# E2E
+# -------------------------------------------------------------------
+
+E2E_DIR := e2e
+
+ifdef VIRTUAL_ENV
+  E2E_PYTHON      := python3
+  E2E_BIN         :=
+  E2E_VENV_PREREQ :=
+else
+  E2E_PYTHON      := $(E2E_DIR)/.venv/bin/python3
+  E2E_BIN         := .venv/bin/
+  E2E_VENV_PREREQ := $(E2E_PYTHON)
+endif
+
+$(E2E_DIR)/.venv/bin/python3:
+	python3 -m venv $(E2E_DIR)/.venv
+
+e2e-venv: $(E2E_VENV_PREREQ)
+
+e2e-lint: e2e-venv
+	$(E2E_PYTHON) -m pip install --quiet "ruff>=0.5"
+	cd $(E2E_DIR) && $(E2E_BIN)ruff check tests/ scenarios/ conftest.py
+	cd $(E2E_DIR) && $(E2E_BIN)ruff format --check tests/ scenarios/ conftest.py
+
+e2e-fmt: e2e-venv
+	$(E2E_PYTHON) -m pip install --quiet "ruff>=0.5"
+	cd $(E2E_DIR) && $(E2E_BIN)ruff format tests/ scenarios/ conftest.py
+	cd $(E2E_DIR) && $(E2E_BIN)ruff check --fix tests/ scenarios/ conftest.py
 
 # -------------------------------------------------------------------
 # OpenAPI docs
@@ -311,9 +357,14 @@ help:
 	@echo "Python SDK:"
 	@echo "  sdk-install          install SDK in editable mode with dev deps"
 	@echo "  sdk-test             run SDK unit tests with coverage"
+	@echo "  sdk-test-min         run SDK unit tests on minimum dependency versions"
 	@echo "  sdk-lint             lint and format-check SDK"
 	@echo "  sdk-fmt              format SDK code"
 	@echo "  sdk-typecheck        run mypy on SDK"
 	@echo "  sdk-build            build SDK wheel and source distribution"
 	@echo "  sdk-package-check    build and validate SDK distribution metadata"
 	@echo "  sdk-all              lint + typecheck + test + package check SDK"
+	@echo ""
+	@echo "E2E:"
+	@echo "  e2e-lint             lint and format-check E2E tests"
+	@echo "  e2e-fmt              format and auto-fix E2E tests"

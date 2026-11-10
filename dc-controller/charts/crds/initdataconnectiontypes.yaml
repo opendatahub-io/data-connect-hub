@@ -97,12 +97,21 @@ spec:
                       description: label is the human-readable label for the field
                       maxLength: 256
                       type: string
+                    multiple:
+                      description: |-
+                        multiple indicates whether more than one enum value may be selected;
+                        only meaningful when type is "enum"
+                      type: boolean
                     name:
                       description: name is the field identifier
                       maxLength: 253
                       type: string
                     required:
                       description: required indicates whether the field must be provided
+                      type: boolean
+                    sensitive:
+                      description: sensitive indicates whether the field value should
+                        be masked in the UI
                       type: boolean
                     type:
                       description: type is the data type of the field

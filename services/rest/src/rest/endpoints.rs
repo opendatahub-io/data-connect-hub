@@ -2,10 +2,11 @@ use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use super::errors::ValidationError;
 
+use crate::clients::flight::FlightRequestContext;
 use crate::state::audit::audit_data_connection;
 use crate::state::audit::audit_data_connection_types;
 use crate::utils::default_secret_labels;
-use actix_web::{HttpResponse, web};
+use actix_web::{HttpMessage, HttpRequest, HttpResponse, web};
 use arrow::array::{Array, AsArray};
 use commons::api::connection_types::DataConnectionType;
 use commons::api::connections::DataConnection;
@@ -23,7 +24,6 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tracing::error;
-use tracing::info;
 
 use crate::rest::CreateConnectionRequest;
 use crate::rest::DataConnectionWithCreds;
@@ -33,6 +33,21 @@ use crate::state::ApiService;
 pub struct ApiContext {
     pub tenant_id: String,
     pub identity: Option<crate::auth::RequestIdentity>,
+    pub request_id: String,
+}
+
+impl ApiContext {
+    fn flight_context(&self) -> FlightRequestContext {
+        self.flight_context_for_tenant(self.tenant_id.clone())
+    }
+
+    fn flight_context_for_tenant(&self, tenant_id: String) -> FlightRequestContext {
+        FlightRequestContext {
+            tenant_id,
+            identity: self.identity.as_ref().map(|identity| identity.username.clone()),
+            request_id: self.request_id.clone(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -71,7 +86,6 @@ pub async fn list_connections(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("list_connections: for tenant {:?}", ctx.tenant_id);
     let connections = service.meta_store.get_data_connections(ctx.tenant_id.as_str()).await?;
     Ok(HttpResponse::Ok().json(connections))
 }
@@ -81,7 +95,6 @@ pub async fn get_connection(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("get_connection");
     let connection = service
         .meta_store
         .get_data_connection(ctx.tenant_id.as_str(), id.as_str())
@@ -95,8 +108,6 @@ async fn create_connection_with_creds(
     tenant_id: String,
     dc_creds: DataConnectionWithCreds,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("create_connection_with_creds: for tenant {:?}", tenant_id);
-
     let dct = meta_store
         .get_data_connection_type(&tenant_id, &dc_creds.data_connection_type_id)
         .await?;
@@ -145,8 +156,6 @@ pub async fn create_connection(
             create_connection_with_creds(meta_store, secret_store, tenant_id, dc_creds).await
         },
         CreateConnectionRequest::DataConnectionWithSecretRef(connection) => {
-            info!("create_connection: for tenant {:?}", tenant_id);
-
             let connection_res = meta_store.create_data_connection(&tenant_id, &connection).await?;
 
             Ok(HttpResponse::Created().json(connection_res))
@@ -158,7 +167,6 @@ pub async fn list_connection_types(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("list_connection_types: for tenant {:?}", ctx.tenant_id);
     let connection_types = service
         .meta_store
         .get_data_connection_types(ctx.tenant_id.as_str())
@@ -172,7 +180,6 @@ pub async fn get_connection_type(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("get_connection_type: for tenant {:?}", ctx.tenant_id);
     let connection_type = service
         .meta_store
         .get_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
@@ -186,7 +193,6 @@ pub async fn patch_connection(
     id: web::Path<String>,
     body: web::Json<serde_json::Value>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("patch_connection: for tenant {:?}", ctx.tenant_id);
     let id = id.into_inner();
     let patch = body.into_inner();
 
@@ -210,11 +216,6 @@ pub async fn create_connection_type(
     ctx: web::ReqData<ApiContext>,
     connection_type: web::Json<DataConnectionType>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!(
-        "create_connection_type: {} from provider {} (tenant {})",
-        connection_type.name, connection_type.provider, ctx.tenant_id,
-    );
-
     connection_type
         .validate_label()
         .map_err(|e| MetaStoreError::InvalidRequest(e.to_string()))?;
@@ -238,7 +239,6 @@ pub async fn patch_connection_type(
     id: web::Path<String>,
     body: web::Json<serde_json::Value>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("patch_connection_type: for tenant {:?}", ctx.tenant_id);
     let id = id.into_inner();
     let patch = body.into_inner();
 
@@ -272,7 +272,6 @@ pub async fn delete_connection(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("delete_connection: for tenant {:?}", ctx.tenant_id);
     service
         .meta_store
         .delete_data_connection(ctx.tenant_id.as_str(), id.as_str())
@@ -285,7 +284,6 @@ pub async fn delete_connection_type(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("delete_connection_type: for tenant {:?}", ctx.tenant_id);
     service
         .meta_store
         .delete_data_connection_type(ctx.tenant_id.as_str(), id.as_str())
@@ -301,16 +299,17 @@ pub struct BinaryDownloadQuery {
 pub async fn get_binary_data(
     service: web::Data<ApiService>,
     ctx: web::ReqData<ApiContext>,
+    req: HttpRequest,
     id: web::Path<String>,
     query: web::Query<BinaryDownloadQuery>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("get_binary_data: binary download for tenant {:?}", ctx.tenant_id);
-
+    req.extensions_mut()
+        .insert(super::access_log::AuditQuery(query.path.clone()));
     let flight = flight_service_by_connection(service.as_ref(), ctx.tenant_id.as_str(), id.as_str()).await?;
 
     let batch_stream = service
         .flight_client(flight.resource.internal_url.as_str())
-        .download_binary(&ctx.tenant_id, &id, &query.path)
+        .download_binary(&ctx.flight_context(), &id, &query.path)
         .await?;
 
     let body_stream = batch_stream.map(|result| match result {
@@ -341,16 +340,15 @@ pub async fn get_binary_data(
 
 pub async fn create_flight_service(
     service: web::Data<ApiService>,
+    ctx: web::ReqData<ApiContext>,
     body: web::Json<FlightService>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("audit_connection_types");
-
     let api_service = service.as_ref();
     let mut flight = body.into_inner();
 
     let connectors = service
         .flight_client(&flight.internal_url)
-        .get_supported_connectors(&service.global_tenant_id)
+        .get_supported_connectors(&ctx.flight_context_for_tenant(service.global_tenant_id.clone()))
         .await?;
 
     let connectors_names = connectors.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
@@ -391,8 +389,6 @@ pub async fn delete_flight_service(
     parts: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     let id = parts.into_inner();
-    info!("delete_flight_service: id={id}");
-
     service.meta_store.delete_flight_service(&id).await?;
     audit_data_connection_types(service.as_ref()).await?;
 
@@ -405,15 +401,12 @@ pub async fn patch_flight_service(
     body: web::Json<serde_json::Value>,
 ) -> Result<HttpResponse, RestErrorResponse> {
     let id = id.into_inner();
-    info!("patch_flight_service:  {:?}", id);
-
     let patch = body.into_inner();
 
     let update_fn = Arc::new(move |service: FlightService| {
         let mut value = serde_json::to_value(&service)
             .map_err(|e| commons::api::errors::MetaStoreError::Serialization(e.to_string()))?;
         json_patch::merge(&mut value, &patch);
-        info!("patch_flight_service: value={:?}", value);
         let service = serde_json::from_value(value)
             .map_err(|e| commons::api::errors::MetaStoreError::Deserialization(e.to_string()))?;
         Ok(service)
@@ -431,14 +424,10 @@ pub async fn check_existent_connection(
     ctx: web::ReqData<ApiContext>,
     id: web::Path<String>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("check_existent_connection: for tenant {:?}", ctx.tenant_id);
-
     let connection_id = id.into_inner();
-    let tenant_id = ctx.tenant_id.clone();
 
-    audit_data_connection(service.as_ref(), tenant_id.as_str(), connection_id.as_str()).await?;
+    audit_data_connection(service.as_ref(), &ctx.flight_context(), connection_id.as_str()).await?;
 
-    info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -447,8 +436,6 @@ pub async fn test_credentials(
     ctx: web::ReqData<ApiContext>,
     body: web::Json<TestCredentials>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("test_credentials: for tenant {:?}", ctx.tenant_id);
-
     let dct = service
         .meta_store
         .get_data_connection_type(ctx.tenant_id.as_str(), &body.data_connection_type_id)
@@ -461,11 +448,10 @@ pub async fn test_credentials(
 
     service
         .flight_client(flight.resource.internal_url.as_str())
-        .test_credentials(&ctx.tenant_id, &body)
+        .test_credentials(&ctx.flight_context(), &body)
         .await
         .map_err(|e| ValidationError::ConnectionCheckFailed(e.message().to_string()))?;
 
-    info!("Connection checked successfully");
     Ok(HttpResponse::NoContent().finish())
 }
 
@@ -474,7 +460,6 @@ pub async fn export_connection(
     ctx: web::ReqData<ApiContext>,
     parts: web::Path<(String, String)>,
 ) -> Result<HttpResponse, RestErrorResponse> {
-    info!("export_connection: for tenant {:?}", ctx.tenant_id);
     let (id, secret_name) = parts.into_inner();
 
     let connection = service
@@ -2058,12 +2043,16 @@ mod tests {
     }
 
     fn discovery_path(path: &str) -> String {
-        format!("/api/{API_VERSION}/discovery{path}")
+        format!("/api/{API_VERSION}/data{path}")
     }
 
     fn test_discovery_app_config(cfg: &mut web::ServiceConfig) {
         cfg.service(
-            web::scope(&format!("/api/{API_VERSION}/discovery"))
+            web::scope(&format!("/api/{API_VERSION}/data"))
+                .wrap(actix_web::middleware::from_fn(
+                    crate::rest::middleware::validate_headers,
+                ))
+                .wrap(actix_web::middleware::from_fn(crate::rest::middleware::trace_request))
                 .route("/flights", web::post().to(create_flight_service))
                 .route("/flights/{id}", web::delete().to(delete_flight_service)),
         );
@@ -2080,6 +2069,7 @@ mod tests {
         .await;
         let req = test::TestRequest::post()
             .uri(&discovery_path("/flights"))
+            .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_json(serde_json::json!({
                 "name": "flight-1",
@@ -2107,6 +2097,7 @@ mod tests {
         .await;
         let req = test::TestRequest::post()
             .uri(&discovery_path("/flights"))
+            .insert_header(("x-tenant-id", "test-tenant"))
             .insert_header(("content-type", "application/json"))
             .set_payload("{}")
             .to_request();
@@ -2122,6 +2113,7 @@ mod tests {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_discovery_app_config)).await;
         let req = test::TestRequest::delete()
             .uri(&discovery_path("/flights/fs-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
 
@@ -2133,6 +2125,7 @@ mod tests {
         let app = test::init_service(App::new().app_data(test_service()).configure(test_discovery_app_config)).await;
         let req = test::TestRequest::delete()
             .uri(&discovery_path("/flights/nonexistent"))
+            .insert_header(("x-tenant-id", "test-tenant"))
             .to_request();
         let resp = test::call_service(&app, req).await;
 

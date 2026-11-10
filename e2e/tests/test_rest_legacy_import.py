@@ -17,8 +17,8 @@ from __future__ import annotations
 import time
 
 import pytest
-from data_connect_hub import DataConnectClient
 
+from data_connect_hub import DataConnectClient
 
 LEGACY_S3_CM_NAME = "s3"
 LEGACY_S3_SECRET_NAME = "e2e-legacy-s3-conn"
@@ -80,6 +80,9 @@ class TestLegacyConnectionTypeImport:
         assert "AWS_ACCESS_KEY_ID" in field_names
         assert "AWS_SECRET_ACCESS_KEY" in field_names
         assert "AWS_S3_ENDPOINT" in field_names
+        sensitive = {f.name: f.sensitive for f in ct.credentials_fields}
+        assert sensitive["AWS_SECRET_ACCESS_KEY"] is True, "type: hidden must map to sensitive"
+        assert sensitive["AWS_ACCESS_KEY_ID"] is False
 
     def test_oci_v1_configmap_imported_as_connection_type(
         self, legacy_import_enabled, rest_client: DataConnectClient
@@ -92,8 +95,23 @@ class TestLegacyConnectionTypeImport:
             "controller may not have reconciled the ConfigMap"
         )
         assert ct.provider == LEGACY_OCI_CM_NAME
-        field_names = {f.name for f in ct.credentials_fields}
-        assert "OCI_HOST" in field_names
+        fields = {f.name: f for f in ct.credentials_fields}
+        assert "OCI_HOST" in fields
+
+        access_type = fields["ACCESS_TYPE"]
+        assert access_type.type == "enum", "type: dropdown must map to enum"
+        assert access_type.multiple is True, "variant: multi must map to multiple"
+        assert access_type.enum_values is not None
+        assert [(e.value, e.label) for e in access_type.enum_values] == [
+            ("Push", "Push secret"),
+            ("Pull", "Pull secret"),
+        ]
+        assert access_type.description, "field description must be imported"
+
+        docker_config = fields[".dockerconfigjson"]
+        assert docker_config.type == "string"
+        assert docker_config.description, "description or properties.helperText must be imported"
+        assert docker_config.sensitive is True, "type: file must map to sensitive"
 
     def test_uri_v1_configmap_not_imported_as_duplicate(
         self, legacy_import_enabled, rest_client: DataConnectClient
@@ -104,8 +122,7 @@ class TestLegacyConnectionTypeImport:
         types = rest_client.list_connection_types()
         uri_v1_types = [ct for ct in types if ct.name == URI_V1_CM_NAME]
         assert len(uri_v1_types) == 0, (
-            f"uri-v1 should not be imported as a separate connection type, "
-            f"but found: {uri_v1_types}"
+            f"uri-v1 should not be imported as a separate connection type, but found: {uri_v1_types}"
         )
         uri_types = [ct for ct in types if ct.name == "URI"]
         assert len(uri_types) == 1, "built-in URI connection type should exist"
@@ -114,9 +131,7 @@ class TestLegacyConnectionTypeImport:
 class TestLegacyConnectionImport:
     """Verify that ODH connection Secrets are imported."""
 
-    def test_s3_secret_imported_as_connection(
-        self, legacy_import_enabled, rest_client: DataConnectClient
-    ) -> None:
+    def test_s3_secret_imported_as_connection(self, legacy_import_enabled, rest_client: DataConnectClient) -> None:
         """A Secret with opendatahub.io/dashboard label and
         connection-type-ref=s3 should be imported as a connection."""
         conn = _poll_connection(rest_client, "E2E Legacy S3 Connection")
@@ -127,9 +142,7 @@ class TestLegacyConnectionImport:
         assert conn.credentials_ref is not None
         assert conn.credentials_ref.secret == LEGACY_S3_SECRET_NAME
 
-    def test_oci_v1_secret_imported_as_connection(
-        self, legacy_import_enabled, rest_client: DataConnectClient
-    ) -> None:
+    def test_oci_v1_secret_imported_as_connection(self, legacy_import_enabled, rest_client: DataConnectClient) -> None:
         """A Secret with connection-type-ref=oci-v1 should be imported as a
         connection referencing the imported oci-v1 type."""
         conn = _poll_connection(rest_client, "E2E Legacy OCI Connection")

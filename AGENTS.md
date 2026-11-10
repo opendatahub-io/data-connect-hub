@@ -40,6 +40,7 @@ Python SDK:
 
 ```console
 make sdk-test       # run SDK unit tests with coverage
+make sdk-test-min   # run SDK unit tests on minimum dependency versions
 make sdk-lint       # lint and format-check SDK
 make sdk-fmt        # format SDK code
 make sdk-typecheck  # run mypy on SDK

@@ -1058,3 +1058,102 @@ var _ = Describe("reconcileTraceEnv", func() {
 		Expect(envOf(deploy, nameKubeRbacProxy)).To(BeEmpty())
 	})
 })
+
+var _ = Describe("auditEnv", func() {
+	It("returns nil when audit is unset", func() {
+		Expect(auditEnv(nil)).To(BeNil())
+	})
+
+	It("returns nil when enabled is unset", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{})).To(BeNil())
+	})
+
+	It("returns nil when disabled", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(false)})).To(BeNil())
+	})
+
+	It("returns AUDIT_ENABLED=true when enabled", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(true)})).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+		}))
+	})
+})
+
+var _ = Describe("reconcileAuditEnv", func() {
+	It("sets AUDIT_ENABLED=true on both service containers when enabled", func() {
+		deploy := newDeployment(
+			corev1.Container{Name: nameRestServiceContainer},
+			corev1.Container{Name: nameFlightServiceContainer},
+		)
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(true)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer, nameFlightServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}))
+		Expect(envOf(deploy, nameFlightServiceContainer)).To(Equal([]corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}))
+	})
+
+	It("leaves AUDIT_ENABLED unset when audit is nil", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestServiceContainer})
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, nil, nameRestServiceContainer)).To(BeFalse())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(BeEmpty())
+	})
+
+	It("leaves AUDIT_ENABLED unset when disabled", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestServiceContainer})
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(false)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeFalse())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(BeEmpty())
+	})
+
+	It("removes a stale AUDIT_ENABLED=true when toggled back to disabled", func() {
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: "warn"}
+		stale := corev1.EnvVar{Name: envAuditEnabled, Value: valueTrue}
+		deploy := newDeployment(corev1.Container{
+			Name: nameRestServiceContainer,
+			Env:  []corev1.EnvVar{existing, stale},
+		})
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(false)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{existing}))
+	})
+
+	It("updates an existing AUDIT_ENABLED rather than duplicating it", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestServiceContainer})
+		enabled := &dchv1alpha1.Audit{Enabled: ptr.To(true)}
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, enabled, nameRestServiceContainer)).To(BeTrue())
+
+		disabled := &dchv1alpha1.Audit{Enabled: ptr.To(false)}
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, disabled, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(BeEmpty())
+	})
+
+	It("preserves non-audit env vars", func() {
+		existing := []corev1.EnvVar{
+			{Name: testEnvRustLog, Value: "debug"},
+			{Name: envOTLPEndpoint, Value: testOTLPEndpoint},
+		}
+		deploy := newDeployment(corev1.Container{Name: nameRestServiceContainer, Env: existing})
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(true)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
+		env := envOf(deploy, nameRestServiceContainer)
+		Expect(env).To(ContainElements(existing))
+		Expect(env).To(ContainElement(corev1.EnvVar{Name: envAuditEnabled, Value: valueTrue}))
+		Expect(env).To(HaveLen(3))
+	})
+
+	It("only touches named containers", func() {
+		deploy := newDeployment(
+			corev1.Container{Name: nameRestServiceContainer},
+			corev1.Container{Name: nameKubeRbacProxy},
+		)
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(true)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).NotTo(BeEmpty())
+		Expect(envOf(deploy, nameKubeRbacProxy)).To(BeEmpty())
+	})
+})

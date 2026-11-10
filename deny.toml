@@ -28,6 +28,13 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "neo4rs requires paste; no neo4rs release drops it" },
     # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
     { id = "RUSTSEC-2025-0134", reason = "neo4rs and rustls-native-certs require rustls-pemfile" },
+    # libsqlite3-sys 0.30.1 bundles SQLite < 3.54.0 (CVE-2026-119375,
+    # WAL page-size mismatch leaks uninitialized page-cache memory).
+    # The fix needs libsqlite3-sys 0.39.0+, but sqlx-sqlite caps it
+    # <0.38 and no sqlx release allows 0.39 yet; the upper-bound bump
+    # (sqlx#4502) is merged but unreleased.
+    # Also ignored in .cargo/audit.toml.
+    { id = "RUSTSEC-2026-0459", reason = "sqlx-sqlite caps libsqlite3-sys <0.38; no sqlx release allows the fixed 0.39 yet" },
 ]
 
 [licenses]

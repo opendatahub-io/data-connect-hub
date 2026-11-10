@@ -101,6 +101,8 @@ impl MetaStoreReader for TestMetaStore {
                     required: true,
                     enum_values: None,
                     default_value: None,
+                    sensitive: false,
+                    multiple: false,
                 }],
                 tags: None,
             },
