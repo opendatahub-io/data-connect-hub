@@ -34,11 +34,11 @@ class TestRestAuth:
             client.list_connections()
 
     def test_denied_user_returns_403(
-        self, gateway_endpoint: str, denied_auth_token: str, tenant_id: str, insecure: bool
+        self, gateway_endpoint: str, persona_denied_auth_token: str, tenant_id: str, insecure: bool
     ) -> None:
-        if not denied_auth_token:
-            pytest.skip("DCH_DENIED_AUTH_TOKEN not set")
-        client = _make_client(gateway_endpoint, token=denied_auth_token, tenant_id=tenant_id, insecure=insecure)
+        if not persona_denied_auth_token:
+            pytest.skip("DCH_PERSONA_DENIED_AUTH_TOKEN not set")
+        client = _make_client(gateway_endpoint, token=persona_denied_auth_token, tenant_id=tenant_id, insecure=insecure)
         with pytest.raises(DCHForbiddenError):
             client.list_connections()
 

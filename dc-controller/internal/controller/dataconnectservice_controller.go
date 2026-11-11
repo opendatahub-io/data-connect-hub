@@ -201,8 +201,16 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types;flight-services,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-store,verbs=get;list;watch;create;update;patch;delete
+// DCH data plane resources are checked by SubjectAccessReview only. The
+// controller needs the union of (1) the verbs kube-rbac-proxy checks for its
+// own REST calls (create/list connection types, create connections, register
+// flight services) and (2) every rule in the ClusterRoles it installs from
+// config/base (dch-read, dch-read-write, dch-admin, rest-service-data-access),
+// because RBAC escalation prevention requires holding a permission to grant it.
+// Keep these in sync with config/base/user-roles/clusterroles.yaml.
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;create;patch;delete
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-store,verbs=get
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=flight-services,verbs=create
 // +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=services;configmaps;serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete

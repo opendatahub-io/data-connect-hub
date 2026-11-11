@@ -19,11 +19,13 @@ class TestFlightAuth:
             client.server_info()
 
     def test_denied_user_is_rejected(
-        self, gateway_endpoint: str, denied_auth_token: str, tenant_id: str, insecure: bool
+        self, gateway_endpoint: str, persona_denied_auth_token: str, tenant_id: str, insecure: bool
     ) -> None:
-        if not denied_auth_token:
-            pytest.skip("DCH_DENIED_AUTH_TOKEN not set")
-        client = DataConnectClient(gateway_endpoint, token=denied_auth_token, tenant_id=tenant_id, insecure=insecure)
+        if not persona_denied_auth_token:
+            pytest.skip("DCH_PERSONA_DENIED_AUTH_TOKEN not set")
+        client = DataConnectClient(
+            gateway_endpoint, token=persona_denied_auth_token, tenant_id=tenant_id, insecure=insecure
+        )
         with pytest.raises(DCHConnectionError, match=r"(?i)unauthorized|permission.?denied"):
             client.server_info()
 

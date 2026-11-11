@@ -57,9 +57,21 @@ rules:
   resources:
   - data-connection-types
   - data-connections
+  verbs:
+  - create
+  - delete
+  - get
+  - patch
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
   - data-store
+  verbs:
+  - get
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
   - dataconnectservices
-  - flight-services
   verbs:
   - create
   - delete
@@ -84,6 +96,12 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - flight-services
+  verbs:
+  - create
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
