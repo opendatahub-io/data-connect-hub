@@ -35,6 +35,8 @@ spec:
           - --health-probe-bind-address=:8081
           - --zap-encoder=json
         env:
+        - name: GODEBUG
+          value: fips140=only
         - name: CONTROLLER_NAMESPACE
           valueFrom:
             fieldRef:

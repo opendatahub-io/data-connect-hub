@@ -70,6 +70,8 @@ spec:
           name: health
           protocol: TCP
         env:
+        - name: GODEBUG
+          value: fips140=only
         - name: CONTROLLER_NAMESPACE
           valueFrom:
             fieldRef:
