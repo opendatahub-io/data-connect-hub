@@ -24,6 +24,7 @@ const SERVICE_NAME: &str = "dch-rest-service";
 
 mod auth;
 mod clients;
+mod fips;
 mod rest;
 #[allow(unused)]
 mod state;
@@ -200,7 +201,13 @@ async fn read_ca_cert(config: &ServerConfig) -> Result<Option<Vec<u8>>, anyhow::
 /// `init_tracing_json`, which may open an OTLP exporter over TLS, so no
 /// subscriber exists yet and anything logged here would be discarded.
 struct CryptoStatus {
+    context_fips: bool,
     provider_fips: bool,
+    cipher_suites_fips: bool,
+    kx_groups_fips: bool,
+    signature_verification_fips: bool,
+    secure_random_fips: bool,
+    key_provider_fips: bool,
     config_fips: bool,
     kx_groups: Vec<rustls::NamedGroup>,
 }
@@ -208,7 +215,13 @@ struct CryptoStatus {
 impl CryptoStatus {
     fn log(&self) {
         tracing::info!(
+            context_fips = self.context_fips,
             provider_fips = self.provider_fips,
+            cipher_suites_fips = self.cipher_suites_fips,
+            kx_groups_fips = self.kx_groups_fips,
+            signature_verification_fips = self.signature_verification_fips,
+            secure_random_fips = self.secure_random_fips,
+            key_provider_fips = self.key_provider_fips,
             config_fips = self.config_fips,
             kx_groups = ?self.kx_groups,
             "installed OpenSSL-backed rustls crypto provider"
@@ -219,6 +232,8 @@ impl CryptoStatus {
 fn install_crypto_provider() -> Result<CryptoStatus> {
     use rustls::crypto::CryptoProvider;
 
+    fips::enforce_openssl_fips()?;
+
     let mut provider = rustls_ossl::default_provider();
     provider.kx_groups.retain(|group| {
         matches!(
@@ -228,7 +243,15 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     });
 
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
+    fips::mark_cipher_suites_fips(&mut provider);
+    fips::mark_signature_verification_fips(&mut provider);
+    let cipher_suites_fips = provider.cipher_suites.iter().all(|suite| suite.fips());
+    let kx_groups_fips = provider.kx_groups.iter().all(|group| group.fips());
+    let signature_verification_fips = provider.signature_verification_algorithms.fips();
+    let secure_random_fips = provider.secure_random.fips();
+    let key_provider_fips = provider.key_provider.fips();
     let provider_fips = provider.fips();
+    let context_fips = rustls_ossl::osslctx().fips_is_enabled();
 
     CryptoProvider::install_default(provider)
         .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
@@ -250,7 +273,13 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     }
 
     Ok(CryptoStatus {
+        context_fips,
         provider_fips,
+        cipher_suites_fips,
+        kx_groups_fips,
+        signature_verification_fips,
+        secure_random_fips,
+        key_provider_fips,
         config_fips,
         kx_groups,
     })

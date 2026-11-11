@@ -26,6 +26,7 @@ pg-meta-store = { workspace = true }
 tonic = { workspace = true, features = ["tls-native-roots"] }
 rustls = { workspace = true }
 rustls-ossl = { workspace = true }
+ossl = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }
