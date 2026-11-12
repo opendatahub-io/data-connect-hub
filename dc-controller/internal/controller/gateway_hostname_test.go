@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -413,6 +414,44 @@ func TestUpdateStatusUsesFinalGatewayPhaseForRelease(t *testing.T) {
 		if release.Name == releasePlatform && release.Version != "" {
 			t.Errorf("platform release advanced while gateway is Not Ready: %+v", release)
 		}
+	}
+}
+
+func TestUpdateStatusPropagatesConflictForRateLimitedRetry(t *testing.T) {
+	cr := &dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: testDCSName, Namespace: testNamespace}}
+	scheme := runtime.NewScheme()
+	if err := dchv1alpha1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	conflict := apierrors.NewConflict(
+		schema.GroupResource{Group: dchv1alpha1.GroupVersion.Group, Resource: "dataconnectservices"},
+		cr.Name,
+		errors.New("resource version changed"),
+	)
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithStatusSubresource(&dchv1alpha1.DataConnectService{}).
+		WithObjects(cr).
+		WithInterceptorFuncs(interceptor.Funcs{
+			SubResourceUpdate: func(_ context.Context, _ client.Client, subResourceName string, _ client.Object, _ ...client.SubResourceUpdateOption) error {
+				if subResourceName != "status" {
+					t.Fatalf("subresource = %q, want status", subResourceName)
+				}
+				return conflict
+			},
+		}).
+		Build()
+	r := &DataConnectServiceReconciler{Client: k8sClient}
+
+	_, err := r.updateStatus(
+		context.Background(),
+		ctrl.Request{NamespacedName: types.NamespacedName{Name: cr.Name, Namespace: cr.Namespace}},
+		&platformConfig{},
+		conditionTypeReady,
+		func(*dchv1alpha1.DataConnectService) {},
+	)
+	if !apierrors.IsConflict(err) {
+		t.Fatalf("updateStatus() error = %v, want conflict", err)
 	}
 }
 
