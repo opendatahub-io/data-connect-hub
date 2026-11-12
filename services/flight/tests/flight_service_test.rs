@@ -54,6 +54,7 @@ impl MetaStoreReader for TestMetaStore {
             },
             resource: DataConnection {
                 name: "test-db".to_string(),
+                description: None,
                 data_connection_type_id: "sqlite".to_string(),
                 format: DataFormat::Tabular,
                 credentials_ref: CredentialsRef {

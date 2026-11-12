@@ -423,6 +423,7 @@ mod tests {
             metadata: make_metadata("conn-1"),
             resource: DataConnection {
                 name: "test".to_string(),
+                description: None,
                 data_connection_type_id: "pg".to_string(),
                 format: DataFormat::Tabular,
                 credentials_ref: creds,

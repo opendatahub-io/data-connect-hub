@@ -215,9 +215,9 @@ A connection pairs a connection type with the actual credentials (stored in a Ku
 ```python
 client.list_connections() -> list[DataConnection]
 client.get_connection(connection_id) -> DataConnection
-client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
-client.create_connection(name=..., connection_type_id=..., data_format=..., credentials=..., properties=...) -> DataConnection
-client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=..., description=...) -> DataConnection
+client.create_connection(name=..., connection_type_id=..., data_format=..., credentials=..., properties=..., description=...) -> DataConnection
+client.update_connection(connection_id, name=..., connection_type_id=..., data_format=..., credentials_ref=..., properties=..., description=...) -> DataConnection
 client.delete_connection(connection_id) -> None
 client.check_connection_readiness(connection_id) -> None
 client.test_credentials(connection_type_id, credentials) -> None
@@ -231,6 +231,7 @@ client.download_binary(connection_id, path) -> Generator[bytes, None, None]
 |---|---|---|
 | `id` | `str` | Unique identifier |
 | `name` | `str` | Display name |
+| `description` | `str \| None` | Optional free-form description; pass `description=None` to `update_connection` to clear it |
 | `data_connection_type_id` | `str` | `id` of the associated `ConnectionType` |
 | `format` | `"tabular" \| "binary"` | Data format of the source (see below) |
 | `tenant_id` | `str` | Owning namespace |

@@ -495,6 +495,7 @@ kubectl label secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
     opendatahub.io/dashboard=true --overwrite >/dev/null
 kubectl annotate secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
     openshift.io/display-name="E2E Legacy S3 Connection" \
+    openshift.io/description="E2E legacy S3 description" \
     opendatahub.io/connection-type-ref=s3 \
     --overwrite >/dev/null
 

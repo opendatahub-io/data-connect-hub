@@ -53,6 +53,7 @@ impl MetaStoreReader for S3TestMetaStore {
             },
             resource: DataConnection {
                 name: "test-s3".to_string(),
+                description: None,
                 data_connection_type_id: "s3-type".to_string(),
                 format: self.format.clone(),
                 credentials_ref: CredentialsRef {
