@@ -649,6 +649,10 @@ components:
           type: string
           description: Display name for the connection.
           example: my-postgres
+        description:
+          type: string
+          description: Optional free-form description of the connection.
+          example: Sales data warehouse
         data_connection_type_id:
           type: string
           description: References a connection type id
@@ -770,6 +774,10 @@ components:
           type: string
           description: Display name for the connection.
           example: my-postgres
+        description:
+          type: string
+          description: Optional free-form description of the connection.
+          example: Sales data warehouse
         data_connection_type_id:
           type: string
           description: References a connection type id
@@ -795,6 +803,10 @@ components:
         name:
           type: string
           description: Display name for the connection.
+        description:
+          type: string
+          nullable: true
+          description: Free-form description of the connection. Set to `null` to remove it.
         data_connection_type_id:
           type: string
           description: References a connection type id.

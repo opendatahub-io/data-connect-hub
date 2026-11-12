@@ -8,6 +8,7 @@
 --     updated_at            string    — ISO 8601 last-update timestamp
 --   resource                object    — DataConnection
 --     name                  string    — human-readable connection name
+--     description           string    — optional free-form description (omitted when unset)
 --     data_connection_type_id string  — references data_connection_types metadata.id.
 --                                       Not a database-level foreign key: the
 --                                       reference is enforced in the meta store, which

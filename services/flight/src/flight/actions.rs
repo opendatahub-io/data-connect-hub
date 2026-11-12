@@ -131,6 +131,7 @@ impl DataIngestionService {
                     },
                     resource: DataConnection {
                         name: "test".to_string(),
+                        description: None,
                         data_connection_type_id: dct_id.clone(),
                         format: DataFormat::Tabular,
                         credentials_ref: CredentialsRef::default(),

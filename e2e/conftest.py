@@ -526,6 +526,7 @@ def _connection_factory(client: DataConnectClient, namespace: str):
         credentials_ref=None,
         credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
+        description: str | None = None,
     ):
         conn = _create_connection_with_retry(
             client,
@@ -535,6 +536,7 @@ def _connection_factory(client: DataConnectClient, namespace: str):
             credentials_ref=credentials_ref,
             credentials=credentials,
             properties=properties,
+            description=description,
         )
         created_ids.append(conn.id)
         if credentials is not None:

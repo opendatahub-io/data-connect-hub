@@ -56,6 +56,18 @@ class TestDataConnection:
         assert conn.status.state == "ready"
         assert conn.status.message == "Connected"
 
+    def test_description_defaults_to_none(self) -> None:
+        conn = DataConnection.model_validate(SAMPLE_CONNECTION_WRAPPED_JSON)
+        assert conn.description is None
+
+    def test_description_from_wrapped_json(self) -> None:
+        data = {
+            **SAMPLE_CONNECTION_WRAPPED_JSON,
+            "resource": {**SAMPLE_CONNECTION_WRAPPED_JSON["resource"], "description": "Sales warehouse"},
+        }
+        conn = DataConnection.model_validate(data)
+        assert conn.description == "Sales warehouse"
+
     def test_round_trip(self) -> None:
         conn = DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
         dumped = conn.model_dump()

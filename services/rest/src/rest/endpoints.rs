@@ -599,6 +599,7 @@ mod tests {
                     },
                     resource: DataConnection {
                         name: "my-pg".to_string(),
+                        description: None,
                         data_connection_type_id: "ct-1".to_string(),
                         format: commons::api::connections::DataFormat::Tabular,
                         credentials_ref: CredentialsRef {
@@ -792,6 +793,7 @@ mod tests {
             if tenant_id == "test-tenant" && uid == "conn-1" {
                 let existing = DataConnection {
                     name: "my-pg".to_string(),
+                    description: Some("Primary PostgreSQL".to_string()),
                     data_connection_type_id: "ct-1".to_string(),
                     format: commons::api::connections::DataFormat::Tabular,
                     credentials_ref: CredentialsRef::default(),
@@ -1388,6 +1390,72 @@ mod tests {
         assert_eq!(resp.status(), 200);
         let body: serde_json::Value = test::read_body_json(resp).await;
         assert_eq!(body["resource"]["properties"]["host"], "localhost");
+    }
+
+    #[actix_web::test]
+    async fn test_create_connection_with_description() {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::post()
+            .uri(&api_path("/connections"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(serde_json::json!({
+                "name": "my-pg",
+                "description": "Sales warehouse",
+                "data_connection_type_id": "ct-1",
+                "format": "tabular",
+                "credentials_ref": {
+                    "secret": "my-pg-creds"
+                },
+                "properties": {}
+            }))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 201);
+        let body: serde_json::Value = test::read_body_json(resp).await;
+        assert_eq!(body["resource"]["description"], "Sales warehouse");
+    }
+
+    async fn patch_conn_1(patch: serde_json::Value) -> serde_json::Value {
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service())
+                .app_data(json_config())
+                .configure(test_app_config),
+        )
+        .await;
+        let req = test::TestRequest::patch()
+            .uri(&api_path("/connections/conn-1"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .set_json(patch)
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+        assert_eq!(resp.status(), 200);
+        test::read_body_json(resp).await
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_replace_description() {
+        let body = patch_conn_1(serde_json::json!({"description": "Reporting replica"})).await;
+        assert_eq!(body["resource"]["description"], "Reporting replica");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_preserves_description() {
+        let body = patch_conn_1(serde_json::json!({"name": "renamed-pg"})).await;
+        assert_eq!(body["resource"]["description"], "Primary PostgreSQL");
+    }
+
+    #[actix_web::test]
+    async fn test_patch_connection_null_clears_description() {
+        let body = patch_conn_1(serde_json::json!({"description": null})).await;
+        assert!(body["resource"].get("description").is_none());
     }
 
     #[actix_web::test]

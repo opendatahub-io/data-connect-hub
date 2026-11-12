@@ -141,6 +141,7 @@ class TestLegacyConnectionImport:
         )
         assert conn.credentials_ref is not None
         assert conn.credentials_ref.secret == LEGACY_S3_SECRET_NAME
+        assert conn.description == "E2E legacy S3 description"
 
     def test_oci_v1_secret_imported_as_connection(self, legacy_import_enabled, rest_client: DataConnectClient) -> None:
         """A Secret with connection-type-ref=oci-v1 should be imported as a

@@ -155,3 +155,27 @@ class TestRestConnection:
         )
         updated = rest_client.update_connection(conn.id, name="e2e-updated-pg")
         assert updated.name == "e2e-updated-pg"
+
+    def test_description_lifecycle(
+        self,
+        rest_client: DataConnectClient,
+        create_connection,
+        pg_connection_type,
+    ) -> None:
+        conn = create_connection(
+            name="e2e-description-pg",
+            connection_type_id=pg_connection_type.id,
+            credentials_ref=CredentialsRef(secret="e2e-ns/e2e-secret"),
+            description="Sales warehouse",
+        )
+        assert rest_client.get_connection(conn.id).description == "Sales warehouse"
+
+        renamed = rest_client.update_connection(conn.id, name="e2e-description-pg-renamed")
+        assert renamed.description == "Sales warehouse"
+
+        updated = rest_client.update_connection(conn.id, description="Reporting replica")
+        assert updated.description == "Reporting replica"
+
+        cleared = rest_client.update_connection(conn.id, description=None)
+        assert cleared.description is None
+        assert rest_client.get_connection(conn.id).description is None

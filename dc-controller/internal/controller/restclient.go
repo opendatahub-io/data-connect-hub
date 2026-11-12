@@ -112,6 +112,7 @@ type EnumValue struct {
 // Connection mirrors the Rust DataConnection JSON structure.
 type Connection struct {
 	Name                 string            `json:"name"`
+	Description          *string           `json:"description,omitempty"`
 	DataConnectionTypeID string            `json:"data_connection_type_id"`
 	Format               string            `json:"format"`
 	CredentialsRef       *CredentialsRef   `json:"credentials_ref"`

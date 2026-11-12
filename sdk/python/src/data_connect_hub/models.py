@@ -55,6 +55,7 @@ class DataConnection(_MaskProperties, BaseModel):
 
     id: str
     name: str
+    description: str | None = None
     data_connection_type_id: str
     format: DataFormat
     tenant_id: str = ""
@@ -79,6 +80,7 @@ class CreateConnectionRequest(_MaskProperties, BaseModel):
     model_config = ConfigDict(hide_input_in_errors=True)
 
     name: str
+    description: str | None = None
     data_connection_type_id: str
     format: DataFormat
     credentials_ref: CredentialsRef | None = None
@@ -94,6 +96,7 @@ class CreateConnectionRequest(_MaskProperties, BaseModel):
 
 class UpdateConnectionRequest(_MaskProperties, BaseModel):
     name: str | None = None
+    description: str | None = None
     data_connection_type_id: str | None = None
     format: DataFormat | None = None
     credentials_ref: CredentialsRef | None = None
