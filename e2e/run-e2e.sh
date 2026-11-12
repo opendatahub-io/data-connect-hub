@@ -85,12 +85,18 @@ DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
 # URI connector
 DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 
+# The e2e user runs most tests and holds dch-read-write and dch-secret-export.
 E2E_SA_NAME="dch-e2e-user"
-E2E_SECRET_READER_SA_NAME="dch-e2e-secret-reader"
-E2E_DENIED_SA_NAME="dch-e2e-denied-user"
-E2E_READER_SA_NAME="dch-e2e-reader"
-E2E_METADATA_ONLY_SA_NAME="dch-e2e-metadata-only"
-E2E_DATA_STORE_ONLY_SA_NAME="dch-e2e-data-store-only"
+# Personas: ServiceAccounts holding a fixed slice of permissions, used by the
+# auth, export, and permission tests (tests/test_rbac.py) to check what each
+# grant allows and denies. Their tokens are DCH_PERSONA_<NAME>_AUTH_TOKEN.
+PERSONA_SECRET_READER_SA_NAME="dch-e2e-persona-secret-reader"
+PERSONA_DENIED_SA_NAME="dch-e2e-persona-denied"
+PERSONA_READER_SA_NAME="dch-e2e-persona-reader"
+PERSONA_METADATA_ONLY_SA_NAME="dch-e2e-persona-metadata-only"
+PERSONA_DATA_STORE_ONLY_SA_NAME="dch-e2e-persona-data-store-only"
+PERSONA_CONNECTIONS_ONLY_SA_NAME="dch-e2e-persona-connections-only"
+PERSONA_TYPES_ONLY_SA_NAME="dch-e2e-persona-types-only"
 PG_SECRET="dch-e2e-pg-creds"
 S3_SECRET="dch-e2e-s3-creds"
 MILVUS_SECRET="dch-e2e-milvus-creds"
@@ -116,24 +122,32 @@ setup_user_accounts() {
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_DENIED_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_CONNECTIONS_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 }
 
@@ -161,27 +175,71 @@ EOF
         --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 }
 
-# setup_permission_rbac grants each permission-test persona (tests/test_rbac.py)
-# a fixed slice of the DCH data plane resources in the tenant namespace.
-setup_permission_rbac() {
-    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
-        kubectl create rolebinding dch-e2e-reader-access \
+# setup_persona_rbac grants each DCH_PERSONA_* service account the access its
+# tests need. The denied persona is deliberately left without any binding.
+# Persona Roles are named dch-e2e-persona-<persona> and RoleBindings
+# dch-e2e-persona-<persona>[-<purpose>]-rb.
+setup_persona_rbac() {
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        # The secret-reader SA holds the same API access as the e2e user
+        # plus read access to the datasource secrets, so export tests can
+        # cover both outcomes of the service-side SubjectAccessReview. The
+        # plain e2e user deliberately lacks the secret read so the
+        # service-side check denies its exports.
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-read-write \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read-write \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-export \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-secret-export \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        # The secret-read Role is created later by setup_service_rbac once
+        # the enabled datasource secrets are known; a RoleBinding may safely
+        # reference it before then.
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --role=dch-e2e-flight-secret-read \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+
+    # Permission matrix personas (tests/test_rbac.py): each holds a fixed slice
+    # of the DCH data plane resources in the tenant namespace.
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create rolebinding dch-e2e-persona-reader \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_READER_SA_NAME}" \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_READER_SA_NAME}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 
     # Connection metadata without data-store: Flight and binary download must be denied.
-    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-metadata-only "$E2E_METADATA_ONLY_SA_NAME" \
-            "data-connections, data-connection-types" "get, list"
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-persona-metadata-only "$PERSONA_METADATA_ONLY_SA_NAME" \
+            "data-connections, data-connection-types" "get"
     fi
 
     # data-store without connection metadata: Flight allowed, REST listing denied.
-    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-data-store-only "$E2E_DATA_STORE_ONLY_SA_NAME" \
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-persona-data-store-only "$PERSONA_DATA_STORE_ONLY_SA_NAME" \
             "data-store" "get"
+    fi
+
+    # data-connections without data-connection-types: connection reads, creates,
+    # readiness, and credential tests allowed; connection type access denied.
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-persona-connections-only "$PERSONA_CONNECTIONS_ONLY_SA_NAME" \
+            "data-connections" "get, create"
+    fi
+
+    # data-connection-types without data-connections: connection type reads and
+    # creates allowed; connection access, readiness, and credential tests denied.
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role dch-e2e-persona-types-only "$PERSONA_TYPES_ONLY_SA_NAME" \
+            "data-connection-types" "get, create"
     fi
 }
 
@@ -193,47 +251,18 @@ setup_user_rbac() {
         local ns
         for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
             # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
-            kubectl delete rolebinding dch-e2e-user-access -n "$ns" --ignore-not-found >/dev/null
-            kubectl create rolebinding dch-e2e-user-access \
+            kubectl delete rolebinding ${E2E_SA_NAME}-read-write -n "$ns" --ignore-not-found >/dev/null
+            kubectl create rolebinding ${E2E_SA_NAME}-read-write \
                 -n "$ns" \
                 --clusterrole=dch-read-write \
                 --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
             # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
-            kubectl create rolebinding dch-e2e-user-export-secret-rb \
+            kubectl create rolebinding ${E2E_SA_NAME}-secret-export \
                 -n "$ns" \
                 --clusterrole=dch-secret-export \
                 --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
                 --dry-run=client -o yaml | kubectl apply -f - >/dev/null
         done
-    fi
-
-    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
-        # The secret-reader SA holds the same API access as the e2e user
-        # plus read access to the datasource secrets, so export tests can
-        # cover both outcomes of the service-side SubjectAccessReview. The
-        # plain e2e user deliberately lacks the secret read so the
-        # service-side check denies its exports.
-        kubectl delete rolebinding dch-e2e-user-secret-read-rb -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl delete rolebinding dch-e2e-secret-reader-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl create rolebinding dch-e2e-secret-reader-access \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-read-write \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" >/dev/null
-        kubectl create rolebinding dch-e2e-secret-reader-export-secret-rb \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-secret-export \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        # The secret-read Role is created later by setup_service_rbac once
-        # the enabled datasource secrets are known; a RoleBinding may safely
-        # reference it before then. The old binding name is removed because
-        # it granted the plain e2e user and would keep the denial test from
-        # passing.
-        kubectl create rolebinding dch-e2e-secret-reader-secret-read-rb \
-            -n "$DCH_TENANT_ID" \
-            --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SECRET_READER_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
     fi
 }
 
@@ -550,20 +579,26 @@ generate_tokens() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_SECRET_READER_AUTH_TOKEN:-}" ]]; then
-        DCH_SECRET_READER_AUTH_TOKEN=$(kubectl create token "$E2E_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_SECRET_READER_AUTH_TOKEN=$(kubectl create token "$PERSONA_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
-        DCH_DENIED_AUTH_TOKEN=$(kubectl create token "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_DENIED_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_DENIED_AUTH_TOKEN=$(kubectl create token "$PERSONA_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_READER_AUTH_TOKEN:-}" ]]; then
-        DCH_READER_AUTH_TOKEN=$(kubectl create token "$E2E_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_READER_AUTH_TOKEN=$(kubectl create token "$PERSONA_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
-        DCH_METADATA_ONLY_AUTH_TOKEN=$(kubectl create token "$E2E_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
-        DCH_DATA_STORE_ONLY_AUTH_TOKEN=$(kubectl create token "$E2E_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_CONNECTIONS_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
 }
 
@@ -579,11 +614,13 @@ DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
 DCH_NEIGHBOR_TENANT_ID=${DCH_NEIGHBOR_TENANT_ID}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
-DCH_SECRET_READER_AUTH_TOKEN=${DCH_SECRET_READER_AUTH_TOKEN}
-DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
-DCH_READER_AUTH_TOKEN=${DCH_READER_AUTH_TOKEN}
-DCH_METADATA_ONLY_AUTH_TOKEN=${DCH_METADATA_ONLY_AUTH_TOKEN}
-DCH_DATA_STORE_ONLY_AUTH_TOKEN=${DCH_DATA_STORE_ONLY_AUTH_TOKEN}
+DCH_PERSONA_SECRET_READER_AUTH_TOKEN=${DCH_PERSONA_SECRET_READER_AUTH_TOKEN}
+DCH_PERSONA_DENIED_AUTH_TOKEN=${DCH_PERSONA_DENIED_AUTH_TOKEN}
+DCH_PERSONA_READER_AUTH_TOKEN=${DCH_PERSONA_READER_AUTH_TOKEN}
+DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN=${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN}
+DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN=${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN}
+DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN=${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN}
+DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
 DCH_AUDIT_ENABLED=${DCH_AUDIT_ENABLED:-false}
@@ -682,7 +719,7 @@ setup_user_accounts
 echo "[3/11] Service accounts ready"
 
 setup_user_rbac
-setup_permission_rbac
+setup_persona_rbac
 echo "[4/11] SA RBAC ready"
 
 # 4. Credential secrets

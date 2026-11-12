@@ -38,6 +38,7 @@ from data_connect_hub import (
 )
 
 CHECK_DATA_CONNECTION = "CheckDataConnection"
+GET_SUPPORTED_CONNECTORS = "GetSupportedConnectors"
 GLOBAL_TYPE_NAME = "Postgres"
 UNUSED_SECRET = "dch-e2e-tenancy-unused"
 
@@ -138,6 +139,18 @@ class TestTenantHeaderRequired:
         try:
             with pytest.raises(flight.FlightUnauthorizedError, match="x-tenant-id header is required"):
                 list(raw.list_actions(flight.FlightCallOptions(headers=headers)))
+        finally:
+            raw.close()
+
+    def test_flight_do_action_without_tenant_is_rejected(self, dch_client: DataConnectClient) -> None:
+        # Flight exempts DoAction without a tenant only for the REST service's
+        # own ServiceAccount (connector discovery); every other caller needs one.
+        fc = dch_client._require_flight()
+        raw = fc._flight_connect()
+        options = flight.FlightCallOptions(headers=[(k, v) for k, v in fc._flight_headers() if k != b"x-tenant-id"])
+        try:
+            with pytest.raises(flight.FlightUnauthorizedError, match="x-tenant-id header is required"):
+                list(raw.do_action(flight.Action(GET_SUPPORTED_CONNECTORS, b""), options))
         finally:
             raw.close()
 

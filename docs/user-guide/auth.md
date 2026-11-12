@@ -71,8 +71,8 @@ DCH provides these ClusterRoles:
 
 | Predefined ClusterRole | Access |
 |---|---|
-| `dch-read` | Read connections, connection types, and data-store resources. |
-| `dch-read-write` | Read and modify those DCH resources. |
+| `dch-read` | `get` on connections, connection types, and data-store resources. |
+| `dch-read-write` | `get`, `create`, `patch`, and `delete` on connections and connection types, plus `get` on data-store. |
 | `dch-admin` | Same permissions as `dch-read-write`. Reserved for future administrative operations. |
 | `dch-secret-export` | Create or overwrite Secrets in a tenant namespace (required for the export endpoint). |
 

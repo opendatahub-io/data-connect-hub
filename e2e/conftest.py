@@ -198,31 +198,43 @@ def auth_token() -> str:
 
 
 @pytest.fixture(scope="session")
-def secret_reader_auth_token() -> str:
-    return os.environ.get("DCH_SECRET_READER_AUTH_TOKEN", "")
+def persona_secret_reader_auth_token() -> str:
+    return os.environ.get("DCH_PERSONA_SECRET_READER_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
-def denied_auth_token() -> str:
-    return os.environ.get("DCH_DENIED_AUTH_TOKEN", "")
+def persona_denied_auth_token() -> str:
+    return os.environ.get("DCH_PERSONA_DENIED_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
-def reader_auth_token() -> str:
+def persona_reader_auth_token() -> str:
     """Token for an SA bound to the predefined ``dch-read`` ClusterRole."""
-    return os.environ.get("DCH_READER_AUTH_TOKEN", "")
+    return os.environ.get("DCH_PERSONA_READER_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
-def metadata_only_auth_token() -> str:
+def persona_metadata_only_auth_token() -> str:
     """Token for an SA with connection metadata access but no ``data-store``."""
-    return os.environ.get("DCH_METADATA_ONLY_AUTH_TOKEN", "")
+    return os.environ.get("DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
-def data_store_only_auth_token() -> str:
+def persona_data_store_only_auth_token() -> str:
     """Token for an SA with ``data-store`` access but no connection metadata."""
-    return os.environ.get("DCH_DATA_STORE_ONLY_AUTH_TOKEN", "")
+    return os.environ.get("DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def persona_connections_only_auth_token() -> str:
+    """Token for an SA with ``data-connections`` access but no ``data-connection-types``."""
+    return os.environ.get("DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
+def persona_types_only_auth_token() -> str:
+    """Token for an SA with ``data-connection-types`` access but no ``data-connections``."""
+    return os.environ.get("DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN", "")
 
 
 @pytest.fixture(scope="session")
@@ -365,7 +377,7 @@ def neighbor_client(
 def secret_reader_client(
     gateway_endpoint: str,
     tenant_id: str,
-    secret_reader_auth_token: str,
+    persona_secret_reader_auth_token: str,
     ca_cert: str | None,
     insecure: bool,
 ) -> DataConnectClient:
@@ -375,11 +387,11 @@ def secret_reader_client(
     plus read access to the datasource secrets, so secret-export tests can
     cover both outcomes of the service-side SubjectAccessReview.
     """
-    if not secret_reader_auth_token:
-        pytest.skip("DCH_SECRET_READER_AUTH_TOKEN not set")
+    if not persona_secret_reader_auth_token:
+        pytest.skip("DCH_PERSONA_SECRET_READER_AUTH_TOKEN not set")
     client = DataConnectClient(
         gateway_endpoint,
-        token=secret_reader_auth_token,
+        token=persona_secret_reader_auth_token,
         tenant_id=tenant_id,
         ca_cert=ca_cert,
         insecure=insecure,

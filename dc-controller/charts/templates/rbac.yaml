@@ -68,9 +68,17 @@ rules:
 - apiGroups: [authorization.k8s.io]
   resources: [subjectaccessreviews]
   verbs: [create]
+# Keep in sync with the kubebuilder:rbac markers in
+# internal/controller/dataconnectservice_controller.go.
 - apiGroups: [dataconnecthub.opendatahub.io]
-  resources: [data-connections, data-connection-types, data-store, flight-services]
-  verbs: [create, delete, get, list, patch, update, watch]
+  resources: [data-connections, data-connection-types]
+  verbs: [create, delete, get, patch]
+- apiGroups: [dataconnecthub.opendatahub.io]
+  resources: [data-store]
+  verbs: [get]
+- apiGroups: [dataconnecthub.opendatahub.io]
+  resources: [flight-services]
+  verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

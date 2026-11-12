@@ -2,6 +2,11 @@
 # (REST via kube-rbac-proxy, Flight via in-service SubjectAccessReview).
 # Bind them per tenant with a RoleBinding in the tenant namespace.
 # See docs/user-guide/auth.md for the operation-to-role mapping.
+#
+# Only verbs that an endpoint actually checks are granted: kube-rbac-proxy maps
+# GET/POST/PATCH/DELETE to get/create/patch/delete (no route uses PUT on these
+# resources), list endpoints are checked as `get`, and Flight only checks `get`
+# on `data-store`.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -9,7 +14,7 @@ metadata:
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
     resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -17,8 +22,11 @@ metadata:
   name: read-write
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    resources: ["data-connections", "data-connection-types"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-store"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -26,8 +34,11 @@ metadata:
   name: admin
 rules:
   - apiGroups: ["dataconnecthub.opendatahub.io"]
-    resources: ["data-connections", "data-connection-types", "data-store"]
-    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    resources: ["data-connections", "data-connection-types"]
+    verbs: ["get", "create", "patch", "delete"]
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: ["data-store"]
+    verbs: ["get"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
