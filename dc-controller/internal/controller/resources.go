@@ -480,7 +480,9 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 	return nil
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) error {
+// setConfigMapGlobalTenants renders the global connection type tenants into
+// every service ConfigMap that declares tenant-ids, replacing the base value.
+func setConfigMapGlobalTenants(resources []*unstructured.Unstructured, tenants []string) error {
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
@@ -493,10 +495,13 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 			continue
 		}
 		globalConnectionTypes, ok := config["global-connection-types"].(map[string]any)
-		if !ok || globalConnectionTypes["tenant-id"] != "opendatahub" {
+		if !ok {
 			continue
 		}
-		globalConnectionTypes["tenant-id"] = namespace
+		if _, ok := globalConnectionTypes["tenant-ids"]; !ok {
+			continue
+		}
+		globalConnectionTypes["tenant-ids"] = tenants
 		if err := setConfigMapTOML(obj, config, data); err != nil {
 			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
 		}

@@ -22,6 +22,10 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.globalNamespaces
+      name: Global Namespaces
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -5047,6 +5051,16 @@ spec:
                 - name
                 - namespace
                 type: object
+              globalNamespaces:
+                description: |-
+                  globalNamespaces lists the namespaces labeled
+                  opendatahub.io/global-data-registry-project whose connection types the
+                  services currently share with every tenant. Empty when no namespace is
+                  labeled or the platform Auth API is not installed.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               httpRoute:
                 description: httpRoute is the name of the HTTPRoute resource created
                   for this service

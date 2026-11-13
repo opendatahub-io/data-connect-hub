@@ -38,12 +38,8 @@ pub struct ApiContext {
 
 impl ApiContext {
     fn flight_context(&self) -> FlightRequestContext {
-        self.flight_context_for_tenant(self.tenant_id.clone())
-    }
-
-    fn flight_context_for_tenant(&self, tenant_id: String) -> FlightRequestContext {
         FlightRequestContext {
-            tenant_id,
+            tenant_id: self.tenant_id.clone(),
             identity: self.identity.as_ref().map(|identity| identity.username.clone()),
             request_id: self.request_id.clone(),
         }
@@ -348,7 +344,7 @@ pub async fn create_flight_service(
 
     let connectors = service
         .flight_client(&flight.internal_url)
-        .get_supported_connectors(&ctx.flight_context_for_tenant(service.global_tenant_id.clone()))
+        .get_supported_connectors(&ctx.flight_context())
         .await?;
 
     let connectors_names = connectors.iter().map(|c| c.name.clone()).collect::<Vec<_>>();
@@ -1035,7 +1031,6 @@ mod tests {
             Arc::new(StubSecretStore::new()),
             None,
             None,
-            "test-tenant".to_string(),
         ))
     }
 
@@ -1081,14 +1076,8 @@ mod tests {
 
     fn test_service_with_authorizer(authorizer: Arc<StubAuthorizer>) -> web::Data<ApiService> {
         web::Data::new(
-            ApiService::new(
-                Arc::new(StubMetaStore),
-                Arc::new(StubSecretStore::new()),
-                None,
-                None,
-                "test-tenant".to_string(),
-            )
-            .with_authorizer(authorizer),
+            ApiService::new(Arc::new(StubMetaStore), Arc::new(StubSecretStore::new()), None, None)
+                .with_authorizer(authorizer),
         )
     }
 

@@ -35,6 +35,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -63,15 +64,20 @@ var _ = Describe("DataConnectService Controller", func() {
 
 	manifestsPath := filepath.Join("..", "..", "..", "config")
 
+	// globalNamespaceConfig is the feature configuration reconciler() uses;
+	// specs that enable it reset it afterwards.
+	var globalNamespaceConfig GlobalNamespaceConfig
+
 	reconciler := func() *DataConnectServiceReconciler {
 		return &DataConnectServiceReconciler{
-			Client:              k8sClient,
-			Scheme:              k8sClient.Scheme(),
-			ManifestsPath:       manifestsPath,
-			RestImage:           testRestImage,
-			FlightImage:         testFlightImage,
-			KubeRbacProxyImage:  "quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable",
-			ControllerNamespace: controllerNamespace,
+			Client:                k8sClient,
+			Scheme:                k8sClient.Scheme(),
+			ManifestsPath:         manifestsPath,
+			RestImage:             testRestImage,
+			FlightImage:           testFlightImage,
+			KubeRbacProxyImage:    "quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable",
+			ControllerNamespace:   controllerNamespace,
+			GlobalNamespaceConfig: globalNamespaceConfig,
 		}
 	}
 
@@ -374,6 +380,73 @@ var _ = Describe("DataConnectService Controller", func() {
 			ciphers, ok := tls["ciphers"].([]any)
 			Expect(ok).To(BeTrue(), "expected projected cipher suites in flight config")
 			Expect(ciphers).To(ContainElement("TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"))
+		})
+	})
+
+	Context("When global namespaces are labeled", func() {
+		const (
+			labelKey = "test.dataconnecthub.opendatahub.io/status-global"
+			globalNS = "dcs-status-global"
+		)
+
+		setLabel := func(labeled bool) {
+			ns := &corev1.Namespace{}
+			ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: globalNS}, ns)).To(Succeed())
+			if ns.Labels == nil {
+				ns.Labels = map[string]string{}
+			}
+			if labeled {
+				ns.Labels[labelKey] = globalNS
+			} else {
+				delete(ns.Labels, labelKey)
+			}
+			ExpectWithOffset(1, k8sClient.Update(ctx, ns)).To(Succeed())
+		}
+
+		restTenantIDs := func() []any {
+			cm := &corev1.ConfigMap{}
+			ExpectWithOffset(1, k8sClient.Get(ctx, types.NamespacedName{Name: np + nameRestService + "-config", Namespace: targetNamespace}, cm)).To(Succeed())
+			var config map[string]any
+			ExpectWithOffset(1, toml.Unmarshal([]byte(cm.Data["config.toml"]), &config)).To(Succeed())
+			section, ok := config["global-connection-types"].(map[string]any)
+			ExpectWithOffset(1, ok).To(BeTrue(), "expected [global-connection-types] section in REST config")
+			ids, ok := section["tenant-ids"].([]any)
+			ExpectWithOffset(1, ok).To(BeTrue(), "expected tenant-ids list in REST config")
+			return ids
+		}
+
+		BeforeEach(func() {
+			globalNamespaceConfig = GlobalNamespaceConfig{Enabled: true, LabelKey: labelKey}
+			ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: globalNS}}
+			Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, ns))).To(Succeed())
+			setLabel(true)
+			createDatabaseSecret()
+			Expect(k8sClient.Create(ctx, &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+			})).To(Succeed())
+		})
+
+		AfterEach(func() {
+			setLabel(false)
+			globalNamespaceConfig = GlobalNamespaceConfig{}
+			cleanupOperatorResources()
+			deleteCR()
+		})
+
+		It("should record the global namespaces rendered into the service config", func() {
+			reconcileUntilReady()
+
+			cr := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.GlobalNamespaces).To(Equal([]string{globalNS}))
+			Expect(restTenantIDs()).To(Equal([]any{targetNamespace, globalNS}))
+
+			setLabel(false)
+			reconcileUntilReady()
+
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(cr.Status.GlobalNamespaces).To(BeEmpty())
+			Expect(restTenantIDs()).To(Equal([]any{targetNamespace}))
 		})
 	})
 

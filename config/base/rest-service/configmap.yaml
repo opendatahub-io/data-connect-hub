@@ -13,7 +13,7 @@ data:
     sa-token-file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
 
     [global-connection-types]
-    tenant-id = "opendatahub"
+    tenant-ids = ["opendatahub"]
 
     [metrics]
     enabled = true

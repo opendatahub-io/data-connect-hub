@@ -44,6 +44,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 	kustypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/yaml"
 
@@ -121,6 +122,7 @@ const (
 	labelManagedBy       = "dataconnecthub.opendatahub.io/managed-by"
 	managedByDCHService  = "dataconnectservice"
 	labelAppName         = "app.kubernetes.io/name"
+	labelPartOf          = "app.kubernetes.io/part-of"
 	annotationSpecHash   = "dataconnecthub/spec-hash"
 	annotationConfigHash = "dataconnecthub/config-hash"
 
@@ -133,13 +135,14 @@ var BuildVersion = "dev"
 // DataConnectServiceReconciler reconciles a DataConnectService object
 type DataConnectServiceReconciler struct {
 	client.Client
-	Scheme              *runtime.Scheme
-	ManifestsPath       string
-	RestImage           string
-	FlightImage         string
-	KubeRbacProxyImage  string
-	ControllerNamespace string
-	FlightServiceClient FlightServiceClient
+	Scheme                *runtime.Scheme
+	ManifestsPath         string
+	RestImage             string
+	FlightImage           string
+	KubeRbacProxyImage    string
+	ControllerNamespace   string
+	FlightServiceClient   FlightServiceClient
+	GlobalNamespaceConfig GlobalNamespaceConfig
 }
 
 type platformConfig struct {
@@ -277,7 +280,8 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Render and apply all manifests (services + gateway)
-	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
+	globalNamespaces, err := r.reconcileManifests(ctx, &cr, &platCfg)
+	if err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
@@ -289,6 +293,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			})
 		}
 	}
+	// The services now share the connection types of globalNamespaces; every
+	// status update below records them. Error paths above keep the last
+	// recorded value.
 
 	// Phase 3: Ensure InitDataConnectionType CRs exist in the DCS namespace
 	r.ensureInitDataConnectionTypes(ctx, &cr)
@@ -298,6 +305,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err != nil {
 		log.Error(err, "failed to check deployment readiness")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setGlobalNamespaces(cr, globalNamespaces)
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "DeploymentCheckError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -308,6 +316,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		log.Info(msg)
 		var gatewayErr error
 		result, err := r.updateStatus(ctx, req, &platCfg, "Progressing", func(cr *dchv1alpha1.DataConnectService) {
+			r.setGlobalNamespaces(cr, globalNamespaces)
 			gatewayErr = r.gatewayStatus(ctx, cr, &platCfg)
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "WaitingForDeployments", msg)
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -328,6 +337,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if err := r.registerFlightService(ctx, &cr); err != nil {
 		log.Error(err, "failed to register flight service")
 		return r.updateStatus(ctx, req, &platCfg, "Error", func(cr *dchv1alpha1.DataConnectService) {
+			r.setGlobalNamespaces(cr, globalNamespaces)
 			r.setCondition(cr, conditionTypeDegraded, metav1.ConditionTrue, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeReady, metav1.ConditionFalse, "FlightRegistrationError", err.Error())
 			r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -337,6 +347,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	// All ready
 	var gatewayErr error
 	result, err := r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
+		r.setGlobalNamespaces(cr, globalNamespaces)
 		gatewayErr = r.gatewayStatus(ctx, cr, &platCfg)
 		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
@@ -420,11 +431,15 @@ func (r *DataConnectServiceReconciler) buildReleases(
 	return append(releases, platformRelease)
 }
 
+// reconcileManifests renders and applies the service manifests. It returns the
+// global namespaces rendered into the service configuration. They are also
+// returned with an error from the final apply, because the caller tolerates a
+// missing Gateway API and still records them in that case.
 func (r *DataConnectServiceReconciler) reconcileManifests(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
-) error {
+) ([]string, error) {
 	manifestPath := filepath.Join(r.ManifestsPath, "base")
 	if r.openShiftMonitoringAvailable(ctx) {
 		manifestPath = filepath.Join(r.ManifestsPath, "overlays", "openshift")
@@ -456,7 +471,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	}
 	resources, err := renderKustomization(r.ManifestsPath, manifestPath, patches, paramsEnvOverrides)
 	if err != nil {
-		return fmt.Errorf("rendering manifests: %w", err)
+		return nil, fmt.Errorf("rendering manifests: %w", err)
 	}
 
 	resources = renderFlightService(resources, cr.Name)
@@ -465,27 +480,31 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	tlsProfile, err := platformtls.LoadWithAdherence(ctx, r.Client)
 	if err != nil {
 		logf.FromContext(ctx).Error(err, "failed to resolve cluster TLS profile for kube-rbac-proxy")
-		return fmt.Errorf("resolving cluster TLS profile for kube-rbac-proxy: %w", err)
+		return nil, fmt.Errorf("resolving cluster TLS profile for kube-rbac-proxy: %w", err)
 	}
 	if err := setKubeRbacProxyTLSOpts(ctx, resources, tlsProfile.Spec); err != nil {
-		return fmt.Errorf("projecting TLS profile to kube-rbac-proxy: %w", err)
+		return nil, fmt.Errorf("projecting TLS profile to kube-rbac-proxy: %w", err)
 	}
 
-	if err := setConfigMapGlobalNamespace(resources, cr.Namespace); err != nil {
-		return fmt.Errorf("setting config namespace: %w", err)
+	globalNamespaces, err := labeledGlobalNamespaces(ctx, r, r.GlobalNamespaceConfig)
+	if err != nil {
+		return nil, fmt.Errorf("resolving global connection type tenants: %w", err)
+	}
+	if err := setConfigMapGlobalTenants(resources, globalTenants(cr.Namespace, globalNamespaces)); err != nil {
+		return nil, fmt.Errorf("setting config namespace: %w", err)
 	}
 	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting discovery service account: %w", err)
+		return nil, fmt.Errorf("setting discovery service account: %w", err)
 	}
 	if err := setConfigMapFlightServiceAddress(resources, cr.Namespace, flightInstanceName); err != nil {
-		return fmt.Errorf("setting flight service address: %w", err)
+		return nil, fmt.Errorf("setting flight service address: %w", err)
 	}
 	if err := setConfigMapFlightTLSProfile(ctx, resources, flightInstanceName, tlsProfile.Spec); err != nil {
-		return fmt.Errorf("setting flight TLS profile: %w", err)
+		return nil, fmt.Errorf("setting flight TLS profile: %w", err)
 	}
 	if cr.Spec.FlightService != nil {
 		if err := setConfigMapFlightConnectorSettings(resources, flightInstanceName, &cr.Spec.FlightService.ServiceOverrides); err != nil {
-			return fmt.Errorf("setting flight-service connector configuration: %w", err)
+			return nil, fmt.Errorf("setting flight-service connector configuration: %w", err)
 		}
 	}
 
@@ -501,7 +520,7 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	if len(audiences) > 0 {
 		updated, err := setConfigMapAudiences(resources, audiences)
 		if err != nil {
-			return fmt.Errorf("setting token review audiences: %w", err)
+			return nil, fmt.Errorf("setting token review audiences: %w", err)
 		}
 		if !updated {
 			logf.FromContext(ctx).Info("tokenReviewAudiences specified but no config.toml with [auth] section found in rendered manifests")
@@ -510,10 +529,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 	}
 
 	if err := r.annotateDeploymentsWithContentHash(ctx, resources, cr.Namespace); err != nil {
-		return fmt.Errorf("annotating deployments with content hash: %w", err)
+		return nil, fmt.Errorf("annotating deployments with content hash: %w", err)
 	}
 
-	return r.applyResources(ctx, cr, cr.Namespace, resources)
+	return globalNamespaces, r.applyResources(ctx, cr, cr.Namespace, resources)
 }
 
 func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {
@@ -1054,6 +1073,12 @@ func isOwnedBy(obj metav1.ObjectMetaAccessor, uid types.UID) bool {
 	return false
 }
 
+// setGlobalNamespaces records the global namespaces whose connection types
+// the services share with every tenant.
+func (r *DataConnectServiceReconciler) setGlobalNamespaces(cr *dchv1alpha1.DataConnectService, namespaces []string) {
+	cr.Status.GlobalNamespaces = namespaces
+}
+
 func (r *DataConnectServiceReconciler) setCondition(cr *dchv1alpha1.DataConnectService, condType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&cr.Status.Conditions, metav1.Condition{
 		Type:               condType,
@@ -1090,7 +1115,11 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// service-ca-operator) are NOT explicitly watched. Changes to these
 	// resources are detected on the next periodic reconcile (~5 min) via
 	// content-hash recomputation in annotateDeploymentsWithContentHash.
-	return ctrl.NewControllerManagedBy(mgr).
+	//
+	// Watches(Namespace, global namespace label) — labeling or unlabeling a
+	// namespace changes the global connection type tenants rendered into the
+	// service ConfigMaps.
+	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dchv1alpha1.DataConnectService{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(ownsPredicate)).
 		Owns(&corev1.Service{}, builder.WithPredicates(ownsPredicate)).
@@ -1101,9 +1130,16 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			&corev1.ConfigMap{},
 			handler.EnqueueRequestsFromMapFunc(r.platformConfigToReconcile),
 			builder.WithPredicates(isPlatformConfig),
-		).
-		Named(managedByDCHService).
-		Complete(r)
+		)
+	if r.GlobalNamespaceConfig.Enabled {
+		b = b.WatchesRawSource(source.Kind(mgr.GetCache(), &corev1.Namespace{},
+			handler.TypedEnqueueRequestsFromMapFunc(func(ctx context.Context, ns *corev1.Namespace) []reconcile.Request {
+				return r.platformConfigToReconcile(ctx, ns)
+			}),
+			labelKeyPredicate[*corev1.Namespace](r.GlobalNamespaceConfig.LabelKey),
+		))
+	}
+	return b.Named(managedByDCHService).Complete(r)
 }
 
 func (r *DataConnectServiceReconciler) platformConfigToReconcile(ctx context.Context, obj client.Object) []reconcile.Request {

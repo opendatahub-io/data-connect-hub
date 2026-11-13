@@ -208,7 +208,7 @@ async fn main() -> Result<()> {
     let pg_meta_store = Arc::new(
         PgMetaStore::new(
             config.database.clone(),
-            config.global_connection_types.tenant_id.clone(),
+            config.global_connection_types.tenant_ids.clone(),
         )
         .await?,
     );
@@ -223,7 +223,6 @@ async fn main() -> Result<()> {
         Arc::new(secret_store),
         flight_ca_cert,
         config.server.sa_token_file.clone(),
-        config.global_connection_types.tenant_id.clone(),
     );
     if config.auth.enabled {
         tracing::info!("Auth enabled (cache TTL: {}s)", config.auth.cache_ttl_secs);

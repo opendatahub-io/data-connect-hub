@@ -21,6 +21,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -281,41 +282,46 @@ address = "flight-service"
 	}
 }
 
-func TestSetConfigMapGlobalNamespace(t *testing.T) {
-	defaultTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "opendatahub"
+func TestSetConfigMapGlobalTenants(t *testing.T) {
+	placeholder := configMapWithTOML(`[global-connection-types]
+tenant-ids = ["opendatahub"]
 `)
-	customTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "custom-tenant"
+	custom := configMapWithTOML(`[global-connection-types]
+tenant-ids = ["custom-tenant"]
 `)
 	noTenant := configMapWithTOML(`[server]
 port = 8080
 `)
 
-	if err := setConfigMapGlobalNamespace([]*unstructured.Unstructured{defaultTenant, customTenant, noTenant}, "test-namespace"); err != nil {
+	tenants := []string{"test-namespace", "global-a"}
+	want := make([]any, len(tenants))
+	for i, tenant := range tenants {
+		want[i] = tenant
+	}
+	if err := setConfigMapGlobalTenants([]*unstructured.Unstructured{placeholder, custom, noTenant}, tenants); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, tt := range []struct {
 		name string
 		cm   *unstructured.Unstructured
-		want string
+		want []any
 	}{
-		{name: "default tenant", cm: defaultTenant, want: "test-namespace"},
-		{name: "custom tenant remains unchanged", cm: customTenant, want: "custom-tenant"},
+		{name: "placeholder is replaced", cm: placeholder, want: want},
+		{name: "any base value is replaced", cm: custom, want: want},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			global, ok := parsedConfigMapTOML(t, tt.cm)["global-connection-types"].(map[string]any)
 			if !ok {
 				t.Fatal("expected [global-connection-types] table")
 			}
-			if got := global["tenant-id"]; got != tt.want {
-				t.Errorf("tenant-id = %v, want %q", got, tt.want)
+			if got := global["tenant-ids"]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tenant-ids = %v, want %v", got, tt.want)
 			}
 		})
 	}
 	if got := parsedConfigMapTOML(t, noTenant)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without tenant-id was changed unexpectedly; server.port = %v", got)
+		t.Errorf("ConfigMap without tenant-ids was changed unexpectedly; server.port = %v", got)
 	}
 }
 
@@ -739,7 +745,7 @@ func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 	}
 	platCfg := &platformConfig{GatewayName: "test-gateway", GatewayNamespace: testNamespace}
 
-	err := r.reconcileManifests(context.Background(), cr, platCfg)
+	_, err := r.reconcileManifests(context.Background(), cr, platCfg)
 	if err == nil {
 		t.Fatal("reconcileManifests() = nil error, want fail-closed error on denied APIServer read")
 	}
