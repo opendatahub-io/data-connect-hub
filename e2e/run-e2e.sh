@@ -151,12 +151,18 @@ setup_user_accounts() {
     fi
 }
 
+# RBAC setup deletes each RoleBinding before creating it: roleRef is
+# immutable, so kubectl apply fails when a rerun changes the role a binding
+# references.
+
 # apply_dch_role creates or updates a tenant Role granting <verbs> on DCH
-# data plane <resources> (comma-separated), then binds it to <sa>.
+# data plane <resources> (comma-separated), then binds it to <sa>. The Role and
+# RoleBinding are both named <sa>-<purpose>.
 # kubectl create role cannot be used: it rejects resources that are not served
 # by the API server, and DCH resources exist only for SubjectAccessReview.
 apply_dch_role() {
-    local name="$1" sa="$2" resources="$3" verbs="$4"
+    local sa="$1" purpose="$2" resources="$3" verbs="$4"
+    local name="${sa}-${purpose}"
     kubectl apply -f - >/dev/null <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -168,77 +174,83 @@ rules:
     resources: [${resources}]
     verbs: [${verbs}]
 EOF
-    kubectl create rolebinding "${name}-rb" \
+    kubectl delete rolebinding "$name" -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+    kubectl create rolebinding "$name" \
         -n "$DCH_TENANT_ID" \
         --role="$name" \
-        --serviceaccount="${DCH_TENANT_ID}:${sa}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        --serviceaccount="${DCH_TENANT_ID}:${sa}" >/dev/null
 }
 
 # setup_persona_rbac grants each DCH_PERSONA_* service account the access its
 # tests need. The denied persona is deliberately left without any binding.
-# Persona Roles are named dch-e2e-persona-<persona> and RoleBindings
-# dch-e2e-persona-<persona>[-<purpose>]-rb.
+# RoleBindings are named <persona SA>-<purpose>; a persona's own Role shares
+# the name of the RoleBinding that grants it.
 setup_persona_rbac() {
     if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
         # The secret-reader SA holds the same API access as the e2e user
-        # plus read access to the datasource secrets, so export tests can
+        # plus read access to the PG connector secret, so export tests can
         # cover both outcomes of the service-side SubjectAccessReview. The
         # plain e2e user deliberately lacks the secret read so the
         # service-side check denies its exports.
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-read-write -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
         kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-read-write \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read-write \
-            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-export -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
         kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-export \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-secret-export \
-            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
+        # Export tests export pg_flight_connection, whose credentials_ref is
+        # $PG_SECRET. Granting only that secret makes a successful export
+        # prove the service-side check targets credentials_ref, not another
+        # secret such as the export target. resourceNames need not exist yet.
+        kubectl create role ${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --verb=get --resource=secrets \
+            --resource-name="$PG_SECRET" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-        # The secret-read Role is created later by setup_service_rbac once
-        # the enabled datasource secrets are known; a RoleBinding may safely
-        # reference it before then.
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
         kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-read \
             -n "$DCH_TENANT_ID" \
-            --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --role=${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
     fi
 
     # Permission matrix personas (tests/test_rbac.py): each holds a fixed slice
     # of the DCH data plane resources in the tenant namespace.
     if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
-        kubectl create rolebinding dch-e2e-persona-reader \
+        kubectl delete rolebinding ${PERSONA_READER_SA_NAME}-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_READER_SA_NAME}-read \
             -n "$DCH_TENANT_ID" \
             --clusterrole=dch-read \
-            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_READER_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_READER_SA_NAME}" >/dev/null
     fi
 
     # Connection metadata without data-store: Flight and binary download must be denied.
     if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-persona-metadata-only "$PERSONA_METADATA_ONLY_SA_NAME" \
+        apply_dch_role "$PERSONA_METADATA_ONLY_SA_NAME" metadata-read \
             "data-connections, data-connection-types" "get"
     fi
 
     # data-store without connection metadata: Flight allowed, REST listing denied.
     if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-persona-data-store-only "$PERSONA_DATA_STORE_ONLY_SA_NAME" \
+        apply_dch_role "$PERSONA_DATA_STORE_ONLY_SA_NAME" data-store-read \
             "data-store" "get"
     fi
 
     # data-connections without data-connection-types: connection reads, creates,
     # readiness, and credential tests allowed; connection type access denied.
     if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-persona-connections-only "$PERSONA_CONNECTIONS_ONLY_SA_NAME" \
+        apply_dch_role "$PERSONA_CONNECTIONS_ONLY_SA_NAME" connections-read-create \
             "data-connections" "get, create"
     fi
 
     # data-connection-types without data-connections: connection type reads and
     # creates allowed; connection access, readiness, and credential tests denied.
     if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
-        apply_dch_role dch-e2e-persona-types-only "$PERSONA_TYPES_ONLY_SA_NAME" \
+        apply_dch_role "$PERSONA_TYPES_ONLY_SA_NAME" types-read-create \
             "data-connection-types" "get, create"
     fi
 }
@@ -257,15 +269,19 @@ setup_user_rbac() {
                 --clusterrole=dch-read-write \
                 --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
             # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
+            kubectl delete rolebinding ${E2E_SA_NAME}-secret-export -n "$ns" --ignore-not-found >/dev/null
             kubectl create rolebinding ${E2E_SA_NAME}-secret-export \
                 -n "$ns" \
                 --clusterrole=dch-secret-export \
-                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
-                --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
         done
     fi
 }
 
+# setup_service_rbac grants the DCH service accounts access to tenant secrets.
+# Those SAs live in DCH_SERVICE_NAMESPACE and are not created by the runner, so
+# their RoleBindings are named dch-e2e-<service>-<purpose>, keeping the e2e
+# prefix on resources the runner owns.
 setup_service_rbac() {
     # Allow flight service SA to read K8s secret for datasource in tenant namespace
     local -a secret_names=()
@@ -278,17 +294,17 @@ setup_service_rbac() {
     [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
 
     if [[ ${#secret_names[@]} -gt 0 ]]; then
-        kubectl create role dch-e2e-flight-secret-read \
+        kubectl create role dch-e2e-flight-service-secret-read \
             -n "$DCH_TENANT_ID" \
             --verb=get --resource=secrets \
             "${secret_names[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-        kubectl create rolebinding dch-e2e-flight-secret-read-rb \
+        kubectl delete rolebinding dch-e2e-flight-service-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding dch-e2e-flight-service-secret-read \
             -n "$DCH_TENANT_ID" \
-            --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --role=dch-e2e-flight-service-secret-read \
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" >/dev/null
     fi
 
     # Grant REST tenant secret access for inline credentials, rollback, readiness, and export.
@@ -296,11 +312,11 @@ setup_service_rbac() {
     # credentials there and check the secret lands in the neighbor namespace.
     local ns
     for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        kubectl delete rolebinding dch-e2e-rest-service-secret-access -n "$ns" --ignore-not-found >/dev/null
         kubectl create rolebinding dch-e2e-rest-service-secret-access \
             -n "$ns" \
             --clusterrole=dch-rest-service-secret-access \
-            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" >/dev/null
     done
 }
 
