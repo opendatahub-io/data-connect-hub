@@ -384,7 +384,7 @@ def secret_reader_client(
     """Client for the secret-reader SA.
 
     The runner gives this SA the same API access as the default e2e user
-    plus read access to the datasource secrets, so secret-export tests can
+    plus read access to the PG connector secret, so secret-export tests can
     cover both outcomes of the service-side SubjectAccessReview.
     """
     if not persona_secret_reader_auth_token:
