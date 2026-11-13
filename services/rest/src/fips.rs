@@ -1,30 +1,3 @@
-use anyhow::Result;
-
-#[allow(unsafe_code)]
-pub fn enforce_openssl_fips() -> Result<()> {
-    use std::ffi::c_char;
-
-    let context = rustls_ossl::osslctx();
-    let provider_name = c"fips".as_ptr().cast::<c_char>();
-
-    unsafe {
-        let provider = ossl::bindings::OSSL_PROVIDER_load(context.ptr(), provider_name);
-        if provider.is_null() {
-            anyhow::bail!("failed to load the OpenSSL FIPS provider");
-        }
-
-        if ossl::bindings::EVP_default_properties_enable_fips(context.ptr(), 1) != 1 {
-            anyhow::bail!("failed to enable FIPS on the OpenSSL library context");
-        }
-
-        if !context.fips_is_enabled() {
-            anyhow::bail!("OpenSSL did not retain the enabled FIPS default properties");
-        }
-    }
-
-    Ok(())
-}
-
 #[derive(Debug)]
 struct FipsSignatureVerificationAlgorithm {
     inner: &'static dyn rustls::pki_types::SignatureVerificationAlgorithm,

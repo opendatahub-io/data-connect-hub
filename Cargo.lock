@@ -4519,7 +4519,6 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "ossl",
  "pg-meta-store",
  "prost",
  "rustls",

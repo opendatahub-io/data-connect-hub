@@ -232,8 +232,6 @@ impl CryptoStatus {
 fn install_crypto_provider() -> Result<CryptoStatus> {
     use rustls::crypto::CryptoProvider;
 
-    fips::enforce_openssl_fips()?;
-
     let mut provider = rustls_ossl::default_provider();
     provider.kx_groups.retain(|group| {
         matches!(
