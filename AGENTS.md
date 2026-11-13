@@ -175,6 +175,7 @@ Workflows under `.github/workflows/`:
   licenses, bans, and sources). Ignored
   advisories that go stale fail via
   `unused-ignored-advisory = "deny"` in `deny.toml`.
+- **`api-contract.yml`** — runs on PRs to `main`. API contract checks from `red-hat-data-services/api-contract-tests` (enforce mode): breaking changes to `docs/api/openapi.yaml`, `dc-controller/charts/crds/*.yaml` or `dc-controller/config/crd/bases/*.yaml` relative to the baseline SHA fail the job, and the coverage job fails on any OpenAPI document or CRD not registered or excluded in `.rhoai/contracts.yaml`. Changing the baseline needs approval from someone other than the author.
 - **`python-sdk.yml`** — runs on PRs touching `sdk/python/`.
   Lint, typecheck, and unit tests for the Python SDK.
 - **`ci-dco-signoff.yml`** — runs on PRs. Verifies all

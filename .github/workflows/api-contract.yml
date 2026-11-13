@@ -1,0 +1,78 @@
+# API contract compatibility checks (RHOAIENG-103170), from
+# red-hat-data-services/api-contract-tests. Compares the REST API and the CRDs
+# in a pull request with an immutable baseline commit and fails on breaking
+# changes. It does not replace behavior, conversion, or upgrade tests.
+#
+# Contracts are declared in .rhoai/contracts.yaml:
+#   data-connect-hub-v1alpha1  docs/api/openapi.yaml  /api/v1alpha1/data
+# CRDs: `make manifests` in dc-controller generates them into config/crd/bases
+# (deployed with Kustomize today) and copies them to charts/crds (the Helm
+# chart). CI does not keep the two in sync, so each is checked by its own job.
+#
+# The reusable workflows are pinned to the "latest" tag of api-contract-tests
+# (v2.2.0 today), so new releases are adopted without a change here. See
+# https://github.com/red-hat-data-services/api-contract-tests/blob/main/docs/releasing.md
+# for the other pinning choices and how to upgrade.
+#
+# Baseline: cb73c26fa3884cd5772cb38c5cc9db578b0cd2c3, the sdk-v0.2.1 tag
+# (the newest release tag) and the RHOAI 3.6 release base (merge base of
+# red-hat-data-services/data-connect-hub rhoai-3.6 and main, from
+# release_baseline.py lookup --release 3.6, data generated 2026-11-09).
+# Everything in the API and CRDs at that commit must stay compatible. Moving it
+# forward needs approval from someone other than the author.
+#
+# Runs on every pull request to main, with no path filter, so an OpenAPI
+# document or CRD added anywhere reaches the coverage job.
+name: API contract
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  api-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        contract-id: [data-connect-hub-v1alpha1]
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-openapi-check.yml@latest
+    with:
+      contract-set: .rhoai/contracts.yaml
+      contract-id: ${{ matrix.contract-id }}
+      baseline-refs: cb73c26fa3884cd5772cb38c5cc9db578b0cd2c3 # sdk-v0.2.1, RHOAI 3.6 release base
+      oasdiff-version: "1.33.0"
+      yq-version: "4.45.1"
+      mode: enforce
+
+  # CRDs shipped by the Helm chart.
+  crd-contract:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-crd-check.yml@latest
+    with:
+      crd-glob: dc-controller/charts/crds/*.yaml
+      baseline-refs: cb73c26fa3884cd5772cb38c5cc9db578b0cd2c3 # sdk-v0.2.1, RHOAI 3.6 release base
+      mode: enforce
+
+  # CRDs deployed with Kustomize (dc-controller/config). Drop this job if
+  # config/crd is removed after the move to Helm.
+  crd-contract-kustomize:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-crd-check.yml@latest
+    with:
+      crd-glob: dc-controller/config/crd/bases/*.yaml
+      baseline-refs: cb73c26fa3884cd5772cb38c5cc9db578b0cd2c3 # sdk-v0.2.1, RHOAI 3.6 release base
+      mode: enforce
+
+  # Every OpenAPI document and CRD manifest must be a contract, a generator
+  # input, or a recorded exclusion.
+  api-contract-coverage:
+    uses: red-hat-data-services/api-contract-tests/.github/workflows/provider-coverage-check.yml@latest
+    with:
+      contract-set: .rhoai/contracts.yaml
+      baseline-refs: cb73c26fa3884cd5772cb38c5cc9db578b0cd2c3 # sdk-v0.2.1, RHOAI 3.6 release base
+      yq-version: "4.45.1"
+      crd-globs: >-
+        dc-controller/charts/crds/*.yaml
+        dc-controller/config/crd/bases/*.yaml
+      mode: enforce
