@@ -1,6 +1,6 @@
 ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:d638f3b49b79575329aacdae2739f954effe2467c12147711e73445c4fc97819
 
-FROM registry.access.redhat.com/ubi9/ubi-minimal:9.7@sha256:907b68736aa798b2d38255b7aa070b2a70acb90803864a40f05d0ec47556ddd0 AS builder
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1794467051@sha256:baafce2d34783a28b4a472779f304e97e00f9d35c99553bc53b068b14344d9a9 AS builder
 
 RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
     && microdnf clean all
