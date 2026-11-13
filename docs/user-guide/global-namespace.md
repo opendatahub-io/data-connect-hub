@@ -89,6 +89,13 @@ kubectl get namespace -l opendatahub.io/global-data-registry-project
 kubectl get rolebinding -A -l dataconnecthub.opendatahub.io/global-namespace=true
 ```
 
+The `DataConnectService` status lists the global namespaces whose connection types the DCH services currently share with every tenant. The field is empty when no namespace is labeled or the platform `Auth` CRD is not installed:
+
+```bash
+kubectl get dataconnectservice -A -o wide
+kubectl get dataconnectservice -A -o jsonpath='{.items[*].status.globalNamespaces}'
+```
+
 ## RoleBindings
 
 dc-controller enables global namespaces only when the platform `Auth` CRD (`services.platform.opendatahub.io`) is installed. In each labeled namespace it maintains these RoleBindings from the `Auth` CR named `auth`:

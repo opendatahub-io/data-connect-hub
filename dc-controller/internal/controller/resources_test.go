@@ -745,7 +745,7 @@ func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 	}
 	platCfg := &platformConfig{GatewayName: "test-gateway", GatewayNamespace: testNamespace}
 
-	err := r.reconcileManifests(context.Background(), cr, platCfg)
+	_, err := r.reconcileManifests(context.Background(), cr, platCfg)
 	if err == nil {
 		t.Fatal("reconcileManifests() = nil error, want fail-closed error on denied APIServer read")
 	}

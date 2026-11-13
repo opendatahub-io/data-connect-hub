@@ -244,6 +244,14 @@ type DataConnectServiceStatus struct {
 	// +optional
 	Gateway *Gateway `json:"gateway,omitempty"`
 
+	// globalNamespaces lists the namespaces labeled
+	// opendatahub.io/global-data-registry-project whose connection types the
+	// services currently share with every tenant. Empty when no namespace is
+	// labeled or the platform Auth API is not installed.
+	// +listType=set
+	// +optional
+	GlobalNamespaces []string `json:"globalNamespaces,omitempty"`
+
 	// conditions represent the current state of the DataConnectService resource.
 	// +listType=map
 	// +listMapKey=type
@@ -255,6 +263,7 @@ type DataConnectServiceStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced,categories=opendatahub,shortName=dchs
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Global Namespaces",type=string,JSONPath=`.status.globalNamespaces`,priority=1
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 // DataConnectService is the Schema for the dataconnectservices API
 type DataConnectService struct {

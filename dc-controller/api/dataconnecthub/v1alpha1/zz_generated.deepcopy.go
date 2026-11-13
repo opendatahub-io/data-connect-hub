@@ -249,6 +249,11 @@ func (in *DataConnectServiceStatus) DeepCopyInto(out *DataConnectServiceStatus) 
 		*out = new(Gateway)
 		**out = **in
 	}
+	if in.GlobalNamespaces != nil {
+		in, out := &in.GlobalNamespaces, &out.GlobalNamespaces
+		*out = make([]string, len(*in))
+		copy(*out, *in)
+	}
 	if in.Conditions != nil {
 		in, out := &in.Conditions, &out.Conditions
 		*out = make([]metav1.Condition, len(*in))

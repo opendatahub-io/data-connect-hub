@@ -145,21 +145,17 @@ func labeledGlobalNamespaces(ctx context.Context, c client.Reader, gn GlobalName
 	return labeled, nil
 }
 
-// globalTenantsFor returns the tenants whose connection types are visible to
+// globalTenants returns the tenants whose connection types are visible to
 // every tenant: the DataConnectService namespace, which holds the built-in
 // connection types, followed by every labeled global namespace.
-func globalTenantsFor(ctx context.Context, c client.Reader, gn GlobalNamespaceConfig, cr *dchv1alpha1.DataConnectService) ([]string, error) {
-	labeled, err := labeledGlobalNamespaces(ctx, c, gn)
-	if err != nil {
-		return nil, err
-	}
-	tenants := []string{cr.Namespace}
+func globalTenants(serviceNamespace string, labeled []string) []string {
+	tenants := []string{serviceNamespace}
 	for _, ns := range labeled {
-		if ns != cr.Namespace {
+		if ns != serviceNamespace {
 			tenants = append(tenants, ns)
 		}
 	}
-	return tenants, nil
+	return tenants
 }
 
 // authGroups reads allowedGroups and adminGroups from the platform Auth CR.

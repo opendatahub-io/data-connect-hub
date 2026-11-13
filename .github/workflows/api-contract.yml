@@ -75,4 +75,7 @@ jobs:
       crd-globs: >-
         dc-controller/charts/crds/*.yaml
         dc-controller/config/crd/bases/*.yaml
+      # The Auth CRD is an envtest fixture copied verbatim from
+      # opendatahub-operator, not a CRD this repository ships or deploys.
+      crd-exclude-globs: dc-controller/internal/controller/testdata/crd/*.yaml
       mode: enforce

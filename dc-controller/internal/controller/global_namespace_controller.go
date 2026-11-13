@@ -48,8 +48,8 @@ import (
 var globalNSReconcileKey = reconcile.Request{NamespacedName: types.NamespacedName{Name: globalNSReconcileKeyStr}}
 
 // GlobalNamespaceReconciler grants the platform Auth CR groups access to DCH
-// resources in every labeled global namespace and records the global
-// namespaces on every DataConnectService.
+// resources in every labeled global namespace. DataConnectServiceReconciler
+// records the global namespaces in the DataConnectService status.
 //
 // In each global namespace:
 //   - Auth allowedGroups and adminGroups can read connections and connection
@@ -306,7 +306,7 @@ func labelKeyPredicate[T client.Object](key string) predicate.TypedPredicate[T] 
 
 // dataConnectServicePredicate reacts to creation, deletion, and the start of
 // deletion; those change the ServiceAccounts that need Secret access. Status
-// updates written by this controller are ignored.
+// updates are ignored.
 func dataConnectServicePredicate() predicate.Predicate {
 	return predicate.Funcs{
 		UpdateFunc: func(e event.UpdateEvent) bool {
