@@ -60,6 +60,47 @@ fi
 
 POD_NAME="dch-e2e-neo4j-seed"
 
+# The pod runs to completion. A single `kubectl wait` for the Succeeded phase
+# would need one budget to cover the image pull, the container start, and the
+# in-pod readiness loop (60 attempts x (2s sleep + JVM startup)), and a
+# jsonpath wait cannot fail fast on a Failed pod — it burns the whole timeout
+# even when the script exited immediately. Split the wait: first wait for the
+# container to start (pull included), then for a terminal phase, each with its
+# own budget. Override via environment variables for slow registries.
+SEED_START_TIMEOUT="${SEED_START_TIMEOUT:-300}"   # seconds: image pull + container start
+SEED_RUN_TIMEOUT="${SEED_RUN_TIMEOUT:-600}"       # seconds: in-pod seed script
+
+pod_phase() {
+    kubectl get pod "$POD_NAME" -n "$NAMESPACE" \
+        -o jsonpath='{.status.phase}' 2>/dev/null || true
+}
+
+# Return 0 once the pod reaches one of the comma-separated phases, 1 on timeout.
+wait_for_pod_phase() {
+    local accepted="$1" timeout="$2" waited=0 phase
+    while :; do
+        phase="$(pod_phase)"
+        if [[ -n "$phase" && ",$accepted," == *",$phase,"* ]]; then
+            return 0
+        fi
+        if (( waited >= timeout )); then
+            return 1
+        fi
+        sleep 5
+        waited=$((waited + 5))
+    done
+}
+
+# Print the pod events (image pull, scheduling) and its full logs so the real
+# failure cause is visible; used by every failure path below.
+dump_seed_pod_diagnostics() {
+    local stage="$1"
+    echo "--- pod events and status ($stage) ---" >&2
+    kubectl describe pod "$POD_NAME" -n "$NAMESPACE" >&2 || true
+    echo "--- pod logs ($stage) ---" >&2
+    kubectl logs "$POD_NAME" -n "$NAMESPACE" >&2 || true
+}
+
 CYPHER_SEED=$(cat <<'CYPHER'
 CREATE (tokyo:City {name: 'Tokyo', country: 'Japan', population: 13960000, dch_e2e: true}),
        (london:City {name: 'London', country: 'United Kingdom', population: 8982000, dch_e2e: true}),
@@ -153,13 +194,22 @@ esac
 cs() { cypher-shell -a "$NEO4J_URI" -u neo4j -p "$ADMIN_PASS" "$@"; }
 
 ready=0
+# Keep the last cypher-shell error so a readiness failure reports its actual
+# cause (authentication, TLS, connectivity) instead of a bare "not reachable".
+last_error=/tmp/neo4j-cypher-last-error.txt
 for i in $(seq 1 60); do
-  if cs "RETURN 1" >/dev/null 2>&1; then
+  if cs "RETURN 1" >"$last_error" 2>&1; then
     ready=1; break
   fi
+  echo "Neo4j not ready yet (attempt $i/60)"
   sleep 2
 done
-[ "$ready" -eq 1 ] || { echo "Neo4j not reachable at $NEO4J_URI" >&2; exit 1; }
+if [ "$ready" -ne 1 ]; then
+  echo "ERROR: Neo4j not reachable at $NEO4J_URI after 60 attempts" >&2
+  echo "--- last cypher-shell error ---" >&2
+  cat "$last_error" >&2
+  exit 1
+fi
 
 echo "Cleaning previous test data"
 cs "MATCH (n) WHERE n.dch_e2e = true DETACH DELETE n;"
@@ -234,11 +284,26 @@ spec:
 $(sed 's/^/          /' "$SEED_TMP")
 EOF
 
-kubectl wait --for=jsonpath='{.status.phase}'=Succeeded "pod/$POD_NAME" \
-    -n "$NAMESPACE" --timeout=120s || {
-    kubectl logs "$POD_NAME" -n "$NAMESPACE" --tail=20 || true
-    echo "ERROR: seed pod '$POD_NAME' failed" >&2
+if ! wait_for_pod_phase "Running,Succeeded,Failed" "$SEED_START_TIMEOUT"; then
+    echo "ERROR: seed pod '$POD_NAME' did not start within ${SEED_START_TIMEOUT}s " \
+         "(phase: $(pod_phase); slow image pull or scheduling issue?)" >&2
+    dump_seed_pod_diagnostics "start"
     exit 1
-}
+fi
+
+# The pod reached Running (or already finished); Succeeded/Failed short-circuit
+# the stage below. The seed script gets its own budget, separate from the pull.
+if ! wait_for_pod_phase "Succeeded,Failed" "$SEED_RUN_TIMEOUT"; then
+    echo "ERROR: seed pod '$POD_NAME' did not finish within ${SEED_RUN_TIMEOUT}s " \
+         "(phase: $(pod_phase); still waiting for Neo4j?)" >&2
+    dump_seed_pod_diagnostics "run"
+    exit 1
+fi
+
+if [[ "$(pod_phase)" != "Succeeded" ]]; then
+    echo "ERROR: seed pod '$POD_NAME' failed" >&2
+    dump_seed_pod_diagnostics "run"
+    exit 1
+fi
 # Leave the completed seed pod in place for inspection; the next run deletes
 # and recreates it.
