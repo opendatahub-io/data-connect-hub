@@ -220,12 +220,16 @@ func TestCreateConnection(t *testing.T) {
 		assert.Equal(t, "type-id", body.DataConnectionTypeID)
 		assert.Equal(t, "my-secret", body.CredentialsRef.Secret)
 
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
+		assert.NoError(t, json.NewEncoder(w).Encode(ConnectionResource{
+			Metadata: ResourceMetadata{ID: testConnectionID},
+		}))
 	}))
 	defer server.Close()
 
 	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
-	err := c.CreateConnection(context.Background(), "test-ns", Connection{
+	created, err := c.CreateConnection(context.Background(), "test-ns", Connection{
 		Name:                 "my-conn",
 		DataConnectionTypeID: "type-id",
 		Format:               "tabular",
@@ -233,6 +237,7 @@ func TestCreateConnection(t *testing.T) {
 		Properties:           map[string]string{},
 	})
 	assert.NoError(t, err)
+	assert.Equal(t, testConnectionID, created.Metadata.ID)
 }
 
 func TestCreateConnectionConflict(t *testing.T) {
@@ -242,7 +247,7 @@ func TestCreateConnectionConflict(t *testing.T) {
 	defer server.Close()
 
 	c := NewHTTPMigrationClient(func() (string, error) { return server.URL, nil })
-	err := c.CreateConnection(context.Background(), "test-ns", Connection{
+	_, err := c.CreateConnection(context.Background(), "test-ns", Connection{
 		Name:       "my-conn",
 		Properties: map[string]string{},
 	})
