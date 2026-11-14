@@ -1,6 +1,6 @@
 ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:9aca95ae4e261eab848dc6abdfd08eb4c2453944232021245b2e3108eb25ae18
 
-FROM registry.access.redhat.com/ubi9/go-toolset@sha256:82b3ce09e7442739b4e17153970d3f7cafe31f9b332966e13249364fd3aa3796 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset@sha256:0e3894cea4fc077084245e8aa2befc8a7d91a4f60fbf850f0b5b555cbe62ee26 AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG CGO_ENABLED=1
