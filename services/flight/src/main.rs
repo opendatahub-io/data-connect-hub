@@ -118,8 +118,10 @@ async fn main() -> Result<()> {
     tracing::info!("Starting DataConnectorHub Flight service");
     tracing::info!(
         audit_enabled = audit.enabled,
-        "Audit logging is {}",
-        if audit.enabled { "enabled" } else { "disabled" }
+        audit_log_queries = audit.log_queries,
+        "Audit logging is {}, query logging is {}",
+        if audit.enabled { "enabled" } else { "disabled" },
+        if audit.log_queries { "enabled" } else { "disabled" }
     );
     log_trace_exporter(&trace);
 

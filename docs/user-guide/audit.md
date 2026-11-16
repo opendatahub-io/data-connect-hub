@@ -47,6 +47,25 @@ section entirely — off is the default).
 Changing this setting causes the REST and Flight service pods to restart, the
 same way changing any other setting on the CR does.
 
+## Turning on query logging
+
+By default, audit records do **not** include what was actually read: the SQL
+statement for `query` operations, or the file path for `download` (REST) and
+`download_binary` (Flight) operations. Because those can contain sensitive
+data, the `audit.query` field is only recorded when you opt in with
+`logQueries: true`:
+
+```yaml
+spec:
+  audit:
+    enabled: true
+    logQueries: true
+```
+
+`logQueries` only takes effect when audit logging itself is enabled, and is
+off by default. With it off, the audit records are still emitted — they just
+have no `audit.query` field.
+
 ## What an audit record looks like
 
 Audit records show up as regular log lines from the `rest-server` and
@@ -118,8 +137,10 @@ Example with errors:
 
 The `audit.query` field records what was actually read: the SQL statement
 for `query` operations, or the path of the file being downloaded for
-`download` (REST) and `download_binary` (Flight) operations. Statements
-longer than 4 KiB are truncated with a `...[truncated]` marker.
+`download` (REST) and `download_binary` (Flight) operations. It only appears
+when `spec.audit.logQueries` is enabled (see
+[Turning on query logging](#turning-on-query-logging)). Statements longer
+than 4 KiB are truncated with a `...[truncated]` marker.
 
 - Example of Flight call from REST. Here's the audit record from REST service:
 ```json
@@ -172,7 +193,7 @@ Each field tells you something specific:
 | `parent_request_id` | Flight only: the trusted REST request ID that caused an internal Flight call |
 | `audit.tenant_id` | Which tenant the request was scoped to |
 | `audit.resource` / `audit.action` | What was accessed and what was done to it, e.g. `connection` / `create` |
-| `audit.query` | What was actually queried: the SQL statement for `query`, or the file path for `download` / `download_binary`. Truncated past 4 KiB |
+| `audit.query` | What was actually queried: the SQL statement for `query`, or the file path for `download` / `download_binary`. Only present when `spec.audit.logQueries` is enabled. Truncated past 4 KiB |
 | `resource_id` | The specific connection/resource affected, when applicable |
 | `status_code` (REST) / `grpc_status` (Flight) | The technical result code |
 | `error_code` / `error_message` | Present only when the request failed |

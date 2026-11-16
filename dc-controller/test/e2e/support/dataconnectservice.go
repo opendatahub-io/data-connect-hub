@@ -178,10 +178,11 @@ func (e *E2EFixture) ResetFlightConnectorConfig() {
 	e.restoreFlightDeploymentStrategy()
 }
 
-// AssertAuditDisabled verifies that AUDIT_ENABLED is absent from both service containers.
+// AssertAuditDisabled verifies that the audit environment variables are
+// absent from both service containers.
 func (e *E2EFixture) AssertAuditDisabled() {
 	By("verifying AUDIT_ENABLED is absent from the service containers")
-	e.assertAuditEnvOnContainers(false)
+	e.assertAuditEnvOnContainers(false, false)
 }
 
 // EnableAudit patches spec.audit.enabled=true and verifies reconciliation.
@@ -197,30 +198,48 @@ func (e *E2EFixture) EnableAudit() {
 
 	By("waiting for the audit change to reconcile and become Ready")
 	e.waitForDCSReady(patched.Generation, 2, 2)
-	e.assertAuditEnvOnContainers(true)
+	e.assertAuditEnvOnContainers(true, false)
 }
 
-// DisableAudit patches spec.audit.enabled=false and verifies reconciliation.
-func (e *E2EFixture) DisableAudit() {
+// EnableAuditQueryLogging patches spec.audit.logQueries=true and verifies
+// reconciliation.
+func (e *E2EFixture) EnableAuditQueryLogging() {
 	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
 	e.useRecreateFlightDeploymentStrategy()
-	By("disabling audit logging")
+	By("enabling audit query logging")
 	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
-		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(false)}
+		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(true)}
 	})
 
 	e.waitForDCSObservedGeneration(patched.Generation)
 
 	By("waiting for the audit change to reconcile and become Ready")
 	e.waitForDCSReady(patched.Generation, 2, 2)
-	e.assertAuditEnvOnContainers(false)
+	e.assertAuditEnvOnContainers(true, true)
+}
+
+// DisableAudit patches spec.audit.enabled=false and verifies reconciliation.
+// logQueries stays set to verify it is subordinate to enabled.
+func (e *E2EFixture) DisableAudit() {
+	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
+	e.useRecreateFlightDeploymentStrategy()
+	By("disabling audit logging")
+	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
+		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(false), LogQueries: ptr.To(true)}
+	})
+
+	e.waitForDCSObservedGeneration(patched.Generation)
+
+	By("waiting for the audit change to reconcile and become Ready")
+	e.waitForDCSReady(patched.Generation, 2, 2)
+	e.assertAuditEnvOnContainers(false, false)
 }
 
 // ResetAudit restores audit logging to disabled and the Flight deployment strategy.
 func (e *E2EFixture) ResetAudit() {
 	current := &dchv1alpha1.DataConnectService{}
 	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
-	if current.Spec.Audit != nil && current.Spec.Audit.Enabled != nil && *current.Spec.Audit.Enabled {
+	if current.Spec.Audit != nil {
 		By("restoring audit logging to disabled")
 		e.useRecreateFlightDeploymentStrategy()
 		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
@@ -232,9 +251,9 @@ func (e *E2EFixture) ResetAudit() {
 	e.restoreFlightDeploymentStrategy()
 }
 
-// assertAuditEnvOnContainers asserts AUDIT_ENABLED's presence and value on the
-// rest-server and flight-server containers.
-func (e *E2EFixture) assertAuditEnvOnContainers(want bool) {
+// assertAuditEnvOnContainers asserts the audit environment variables'
+// presence and value on the rest-server and flight-server containers.
+func (e *E2EFixture) assertAuditEnvOnContainers(wantEnabled, wantLogQueries bool) {
 	deployments := map[string]string{
 		restDeploymentName:  "rest-server",
 		e.flightServiceName: "flight-server",
@@ -243,24 +262,33 @@ func (e *E2EFixture) assertAuditEnvOnContainers(want bool) {
 		deployment := &appsv1.Deployment{}
 		deploymentKey := types.NamespacedName{Name: deploymentName, Namespace: applicationNamespace}
 		Expect(e.k8sClient.Get(e.ctx, deploymentKey, deployment)).To(Succeed())
-		value, found := auditEnvOf(deployment, containerName)
-		if want {
-			Expect(found).To(BeTrue(), "expected AUDIT_ENABLED on %s in %s", containerName, deploymentName)
-			Expect(value).To(Equal("true"), "unexpected AUDIT_ENABLED on %s in %s", containerName, deploymentName)
-		} else {
-			Expect(found).To(BeFalse(), "expected no AUDIT_ENABLED on %s in %s", containerName, deploymentName)
+		for _, check := range []struct {
+			name string
+			want bool
+		}{
+			{name: "AUDIT_ENABLED", want: wantEnabled},
+			{name: "AUDIT_LOG_QUERIES", want: wantLogQueries},
+		} {
+			value, found := auditEnvOf(deployment, containerName, check.name)
+			if check.want {
+				Expect(found).To(BeTrue(), "expected %s on %s in %s", check.name, containerName, deploymentName)
+				Expect(value).To(Equal("true"), "unexpected %s on %s in %s", check.name, containerName, deploymentName)
+			} else {
+				Expect(found).To(BeFalse(), "expected no %s on %s in %s", check.name, containerName, deploymentName)
+			}
 		}
 	}
 }
 
-// auditEnvOf returns the value of AUDIT_ENABLED on the named container.
-func auditEnvOf(deployment *appsv1.Deployment, containerName string) (string, bool) {
+// auditEnvOf returns the value of the named environment variable on the
+// named container.
+func auditEnvOf(deployment *appsv1.Deployment, containerName, name string) (string, bool) {
 	for _, container := range deployment.Spec.Template.Spec.Containers {
 		if container.Name != containerName {
 			continue
 		}
 		for _, env := range container.Env {
-			if env.Name == "AUDIT_ENABLED" {
+			if env.Name == name {
 				return env.Value, true
 			}
 		}

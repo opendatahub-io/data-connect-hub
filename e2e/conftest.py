@@ -98,6 +98,11 @@ def audit_enabled() -> bool:
 
 
 @pytest.fixture(scope="session")
+def audit_log_queries() -> bool:
+    return os.environ.get("DCH_AUDIT_LOG_QUERIES", "false").lower() in ("true", "1", "yes")
+
+
+@pytest.fixture(scope="session")
 def service_namespace() -> str:
     return os.environ.get("DCH_SERVICE_NAMESPACE", "")
 

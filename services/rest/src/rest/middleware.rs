@@ -48,9 +48,11 @@ pub async fn trace_request(
     let started = Instant::now();
     let method = req.method().clone();
     let route = req.match_pattern().unwrap_or_else(|| req.path().to_string());
-    let audit_enabled = req
+    let audit_config = req
         .app_data::<web::Data<AuditConfig>>()
-        .is_some_and(|config| config.enabled);
+        .map(|config| *config.get_ref())
+        .unwrap_or_default();
+    let audit_enabled = audit_config.enabled;
     let audit_operation = resource_action_for(&method, &route);
     let request_id = Uuid::new_v4().to_string();
     let tenant_id = HeaderExtractor(req.headers())
@@ -147,6 +149,7 @@ pub async fn trace_request(
         };
         let _entered = span.enter();
         log_request(
+            audit_config,
             &request_id,
             &tenant_id,
             &actor,
@@ -329,7 +332,10 @@ mod tests {
         async {
             let app = awtest::init_service(
                 App::new()
-                    .app_data(web::Data::new(AuditConfig { enabled: true }))
+                    .app_data(web::Data::new(AuditConfig {
+                        enabled: true,
+                        log_queries: false,
+                    }))
                     .service(
                         web::scope("/api/v1alpha1/data")
                             .wrap(actix_web::middleware::from_fn(validate_headers))
@@ -375,7 +381,10 @@ mod tests {
         async {
             let app = awtest::init_service(
                 App::new()
-                    .app_data(web::Data::new(AuditConfig { enabled: true }))
+                    .app_data(web::Data::new(AuditConfig {
+                        enabled: true,
+                        log_queries: true,
+                    }))
                     .service(
                         web::scope("/api/v1alpha1/data")
                             .wrap(actix_web::middleware::from_fn(validate_headers))
@@ -407,6 +416,52 @@ mod tests {
         assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
         assert_eq!(events[0].get("audit.action").map(String::as_str), Some("download"));
         assert_eq!(events[0].get("audit.query").map(String::as_str), Some("reports/q3.csv"));
+        assert_eq!(events[0].get("resource_id").map(String::as_str), Some("conn-1"));
+    }
+
+    #[actix_web::test]
+    async fn test_audit_download_omits_query_when_log_queries_disabled() {
+        let capture = AuditCapture::default();
+        let subscriber = Registry::default().with(capture.clone());
+
+        async {
+            let app = awtest::init_service(
+                App::new()
+                    .app_data(web::Data::new(AuditConfig {
+                        enabled: true,
+                        log_queries: false,
+                    }))
+                    .service(
+                        web::scope("/api/v1alpha1/data")
+                            .wrap(actix_web::middleware::from_fn(validate_headers))
+                            .wrap(actix_web::middleware::from_fn(trace_request))
+                            .route(
+                                "/connections/{id}/binary",
+                                web::get().to(|req: actix_web::HttpRequest| async move {
+                                    req.extensions_mut().insert(AuditQuery("reports/q3.csv".to_string()));
+                                    HttpResponse::Ok().finish()
+                                }),
+                            ),
+                    ),
+            )
+            .await;
+            let request = awtest::TestRequest::get()
+                .uri("/api/v1alpha1/data/connections/conn-1/binary?path=reports%2Fq3.csv")
+                .insert_header((X_TENANT_ID, "tenant"))
+                .insert_header((X_REMOTE_USER, "alice"))
+                .to_request();
+
+            let response = awtest::call_service(&app, request).await;
+            assert_eq!(response.status(), 200);
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let events = capture.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
+        assert_eq!(events[0].get("audit.action").map(String::as_str), Some("download"));
+        assert!(!events[0].contains_key("audit.query"));
         assert_eq!(events[0].get("resource_id").map(String::as_str), Some("conn-1"));
     }
 }

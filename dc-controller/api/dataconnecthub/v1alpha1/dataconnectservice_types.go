@@ -164,6 +164,15 @@ type Audit struct {
 	// +kubebuilder:default=false
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
+
+	// logQueries includes what was actually read (the SQL statement for
+	// query operations, or the file path for downloads) in the audit.query
+	// field of audit records. Queries can contain sensitive data, so this
+	// is off by default and only takes effect when enabled is true.
+	// Sets AUDIT_LOG_QUERIES on the rest-server and flight-server containers.
+	// +kubebuilder:default=false
+	// +optional
+	LogQueries *bool `json:"logQueries,omitempty"`
 }
 
 // DataConnectServiceSpec defines the desired state of DataConnectService

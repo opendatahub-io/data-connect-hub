@@ -145,12 +145,14 @@ where
                 resource_id.clone(),
                 audit_state.clone(),
             );
+            let mut dispatch_config = audit;
+            dispatch_config.enabled = dispatch_config.enabled
+                && matches!(
+                    path.as_str(),
+                    "/arrow.flight.protocol.FlightService/DoGet" | "/arrow.flight.protocol.FlightService/DoAction"
+                );
             let mut dispatch_audit = PendingAudit::new(
-                audit.enabled
-                    && matches!(
-                        path.as_str(),
-                        "/arrow.flight.protocol.FlightService/DoGet" | "/arrow.flight.protocol.FlightService/DoAction"
-                    ),
+                dispatch_config,
                 dispatch_context,
                 dispatch_resource,
                 dispatch_action,
@@ -229,7 +231,7 @@ fn audit_dispatch_failure(
     let status = Status::new(code, "gRPC dispatch failed");
     let context = AuditContext::from_http(request_id.to_string(), tenant_id.to_string(), resource_id, state);
     let _guard = span.enter();
-    log_rpc(audit.enabled, &context, resource, action, Some(&status), duration);
+    log_rpc(audit, &context, resource, action, Some(&status), duration);
 }
 
 /// TracedStream keeps a span open until the wrapped stream terminates or is
@@ -246,7 +248,7 @@ pub struct TracedStream<T> {
 }
 
 pub(crate) struct StreamAudit {
-    enabled: bool,
+    config: AuditConfig,
     context: AuditContext,
     resource: &'static str,
     action: &'static str,
@@ -255,14 +257,14 @@ pub(crate) struct StreamAudit {
 
 impl StreamAudit {
     pub(crate) fn new(
-        enabled: bool,
+        config: AuditConfig,
         context: AuditContext,
         resource: &'static str,
         action: &'static str,
         started: Instant,
     ) -> Self {
         Self {
-            enabled,
+            config,
             context,
             resource,
             action,
@@ -296,7 +298,7 @@ impl<T> TracedStream<T> {
     pub(crate) fn new_audited<S>(
         operation: &'static str,
         inner: S,
-        enabled: bool,
+        config: AuditConfig,
         context: AuditContext,
         started: Instant,
     ) -> Self
@@ -307,7 +309,7 @@ impl<T> TracedStream<T> {
         Self::new_audited_operation(
             operation,
             inner,
-            StreamAudit::new(enabled, context, resource, action, started),
+            StreamAudit::new(config, context, resource, action, started),
         )
     }
 
@@ -343,7 +345,7 @@ impl<T> TracedStream<T> {
         if let Some(audit) = &self.audit {
             let _guard = self.span.enter();
             log_rpc(
-                audit.enabled,
+                audit.config,
                 &audit.context,
                 audit.resource,
                 audit.action,
@@ -539,7 +541,10 @@ mod tests {
             let mut stream = TracedStream::new_audited(
                 "statement",
                 futures::stream::iter(vec![Ok(1)]),
-                true,
+                AuditConfig {
+                    enabled: true,
+                    log_queries: true,
+                },
                 audit_context(),
                 Instant::now(),
             );
@@ -562,6 +567,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn audited_stream_omits_query_when_log_queries_disabled() {
+        let capture = AuditCapture::default();
+        let subscriber = Registry::default().with(capture.clone());
+
+        async {
+            let mut stream = TracedStream::new_audited(
+                "statement",
+                futures::stream::iter(vec![Ok(1)]),
+                AuditConfig {
+                    enabled: true,
+                    log_queries: false,
+                },
+                audit_context(),
+                Instant::now(),
+            );
+            assert_eq!(stream.next().await.unwrap().unwrap(), 1);
+            assert!(stream.next().await.is_none());
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let events = capture.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].get("audit.resource").map(String::as_str), Some("connection"));
+        assert_eq!(events[0].get("audit.action").map(String::as_str), Some("query"));
+        assert!(!events[0].contains_key("audit.query"));
+    }
+
+    #[tokio::test]
     async fn audited_stream_emits_once_on_error_and_drop() {
         let capture = AuditCapture::default();
         let subscriber = Registry::default().with(capture.clone());
@@ -570,7 +604,10 @@ mod tests {
             let mut stream = TracedStream::<u8>::new_audited(
                 "statement",
                 futures::stream::iter(vec![Err(Status::internal("sensitive backend error"))]),
-                true,
+                AuditConfig {
+                    enabled: true,
+                    log_queries: true,
+                },
                 audit_context(),
                 Instant::now(),
             );
@@ -604,7 +641,10 @@ mod tests {
             let stream = TracedStream::<u8>::new_audited(
                 "statement",
                 futures::stream::pending(),
-                true,
+                AuditConfig {
+                    enabled: true,
+                    log_queries: true,
+                },
                 audit_context(),
                 Instant::now(),
             );
@@ -627,7 +667,7 @@ mod tests {
             let mut stream = TracedStream::new_audited(
                 "statement",
                 futures::stream::iter(vec![Ok(1)]),
-                false,
+                AuditConfig::default(),
                 audit_context(),
                 Instant::now(),
             );
