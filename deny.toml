@@ -28,6 +28,13 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "neo4rs requires paste; no neo4rs release drops it" },
     # rustls-pemfile 2.2.0 (via neo4rs, rustls-native-certs)
     { id = "RUSTSEC-2025-0134", reason = "neo4rs and rustls-native-certs require rustls-pemfile" },
+    # chrono 0.4.45 (via arrow-arith; Arrow is our interchange format)
+    # Also ignored in .cargo/audit.toml.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained; arrow requires it and no fixed release exists" },
+    # chrono-tz 0.8.6 and its build dep chrono-tz-build 0.2.1 (via neo4rs)
+    # Also ignored in .cargo/audit.toml.
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz is unmaintained; neo4rs requires it and no fixed release exists" },
+    { id = "RUSTSEC-2026-0559", reason = "chrono-tz-build is unmaintained; build dep of chrono-tz via neo4rs" },
     # libsqlite3-sys 0.30.1 bundles SQLite < 3.54.0 (CVE-2026-119375,
     # WAL page-size mismatch leaks uninitialized page-cache memory).
     # The fix needs libsqlite3-sys 0.39.0+, but sqlx-sqlite caps it
