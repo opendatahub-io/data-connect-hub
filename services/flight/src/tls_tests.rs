@@ -54,7 +54,7 @@ fn root_store(cert: &TestCert) -> rustls::RootCertStore {
 }
 
 fn provider_suite(name: &str) -> rustls::SupportedCipherSuite {
-    rustls::crypto::aws_lc_rs::default_provider()
+    rustls_ossl::default_provider()
         .cipher_suites
         .into_iter()
         .find(|suite| suite.suite().as_str() == Some(name))
@@ -95,7 +95,7 @@ async fn connect(
 ) -> std::io::Result<tokio_rustls::client::TlsStream<tokio::net::TcpStream>> {
     // Mirror the server's provider chain: restricting the offered suites
     // requires a derived CryptoProvider in this rustls line.
-    let base = rustls::crypto::aws_lc_rs::default_provider();
+    let base = rustls_ossl::default_provider();
     let provider = Arc::new(rustls::crypto::CryptoProvider {
         cipher_suites: suites.unwrap_or_else(|| base.cipher_suites.clone()),
         ..base
@@ -114,6 +114,7 @@ async fn connect(
 
 #[tokio::test]
 async fn modern_minimum_serves_tls13_only() {
+    install_openssl_provider();
     let cert = self_signed_cert();
     let acceptor = build_tls_acceptor(
         cert.cert_path.to_str().unwrap(),
@@ -147,6 +148,7 @@ async fn modern_minimum_serves_tls13_only() {
 
 #[tokio::test]
 async fn restricted_cipher_suite_enforced_for_tls12() {
+    install_openssl_provider();
     let cert = self_signed_cert();
     let acceptor = build_tls_acceptor(
         cert.cert_path.to_str().unwrap(),
@@ -199,6 +201,7 @@ async fn restricted_cipher_suite_enforced_for_tls12() {
 
 #[tokio::test]
 async fn tls12_minimum_accepts_tls12_clients() {
+    install_openssl_provider();
     let cert = self_signed_cert();
     let acceptor = build_tls_acceptor(
         cert.cert_path.to_str().unwrap(),
@@ -221,6 +224,7 @@ async fn tls12_minimum_accepts_tls12_clients() {
 
 #[tokio::test]
 async fn old_profile_minima_fail_fast() {
+    install_openssl_provider();
     // rustls cannot serve TLS 1.0/1.1: the Old profile's minimum must be a
     // startup error, never a silent normalization to TLS 1.2.
     let cert = self_signed_cert();
@@ -245,6 +249,7 @@ async fn old_profile_minima_fail_fast() {
 
 #[tokio::test]
 async fn unknown_minimum_version_fails_fast() {
+    install_openssl_provider();
     // An unvalidated minimum must be a configuration error, never a panic
     // or a silent fallback to provider defaults.
     let cert = self_signed_cert();
@@ -267,6 +272,7 @@ async fn unknown_minimum_version_fails_fast() {
 
 #[tokio::test]
 async fn unusable_cipher_lists_fail_fast() {
+    install_openssl_provider();
     let cert = self_signed_cert();
     // TLS 1.3-only suite names are unusable for TLS <= 1.2 handshakes, and
     // CBC suites (Old profile) are not implemented by the provider at all.
@@ -298,7 +304,7 @@ async fn legacy_config_without_policy_keeps_identity_path() {
     // identity-only tonic TLS path: no enforced acceptor is returned.
     // tonic's ServerTlsConfig resolves the provider from the process
     // default, which main.rs installs before configuring TLS.
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    install_openssl_provider();
     let cert = self_signed_cert();
     let tls = TlsConfig {
         cert_file: Some(cert.cert_path.to_str().unwrap().to_string()),
@@ -310,6 +316,15 @@ async fn legacy_config_without_policy_keeps_identity_path() {
         .await
         .expect("legacy TLS configuration");
     assert!(acceptor.is_none());
+}
+
+fn install_openssl_provider() {
+    use std::sync::Once;
+
+    static INSTALL: Once = Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls_ossl::default_provider().install_default();
+    });
 }
 
 #[tokio::test]

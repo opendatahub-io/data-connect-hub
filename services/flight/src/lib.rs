@@ -125,7 +125,12 @@ async fn build_tls_acceptor(
     let key =
         PrivateKeyDer::from_pem_file(key_file).map_err(|e| anyhow::anyhow!("reading key file {key_file}: {e}"))?;
 
-    let base_provider = rustls::crypto::aws_lc_rs::default_provider();
+    let base_provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| {
+            anyhow::anyhow!("no rustls CryptoProvider installed; flight-service must install the OpenSSL-backed provider before TLS setup")
+        })?
+        .as_ref()
+        .clone();
     let versions: &[&'static rustls::SupportedProtocolVersion] = match min_version {
         "VersionTLS13" => &[&rustls::version::TLS13],
         "VersionTLS12" => &[&rustls::version::TLS12, &rustls::version::TLS13],
@@ -177,7 +182,7 @@ async fn build_tls_acceptor(
     for suite in &base_provider.cipher_suites {
         if matches!(suite, rustls::SupportedCipherSuite::Tls13(_)) && !suites.iter().any(|s| s.suite() == suite.suite())
         {
-            suites.push(*suite);
+            suites.push(suite.clone());
         }
     }
     // The selected suites are enforced through a derived provider: this

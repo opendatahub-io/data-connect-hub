@@ -103,15 +103,24 @@ http-body = "1"
 http-body-util = "0.1"
 uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
-opendal = { version = "0.59", features = ["services-s3"] }
-opendal-http-transport-reqwest = { version = "0.59", default-features = false, features = ["rustls"] }
-# OpenDAL 0.59's reqwest transport uses reqwest 0.13.
-reqwest-opendal = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "stream"] }
+opendal = { version = "0.59", default-features = false, features = [
+    "auto-register-services",
+    "executors-tokio",
+    "layers-concurrent-limit",
+    "layers-logging",
+    "layers-retry",
+    "layers-timeout",
+    "services-s3",
+    "http-transport-reqwest-native-tls",
+] }
+opendal-http-transport-reqwest = { version = "0.59", default-features = false, features = ["native-tls"] }
+# OpenDAL 0.58's reqwest transport uses reqwest 0.13.
+reqwest-opendal = { package = "reqwest", version = "0.13", default-features = false, features = ["native-tls", "stream"] }
 parquet = { version = "60.2", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
 arrow-csv = "60.2"
 arrow-json = "60.2"
 arrow-cast = "60.2"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json", "stream"] }
 mime = "0.3"
 url = "2.5"
 rustls = { version = "0.23", default-features = false, features = ["std", "logging", "tls12"] }
@@ -125,6 +134,7 @@ rustls-ossl = "=0.0.1"
 # something like an opaque `FailedToGetRandomBytes`, naming neither the
 # call that failed nor the reason.
 ossl = { version = "1.5.4", features = ["log"] }
+openssl = "0.10"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 opentelemetry = "0.32"

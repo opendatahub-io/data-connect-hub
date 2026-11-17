@@ -2,7 +2,7 @@ ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:5e9a0970f7
 
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS builder
 
-RUN microdnf install -y gcc pkgconf tar gzip unzip findutils ca-certificates curl-minimal openssl-devel \
+RUN microdnf install -y gcc pkgconf tar gzip unzip findutils ca-certificates curl-minimal openssl-devel clang \
     && microdnf clean all
 
 ENV RUSTUP_HOME=/usr/local/rustup \

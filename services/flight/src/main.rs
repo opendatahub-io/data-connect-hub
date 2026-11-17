@@ -101,12 +101,153 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
     registry
 }
 
+mod fips;
+
+/// Key exchange groups are restricted to the NIST curves first. `rustls`
+/// computes `CryptoProvider::fips()` as an `all()` across every configured
+/// component, and derives `ClientConfig::require_ems` from that value, so a
+/// single component reporting non-FIPS would silently disable Extended Master
+/// Secret — mandatory for the TLS 1.2 KDF under FIPS 140-3 IG section D.Q.
+///
+/// When `DCH_REQUIRE_FIPS` is set, a configuration that does not report FIPS
+/// is treated as fatal rather than degrading quietly.
+///
+/// The status is returned rather than logged: this has to run before
+/// `init_tracing_json`, which may open an OTLP exporter over TLS, so no
+/// subscriber exists yet and anything logged here would be discarded.
+struct CryptoStatus {
+    context_fips: bool,
+    provider_fips: bool,
+    cipher_suites_fips: bool,
+    kx_groups_fips: bool,
+    signature_verification_fips: bool,
+    secure_random_fips: bool,
+    key_provider_fips: bool,
+    config_fips: bool,
+    kx_groups: Vec<rustls::NamedGroup>,
+    cipher_suites: Vec<rustls::CipherSuite>,
+    signature_schemes: Vec<rustls::SignatureScheme>,
+}
+
+impl CryptoStatus {
+    fn log(&self) {
+        tracing::info!(
+            context_fips = self.context_fips,
+            provider_fips = self.provider_fips,
+            cipher_suites_fips = self.cipher_suites_fips,
+            kx_groups_fips = self.kx_groups_fips,
+            signature_verification_fips = self.signature_verification_fips,
+            secure_random_fips = self.secure_random_fips,
+            key_provider_fips = self.key_provider_fips,
+            config_fips = self.config_fips,
+            kx_groups = ?self.kx_groups,
+            cipher_suites = ?self.cipher_suites,
+            signature_schemes = ?self.signature_schemes,
+            "installed OpenSSL-backed rustls crypto provider"
+        );
+    }
+}
+
+fn install_crypto_provider() -> Result<CryptoStatus> {
+    use rustls::crypto::{CryptoProvider, SecureRandom};
+
+    let mut provider = rustls_ossl::default_provider();
+
+    // rustls-ossl's own secure_random reads OpenSSL's global default library
+    // context, which nothing configures and which holds no providers at all
+    // on a FIPS host. See fips::FipsSecureRandom.
+    provider.secure_random = &fips::FipsSecureRandom;
+
+    provider.kx_groups.retain(|group| {
+        matches!(
+            group.name(),
+            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1 | rustls::NamedGroup::secp521r1
+        )
+    });
+
+    let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
+    fips::mark_cipher_suites_fips(&mut provider);
+    provider.signature_verification_algorithms = fips::openssl_signature_verification_algorithms();
+    fips::mark_signature_verification_fips(&mut provider);
+    // Capture the resolved algorithm lists before reading the flags. Every
+    // FIPS flag here is an `all()`, which is true over an empty list, so a
+    // provider that resolved no cipher suites, no key exchange groups or no
+    // signature algorithms reports flawless compliance while being unable to
+    // complete a handshake — an empty signature_algorithms extension does not
+    // even encode to a valid ClientHello. Treat an empty list as fatal rather
+    // than letting it surface later as a TLS error with no stated cause.
+    let cipher_suites: Vec<_> = provider.cipher_suites.iter().map(|suite| suite.suite()).collect();
+    let signature_schemes: Vec<_> = provider
+        .signature_verification_algorithms
+        .mapping
+        .iter()
+        .map(|(scheme, _)| *scheme)
+        .collect();
+
+    if cipher_suites.is_empty() || kx_groups.is_empty() || signature_schemes.is_empty() {
+        return Err(anyhow::anyhow!(
+            "the OpenSSL provider resolved an incomplete algorithm set \
+         (cipher suites: {}, kx groups: {}, signature algorithms: {}); refusing to start",
+            cipher_suites.len(),
+            kx_groups.len(),
+            signature_schemes.len(),
+        ));
+    }
+
+    let cipher_suites_fips = provider.cipher_suites.iter().all(|suite| suite.fips());
+    let kx_groups_fips = provider.kx_groups.iter().all(|group| group.fips());
+    let signature_verification_fips = provider.signature_verification_algorithms.fips();
+    let secure_random_fips = provider.secure_random.fips();
+    let key_provider_fips = provider.key_provider.fips();
+    let provider_fips = provider.fips();
+    let context_fips = rustls_ossl::osslctx().fips_is_enabled();
+
+    // Draw once here so that a DRBG which cannot be instantiated is a startup
+    // failure with a clear message, rather than an opaque connect error on the
+    // first TLS handshake. Each worker thread instantiates its own DRBG later,
+    // so this proves the context is usable, not that every instance will be.
+    let mut probe = [0u8; 32];
+    fips::FipsSecureRandom
+        .fill(&mut probe)
+        .map_err(|_| anyhow::anyhow!("the OpenSSL DRBG produced no random bytes; refusing to start"))?;
+
+    CryptoProvider::install_default(provider)
+        .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
+
+    // Build a throwaway client configuration purely to read the config-level
+    // FIPS status: it folds in `require_ems`, which the provider-level flag
+    // does not cover. tonic builds its own configurations internally, so
+    // there is no live one to inspect here.
+    let probe = rustls::ClientConfig::builder()
+        .with_root_certificates(rustls::RootCertStore::empty())
+        .with_no_client_auth();
+    let config_fips = probe.fips();
+
+    if std::env::var_os("DCH_REQUIRE_FIPS").is_some() && !config_fips {
+        return Err(anyhow::anyhow!(
+            "DCH_REQUIRE_FIPS is set but the TLS configuration does not report FIPS \
+         (provider_fips={provider_fips}, config_fips={config_fips}); refusing to start"
+        ));
+    }
+
+    Ok(CryptoStatus {
+        context_fips,
+        provider_fips,
+        cipher_suites_fips,
+        kx_groups_fips,
+        signature_verification_fips,
+        secure_random_fips,
+        key_provider_fips,
+        config_fips,
+        kx_groups,
+        cipher_suites,
+        signature_schemes,
+    })
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
-
+    let crypto_status = install_crypto_provider()?;
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
@@ -114,6 +255,8 @@ async fn main() -> Result<()> {
     let trace = TraceConfig::from_env();
     let audit = AuditConfig::from_env();
     let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
+
+    crypto_status.log();
 
     tracing::info!("Starting DataConnectorHub Flight service");
     tracing::info!(
