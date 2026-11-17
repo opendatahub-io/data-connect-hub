@@ -5,11 +5,12 @@ use actix_web::middleware::Next;
 use actix_web::{HttpMessage, HttpResponse, ResponseError, web};
 use std::time::Instant;
 
-use super::access_log::{AuditConfig, AuditError, AuditQuery, RequestId, log_request, resource_action_for};
+use super::access_log::{AuditError, AuditQuery, RequestId, log_request, resource_action_for};
 use super::endpoints::ApiContext;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
 use commons::api::{X_REMOTE_USER, X_TENANT_ID};
+use commons::utils::audit::AuditConfig;
 use opentelemetry::propagation::Extractor;
 use tracing::Instrument;
 use tracing::field::Empty;

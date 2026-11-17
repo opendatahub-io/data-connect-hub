@@ -1,9 +1,10 @@
 use crate::flight::QueryContext;
-use crate::flight::audit::{AuditConfig, AuditContext, PendingAudit, bounded_query, do_get_operation};
+use crate::flight::audit::{AuditContext, PendingAudit, bounded_query, do_get_operation};
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
 use crate::flight::trace::TracedStream;
+use commons::utils::audit::AuditConfig;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_flight::{

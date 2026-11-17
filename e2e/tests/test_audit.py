@@ -162,7 +162,7 @@ def test_flight_query_audit_record(
     tenant_id: str,
     jaeger_query_url: str | None,
     pod_logs_since: Callable[[str, datetime], list[dict]],
-    require_audit_log_queries: None,
+    audit_log_queries: bool,
 ) -> None:
     started = datetime.now(UTC)
 
@@ -178,10 +178,13 @@ def test_flight_query_audit_record(
         **{
             "audit.resource": "connection",
             "audit.action": "query",
-            "audit.query": "SELECT 1 AS audit_test",
             "audit.tenant_id": tenant_id,
         },
     )
+    if audit_log_queries:
+        assert record["audit.query"] == "SELECT 1 AS audit_test"
+    else:
+        assert "audit.query" not in record
     assert uuid.UUID(record["request_id"]).version == 4
     assert record["audit.actor"] not in ("", "unknown")
     assert record["caller_principal"] == record["audit.actor"]

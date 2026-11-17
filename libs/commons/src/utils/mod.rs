@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod config;
 
 use anyhow::{Context, Result};

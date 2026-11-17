@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
+use commons::utils::audit::AuditConfig;
 use commons::utils::{TraceConfig, init_tracing_json, log_trace_exporter};
 #[cfg(feature = "elasticsearch")]
 use elasticsearch_connector::ElasticsearchConnector;
 use flight_service::flight::DataIngestionService;
-use flight_service::flight::audit::AuditConfig;
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::utils::ServerConfig;
 use flight_service::{CommandLineArgs, configure_metrics, configure_tls, load_config, start_server};

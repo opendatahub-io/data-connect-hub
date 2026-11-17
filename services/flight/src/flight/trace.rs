@@ -1,7 +1,6 @@
-use crate::flight::audit::{
-    AuditConfig, AuditContext, PendingAudit, RpcAuditState, RpcRequestId, do_get_operation, log_rpc,
-};
+use crate::flight::audit::{AuditContext, PendingAudit, RpcAuditState, RpcRequestId, do_get_operation, log_rpc};
 use commons::api::{X_DATA_CONNECTION_ID, X_TENANT_ID};
+use commons::utils::audit::AuditConfig;
 use futures::Stream;
 use opentelemetry::propagation::Extractor;
 use std::future::Future;

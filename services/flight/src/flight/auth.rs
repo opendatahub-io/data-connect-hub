@@ -1,5 +1,6 @@
-use crate::flight::audit::{AuditConfig, AuditContext, CallerIdentity, PendingAudit, RpcRequestId};
+use crate::flight::audit::{AuditContext, CallerIdentity, PendingAudit, RpcRequestId};
 use commons::api::{X_REMOTE_USER, X_REQUEST_ID, X_TENANT_ID};
+use commons::utils::audit::AuditConfig;
 use http::header::AUTHORIZATION;
 use http_body::Body;
 use kube_utils::auth::{AuthError, KubeAuthClient};
