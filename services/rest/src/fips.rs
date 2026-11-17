@@ -118,6 +118,67 @@ impl rustls::crypto::tls12::Prf for FipsPrf {
     }
 }
 
+/// Personalization string for the per-thread DRBG instances, as recommended
+/// by SP 800-90A section 8.7.1 to separate instantiations that draw on the
+/// same entropy source.
+const DRBG_PERSONALIZATION: &[u8] = b"data-connect-hub rest-service";
+
+thread_local! {
+    /// One DRBG per thread. `EvpRandCtx` wraps a raw `EVP_RAND_CTX` and its
+    /// `generate` takes `&mut self`, while `SecureRandom::fill` only has
+    /// `&self`. A thread-local instance avoids both a mutex on the handshake
+    /// path and the `unsafe impl Send` a shared instance would need, which
+    /// the workspace's `unsafe_code = "deny"` rules out.
+    static DRBG: std::cell::RefCell<Option<ossl::rand::EvpRandCtx>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// FipsSecureRandom draws random bytes from a DRBG instantiated in the same
+/// OpenSSL library context as the rest of the provider, the one
+/// `rustls_ossl::osslctx()` configures.
+///
+/// It replaces rustls-ossl's own `secure_random`, which calls
+/// `RAND_priv_bytes()` — an API with no library-context argument, so it reads
+/// the *global default* context instead. Nothing in this process configures
+/// that context, and on a FIPS-mode RHEL host OpenSSL does not fall back to
+/// auto-loading the default provider, so it holds no providers at all: the
+/// `CTR-DRBG` fetch fails as unsupported and every TLS handshake aborts with
+/// `FailedToGetRandomBytes` before the ClientHello is written. The bypass is
+/// invisible off a FIPS host, where the default provider loads on its own.
+#[derive(Debug)]
+pub struct FipsSecureRandom;
+
+impl rustls::crypto::SecureRandom for FipsSecureRandom {
+    fn fill(&self, buf: &mut [u8]) -> Result<(), rustls::crypto::GetRandomFailed> {
+        DRBG.with(|drbg| {
+            let mut drbg = drbg.borrow_mut();
+            if drbg.is_none() {
+                *drbg = Some(new_drbg()?);
+            }
+            drbg.as_mut()
+                .ok_or(rustls::crypto::GetRandomFailed)?
+                .generate(&[], buf)
+                .map_err(|_| rustls::crypto::GetRandomFailed)
+        })
+    }
+
+    /// Reports the FIPS status of the context the DRBG is fetched from rather
+    /// than a constant, so that off a FIPS host `CryptoProvider::fips()` stops
+    /// claiming otherwise instead of asserting it unconditionally.
+    fn fips(&self) -> bool {
+        rustls_ossl::osslctx().fips_is_enabled()
+    }
+}
+
+fn new_drbg() -> Result<ossl::rand::EvpRandCtx, rustls::crypto::GetRandomFailed> {
+    ossl::rand::EvpRandCtx::new_hmac_drbg(
+        rustls_ossl::osslctx(),
+        ossl::digest::DigestAlg::Sha2_256,
+        DRBG_PERSONALIZATION,
+    )
+    .map_err(|_| rustls::crypto::GetRandomFailed)
+}
+
 fn is_fips_cipher_suite(suite: rustls::CipherSuite) -> bool {
     matches!(
         suite,

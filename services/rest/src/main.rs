@@ -210,6 +210,8 @@ struct CryptoStatus {
     key_provider_fips: bool,
     config_fips: bool,
     kx_groups: Vec<rustls::NamedGroup>,
+    cipher_suites: Vec<rustls::CipherSuite>,
+    signature_schemes: Vec<rustls::SignatureScheme>,
 }
 
 impl CryptoStatus {
@@ -224,15 +226,23 @@ impl CryptoStatus {
             key_provider_fips = self.key_provider_fips,
             config_fips = self.config_fips,
             kx_groups = ?self.kx_groups,
+            cipher_suites = ?self.cipher_suites,
+            signature_schemes = ?self.signature_schemes,
             "installed OpenSSL-backed rustls crypto provider"
         );
     }
 }
 
 fn install_crypto_provider() -> Result<CryptoStatus> {
-    use rustls::crypto::CryptoProvider;
+    use rustls::crypto::{CryptoProvider, SecureRandom};
 
     let mut provider = rustls_ossl::default_provider();
+
+    // rustls-ossl's own secure_random reads OpenSSL's global default library
+    // context, which nothing configures and which holds no providers at all
+    // on a FIPS host. See fips::FipsSecureRandom.
+    provider.secure_random = &fips::FipsSecureRandom;
+
     provider.kx_groups.retain(|group| {
         matches!(
             group.name(),
@@ -243,6 +253,31 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
     fips::mark_cipher_suites_fips(&mut provider);
     fips::mark_signature_verification_fips(&mut provider);
+    // Capture the resolved algorithm lists before reading the flags. Every
+    // FIPS flag here is an `all()`, which is true over an empty list, so a
+    // provider that resolved no cipher suites, no key exchange groups or no
+    // signature algorithms reports flawless compliance while being unable to
+    // complete a handshake — an empty signature_algorithms extension does not
+    // even encode to a valid ClientHello. Treat an empty list as fatal rather
+    // than letting it surface later as a TLS error with no stated cause.
+    let cipher_suites: Vec<_> = provider.cipher_suites.iter().map(|suite| suite.suite()).collect();
+    let signature_schemes: Vec<_> = provider
+        .signature_verification_algorithms
+        .mapping
+        .iter()
+        .map(|(scheme, _)| *scheme)
+        .collect();
+
+    if cipher_suites.is_empty() || kx_groups.is_empty() || signature_schemes.is_empty() {
+        return Err(anyhow::anyhow!(
+            "the OpenSSL provider resolved an incomplete algorithm set \
+             (cipher suites: {}, kx groups: {}, signature algorithms: {}); refusing to start",
+            cipher_suites.len(),
+            kx_groups.len(),
+            signature_schemes.len(),
+        ));
+    }
+
     let cipher_suites_fips = provider.cipher_suites.iter().all(|suite| suite.fips());
     let kx_groups_fips = provider.kx_groups.iter().all(|group| group.fips());
     let signature_verification_fips = provider.signature_verification_algorithms.fips();
@@ -250,6 +285,15 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     let key_provider_fips = provider.key_provider.fips();
     let provider_fips = provider.fips();
     let context_fips = rustls_ossl::osslctx().fips_is_enabled();
+
+    // Draw once here so that a DRBG which cannot be instantiated is a startup
+    // failure with a clear message, rather than an opaque connect error on the
+    // first TLS handshake. Each worker thread instantiates its own DRBG later,
+    // so this proves the context is usable, not that every instance will be.
+    let mut probe = [0u8; 32];
+    fips::FipsSecureRandom
+        .fill(&mut probe)
+        .map_err(|_| anyhow::anyhow!("the OpenSSL DRBG produced no random bytes; refusing to start"))?;
 
     CryptoProvider::install_default(provider)
         .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
@@ -280,6 +324,8 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
         key_provider_fips,
         config_fips,
         kx_groups,
+        cipher_suites,
+        signature_schemes,
     })
 }
 

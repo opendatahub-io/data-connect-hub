@@ -3651,8 +3651,10 @@ dependencies = [
  "bindgen",
  "cfg-if",
  "libc",
+ "log",
  "ossl-sys",
  "pkg-config",
+ "vsprintf",
 ]
 
 [[package]]
@@ -4519,6 +4521,7 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
+ "ossl",
  "pg-meta-store",
  "prost",
  "rustls",
@@ -6040,6 +6043,16 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "vsprintf"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aec2f81b75ca063294776b4f7e8da71d1d5ae81c2b1b149c8d89969230265d63"
+dependencies = [
+ "cc",
+ "libc",
+]
 
 [[package]]
 name = "walkdir"
