@@ -246,6 +246,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
 				return ctrl.Result{}, err
 			}
+			if err := r.deleteTenantRoleBindings(ctx); err != nil {
+				return ctrl.Result{}, err
+			}
 			controllerutil.RemoveFinalizer(&cr, finalizerName)
 			return ctrl.Result{}, r.Update(ctx, &cr)
 		}
