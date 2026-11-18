@@ -3,7 +3,6 @@ use actix_web::{App, HttpServer, middleware, web};
 use clap::Parser;
 
 use crate::rest::API_VERSION;
-use crate::rest::access_log::AuditConfig;
 use crate::rest::endpoints::*;
 use crate::rest::errors::{json_config, path_config, query_config};
 use crate::rest::metrics::{install_prometheus_recorder, observe_http_request, spawn_metrics_server};
@@ -12,6 +11,7 @@ use crate::state::ApiService;
 use crate::utils::ServerConfig;
 use anyhow::Result;
 use commons::api::storage::MetaStore;
+use commons::utils::audit::AuditConfig;
 use commons::utils::{TraceConfig, init_tracing_json, log_trace_exporter};
 use config::{Config, File};
 use kube_utils::secrets::KubeSecretStore;
@@ -198,8 +198,10 @@ async fn main() -> Result<()> {
     tracing::info!("Starting DataConnectorHub API service");
     tracing::info!(
         audit_enabled = audit.enabled,
-        "Audit logging is {}",
-        if audit.enabled { "enabled" } else { "disabled" }
+        audit_log_queries = audit.log_queries,
+        "Audit logging is {}, query logging is {}",
+        if audit.enabled { "enabled" } else { "disabled" },
+        if audit.log_queries { "enabled" } else { "disabled" }
     );
     log_config_source(&args.config, "--config", true);
     log_config_source(&args.secret_config, "--secret-config", false);

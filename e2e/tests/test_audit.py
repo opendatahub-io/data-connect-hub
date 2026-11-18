@@ -23,6 +23,12 @@ def require_audit_enabled(audit_enabled: bool) -> None:
         pytest.skip("DCH_AUDIT_ENABLED is not true")
 
 
+@pytest.fixture
+def require_audit_log_queries(audit_log_queries: bool) -> None:
+    if not audit_log_queries:
+        pytest.skip("DCH_AUDIT_LOG_QUERIES is not true")
+
+
 def _wait_for_record(
     pod_logs_since: Callable[[str, datetime], list[dict]],
     service: str,
@@ -156,6 +162,7 @@ def test_flight_query_audit_record(
     tenant_id: str,
     jaeger_query_url: str | None,
     pod_logs_since: Callable[[str, datetime], list[dict]],
+    audit_log_queries: bool,
 ) -> None:
     started = datetime.now(UTC)
 
@@ -171,10 +178,13 @@ def test_flight_query_audit_record(
         **{
             "audit.resource": "connection",
             "audit.action": "query",
-            "audit.query": "SELECT 1 AS audit_test",
             "audit.tenant_id": tenant_id,
         },
     )
+    if audit_log_queries:
+        assert record["audit.query"] == "SELECT 1 AS audit_test"
+    else:
+        assert "audit.query" not in record
     assert uuid.UUID(record["request_id"]).version == 4
     assert record["audit.actor"] not in ("", "unknown")
     assert record["caller_principal"] == record["audit.actor"]
@@ -235,6 +245,7 @@ def test_rest_binary_download_links_flight_audit_record(
     rest_client: DataConnectClient,
     uri_flight_connection: str,
     pod_logs_since: Callable[[str, datetime], list[dict]],
+    require_audit_log_queries: None,
 ) -> None:
     started = datetime.now(UTC)
 
@@ -276,6 +287,7 @@ def test_flight_query_failure_audit_is_sanitized(
     dch_client: DataConnectClient,
     pg_flight_connection: str,
     pod_logs_since: Callable[[str, datetime], list[dict]],
+    require_audit_log_queries: None,
 ) -> None:
     started = datetime.now(UTC)
 

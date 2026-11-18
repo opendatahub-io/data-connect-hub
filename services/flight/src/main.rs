@@ -1,10 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
+use commons::utils::audit::AuditConfig;
 use commons::utils::{TraceConfig, init_tracing_json, log_trace_exporter};
 #[cfg(feature = "elasticsearch")]
 use elasticsearch_connector::ElasticsearchConnector;
 use flight_service::flight::DataIngestionService;
-use flight_service::flight::audit::AuditConfig;
 use flight_service::flight::registry::ConnectorsRegistry;
 use flight_service::utils::ServerConfig;
 use flight_service::{CommandLineArgs, configure_metrics, configure_tls, load_config, start_server};
@@ -118,8 +118,10 @@ async fn main() -> Result<()> {
     tracing::info!("Starting DataConnectorHub Flight service");
     tracing::info!(
         audit_enabled = audit.enabled,
-        "Audit logging is {}",
-        if audit.enabled { "enabled" } else { "disabled" }
+        audit_log_queries = audit.log_queries,
+        "Audit logging is {}, query logging is {}",
+        if audit.enabled { "enabled" } else { "disabled" },
+        if audit.log_queries { "enabled" } else { "disabled" }
     );
     log_trace_exporter(&trace);
 

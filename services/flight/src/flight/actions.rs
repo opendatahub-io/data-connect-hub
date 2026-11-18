@@ -67,7 +67,7 @@ impl DataIngestionService {
         let context = AuditContext::from_request(&request);
         let action = request.get_ref().r#type.clone();
         let (resource, audit_action) = action_operation(&action);
-        let mut audit = PendingAudit::new(self.audit.enabled, context.clone(), resource, audit_action, started);
+        let mut audit = PendingAudit::new(self.audit, context.clone(), resource, audit_action, started);
         let result = match action.as_str() {
             ACTION_CHECK_DATA_CONNECTION => self.action_check_connection(&request).await,
             ACTION_GET_SUPPORTED_CONNECTORS => self.action_get_supported_connectors().await,
@@ -80,7 +80,7 @@ impl DataIngestionService {
                 Ok(Response::new(Box::pin(TracedStream::new_audited_operation(
                     "action",
                     response.into_inner(),
-                    StreamAudit::new(self.audit.enabled, context, resource, audit_action, started),
+                    StreamAudit::new(self.audit, context, resource, audit_action, started),
                 ))
                     as <Self as FlightService>::DoActionStream))
             },
