@@ -8,7 +8,7 @@ Shared variables and helpers live in `lib.sh`; every namespace below is a
 | Script | Purpose |
 |--------|---------|
 | `setup-kind.sh` | Stage 1: create the Kind cluster, install Gateway API CRDs and Istio, deploy the ingress Gateway. |
-| `deploy-dch.sh` | Stage 2: build images, load them into Kind, deploy DCH and the tenant datasources. |
+| `deploy-dch.sh` | Stage 2: build images, load them into Kind, install the platform Auth CRD and CR, deploy DCH and the tenant datasources. |
 | `run-tests.sh` | Stage 3: generate the e2e env config and run the e2e suite. |
 | `run-disabled-connector-test.sh` | Verify CRUD and ingestion behavior for a disabled connector. |
 | `lib.sh` | Shared variables and helpers; sourced by the other scripts. |

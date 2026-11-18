@@ -61,13 +61,19 @@ DCH_INSECURE="${DCH_INSECURE:-true}"
 DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
 DCH_NEIGHBOR_TENANT_ID="${DCH_NEIGHBOR_TENANT_ID:-dch-e2e-neighbor}"
+DCH_GLOBAL_NAMESPACE="${DCH_GLOBAL_NAMESPACE:-dch-e2e-global}"
 
 # Tenancy tests need three distinct namespaces: the runner grants the e2e user
 # access to the tenant and the neighbor tenant, and none in the no-access one.
+# Global namespace tests label and unlabel their own namespace, so it must not
+# be any of those either.
 if [[ "$DCH_TENANT_ID" == "$DCH_NEIGHBOR_TENANT_ID" ||
       "$DCH_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ||
-      "$DCH_NEIGHBOR_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ]]; then
-    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, and DCH_NO_ACCESS_NAMESPACE must be distinct" >&2
+      "$DCH_NEIGHBOR_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ||
+      "$DCH_GLOBAL_NAMESPACE" == "$DCH_TENANT_ID" ||
+      "$DCH_GLOBAL_NAMESPACE" == "$DCH_NEIGHBOR_TENANT_ID" ||
+      "$DCH_GLOBAL_NAMESPACE" == "$DCH_NO_ACCESS_NAMESPACE" ]]; then
+    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, DCH_NO_ACCESS_NAMESPACE, and DCH_GLOBAL_NAMESPACE must be distinct" >&2
     exit 1
 fi
 
@@ -351,6 +357,28 @@ setup_service_rbac() {
     # neighbor tenant needs it too, so tenancy tests can create inline
     # credentials there and check the secret lands in the neighbor namespace.
     wait_for_tenant_bindings
+}
+
+# setup_global_namespace prepares the namespace that global namespace tests
+# (tests/test_global_namespace.py) label as global. The tests run only when the
+# platform Auth CR exists, because dc-controller enables global namespaces only
+# when the Auth CRD is installed. The e2e user manages the namespace through
+# its own dch-read-write RoleBinding, as administrators can grant to a group
+# outside the Auth CR adminGroups, so the tests do not depend on adminGroups.
+setup_global_namespace() {
+    E2E_GLOBAL_NAMESPACE_ENABLED="false"
+    if ! kubectl get auths.services.platform.opendatahub.io auth >/dev/null 2>&1; then
+        return 0
+    fi
+    kubectl create namespace "$DCH_GLOBAL_NAMESPACE" 2>/dev/null || true
+    if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
+        kubectl create rolebinding dch-e2e-global-writer \
+            -n "$DCH_GLOBAL_NAMESPACE" \
+            --clusterrole=dch-read-write \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+    E2E_GLOBAL_NAMESPACE_ENABLED="true"
 }
 
 # -------------------------------------------------------------------
@@ -674,7 +702,12 @@ DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
 DCH_AUDIT_ENABLED=${DCH_AUDIT_ENABLED:-false}
 DCH_AUDIT_LOG_QUERIES=${DCH_AUDIT_LOG_QUERIES:-false}
+DCH_REST_SA=${DCH_REST_SA}
+DCH_FLIGHT_SA=${DCH_FLIGHT_SA}
 EOF
+
+    [[ "$E2E_GLOBAL_NAMESPACE_ENABLED" == "true" ]] && \
+        echo "DCH_GLOBAL_NAMESPACE=${DCH_GLOBAL_NAMESPACE}" >> "$ENV_FILE"
 
     if [[ "$E2E_PG_ENABLED" == "true" ]]; then
         echo "DCH_PG_SECRET=${PG_SECRET}" >> "$ENV_FILE"
@@ -777,7 +810,13 @@ echo "[3/11] Service accounts ready"
 
 setup_user_rbac
 setup_persona_rbac
+setup_global_namespace
 echo "[4/11] SA RBAC ready"
+if [[ "$E2E_GLOBAL_NAMESPACE_ENABLED" == "true" ]]; then
+    echo "       Global namespace $DCH_GLOBAL_NAMESPACE ready"
+else
+    echo "       Global namespace tests skipped (no platform Auth CR)"
+fi
 
 # 4. Credential secrets
 setup_pg_secret

@@ -105,7 +105,7 @@ mod tests {
             port = 8080
 
             [global-connection-types]
-            tenant-id = "opendatahub"
+            tenant-ids = ["opendatahub"]
 
             [flight-service]
             ca-cert = "/etc/tls/flight/ca.crt"
@@ -144,7 +144,7 @@ mod tests {
             port = 8080
 
             [global-connection-types]
-            tenant-id = "opendatahub"
+            tenant-ids = ["opendatahub"]
 
             [flight-service]
             ca-cert = "/etc/tls/flight/ca.crt"

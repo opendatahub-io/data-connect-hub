@@ -479,7 +479,7 @@ mod tests {
         meta: Arc<dyn MetaStore + Send + Sync>,
         secrets: Arc<dyn SecretStore + Send + Sync>,
     ) -> ApiService {
-        ApiService::new(meta, secrets, None, None, "test-tenant".to_string())
+        ApiService::new(meta, secrets, None, None)
     }
 
     fn request_context() -> FlightRequestContext {

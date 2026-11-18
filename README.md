@@ -121,7 +121,7 @@ address = "127.0.0.1"
 port = 8080
 
 [global-connection-types]
-tenant-id = "default"
+tenant-ids = ["default"]
 
 # Optional: Prometheus metrics on http://<address>:<port>/metrics
 [metrics]
@@ -150,7 +150,7 @@ batch_size = 512
 max_rows = 1000000
 
 [global-connection-types]
-tenant-id = "default"
+tenant-ids = ["default"]
 
 [tls]
 # cert_file = "/etc/tls/private/tls.crt"
