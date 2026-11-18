@@ -91,8 +91,9 @@ const (
 	envOTLPInsecure    = "OTEL_EXPORTER_OTLP_INSECURE"
 	envOTLPCertificate = "OTEL_EXPORTER_OTLP_CERTIFICATE"
 
-	// envAuditEnabled carries spec.audit.enabled to the service containers.
-	envAuditEnabled = "AUDIT_ENABLED"
+	// Audit logging environment variables carrying spec.audit to the service containers.
+	envAuditEnabled    = "AUDIT_ENABLED"
+	envAuditLogQueries = "AUDIT_LOG_QUERIES"
 
 	kindDeployment         = "Deployment"
 	kindConfigMap          = "ConfigMap"

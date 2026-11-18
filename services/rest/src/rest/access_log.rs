@@ -1,25 +1,6 @@
 use actix_web::http::Method;
+use commons::utils::audit::AuditConfig;
 use std::time::Duration;
-
-/// AuditConfig controls whether REST audit records are emitted.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct AuditConfig {
-    /// enabled indicates whether request audit events should be emitted.
-    pub enabled: bool,
-}
-
-impl AuditConfig {
-    /// from_env reads the controller-provided `AUDIT_ENABLED` setting.
-    pub fn from_env() -> Self {
-        Self::from_value(std::env::var("AUDIT_ENABLED").ok().as_deref())
-    }
-
-    fn from_value(value: Option<&str>) -> Self {
-        Self {
-            enabled: value.is_some_and(|value| value.eq_ignore_ascii_case("true")),
-        }
-    }
-}
 
 /// RequestId uniquely identifies one inbound REST request.
 #[derive(Clone, Debug)]
@@ -68,6 +49,7 @@ pub fn resource_action_for(method: &Method, route: &str) -> Option<(&'static str
 #[allow(clippy::too_many_arguments)]
 /// log_request emits one structured audit event for a completed REST request.
 pub fn log_request(
+    config: AuditConfig,
     request_id: &str,
     tenant_id: &str,
     actor: &str,
@@ -80,6 +62,7 @@ pub fn log_request(
     duration: Duration,
 ) {
     let duration_ms = u64::try_from(duration.as_millis()).unwrap_or(u64::MAX);
+    let query = if config.log_queries { query } else { None };
 
     match (resource_id, error) {
         (Some(resource_id), Some(error)) => tracing::info!(
@@ -226,13 +209,5 @@ mod tests {
     fn resource_action_mapping_excludes_non_audited_routes() {
         assert_eq!(resource_action_for(&Method::GET, "/health"), None);
         assert_eq!(resource_action_for(&Method::GET, "/api/v1alpha1/data/missing"), None);
-    }
-
-    #[test]
-    fn audit_config_is_disabled_by_default_and_requires_true() {
-        assert!(!AuditConfig::from_value(None).enabled);
-        assert!(!AuditConfig::from_value(Some("false")).enabled);
-        assert!(!AuditConfig::from_value(Some("1")).enabled);
-        assert!(AuditConfig::from_value(Some("TRUE")).enabled);
     }
 }

@@ -1,9 +1,10 @@
 use crate::flight::QueryContext;
-use crate::flight::audit::{AuditConfig, AuditContext, PendingAudit, bounded_query, do_get_operation};
+use crate::flight::audit::{AuditContext, PendingAudit, bounded_query, do_get_operation};
 use crate::flight::errors::{map_connector_error, map_meta_store_error};
 use crate::flight::metrics;
 use crate::flight::registry::ConnectorsRegistry;
 use crate::flight::trace::TracedStream;
+use commons::utils::audit::AuditConfig;
 
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow_flight::{
@@ -110,7 +111,7 @@ impl DataIngestionService {
 
     fn pending_do_get_audit(&self, operation: &'static str, context: AuditContext, started: Instant) -> PendingAudit {
         let (resource, action) = do_get_operation(operation);
-        PendingAudit::new(self.audit.enabled, context, resource, action, started)
+        PendingAudit::new(self.audit, context, resource, action, started)
     }
 
     fn query_to_string(query: &CommandGetSqlInfo) -> Vec<String> {
@@ -228,7 +229,7 @@ impl DataIngestionService {
         Ok(Response::new(Box::pin(TracedStream::new_audited(
             OPERATION_SQL_INFO,
             flight_stream,
-            self.audit.enabled,
+            self.audit,
             context,
             started,
         )) as <Self as FlightService>::DoGetStream))
@@ -323,7 +324,7 @@ impl DataIngestionService {
         Ok(Response::new(Box::pin(TracedStream::new_audited(
             OPERATION_TABLES,
             flight_stream,
-            self.audit.enabled,
+            self.audit,
             context,
             started,
         )) as <Self as FlightService>::DoGetStream))
@@ -423,7 +424,7 @@ impl DataIngestionService {
         Ok(Response::new(Box::pin(TracedStream::new_audited(
             OPERATION_STATEMENT,
             flight_stream,
-            self.audit.enabled,
+            self.audit,
             context,
             started,
         )) as <Self as FlightService>::DoGetStream))
@@ -542,7 +543,7 @@ impl DataIngestionService {
         Ok(Response::new(Box::pin(TracedStream::new_audited(
             OPERATION_BINARY,
             flight_stream,
-            self.audit.enabled,
+            self.audit,
             context,
             started,
         )) as <Self as FlightService>::DoGetStream))

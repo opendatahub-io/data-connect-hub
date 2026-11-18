@@ -665,17 +665,26 @@ func auditEnv(audit *dchv1alpha1.Audit) []corev1.EnvVar {
 	if audit == nil || audit.Enabled == nil || !*audit.Enabled {
 		return nil
 	}
-	return []corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}
+	vars := []corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}
+	if audit.LogQueries != nil && *audit.LogQueries {
+		vars = append(vars, corev1.EnvVar{Name: envAuditLogQueries, Value: valueTrue})
+	}
+	return vars
 }
 
-// reconcileAuditEnv reconciles the audit logging environment variable in
-// deployments, removing a stale variable when audit logging is disabled so
-// that clearing spec.audit.enabled actually turns it off in the running
-// containers.
+// reconcileAuditEnv reconciles the audit logging environment variables in
+// deployments, removing stale variables when audit logging (or query
+// logging) is disabled so that clearing spec.audit actually turns it off
+// in the running containers.
 func reconcileAuditEnv(resources []*unstructured.Unstructured, audit *dchv1alpha1.Audit, containerNames ...string) bool {
 	wanted := make(map[string]bool, len(containerNames))
 	for _, name := range containerNames {
 		wanted[name] = true
+	}
+
+	auditEnvNames := map[string]bool{
+		envAuditEnabled:    true,
+		envAuditLogQueries: true,
 	}
 
 	desiredVars := auditEnv(audit)
@@ -702,14 +711,14 @@ func reconcileAuditEnv(resources []*unstructured.Unstructured, audit *dchv1alpha
 			env, _ := container["env"].([]any)
 			var newEnv []any
 
-			// Remove the audit env var, preserve others
+			// Remove the audit env vars, preserve others
 			for _, e := range env {
 				existing, ok := e.(map[string]any)
 				if !ok {
 					newEnv = append(newEnv, e)
 					continue
 				}
-				if n, _ := existing["name"].(string); n != envAuditEnabled {
+				if n, _ := existing["name"].(string); !auditEnvNames[n] {
 					newEnv = append(newEnv, e)
 				}
 			}

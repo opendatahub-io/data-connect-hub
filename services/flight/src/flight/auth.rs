@@ -1,5 +1,6 @@
-use crate::flight::audit::{AuditConfig, AuditContext, CallerIdentity, PendingAudit, RpcRequestId};
+use crate::flight::audit::{AuditContext, CallerIdentity, PendingAudit, RpcRequestId};
 use commons::api::{X_REMOTE_USER, X_REQUEST_ID, X_TENANT_ID};
+use commons::utils::audit::AuditConfig;
 use http::header::AUTHORIZATION;
 use http_body::Body;
 use kube_utils::auth::{AuthError, KubeAuthClient};
@@ -196,13 +197,9 @@ fn pending_auth_audit<B>(
             .get::<Arc<crate::flight::audit::RpcAuditState>>()
             .cloned(),
     };
-    PendingAudit::new(
-        audit.enabled && is_audited_path(req.uri().path()),
-        context,
-        "flight_server",
-        "authenticate",
-        started,
-    )
+    let mut config = audit;
+    config.enabled = config.enabled && is_audited_path(req.uri().path());
+    PendingAudit::new(config, context, "flight_server", "authenticate", started)
 }
 
 fn is_audited_path(path: &str) -> bool {

@@ -40,7 +40,10 @@ To pass extra pytest arguments:
 Audit-log tests run only when the deployed `DataConnectService` already has
 `spec.audit.enabled: true`. Set `DCH_AUDIT_ENABLED=true` in `env.local`, then
 run `./e2e/run-e2e.sh e2e/env.local -k audit`. These tests read pod logs from
-`DCH_SERVICE_NAMESPACE` using the current `kubectl` context.
+`DCH_SERVICE_NAMESPACE` using the current `kubectl` context. Tests asserting
+the `audit.query` field additionally require `spec.audit.logQueries: true` on
+the deployed `DataConnectService` and `DCH_AUDIT_LOG_QUERIES=true` in
+`env.local`.
 
 The runner labels `DCH_TENANT_ID` (and the neighbor tenant) with `dataconnecthub.opendatahub.io/tenant=true` and waits for the dc-controller to reconcile the tenant-local `dch-rest-service-secret-access` RoleBinding into each of them. That binding grants the REST ServiceAccount `get`, `create`, `patch`, and `delete` on secrets in the namespace for inline credentials, failed-creation cleanup, readiness, and export — the runner no longer creates it by hand. The runner does grant Flight read access to configured connector secrets. Service RBAC setup runs even when `DCH_AUTH_TOKEN` is supplied; the Kubernetes identity running the script must be allowed to create the Roles and RoleBindings and grant their referenced permissions. The runner also binds the `dch-e2e-persona-secret-reader` ServiceAccount to `dch-read-write` and `dch-secret-export` plus `get` on the PG connector secret, so export tests cover both outcomes of the service-side secret access check.
 

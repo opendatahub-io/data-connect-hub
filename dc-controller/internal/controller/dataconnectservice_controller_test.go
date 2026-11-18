@@ -874,6 +874,7 @@ var _ = Describe("DataConnectService Controller", func() {
 const (
 	testOTLPEndpoint = "http://otel:4317"
 	testEnvRustLog   = "RUST_LOG"
+	testEnvRustWarn  = "warn"
 )
 
 var _ = Describe("traceEnv", func() {
@@ -1077,6 +1078,29 @@ var _ = Describe("auditEnv", func() {
 			{Name: envAuditEnabled, Value: valueTrue},
 		}))
 	})
+
+	It("returns AUDIT_ENABLED and AUDIT_LOG_QUERIES when both enabled", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(true)})).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+			{Name: envAuditLogQueries, Value: valueTrue},
+		}))
+	})
+
+	It("omits AUDIT_LOG_QUERIES when logQueries is unset", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(true)})).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+		}))
+	})
+
+	It("omits AUDIT_LOG_QUERIES when logQueries is false", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(false)})).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+		}))
+	})
+
+	It("returns nil when logQueries is enabled but audit is disabled", func() {
+		Expect(auditEnv(&dchv1alpha1.Audit{Enabled: ptr.To(false), LogQueries: ptr.To(true)})).To(BeNil())
+	})
 })
 
 var _ = Describe("reconcileAuditEnv", func() {
@@ -1090,6 +1114,24 @@ var _ = Describe("reconcileAuditEnv", func() {
 		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer, nameFlightServiceContainer)).To(BeTrue())
 		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}))
 		Expect(envOf(deploy, nameFlightServiceContainer)).To(Equal([]corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}))
+	})
+
+	It("sets AUDIT_LOG_QUERIES=true on both service containers when logQueries is enabled", func() {
+		deploy := newDeployment(
+			corev1.Container{Name: nameRestServiceContainer},
+			corev1.Container{Name: nameFlightServiceContainer},
+		)
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(true)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer, nameFlightServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+			{Name: envAuditLogQueries, Value: valueTrue},
+		}))
+		Expect(envOf(deploy, nameFlightServiceContainer)).To(Equal([]corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+			{Name: envAuditLogQueries, Value: valueTrue},
+		}))
 	})
 
 	It("leaves AUDIT_ENABLED unset when audit is nil", func() {
@@ -1108,7 +1150,7 @@ var _ = Describe("reconcileAuditEnv", func() {
 	})
 
 	It("removes a stale AUDIT_ENABLED=true when toggled back to disabled", func() {
-		existing := corev1.EnvVar{Name: testEnvRustLog, Value: "warn"}
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: testEnvRustWarn}
 		stale := corev1.EnvVar{Name: envAuditEnabled, Value: valueTrue}
 		deploy := newDeployment(corev1.Container{
 			Name: nameRestServiceContainer,
@@ -1118,6 +1160,49 @@ var _ = Describe("reconcileAuditEnv", func() {
 
 		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
 		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{existing}))
+	})
+
+	It("removes a stale AUDIT_LOG_QUERIES=true when logQueries is toggled back to disabled", func() {
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: testEnvRustWarn}
+		staleQueries := corev1.EnvVar{Name: envAuditLogQueries, Value: valueTrue}
+		deploy := newDeployment(corev1.Container{
+			Name: nameRestServiceContainer,
+			Env:  []corev1.EnvVar{existing, staleQueries},
+		})
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(false)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{
+			existing,
+			{Name: envAuditEnabled, Value: valueTrue},
+		}))
+	})
+
+	It("removes stale audit env vars when audit is disabled", func() {
+		existing := corev1.EnvVar{Name: testEnvRustLog, Value: testEnvRustWarn}
+		stale := []corev1.EnvVar{
+			{Name: envAuditEnabled, Value: valueTrue},
+			{Name: envAuditLogQueries, Value: valueTrue},
+		}
+		deploy := newDeployment(corev1.Container{
+			Name: nameRestServiceContainer,
+			Env:  append([]corev1.EnvVar{existing}, stale...),
+		})
+		audit := &dchv1alpha1.Audit{Enabled: ptr.To(false), LogQueries: ptr.To(true)}
+
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, audit, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{existing}))
+	})
+
+	It("updates an existing AUDIT_LOG_QUERIES rather than duplicating it", func() {
+		deploy := newDeployment(corev1.Container{Name: nameRestServiceContainer})
+		enabled := &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(true)}
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, enabled, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(HaveLen(2))
+
+		queriesOff := &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(false)}
+		Expect(reconcileAuditEnv([]*unstructured.Unstructured{deploy}, queriesOff, nameRestServiceContainer)).To(BeTrue())
+		Expect(envOf(deploy, nameRestServiceContainer)).To(Equal([]corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}))
 	})
 
 	It("updates an existing AUDIT_ENABLED rather than duplicating it", func() {

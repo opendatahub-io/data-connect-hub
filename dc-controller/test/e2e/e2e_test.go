@@ -101,7 +101,11 @@ var _ = Describe("dc-controller", Ordered, func() {
 				fixture.EnableAudit()
 			})
 
-			It("removes AUDIT_ENABLED when disabled again", func() {
+			It("sets AUDIT_LOG_QUERIES=true on both services when query logging is enabled", func() {
+				fixture.EnableAuditQueryLogging()
+			})
+
+			It("removes the audit env vars when disabled again", func() {
 				fixture.DisableAudit()
 			})
 		})
