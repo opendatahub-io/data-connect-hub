@@ -40,9 +40,9 @@ async fn main() -> Result<()> {
         batch_size: config.query.batch_size,
     };
 
-    let tenant_id = config.global_connection_types.tenant_id;
+    let global_tenant_ids = config.global_connection_types.tenant_ids;
     let auth = config.auth;
-    let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
+    let meta_store = Arc::new(PgMetaStore::new(config.database, global_tenant_ids).await?);
 
     let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
 
