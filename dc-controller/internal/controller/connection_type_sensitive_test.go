@@ -51,7 +51,7 @@ var builtinSensitiveFields = map[string]bool{
 }
 
 func TestBuiltinConnectionTypesSensitiveFields(t *testing.T) {
-	typesDir := filepath.Join("..", "..", "..", "config", "connection-types")
+	typesDir := filepath.Join("..", "..", "..", "manifests", "connection-types")
 	entries, err := os.ReadDir(typesDir)
 	if err != nil {
 		t.Fatalf("read %s: %v", typesDir, err)

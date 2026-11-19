@@ -149,7 +149,7 @@ func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	Expect(installTestPostgres(applicationNamespace, postgresPassword)).To(Succeed())
 
 	By("creating REST and Flight TLS secrets signed by the test CA")
-	restTLSSecret, err := e.serviceCA.tlsSecret("rest-service-tls", applicationNamespace,
+	restTLSSecret, err := e.serviceCA.tlsSecret(restDeploymentName+"-tls", applicationNamespace,
 		restDeploymentName,
 		fmt.Sprintf("%s.%s", restDeploymentName, applicationNamespace),
 		fmt.Sprintf("%s.%s.svc", restDeploymentName, applicationNamespace),
@@ -158,7 +158,7 @@ func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(e.k8sClient.Create(e.ctx, restTLSSecret)).To(Succeed())
 
-	flightTLSSecret, err := e.serviceCA.tlsSecret(fmt.Sprintf("%s-flight-tls", dcsName), applicationNamespace,
+	flightTLSSecret, err := e.serviceCA.tlsSecret(e.flightServiceName+"-tls", applicationNamespace,
 		e.flightServiceName,
 		fmt.Sprintf("%s.%s", e.flightServiceName, applicationNamespace),
 		fmt.Sprintf("%s.%s.svc", e.flightServiceName, applicationNamespace),

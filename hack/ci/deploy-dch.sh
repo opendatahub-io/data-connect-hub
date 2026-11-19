@@ -22,12 +22,6 @@ docker build \
     -t "$CI_REST_IMAGE" -f "$CI_REPO_ROOT/services/rest/Containerfile.konflux" "$CI_REPO_ROOT"
 
 echo "--- Building dc-controller ---"
-sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
-    "$CI_REPO_ROOT/config/base/flight-service/deployment.yaml"
-rm -f "$CI_REPO_ROOT/config/base/flight-service/deployment.yaml.bak"
-sed -E -i.bak 's/^([[:space:]]*imagePullPolicy:).*/\1 IfNotPresent/' \
-    "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml"
-rm -f "$CI_REPO_ROOT/config/base/rest-service/deployment.yaml.bak"
 docker build \
     --build-arg "RUNTIME_BASE_IMAGE=${CI_E2E_RUNTIME_BASE_IMAGE}" \
     -t "$CI_CONTROLLER_IMAGE" -f "$CI_REPO_ROOT/dc-controller/Containerfile.konflux" "$CI_REPO_ROOT"
@@ -129,7 +123,7 @@ for svc in "$CI_REST_SERVICE_NAME" "$CI_FLIGHT_SERVICE_NAME"; do
         -addext "subjectAltName=DNS:${svc}.${CI_SVC_NAMESPACE}.svc,DNS:${svc}.${CI_SVC_NAMESPACE}.svc.cluster.local,DNS:${svc}" \
         -days 365 2>/dev/null
 
-    tls_secret_name="${svc#dch-}-tls"
+    tls_secret_name="${svc}-tls"
     kubectl create secret tls "$tls_secret_name" -n "$CI_SVC_NAMESPACE" \
         --cert="${CI_TEMP_DIR}/${svc}-tls.crt" \
         --key="${CI_TEMP_DIR}/${svc}-tls.key" \
