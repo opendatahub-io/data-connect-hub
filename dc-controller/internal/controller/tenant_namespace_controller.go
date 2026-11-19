@@ -169,7 +169,7 @@ func (r *TenantNamespaceReconciler) ensureRoleBinding(ctx context.Context, cr *d
 	if apierrors.IsNotFound(err) {
 		if err := r.Create(ctx, desired); err != nil {
 			if apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("tenant RoleBinding %s/%s appeared after the read, requeueing", namespace, desired.Name)
+				return fmt.Errorf("tenant RoleBinding %s/%s appeared after the read, requeuing", namespace, desired.Name)
 			}
 			return fmt.Errorf("creating tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
 		}
@@ -199,7 +199,7 @@ func (r *TenantNamespaceReconciler) ensureRoleBinding(ctx context.Context, cr *d
 		}
 		if err := r.Create(ctx, desired); err != nil {
 			if apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("tenant RoleBinding %s/%s is still terminating, requeueing replacement", namespace, desired.Name)
+				return fmt.Errorf("tenant RoleBinding %s/%s is still terminating, requeuing replacement", namespace, desired.Name)
 			}
 			return fmt.Errorf("recreating tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
 		}
