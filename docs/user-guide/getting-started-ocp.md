@@ -364,6 +364,25 @@ A tenant is a consumer of DCH service. As a tenant admin, you can set up to cons
 oc new-project dch-tenant-a
 ```
 
+Label the namespace as a DCH tenant. The dc-controller watches namespaces with this label and automatically creates the RoleBinding that lets the REST service manage connection secrets in this namespace:
+
+```sh
+oc label namespace dch-tenant-a dataconnecthub.opendatahub.io/tenant=true
+```
+
+Verify the RoleBinding was created:
+
+```sh
+oc get rolebinding dch-rest-service-secret-access -n dch-tenant-a
+```
+
+You should see:
+
+```
+NAME                             ROLE                                       AGE
+dch-rest-service-secret-access   ClusterRole/dch-rest-service-secret-access   30s
+```
+
 ## Prepare Tenant Data Source
 
 A tenant can have different types of data sources such as Postgres, S3, ElasticSearch, etc ... For this demo, create a Postgres datasource as follows:

@@ -266,6 +266,17 @@ def no_access_namespace() -> str:
 
 
 @pytest.fixture(scope="session")
+def e2e_user_sa() -> str:
+    """Name of the e2e user ServiceAccount in the tenant namespace.
+
+    Only set when run-e2e.sh created the user (bring-your-own-token runs
+    leave it unset). Onboarding tests use it to grant the user DCH API
+    access in freshly created namespaces.
+    """
+    return os.environ.get("E2E_USER_SA_NAME", "")
+
+
+@pytest.fixture(scope="session")
 def ca_cert() -> str | None:
     return os.environ.get("DCH_CA_CERT")
 
