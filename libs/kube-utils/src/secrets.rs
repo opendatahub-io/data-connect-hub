@@ -169,6 +169,8 @@ impl SecretStore for KubeSecretStore {
 fn create_secret_error(name: &str, namespace: &str, err: &kube::Error) -> SecretStoreError {
     let reason = match err {
         kube::Error::Api(status) if !status.message.is_empty() => status.message.clone(),
+        kube::Error::Api(status) if !status.reason.is_empty() => status.reason.clone(),
+        kube::Error::Api(status) => format!("Kubernetes API request failed with HTTP {}", status.code),
         kube::Error::BuildRequest(request::Error::BuildRequest(e)) => {
             format!("the secret name or namespace is not valid in a request URI: {e}")
         },
@@ -179,6 +181,9 @@ fn create_secret_error(name: &str, namespace: &str, err: &kube::Error) -> Secret
             CreateSecretErrorKind::Conflict
         },
         kube::Error::Api(status) if status.is_invalid() || status.code == 422 => CreateSecretErrorKind::Invalid,
+        // The namespace comes from the caller's X-Tenant-Id; a Secret write
+        // only returns 404 when that namespace does not exist.
+        kube::Error::Api(status) if status.is_not_found() || status.code == 404 => CreateSecretErrorKind::Invalid,
         kube::Error::Api(status) if status.code == 429 || status.code >= 500 => CreateSecretErrorKind::Unavailable,
         // The request URI is built from the caller-supplied namespace and
         // secret name, so a URI the client cannot build is the caller's error.
@@ -301,9 +306,24 @@ mod tests {
     }
 
     #[test]
-    fn test_create_secret_error_empty_api_message_falls_back_to_error() {
+    fn test_create_secret_error_missing_namespace_is_invalid() {
+        let message = "namespaces \"team-alpha\" not found";
+        assert_eq!(
+            create_reason(api_error(404, "NotFound", message)),
+            (message.to_string(), CreateSecretErrorKind::Invalid)
+        );
+    }
+
+    #[test]
+    fn test_create_secret_error_empty_api_message_falls_back_to_reason() {
         let (reason, _) = create_reason(api_error(500, "InternalError", ""));
-        assert!(reason.contains("InternalError"), "{reason}");
+        assert_eq!(reason, "InternalError");
+    }
+
+    #[test]
+    fn test_create_secret_error_empty_api_message_and_reason_falls_back_to_code() {
+        let (reason, _) = create_reason(api_error(500, "", ""));
+        assert_eq!(reason, "Kubernetes API request failed with HTTP 500");
     }
 
     #[test]

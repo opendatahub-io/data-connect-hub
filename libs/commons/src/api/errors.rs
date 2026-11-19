@@ -87,7 +87,8 @@ pub enum CreateSecretErrorKind {
     /// The secret already exists, or its fields are managed by another client.
     /// The caller can retry with a different secret name.
     Conflict,
-    /// The secret name or keys are invalid. The caller can fix the request.
+    /// The secret name or keys are invalid, or the tenant namespace does not
+    /// exist. The caller can fix the request.
     Invalid,
     /// The Kubernetes API is unreachable or failed. The caller can retry later.
     Unavailable,

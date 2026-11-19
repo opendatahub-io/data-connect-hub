@@ -156,11 +156,12 @@ The REST API returns `cannot_create_secret` when the Kubernetes secret write fai
 
 | HTTP status | Kubernetes error | Cause and fix |
 |---|---|---|
-| `500` | `secrets is forbidden: User "system:serviceaccount:..." cannot create resource "secrets"` | The REST ServiceAccount has no Secret access in the tenant namespace. Bind the ClusterRole as described in [2.3](#23-grant-rest-service-permission-to-manage-connection-secrets). |
+| `500` | `secrets is forbidden: User "system:serviceaccount:..." cannot <verb> resource "secrets"` | The REST ServiceAccount has no Secret access in the tenant namespace. The verb is `create` for connection creation, and `patch` or `create` for export. Bind the ClusterRole as described in [2.3](#23-grant-rest-service-permission-to-manage-connection-secrets). |
 | `500` | `admission webhook "..." denied the request` | A cluster policy rejected the Secret. Check the named webhook or policy. |
 | `409` | `secrets "..." already exists` | Choose a different secret name in the request. |
 | `409` | `Apply failed with ... conflict` | The export target Secret has fields managed by another client. Choose a different secret name, or delete the existing Secret. |
 | `422` | `... is invalid: ...` or `not valid in a request URI` | Fix the secret name, namespace, or keys named in the message. |
+| `422` | `namespaces "..." not found` | The tenant namespace in `X-Tenant-Id` does not exist. Use an existing tenant namespace. |
 | `503` | Throttling (`429`), server error, or connection failure | The Kubernetes API is unavailable. Retry later; if it persists, check the REST logs and the API server. |
 
 Run these checks as an administrator with permission to impersonate the REST ServiceAccount. Replace the deployment and namespace values for your installation:
