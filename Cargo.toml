@@ -116,12 +116,11 @@ rustls = { version = "0.23", default-features = false, features = ["std", "loggi
 # RHEL FIPS provider. Pinned exactly: published at 0.0.1, so semver gives no
 # compatibility guarantee.
 rustls-ossl = "=0.0.1"
-# Used directly for the DRBG behind fips::FipsSecureRandom, and also shared
-# with rustls-ossl: kept at the version rustls-ossl resolves so Cargo unifies
-# the two and its copy picks up the "log" feature. That feature makes every
-# failed OpenSSL call emit the OpenSSL error stack through `log::error!`,
-# without which rustls flattens the cause into an opaque
-# `FailedToGetRandomBytes` that names neither the call nor the reason.
+# Transitive dependency of rustls-ossl, declared directly only to turn on
+# its "log" feature: every failed OpenSSL call then emits the OpenSSL error
+# stack through `log::error!`. Without it rustls flattens the cause into
+# something like an opaque `FailedToGetRandomBytes`, naming neither the
+# call that failed nor the reason.
 ossl = { version = "1.5.4", features = ["log"] }
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
@@ -140,3 +139,19 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
     "internal-logs",
 ] }
 tracing-opentelemetry = "0.33"
+
+# Both crates are consumed from a fork carrying fixes that rustls-ossl 0.0.1
+# and ossl 1.5.4 need on RHEL 9 in FIPS mode, where libcrypto 3.5 is paired
+# with the frozen 3.0.7 FIPS module: the RNG drawing from the configured
+# library context, signature mechanism selection by provider capability
+# rather than libcrypto version, FIPS reporting for the TLS KDFs, ChaCha20
+# excluded from FIPS, an error instead of a provider that cannot complete
+# a handshake, TLS key shares expanded to the uncompressed point form, and
+# signature verification reporting the context's FIPS state.
+# Pinned to a commit so builds stay reproducible.
+#
+# Drop this section, and the allow-git entry in deny.toml, once the fixes are
+# released upstream: https://github.com/latchset/kryoptic
+[patch.crates-io]
+ossl = { git = "https://github.com/loicmarchal/kryoptic-dch", rev = "96da7fb357072e7f1f88c33eca67434f3066cb54" }
+rustls-ossl = { git = "https://github.com/loicmarchal/kryoptic-dch", rev = "96da7fb357072e7f1f88c33eca67434f3066cb54" }

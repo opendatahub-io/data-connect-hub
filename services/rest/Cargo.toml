@@ -26,6 +26,8 @@ pg-meta-store = { workspace = true }
 tonic = { workspace = true, features = ["tls-native-roots"] }
 rustls = { workspace = true }
 rustls-ossl = { workspace = true }
+# Unused in code: present so rustls-ossl's copy of ossl is built with
+# "log", which surfaces the OpenSSL error stack behind a failed call.
 ossl = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }

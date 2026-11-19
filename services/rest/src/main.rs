@@ -234,32 +234,25 @@ impl CryptoStatus {
 }
 
 fn install_crypto_provider() -> Result<CryptoStatus> {
-    use rustls::crypto::{CryptoProvider, SecureRandom};
+    use rustls::crypto::CryptoProvider;
 
-    let mut provider = rustls_ossl::default_provider();
+    // try_default_provider, not default_provider: the component lists are
+    // discovered by probing the OpenSSL context, and an empty one is reported
+    // here rather than surfacing later as a handshake the peer rejects.
+    let mut provider = rustls_ossl::try_default_provider()
+        .map_err(|e| anyhow::anyhow!("the OpenSSL crypto provider is unusable: {e}"))?;
 
-    // rustls-ossl's own secure_random reads OpenSSL's global default library
-    // context, which nothing configures and which holds no providers at all
-    // on a FIPS host. See fips::FipsSecureRandom.
-    provider.secure_random = &fips::FipsSecureRandom;
-
-    provider.kx_groups.retain(|group| {
-        matches!(
-            group.name(),
-            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1 | rustls::NamedGroup::secp521r1
-        )
-    });
+    fips::retain_fips_kx_groups(&mut provider);
+    fips::retain_fips_cipher_suites(&mut provider);
 
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
-    fips::mark_cipher_suites_fips(&mut provider);
-    fips::mark_signature_verification_fips(&mut provider);
-    // Capture the resolved algorithm lists before reading the flags. Every
-    // FIPS flag here is an `all()`, which is true over an empty list, so a
-    // provider that resolved no cipher suites, no key exchange groups or no
-    // signature algorithms reports flawless compliance while being unable to
-    // complete a handshake — an empty signature_algorithms extension does not
-    // even encode to a valid ClientHello. Treat an empty list as fatal rather
-    // than letting it surface later as a TLS error with no stated cause.
+    // try_default_provider above vouches for what the OpenSSL context
+    // supplied; this guards what the policy applied here leaves behind. Every
+    // FIPS flag below is an `all()`, which is true over an empty list, so a
+    // provider filtered down to nothing would report flawless compliance
+    // while being unable to complete a handshake — an empty
+    // signature_algorithms extension does not even encode to a valid
+    // ClientHello.
     let cipher_suites: Vec<_> = provider.cipher_suites.iter().map(|suite| suite.suite()).collect();
     let signature_schemes: Vec<_> = provider
         .signature_verification_algorithms
@@ -270,7 +263,7 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
 
     if cipher_suites.is_empty() || kx_groups.is_empty() || signature_schemes.is_empty() {
         return Err(anyhow::anyhow!(
-            "the OpenSSL provider resolved an incomplete algorithm set \
+            "the configured FIPS policy left an incomplete algorithm set \
              (cipher suites: {}, kx groups: {}, signature algorithms: {}); refusing to start",
             cipher_suites.len(),
             kx_groups.len(),
@@ -285,15 +278,6 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     let key_provider_fips = provider.key_provider.fips();
     let provider_fips = provider.fips();
     let context_fips = rustls_ossl::osslctx().fips_is_enabled();
-
-    // Draw once here so that a DRBG which cannot be instantiated is a startup
-    // failure with a clear message, rather than an opaque connect error on the
-    // first TLS handshake. Each worker thread instantiates its own DRBG later,
-    // so this proves the context is usable, not that every instance will be.
-    let mut probe = [0u8; 32];
-    fips::FipsSecureRandom
-        .fill(&mut probe)
-        .map_err(|_| anyhow::anyhow!("the OpenSSL DRBG produced no random bytes; refusing to start"))?;
 
     CryptoProvider::install_default(provider)
         .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
