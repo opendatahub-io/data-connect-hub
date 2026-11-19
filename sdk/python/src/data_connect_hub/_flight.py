@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
+import urllib.parse
+import urllib.request
 from collections.abc import Callable, Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -29,10 +32,85 @@ _TLS_SKIP_VERIFY = DatabaseOptions.TLS_SKIP_VERIFY.value
 
 _FLIGHT_DISABLE_SERVER_VERIFICATION = "disable_server_verification"
 _FLIGHT_TLS_ROOT_CERTS = "tls_root_certs"
+_FLIGHT_GENERIC_OPTIONS = "generic_options"
+
+_GRPC_ARG_HTTP_PROXY = "grpc.http_proxy"
+_GRPC_ARG_ENABLE_HTTP_PROXY = "grpc.enable_http_proxy"
 
 
 def _is_auth_error(exc: Exception) -> bool:
     return _GRPC_UNAUTHENTICATED in str(exc).lower()
+
+
+def _split_host_port(entry: str) -> tuple[str, int | None]:
+    """Split a ``no_proxy`` entry into host and optional port (``host:443``, ``[::1]:443``)."""
+    if entry.startswith("["):
+        host, _, rest = entry[1:].partition("]")
+        port = rest[1:] if rest.startswith(":") else ""
+    elif entry.count(":") == 1:
+        host, _, port = entry.partition(":")
+    else:
+        return entry, None
+    return host, int(port) if port.isdigit() else None
+
+
+def _bypasses_proxy(host: str, port: int | None, no_proxy: str) -> bool:
+    """Return True when ``host:port`` must be reached directly.
+
+    Loopback targets (``localhost``, ``*.localhost``, loopback/unspecified IPs)
+    always bypass the proxy, matching grpc-go (ADBC). Otherwise ``no_proxy``
+    entries match as ``*``, domain suffix (``example.com``, ``.example.com`` or
+    ``*.example.com``) or IP/CIDR, optionally restricted to a port (``host:443``).
+    """
+    host = host.lower()
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        ip = None
+    if host == "localhost" or host.endswith(".localhost") or (ip is not None and (ip.is_loopback or ip.is_unspecified)):
+        return True
+    for raw in no_proxy.split(","):
+        entry = raw.strip().lower()
+        if entry == "*":
+            return True
+        entry_host, entry_port = _split_host_port(entry)
+        if not entry_host or (entry_port is not None and entry_port != port):
+            continue
+        if ip is not None:
+            with contextlib.suppress(ValueError):
+                if ip in ipaddress.ip_network(entry_host, strict=False):
+                    return True
+            continue
+        domain = entry_host.removeprefix("*.").lstrip(".")
+        if host == domain or host.endswith(f".{domain}"):
+            return True
+    return False
+
+
+def _grpc_proxy_options(url: str) -> list[tuple[str, str | int]]:
+    """Return gRPC channel args that apply the proxy environment to a pyarrow Flight client.
+
+    gRPC C-core (used by pyarrow Flight) only reads the lowercase ``grpc_proxy``,
+    ``https_proxy``, ``http_proxy`` and ``no_proxy`` variables, while httpx (REST)
+    and grpc-go (ADBC queries) also honor the uppercase forms. Resolving the proxy
+    here, case-insensitively, makes Flight honor the same variables. Loopback
+    targets are never proxied, matching grpc-go; httpx proxies them unless they
+    are listed in ``no_proxy``.
+    """
+    parts = urllib.parse.urlsplit(url)
+    if not parts.hostname:
+        return []
+    proxies = urllib.request.getproxies_environment()
+    proxy = proxies.get("grpc") or proxies.get("https") or proxies.get("http")
+    if not proxy:
+        return []
+    # gRPC dials 443 when the Flight URL omits the port, for every scheme
+    # (grpc://, grpc+tcp:// and grpc+tls://), so match no_proxy against that.
+    if _bypasses_proxy(parts.hostname, parts.port or 443, proxies.get("no", "")):
+        return [(_GRPC_ARG_ENABLE_HTTP_PROXY, 0)]
+    if "://" not in proxy:
+        proxy = f"http://{proxy}"
+    return [(_GRPC_ARG_HTTP_PROXY, proxy)]
 
 
 class FlightClient:
@@ -120,6 +198,9 @@ class FlightClient:
             kwargs[_FLIGHT_DISABLE_SERVER_VERIFICATION] = True
         if self._tls_root_certs:
             kwargs[_FLIGHT_TLS_ROOT_CERTS] = self._tls_root_certs.encode()
+        proxy_options = _grpc_proxy_options(self._url)
+        if proxy_options:
+            kwargs[_FLIGHT_GENERIC_OPTIONS] = proxy_options
         try:
             return flight.connect(self._url, **kwargs)
         except Exception as exc:
