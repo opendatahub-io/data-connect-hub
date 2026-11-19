@@ -633,6 +633,7 @@ def flight_client_factory(
     """Factory that creates a raw pyarrow.flight client with headers for a given connection."""
     import pyarrow.flight as flight
 
+    from data_connect_hub._flight import _grpc_proxy_options
     from data_connect_hub.client import _build_urls
 
     _, flight_url = _build_urls(gateway_endpoint)
@@ -643,6 +644,10 @@ def flight_client_factory(
             kwargs["disable_server_verification"] = True
         if ca_cert:
             kwargs["tls_root_certs"] = Path(ca_cert).read_bytes()
+        # Same proxy resolution as the SDK, so these tests take the SDK's network path.
+        proxy_options = _grpc_proxy_options(flight_url)
+        if proxy_options:
+            kwargs["generic_options"] = proxy_options
 
         client = flight.connect(flight_url, **kwargs)
         headers = [
