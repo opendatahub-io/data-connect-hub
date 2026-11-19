@@ -115,9 +115,9 @@ paths:
         When the server cannot create the secret for inline credentials, it
         returns `cannot_create_secret` with the Kubernetes error in the
         message: `409` when the secret already exists, `422` when the secret
-        name or keys are invalid, `503` when the Kubernetes API is
-        unavailable, and `500` for other failures, such as missing RBAC for
-        the DCH service account.
+        name or keys are invalid or the tenant namespace does not exist, `503`
+        when the Kubernetes API is unavailable, and `500` for other failures,
+        such as missing RBAC for the DCH service account.
 
         Accepts two payload variants (untagged union):
         use `credentials_ref` to reference an existing secret,
@@ -254,9 +254,10 @@ paths:
         When the server cannot write the secret, it returns
         `cannot_create_secret` with the Kubernetes error in the message:
         `409` when fields of the existing secret are managed by another
-        client, `422` when the secret name or keys are invalid, `503` when
-        the Kubernetes API is unavailable, and `500` for other failures,
-        such as missing RBAC for the DCH service account.
+        client, `422` when the secret name or keys are invalid or the tenant
+        namespace does not exist, `503` when the Kubernetes API is
+        unavailable, and `500` for other failures, such as missing RBAC for
+        the DCH service account.
       tags: [connections]
       responses:
         "204":
