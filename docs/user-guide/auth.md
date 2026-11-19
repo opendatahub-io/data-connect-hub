@@ -70,6 +70,19 @@ kubectl create rolebinding dch-rest-service-secret-access \
   --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+When migrating a standalone install to the dc-controller, the controller
+does not take the manual binding over: a pre-existing binding without the
+managed-by label is left unchanged, and the controller reports a warning
+event on the tenant namespace (`kubectl describe namespace
+"$TENANT_NAMESPACE"`). Resolve the conflict either by deleting the manual
+binding — the controller recreates and manages it — or by opting in:
+
+```bash
+kubectl label rolebinding dch-rest-service-secret-access \
+  -n "$TENANT_NAMESPACE" \
+  dataconnecthub.opendatahub.io/managed-by=dataconnectservice
+```
 </details>
 
 ### 2.4 Grant users access to Flight and REST APIs

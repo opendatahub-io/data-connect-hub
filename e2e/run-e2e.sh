@@ -93,6 +93,9 @@ DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 
 # The e2e user runs most tests and holds dch-read-write and dch-secret-export.
 E2E_SA_NAME="dch-e2e-user"
+# Set to true by generate_tokens when it mints DCH_AUTH_TOKEN itself; a
+# bring-your-own-token run leaves it false so E2E_USER_SA_NAME stays unset.
+E2E_GENERATED_AUTH_TOKEN=false
 # Personas: ServiceAccounts holding a fixed slice of permissions, used by the
 # auth, export, and permission tests (tests/test_rbac.py) to check what each
 # grant allows and denies. Their tokens are DCH_PERSONA_<NAME>_AUTH_TOKEN.
@@ -655,6 +658,7 @@ generate_tokens() {
 
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+        E2E_GENERATED_AUTH_TOKEN=true
     fi
     if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
         DCH_PERSONA_SECRET_READER_AUTH_TOKEN=$(kubectl create token "$PERSONA_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
@@ -714,9 +718,10 @@ EOF
     fi
 
     # The e2e user SA name lets onboarding tests grant the user access in
-    # freshly created namespaces. Only set when the runner created the user;
-    # bring-your-own-token runs leave it unset and those tests skip.
-    if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
+    # freshly created namespaces. Only set when the runner minted the e2e
+    # user's token; bring-your-own-token runs leave it unset and those
+    # tests skip.
+    if [[ "$E2E_GENERATED_AUTH_TOKEN" == "true" ]]; then
         echo "E2E_USER_SA_NAME=${E2E_SA_NAME}" >> "$ENV_FILE"
     fi
 

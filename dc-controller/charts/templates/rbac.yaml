@@ -63,7 +63,7 @@ rules:
   resources: [servicemonitors]
   verbs: [create, delete, get, list, patch, update, watch]
 - apiGroups: [rbac.authorization.k8s.io]
-  resources: [clusterroles, clusterrolebindings, rolebindings]
+  resources: [clusterroles, clusterrolebindings]
   verbs: [create, delete, get, list, patch, update, watch]
 - apiGroups: [authentication.k8s.io]
   resources: [tokenreviews]
@@ -96,9 +96,16 @@ rules:
   resourceNames: [dch-global-read, dch-global-read-write, dch-global-rest-service-secret-access, dch-global-flight-service-secret-access]
   verbs: [delete, patch, update]
 - apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings]
+  resourceNames: [dch-rest-service-secret-access]
+  verbs: [delete, patch, update]
+- apiGroups: [rbac.authorization.k8s.io]
   resources: [clusterroles]
   resourceNames: [dch-read, dch-read-write, dch-rest-service-secret-access, dch-flight-service-secret-access]
   verbs: [bind]
+- apiGroups: [events.k8s.io]
+  resources: [events]
+  verbs: [create, patch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

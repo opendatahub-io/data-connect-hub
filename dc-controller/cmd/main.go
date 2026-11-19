@@ -237,6 +237,7 @@ func main() {
 		ControllerNamespace:   controller.ResolveControllerNamespace(),
 		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver),
 		GlobalNamespaceConfig: globalNamespaceConfig,
+		APIReader:             mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
@@ -277,8 +278,10 @@ func main() {
 	}
 
 	if err := (&controller.TenantNamespaceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Recorder:  mgr.GetEventRecorder("dc-controller"),
+		APIReader: mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "tenantnamespace")
 		os.Exit(1)
