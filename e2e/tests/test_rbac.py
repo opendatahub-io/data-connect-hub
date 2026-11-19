@@ -15,6 +15,11 @@ run-e2e.sh creates one persona ServiceAccount per role in ``DCH_TENANT_ID``:
 - connections-only: ``get`` and ``create`` on data-connections
 - types-only: ``get`` and ``create`` on data-connection-types
 
+It also creates a group-member persona in its own namespace with no direct
+binding: the secret-reader grants (``dch-read-write``, ``dch-secret-export``,
+``get`` on the PG connector secret) are bound to the group
+``system:serviceaccounts:<namespace>`` instead.
+
 REST is authorized by kube-rbac-proxy before a request reaches the service, so
 a 403 on a missing resource proves the proxy denied it, and a 404 proves the
 proxy let it through.
@@ -24,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import subprocess
 import uuid
 from collections.abc import Callable
 
@@ -94,6 +100,26 @@ def connections_only_client(make_client, persona_connections_only_auth_token: st
 @pytest.fixture(scope="module")
 def types_only_client(make_client, persona_types_only_auth_token: str) -> DataConnectClient:
     return make_client(persona_types_only_auth_token, "DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN")
+
+
+@pytest.fixture(scope="module")
+def group_member_client(make_client, persona_group_member_auth_token: str) -> DataConnectClient:
+    return make_client(persona_group_member_auth_token, "DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN")
+
+
+@pytest.fixture()
+def export_secret_name(tenant_id: str):
+    """Name for an export target Secret; deletes the Secret after the test."""
+    name = f"dch-e2e-rbac-export-{uuid.uuid4().hex[:8]}"
+    yield name
+    result = subprocess.run(
+        ["kubectl", "delete", "secret", name, "--namespace", tenant_id, "--ignore-not-found"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"failed to delete exported Secret {name} in {tenant_id}: {result.stderr.strip()}")
 
 
 @pytest.fixture()
@@ -436,6 +462,44 @@ class TestTypesOnlyRole:
         # `create` on data-connection-types must not stand in for it.
         with pytest.raises(DCHForbiddenError):
             _CONNECTION_CREATE_ACTIONS[operation](types_only_client, connection_type, connection)
+
+
+class TestGroupMember:
+    """Access granted only through group RoleBindings is honored everywhere.
+
+    kube-rbac-proxy and Flight review the caller with the groups from its
+    token. The REST service-side secret check reviews the groups the proxy
+    forwards in ``x-remote-groups``; without them a group-granted export
+    is denied.
+    """
+
+    def test_can_list_connections(self, group_member_client: DataConnectClient, connection: DataConnection) -> None:
+        assert connection.id in [c.id for c in group_member_client.list_connections()]
+
+    def test_flight_is_authorized(self, group_member_client: DataConnectClient) -> None:
+        assert isinstance(group_member_client.server_info(), dict)
+
+    def test_export_of_group_readable_secret_succeeds(
+        self,
+        group_member_client: DataConnectClient,
+        pg_flight_connection: str,
+        export_secret_name: str,
+    ) -> None:
+        group_member_client.export_connection(pg_flight_connection, export_secret_name)
+
+    def test_export_of_unreadable_secret_is_denied_by_service(
+        self,
+        group_member_client: DataConnectClient,
+        connection: DataConnection,
+        export_secret_name: str,
+    ) -> None:
+        # The group grants dch-secret-export, so kube-rbac-proxy lets the
+        # request through; the group grants get only on the PG connector
+        # secret, so the service-side check must deny this connection's
+        # credentials_ref. A REST error body proves the service denied it.
+        with pytest.raises(DCHForbiddenError) as exc_info:
+            group_member_client.export_connection(connection.id, export_secret_name)
+        assert _rest_error_code(exc_info.value.body) == "forbidden"
 
 
 _FLIGHT_REGISTRATION_URL = "grpc+tls://dch-e2e-rbac.invalid:443"
