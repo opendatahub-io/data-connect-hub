@@ -1,7 +1,7 @@
 use actix_web::web::{JsonConfig, PathConfig, QueryConfig};
 use actix_web::{HttpResponse, ResponseError, http::StatusCode};
-use commons::api::errors::SecretStoreError;
 use commons::api::errors::{ConnectorError, MetaStoreError};
+use commons::api::errors::{CreateSecretErrorKind, SecretStoreError};
 use kube_utils::auth::AuthError;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -138,7 +138,15 @@ impl From<SecretStoreError> for RestErrorResponse {
         let (code, status) = match &err {
             SecretStoreError::SecretNotFound(_) => ("secret_not_found", 404),
             SecretStoreError::Forbidden(_) => ("forbidden", 403),
-            SecretStoreError::CannotCreateSecret(_) => ("cannot_create_secret", 400),
+            SecretStoreError::CannotCreateSecret { kind, .. } => {
+                let status = match kind {
+                    CreateSecretErrorKind::Conflict => 409,
+                    CreateSecretErrorKind::Invalid => 422,
+                    CreateSecretErrorKind::Unavailable => 503,
+                    CreateSecretErrorKind::Internal => 500,
+                };
+                ("cannot_create_secret", status)
+            },
             SecretStoreError::CannotDeleteSecret(_) => ("cannot_delete_secret", 400),
             SecretStoreError::CannotSetSecretLabels(_) => ("cannot_set_secret_labels", 400),
         };
@@ -338,5 +346,24 @@ mod tests {
         assert_eq!(audit_error.code, "connection");
         assert_eq!(audit_error.message, "Service Unavailable");
         assert!(!audit_error.message.contains("secret"));
+    }
+
+    #[test]
+    fn cannot_create_secret_status_follows_kind() {
+        for (kind, expected) in [
+            (CreateSecretErrorKind::Conflict, 409),
+            (CreateSecretErrorKind::Invalid, 422),
+            (CreateSecretErrorKind::Unavailable, 503),
+            (CreateSecretErrorKind::Internal, 500),
+        ] {
+            let response = RestErrorResponse::from(SecretStoreError::CannotCreateSecret {
+                name: "my-secret".to_string(),
+                namespace: "team-alpha".to_string(),
+                reason: "kubernetes error".to_string(),
+                kind,
+            });
+            assert_eq!(response.code, "cannot_create_secret");
+            assert_eq!(response.status, expected, "{kind:?}");
+        }
     }
 }

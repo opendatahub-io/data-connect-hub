@@ -68,12 +68,32 @@ pub enum SecretStoreError {
     SecretNotFound(String),
     #[error("Access denied: {0}")]
     Forbidden(String),
-    #[error("Cannot create secret: {0}")]
-    CannotCreateSecret(String),
+    #[error("Cannot create secret '{name}' in namespace '{namespace}': {reason}")]
+    CannotCreateSecret {
+        name: String,
+        namespace: String,
+        reason: String,
+        kind: CreateSecretErrorKind,
+    },
     #[error("Cannot delete secret: {0}")]
     CannotDeleteSecret(String),
     #[error("Cannot set secret labels: {0}")]
     CannotSetSecretLabels(String),
+}
+
+/// Why a secret write failed, from the caller's point of view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CreateSecretErrorKind {
+    /// The secret already exists, or its fields are managed by another client.
+    /// The caller can retry with a different secret name.
+    Conflict,
+    /// The secret name or keys are invalid. The caller can fix the request.
+    Invalid,
+    /// The Kubernetes API is unreachable or failed. The caller can retry later.
+    Unavailable,
+    /// The write was rejected for a reason the caller cannot fix, such as
+    /// missing RBAC for the DCH service account or an admission policy.
+    Internal,
 }
 
 /// Errors pertainint to data connection types.
