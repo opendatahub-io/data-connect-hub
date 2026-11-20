@@ -32,7 +32,7 @@ use crate::state::ApiService;
 #[derive(Clone)]
 pub struct ApiContext {
     pub tenant_id: String,
-    pub identity: Option<crate::auth::RequestIdentity>,
+    pub identity: Option<kube_utils::auth::AuthInfo>,
     pub request_id: String,
 }
 
@@ -1036,7 +1036,7 @@ mod tests {
 
     struct StubAuthorizer {
         result: Result<(), kube_utils::auth::AuthError>,
-        seen_identity: RwLock<Option<crate::auth::RequestIdentity>>,
+        seen_identity: RwLock<Option<kube_utils::auth::AuthInfo>>,
     }
 
     impl StubAuthorizer {
@@ -1056,7 +1056,7 @@ mod tests {
             }
         }
 
-        fn seen_identity(&self) -> Option<crate::auth::RequestIdentity> {
+        fn seen_identity(&self) -> Option<kube_utils::auth::AuthInfo> {
             self.seen_identity.read().unwrap().clone()
         }
     }
@@ -1065,7 +1065,7 @@ mod tests {
     impl crate::auth::RequestAuthorizer for StubAuthorizer {
         async fn check_secret_access(
             &self,
-            identity: &crate::auth::RequestIdentity,
+            identity: &kube_utils::auth::AuthInfo,
             _tenant_id: &str,
             _secret_name: &str,
         ) -> Result<(), kube_utils::auth::AuthError> {
@@ -1161,12 +1161,10 @@ mod tests {
     }
 
     #[actix_web::test]
-    async fn test_export_ignores_remote_groups_header() {
-        // Regression test: kube-rbac-proxy renders x-remote-groups by joining
-        // group names with a separator, so a caller whose single literal group
-        // is "ordinary,secret-readers" must not be reconstructed as a member
-        // of "secret-readers". The header is never parsed: the identity
-        // carries the username only and is reviewed by username alone.
+    async fn test_export_reviews_remote_groups() {
+        // Regression test: a caller granted `get` on the source Secret only
+        // through a group binding must be reviewed with its groups, so the
+        // proxy-injected x-remote-groups header reaches the authorizer.
         let authorizer = Arc::new(StubAuthorizer::allowing());
         let app = test::init_service(
             App::new()
@@ -1177,16 +1175,48 @@ mod tests {
         let req = test::TestRequest::put()
             .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
             .insert_header(("x-tenant-id", "test-tenant"))
-            .insert_header(("x-remote-user", "attacker"))
-            .insert_header(("x-remote-groups", "ordinary,secret-readers"))
+            .insert_header(("x-remote-user", "alice"))
+            .insert_header(("x-remote-groups", "secret-readers|system:authenticated"))
             .to_request();
         let resp = test::call_service(&app, req).await;
 
         assert_eq!(resp.status(), 204);
         assert_eq!(
             authorizer.seen_identity(),
-            Some(crate::auth::RequestIdentity {
-                username: "attacker".to_string()
+            Some(kube_utils::auth::AuthInfo {
+                username: "alice".to_string(),
+                groups: vec!["secret-readers".to_string(), "system:authenticated".to_string()],
+            })
+        );
+    }
+
+    #[actix_web::test]
+    async fn test_export_reviews_non_ascii_remote_groups() {
+        // Regression test: kube-rbac-proxy writes group names as raw UTF-8.
+        // A non-ASCII name must not drop the other groups in the header.
+        let authorizer = Arc::new(StubAuthorizer::allowing());
+        let app = test::init_service(
+            App::new()
+                .app_data(test_service_with_authorizer(authorizer.clone()))
+                .configure(test_app_config),
+        )
+        .await;
+        let groups = actix_web::http::header::HeaderValue::from_bytes("研发团队|secret-readers".as_bytes())
+            .expect("obs-text bytes are a valid header value");
+        let req = test::TestRequest::put()
+            .uri(&api_path("/connections/conn-1/exports/secrets/exported-secret"))
+            .insert_header(("x-tenant-id", "test-tenant"))
+            .insert_header(("x-remote-user", "alice"))
+            .insert_header(("x-remote-groups", groups))
+            .to_request();
+        let resp = test::call_service(&app, req).await;
+
+        assert_eq!(resp.status(), 204);
+        assert_eq!(
+            authorizer.seen_identity(),
+            Some(kube_utils::auth::AuthInfo {
+                username: "alice".to_string(),
+                groups: vec!["研发团队".to_string(), "secret-readers".to_string()],
             })
         );
     }

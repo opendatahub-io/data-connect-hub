@@ -33,12 +33,12 @@ spec:
             - --ignore-paths=/health
             - --tls-cert-file=/etc/tls/private/tls.crt
             - --tls-private-key-file=/etc/tls/private/tls.key
-            # x-remote-user gives the service a username for authentications
-            # that carry no forwardable token. The proxy also injects
-            # x-remote-groups as a delimiter-joined string; the service never
-            # parses it because group names may contain the separator, so no
-            # separator is configured here.
+            # The proxy strips the Authorization header and injects the
+            # caller's identity as x-remote-user and x-remote-groups. The
+            # service splits x-remote-groups on this separator, so it must
+            # match GROUPS_SEPARATOR in services/rest/src/auth.rs.
             - --auth-header-fields-enabled
+            - --auth-header-groups-field-separator=|
             - --logtostderr=true
           ports:
             - name: https
