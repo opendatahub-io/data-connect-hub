@@ -167,8 +167,6 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
 
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
     fips::mark_cipher_suites_fips(&mut provider);
-    provider.signature_verification_algorithms = fips::openssl_signature_verification_algorithms();
-    fips::mark_signature_verification_fips(&mut provider);
     // Capture the resolved algorithm lists before reading the flags. Every
     // FIPS flag here is an `all()`, which is true over an empty list, so a
     // provider that resolved no cipher suites, no key exchange groups or no

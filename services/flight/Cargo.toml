@@ -62,7 +62,6 @@ rustls = { workspace = true }
 tokio-rustls = { workspace = true }
 rustls-ossl = { workspace = true }
 ossl = { workspace = true }
-openssl = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }

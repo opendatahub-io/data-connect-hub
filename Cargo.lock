@@ -1670,7 +1670,6 @@ dependencies = [
  "milvus-connector",
  "neo4j-connector",
  "opendal",
- "openssl",
  "opentelemetry",
  "ossl",
  "parquet",

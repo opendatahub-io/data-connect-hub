@@ -134,7 +134,6 @@ rustls-ossl = "=0.0.1"
 # something like an opaque `FailedToGetRandomBytes`, naming neither the
 # call that failed nor the reason.
 ossl = { version = "1.5.4", features = ["log"] }
-openssl = "0.10"
 metrics = "0.24"
 metrics-exporter-prometheus = { version = "0.18", default-features = false }
 opentelemetry = "0.32"

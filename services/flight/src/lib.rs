@@ -182,7 +182,7 @@ async fn build_tls_acceptor(
     for suite in &base_provider.cipher_suites {
         if matches!(suite, rustls::SupportedCipherSuite::Tls13(_)) && !suites.iter().any(|s| s.suite() == suite.suite())
         {
-            suites.push(suite.clone());
+            suites.push(*suite);
         }
     }
     // The selected suites are enforced through a derived provider: this
