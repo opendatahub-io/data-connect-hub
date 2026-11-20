@@ -1,6 +1,6 @@
 ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:9aca95ae4e261eab848dc6abdfd08eb4c2453944232021245b2e3108eb25ae18
 
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26.10-1794208260 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset@sha256:4053e919374d739ee6b0007e412d89256b0bd065e0bc690c2b3905bbaab6500e AS builder
 ARG TARGETOS=linux
 ARG TARGETARCH
 ARG CGO_ENABLED=1
@@ -19,6 +19,8 @@ RUN CGO_ENABLED=${CGO_ENABLED} GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
 
 FROM ${RUNTIME_BASE_IMAGE}
 WORKDIR /
+
+ENV GOLANG_FIPS=1
 
 COPY --from=builder --chown=root:root --chmod=0555 /workspace/manager .
 COPY config/ /manifests/

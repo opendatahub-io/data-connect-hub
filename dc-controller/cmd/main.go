@@ -18,6 +18,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -61,6 +62,13 @@ func requiredEnv(key string) string {
 		os.Exit(1)
 	}
 	return v
+}
+
+func validateFIPSRequest(value string) error {
+	if value != "1" {
+		return errors.New("GOLANG_FIPS=1 is not set")
+	}
+	return nil
 }
 
 func init() {
@@ -108,6 +116,12 @@ func main() {
 		zap.UseFlagOptions(&opts),
 		zap.RawZapOpts(gozap.Fields(gozap.String("service.name", "data-connect-hub"))),
 	).WithName("dc-controller"))
+
+	if err := validateFIPSRequest(os.Getenv("GOLANG_FIPS")); err != nil {
+		setupLog.Error(err, "OpenSSL FIPS startup assertion failed")
+		os.Exit(1)
+	}
+	setupLog.Info("OpenSSL FIPS mode enabled")
 
 	cfg := ctrl.GetConfigOrDie()
 	tlsResult, err := controllertls.Resolve(context.Background(), cfg)
@@ -235,7 +249,7 @@ func main() {
 		FlightImage:           requiredEnv(controller.RelatedImageFlightService),
 		KubeRbacProxyImage:    requiredEnv(controller.RelatedImageKubeRbacProxy),
 		ControllerNamespace:   controller.ResolveControllerNamespace(),
-		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver),
+		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver, tlsResult.TLSOpts...),
 		GlobalNamespaceConfig: globalNamespaceConfig,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
@@ -245,7 +259,7 @@ func main() {
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)
@@ -261,7 +275,7 @@ func main() {
 	if err := (&controller.ConfigMapWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "configmapwatcher")
 		os.Exit(1)
@@ -270,7 +284,7 @@ func main() {
 	if err := (&controller.SecretWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPMigrationClient(restURLResolver),
+		RestClient: controller.NewHTTPMigrationClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)

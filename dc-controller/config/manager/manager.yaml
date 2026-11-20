@@ -70,6 +70,8 @@ spec:
           name: health
           protocol: TCP
         env:
+        - name: GOLANG_FIPS
+          value: "1"
         - name: CONTROLLER_NAMESPACE
           valueFrom:
             fieldRef:
