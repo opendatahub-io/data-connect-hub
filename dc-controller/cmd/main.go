@@ -18,7 +18,6 @@ package main
 
 import (
 	"context"
-	"crypto/fips140"
 	"errors"
 	"flag"
 	"fmt"
@@ -65,12 +64,9 @@ func requiredEnv(key string) string {
 	return v
 }
 
-func validateFIPSMode(enabled, enforced bool) error {
-	if !enabled {
-		return errors.New("FIPS 140-3 mode is not enabled")
-	}
-	if !enforced {
-		return errors.New("FIPS 140-3 mode is not enforced")
+func validateFIPSRequest(value string) error {
+	if value != "1" {
+		return errors.New("GOLANG_FIPS=1 is not set")
 	}
 	return nil
 }
@@ -121,11 +117,11 @@ func main() {
 		zap.RawZapOpts(gozap.Fields(gozap.String("service.name", "data-connect-hub"))),
 	).WithName("dc-controller"))
 
-	if err := validateFIPSMode(fips140.Enabled(), fips140.Enforced()); err != nil {
-		setupLog.Error(err, "FIPS 140-3 startup assertion failed")
+	if err := validateFIPSRequest(os.Getenv("GOLANG_FIPS")); err != nil {
+		setupLog.Error(err, "OpenSSL FIPS startup assertion failed")
 		os.Exit(1)
 	}
-	setupLog.Info("FIPS 140-3 mode enabled", "module-version", fips140.Version())
+	setupLog.Info("OpenSSL FIPS mode enabled")
 
 	cfg := ctrl.GetConfigOrDie()
 	tlsResult, err := controllertls.Resolve(context.Background(), cfg)
