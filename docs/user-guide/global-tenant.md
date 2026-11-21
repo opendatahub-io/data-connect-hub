@@ -1,6 +1,8 @@
 # Global Tenant
 
-By default, DCH connection types and connections in a tenant namespace are accessible only to DCH users authorized in that namespace. In a global tenant, connection types are visible to every DCH user, whichever tenant they select, and members of the `Auth` CR `allowedGroups` and `adminGroups` can read its connections and ingest data from them by selecting the global tenant with `X-Tenant-Id`.
+By default, DCH connection types and connections in a tenant namespace are accessible only to DCH users authorized in that namespace. In a global tenant, members of the `Auth` CR `allowedGroups` and `adminGroups` can read its connection types and connections and ingest data from them by selecting the global tenant with `X-Tenant-Id`.
+
+Connection types in a global tenant stay scoped to it: they are not visible from other tenants, and connections in other tenants cannot use them. To share a connection type with every tenant, create it in the DCH namespace. This keeps every connection working when a platform admin changes which namespace is the global tenant: a connection only ever references a type in its own tenant or in the DCH namespace, which never changes.
 
 See [Concepts and Terminologies](concepts-terminologies.md) for the terms used in this guide.
 
@@ -46,14 +48,6 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
 
    This step is automatic. dc-controller:
 
-   - Adds the namespace to `[global-connection-types]` after the DCH namespace,<br>so every DCH user can see all connection types in both namespaces, including the built-in types in `opendatahub`:
-
-     ```toml
-     # config.toml in dch-rest-service-config and dch-flight-service-config
-     [global-connection-types]
-     tenant-ids = ["opendatahub", "global-assets"]
-     ```
-
    - Creates RoleBindings in the namespace,<br>so users access connections in `global-assets` with `X-Tenant-Id: global-assets`:
 
      | Subject | ClusterRole | Grants |
@@ -77,7 +71,7 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
          - global-assets
      ```
 
-   Removing the label reverts all three. RoleBindings that administrators create under other names are not touched.
+   Removing the label reverts both. RoleBindings that administrators create under other names are not touched. Neither step changes `[global-connection-types]`, so designating or removing a global tenant does not restart the REST or Flight service. The services cache authorization decisions for `[auth] cache_ttl_secs` (60 seconds by default), so access granted through the removed RoleBindings can last that long.
 
 5. **Members of the `Auth` CR `adminGroups` or a DCH admin group manage connection types and connections** using the REST API with `X-Tenant-Id: global-assets`.
 
@@ -87,7 +81,7 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
    from data_connect_hub import CredentialsRef, DataConnectClient
 
    with DataConnectClient(endpoint="<gateway-host>", token="<token>", tenant_id="global-assets") as client:
-       # Create a connection type visible to every tenant.
+       # Create a connection type in the global tenant; it is not visible from other tenants.
        client.create_connection_type(name="my-type", provider="postgres")
        # Create a shared connection; its Secret must exist in the global tenant.
        client.create_connection(name="shared-orders", connection_type_id="<type-id>", data_format="tabular", credentials_ref=CredentialsRef(secret="shared-orders"))

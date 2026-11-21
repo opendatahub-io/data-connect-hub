@@ -1,4 +1,4 @@
-"""Global namespace tests: a labeled namespace shares DCH resources with every tenant.
+"""Global namespace tests: a labeled namespace grants the Auth CR groups access to its DCH resources.
 
 run-e2e.sh sets ``DCH_GLOBAL_NAMESPACE`` only when the platform Auth CR exists,
 and grants the e2e user ``dch-read-write`` there as a writer. The module labels
@@ -11,10 +11,10 @@ Two identities take part:
   global namespace only through the Auth CR ``allowedGroups``, so its tests run
   only when those include ``system:authenticated``.
 
-Changing the label changes the global connection type tenants in the REST and
-Flight ConfigMaps, which rolls both Deployments. The module waits for each
-rollout before calling DCH, and again after removing the label, so later modules
-never run during a rollout.
+Connection types in the global namespace stay scoped to it: the label only adds
+RoleBindings and never changes the global connection type tenants, so it does
+not roll the REST or Flight Deployments. The module waits for dc-controller to
+create or remove the RoleBindings after each label change.
 """
 
 from __future__ import annotations
@@ -31,17 +31,18 @@ import pytest
 
 from data_connect_hub import (
     ConnectionType,
+    CredentialsRef,
     DataConnectClient,
     DCHConnectionError,
     DCHForbiddenError,
     DCHServerError,
     DCHTimeoutError,
+    DCHValidationError,
     InlineCredentials,
 )
 
 GLOBAL_LABEL = "opendatahub.io/global-data-connect-hub-project"
 MANAGED_SELECTOR = "dataconnecthub.opendatahub.io/global-namespace=true"
-SERVICE_SELECTOR = "app.kubernetes.io/name in (rest-service,flight-service)"
 WRITER_ROLE_BINDING = "dch-e2e-global-writer"
 ROLE_BINDINGS = {
     "dch-global-read": "dch-read",
@@ -51,7 +52,7 @@ ROLE_BINDINGS = {
 }
 BUILT_IN_POSTGRES_TYPE = "Postgres"
 ALL_AUTHENTICATED = "system:authenticated"
-ROLLOUT_TIMEOUT_SECONDS = 300
+KUBECTL_TIMEOUT_SECONDS = 60
 WAIT_TIMEOUT_SECONDS = 180.0
 
 # Errors the Gateway returns while a REST or Flight pod is being replaced.
@@ -65,7 +66,7 @@ TRANSIENT_ERRORS = (DCHConnectionError, DCHServerError, DCHTimeoutError)
 
 def _kubectl(*args: str) -> str:
     result = subprocess.run(
-        ["kubectl", *args], check=False, capture_output=True, text=True, timeout=ROLLOUT_TIMEOUT_SECONDS
+        ["kubectl", *args], check=False, capture_output=True, text=True, timeout=KUBECTL_TIMEOUT_SECONDS
     )
     if result.returncode != 0:
         pytest.fail(f"kubectl {' '.join(args)} failed: {result.stderr.strip()}")
@@ -85,45 +86,29 @@ def _wait_for(check: Callable[[], bool], message: str, timeout: float = WAIT_TIM
     pytest.fail(message)
 
 
-def _service_generations(service_namespace: str) -> dict[str, int]:
-    deployments = _kubectl_json("get", "deployments", "--namespace", service_namespace, "--selector", SERVICE_SELECTOR)
-    return {d["metadata"]["name"]: d["metadata"]["generation"] for d in deployments["items"]}
-
-
-def _set_global_label(namespace: str, service_namespace: str, labeled: bool) -> None:
-    """Add or remove the global label and wait for REST and Flight to roll out."""
-    labels = _kubectl_json("get", "namespace", namespace)["metadata"].get("labels", {})
-    if (GLOBAL_LABEL in labels) == labeled:
-        return
-    before = _service_generations(service_namespace)
-    assert before, f"no REST or Flight Deployment found in {service_namespace!r}"
-
-    change = f"{GLOBAL_LABEL}={namespace}" if labeled else f"{GLOBAL_LABEL}-"
-    _kubectl("label", "namespace", namespace, change, "--overwrite")
-
-    # dc-controller renders the new tenants into the ConfigMaps, which changes
-    # the config hash on both Deployments. Wait for that before checking the
-    # rollout, or the check could pass against the old generation.
-    _wait_for(
-        lambda: all(gen > before.get(name, 0) for name, gen in _service_generations(service_namespace).items()),
-        "dc-controller did not roll out REST and Flight after the global label changed; "
-        "was the platform Auth CRD installed before dc-controller started?",
-    )
-    _kubectl(
-        "rollout",
-        "status",
-        "deployment",
-        "--namespace",
-        service_namespace,
-        "--selector",
-        SERVICE_SELECTOR,
-        f"--timeout={ROLLOUT_TIMEOUT_SECONDS}s",
-    )
-
-
 def _managed_role_bindings(namespace: str) -> dict[str, dict]:
     items = _kubectl_json("get", "rolebindings", "--namespace", namespace, "--selector", MANAGED_SELECTOR)["items"]
     return {rb["metadata"]["name"]: rb for rb in items}
+
+
+def _set_global_label(namespace: str, labeled: bool) -> None:
+    """Add or remove the global label and wait for dc-controller to reconcile the RoleBindings."""
+    labels = _kubectl_json("get", "namespace", namespace)["metadata"].get("labels", {})
+    if (GLOBAL_LABEL in labels) == labeled:
+        return
+    change = f"{GLOBAL_LABEL}={namespace}" if labeled else f"{GLOBAL_LABEL}-"
+    _kubectl("label", "namespace", namespace, change, "--overwrite")
+    if labeled:
+        _wait_for(
+            lambda: bool(_managed_role_bindings(namespace)),
+            f"dc-controller did not create RoleBindings in {namespace!r}; "
+            "was the platform Auth CRD installed before dc-controller started?",
+        )
+    else:
+        _wait_for(
+            lambda: not _managed_role_bindings(namespace),
+            f"dc-controller did not remove its RoleBindings from {namespace!r}",
+        )
 
 
 def _role_binding_exists(namespace: str, name: str) -> bool:
@@ -141,12 +126,13 @@ def _secret_properties(namespace: str, name: str) -> dict[str, str]:
     return {key: base64.b64decode(value).decode() for key, value in data.items()}
 
 
-def _type_listed(client: DataConnectClient, name: str) -> bool | None:
-    """Report whether *client*'s listing contains *name*; None when the Gateway is still settling."""
+def _can_list_connection_types(client: DataConnectClient) -> bool:
+    """Report whether *client* may list connection types; the services cache authorization decisions."""
     try:
-        return any(ct.name == name for ct in client.list_connection_types())
-    except TRANSIENT_ERRORS:
-        return None
+        client.list_connection_types()
+    except (DCHForbiddenError, *TRANSIENT_ERRORS):
+        return False
+    return True
 
 
 def _client(endpoint: str, token: str, tenant: str, ca_cert: str | None, insecure: bool) -> DataConnectClient:
@@ -167,13 +153,13 @@ def _client(endpoint: str, token: str, tenant: str, ca_cert: str | None, insecur
 
 
 @pytest.fixture(scope="module")
-def global_namespace(global_namespace_id: str, service_namespace: str) -> str:
+def global_namespace(global_namespace_id: str) -> str:
     """The labeled global namespace; the label is removed after the module."""
     if not global_namespace_id:
         pytest.skip("DCH_GLOBAL_NAMESPACE not set (run-e2e.sh found no platform Auth CR)")
-    _set_global_label(global_namespace_id, service_namespace, True)
+    _set_global_label(global_namespace_id, True)
     yield global_namespace_id  # type: ignore[misc]
-    _set_global_label(global_namespace_id, service_namespace, False)
+    _set_global_label(global_namespace_id, False)
 
 
 @pytest.fixture(scope="module")
@@ -181,10 +167,6 @@ def auth_groups() -> tuple[list[str], list[str]]:
     """The platform Auth CR ``allowedGroups`` and ``adminGroups``."""
     spec = _kubectl_json("get", "auths.services.platform.opendatahub.io", "auth").get("spec", {})
     return spec.get("allowedGroups", []), spec.get("adminGroups", [])
-
-
-# The clients below are created after the label rollout, so they never reuse a
-# connection to a replaced pod.
 
 
 @pytest.fixture(scope="module")
@@ -220,6 +202,10 @@ def consumer_client(
     if not persona_denied_auth_token:
         pytest.skip("DCH_PERSONA_DENIED_AUTH_TOKEN not set")
     client = _client(gateway_endpoint, persona_denied_auth_token, global_namespace, ca_cert, insecure)
+    _wait_for(
+        lambda: _can_list_connection_types(client),
+        f"the denied user cannot read {global_namespace!r} through the Auth CR allowedGroups",
+    )
     yield client  # type: ignore[misc]
     client.close()
 
@@ -272,17 +258,24 @@ class TestGlobalNamespace:
             ("ServiceAccount", service_namespace, flight_service_account)
         ]
 
-    def test_connection_type_visible_to_every_tenant(
-        self, global_type: ConnectionType, tenant_client: DataConnectClient
+    def test_connection_type_stays_in_global_namespace(
+        self, global_type: ConnectionType, tenant_client: DataConnectClient, global_namespace: str
     ) -> None:
-        _wait_for(
-            lambda: _type_listed(tenant_client, global_type.name) is True,
-            f"global connection type {global_type.name!r} is not visible to the tenant",
-        )
-        listed = next(ct for ct in tenant_client.list_connection_types() if ct.name == global_type.name)
-        assert listed.id == global_type.id
-        # Global types come back without a tenant_id.
-        assert not listed.tenant_id
+        """A connection in another tenant must never reference a global namespace type.
+
+        Otherwise designating a different global namespace would leave that
+        connection unusable.
+        """
+        assert global_type.tenant_id == global_namespace
+        assert global_type.id not in [ct.id for ct in tenant_client.list_connection_types()]
+        with pytest.raises(DCHValidationError) as exc_info:
+            tenant_client.create_connection(
+                name=f"e2e-global-cross-{uuid.uuid4().hex[:8]}",
+                connection_type_id=global_type.id,
+                data_format="tabular",
+                credentials_ref=CredentialsRef(secret="dch-e2e-global-unused"),
+            )
+        assert exc_info.value.status_code == 422
 
     def test_consumer_reads_but_cannot_write(
         self, consumer_client: DataConnectClient, global_type: ConnectionType
@@ -335,26 +328,11 @@ class TestGlobalNamespace:
                 writer_client.delete_connection(conn.id)
             _kubectl("delete", "secret", credentials.secret, "--namespace", global_namespace, "--ignore-not-found")
 
-    def test_removing_the_label_revokes_access(
-        self,
-        global_namespace: str,
-        service_namespace: str,
-        global_type: ConnectionType,
-        tenant_client: DataConnectClient,
-    ) -> None:
+    def test_removing_the_label_removes_role_bindings(self, global_namespace: str) -> None:
         # run-e2e.sh creates the writer binding unless DCH_AUTH_TOKEN is supplied.
         writer_bound = _role_binding_exists(global_namespace, WRITER_ROLE_BINDING)
-        _set_global_label(global_namespace, service_namespace, False)
-
-        _wait_for(
-            lambda: not _managed_role_bindings(global_namespace),
-            f"dc-controller did not remove its RoleBindings from {global_namespace!r}",
-        )
+        _set_global_label(global_namespace, False)
         if writer_bound:
             assert _role_binding_exists(global_namespace, WRITER_ROLE_BINDING), (
                 "administrator-created bindings must survive"
             )
-        _wait_for(
-            lambda: _type_listed(tenant_client, global_type.name) is False,
-            f"connection type {global_type.name!r} is still visible to the tenant after the label was removed",
-        )

@@ -293,7 +293,7 @@ tenant-ids = ["custom-tenant"]
 port = 8080
 `)
 
-	tenants := []string{"test-namespace", "global-a"}
+	tenants := []string{"test-namespace"}
 	want := make([]any, len(tenants))
 	for i, tenant := range tenants {
 		want[i] = tenant
@@ -745,7 +745,7 @@ func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 	}
 	platCfg := &platformConfig{GatewayName: "test-gateway", GatewayNamespace: testNamespace}
 
-	err := r.reconcileManifests(context.Background(), cr, platCfg, nil)
+	err := r.reconcileManifests(context.Background(), cr, platCfg)
 	if err == nil {
 		t.Fatal("reconcileManifests() = nil error, want fail-closed error on denied APIServer read")
 	}

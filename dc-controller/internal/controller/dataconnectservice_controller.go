@@ -280,9 +280,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		})
 	}
 
-	// Resolve the global namespaces whose connection types the services
-	// share with every tenant. Error paths below keep the last recorded
-	// value; every later status update records them.
+	// Resolve the global namespaces for status.globalTenants. Error paths
+	// below keep the last recorded value; every later status update records
+	// them.
 	globalNamespaces, err := labeledGlobalNamespaces(ctx, r, r.GlobalNamespaceConfig)
 	if err != nil {
 		log.Error(err, "failed to resolve global namespaces")
@@ -294,7 +294,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// Phase 2: Render and apply all manifests (services + gateway)
-	if err := r.reconcileManifests(ctx, &cr, &platCfg, globalNamespaces); err != nil {
+	if err := r.reconcileManifests(ctx, &cr, &platCfg); err != nil {
 		if meta.IsNoMatchError(err) {
 			log.Info("Gateway API CRDs not installed, skipping HTTPRoute creation")
 		} else {
@@ -440,14 +440,11 @@ func (r *DataConnectServiceReconciler) buildReleases(
 	return append(releases, platformRelease)
 }
 
-// reconcileManifests renders and applies the service manifests. The
-// globalNamespaces are rendered into the service configuration as global
-// connection type tenants.
+// reconcileManifests renders and applies the service manifests.
 func (r *DataConnectServiceReconciler) reconcileManifests(
 	ctx context.Context,
 	cr *dchv1alpha1.DataConnectService,
 	platCfg *platformConfig,
-	globalNamespaces []string,
 ) error {
 	manifestPath := filepath.Join(r.ManifestsPath, "base")
 	if r.openShiftMonitoringAvailable(ctx) {
@@ -495,7 +492,10 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("projecting TLS profile to kube-rbac-proxy: %w", err)
 	}
 
-	if err := setConfigMapGlobalTenants(resources, globalTenants(cr.Namespace, globalNamespaces)); err != nil {
+	// Only the DataConnectService namespace, which holds the built-in
+	// connection types, is a global connection type tenant. Global
+	// namespaces are left out on purpose; see GlobalNamespaceLabel.
+	if err := setConfigMapGlobalTenants(resources, []string{cr.Namespace}); err != nil {
 		return fmt.Errorf("setting config namespace: %w", err)
 	}
 	if err := setConfigMapDiscoveryServiceAccount(resources, cr.Namespace, flightInstanceName); err != nil {
@@ -1078,8 +1078,8 @@ func isOwnedBy(obj metav1.ObjectMetaAccessor, uid types.UID) bool {
 	return false
 }
 
-// setGlobalTenants records the global tenants whose connection types
-// the services share with every tenant.
+// setGlobalTenants records the labeled global namespaces whose DCH resources
+// the Auth CR groups can access.
 func (r *DataConnectServiceReconciler) setGlobalTenants(cr *dchv1alpha1.DataConnectService, tenants []string) {
 	cr.Status.GlobalTenants = tenants
 }
@@ -1122,8 +1122,8 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	// content-hash recomputation in annotateDeploymentsWithContentHash.
 	//
 	// Watches(Namespace, global namespace label) — labeling or unlabeling a
-	// namespace changes the global connection type tenants rendered into the
-	// service ConfigMaps.
+	// namespace changes status.globalTenants. It does not change the service
+	// ConfigMaps; see GlobalNamespaceLabel.
 	b := ctrl.NewControllerManagedBy(mgr).
 		For(&dchv1alpha1.DataConnectService{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Owns(&appsv1.Deployment{}, builder.WithPredicates(ownsPredicate)).
