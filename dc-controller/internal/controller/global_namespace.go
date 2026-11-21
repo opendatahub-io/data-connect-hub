@@ -36,9 +36,12 @@ import (
 )
 
 // Global namespaces are RHOAI-wide shared projects designated by a Namespace
-// label. The controller watches that label, grants the platform Auth CR groups
-// access to DCH resources in every labeled namespace, and makes their
-// connection types visible to every tenant.
+// label. The controller watches that label and grants the platform Auth CR
+// groups access to DCH resources in every labeled namespace. Their connection
+// types stay scoped to the global namespace: only the DataConnectService
+// namespace is a global connection type tenant. A connection in another tenant
+// therefore never references a type in a global namespace, so changing the
+// designation cannot break existing connections.
 const (
 	// GlobalNamespaceLabel is DCH's own label for its global project. It is
 	// separate from Data Registry's and MLflow's labels; a namespace can carry
@@ -147,19 +150,6 @@ func labeledGlobalNamespaces(ctx context.Context, c client.Reader, gn GlobalName
 	}
 	slices.Sort(labeled)
 	return labeled, nil
-}
-
-// globalTenants returns the tenants whose connection types are visible to
-// every tenant: the DataConnectService namespace, which holds the built-in
-// connection types, followed by every labeled global namespace.
-func globalTenants(serviceNamespace string, labeled []string) []string {
-	tenants := []string{serviceNamespace}
-	for _, ns := range labeled {
-		if ns != serviceNamespace {
-			tenants = append(tenants, ns)
-		}
-	}
-	return tenants
 }
 
 // authGroups reads allowedGroups and adminGroups from the platform Auth CR.

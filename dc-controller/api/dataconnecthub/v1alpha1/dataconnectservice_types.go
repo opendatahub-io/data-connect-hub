@@ -254,8 +254,8 @@ type DataConnectServiceStatus struct {
 	Gateway *Gateway `json:"gateway,omitempty"`
 
 	// globalTenants lists the namespaces labeled
-	// opendatahub.io/global-data-connect-hub-project whose connection types the
-	// services currently share with every tenant. Empty when no namespace is
+	// opendatahub.io/global-data-connect-hub-project, where the platform Auth CR
+	// groups are granted access to DCH resources. Empty when no namespace is
 	// labeled or the platform Auth API is not installed.
 	// +listType=set
 	// +optional
