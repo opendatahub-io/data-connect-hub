@@ -128,10 +128,10 @@ var _ = Describe("GlobalNamespace Controller", Ordered, func() {
 		}
 	}
 
-	tenantsFor := func(cfg GlobalNamespaceConfig) []string {
+	labeledFor := func(cfg GlobalNamespaceConfig) []string {
 		labeled, err := labeledGlobalNamespaces(ctx, k8sClient, cfg)
 		Expect(err).NotTo(HaveOccurred())
-		return globalTenants(serviceNS, labeled)
+		return labeled
 	}
 
 	BeforeAll(func() {
@@ -199,10 +199,10 @@ var _ = Describe("GlobalNamespace Controller", Ordered, func() {
 
 	})
 
-	It("makes the DataConnectService namespace and the labeled namespaces global connection type tenants", func() {
-		Expect(tenantsFor(gn)).To(Equal([]string{serviceNS, globalA}))
-		Expect(tenantsFor(GlobalNamespaceConfig{LabelKey: labelKey})).To(Equal([]string{serviceNS}),
-			"disabled feature keeps only the DataConnectService namespace")
+	It("lists the labeled namespaces as global namespaces", func() {
+		Expect(labeledFor(gn)).To(Equal([]string{globalA}))
+		Expect(labeledFor(GlobalNamespaceConfig{LabelKey: labelKey})).To(BeEmpty(),
+			"disabled feature lists no global namespace")
 	})
 
 	It("repairs drift and leaves administrator-created bindings alone", func() {
@@ -284,7 +284,7 @@ var _ = Describe("GlobalNamespace Controller", Ordered, func() {
 
 		expectManagedRoleBindings(globalA)
 		expectManagedRoleBindings(globalB)
-		Expect(tenantsFor(gn)).To(Equal([]string{serviceNS, globalA, globalB}))
+		Expect(labeledFor(gn)).To(Equal([]string{globalA, globalB}))
 	})
 
 	It("removes the bindings from a namespace that is unlabeled", func() {
@@ -293,7 +293,7 @@ var _ = Describe("GlobalNamespace Controller", Ordered, func() {
 
 		expectNoManagedRoleBindings(globalA)
 		expectManagedRoleBindings(globalB)
-		Expect(tenantsFor(gn)).To(Equal([]string{serviceNS, globalB}))
+		Expect(labeledFor(gn)).To(Equal([]string{globalB}))
 
 		_, err := getRB(globalA, customRB)
 		Expect(err).NotTo(HaveOccurred(), "administrator-created bindings survive")
@@ -321,12 +321,12 @@ var _ = Describe("GlobalNamespace Controller", Ordered, func() {
 		expectManagedRoleBindings(globalB)
 	})
 
-	It("keeps only the DataConnectService namespace as tenant when no namespace is labeled", func() {
+	It("lists no global namespace when no namespace is labeled", func() {
 		setLabel(globalB, false)
 		reconcileOnce()
 
 		expectNoManagedRoleBindings(globalB)
-		Expect(tenantsFor(gn)).To(Equal([]string{serviceNS}))
+		Expect(labeledFor(gn)).To(BeEmpty())
 	})
 
 	It("removes the bindings when no DataConnectService is left", func() {

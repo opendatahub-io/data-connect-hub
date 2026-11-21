@@ -5,9 +5,27 @@
 | Tenant | **A Kubernetes namespace.**<br>Clients select it with the `X-Tenant-Id: <tenant-namespace>` header, and DCH checks the caller's Kubernetes permissions in that namespace. See [Authentication & Authorization](auth.md). |
 | DCH user | **A user granted a DCH ClusterRole (`dch-read`, `dch-read-write`, or `dch-admin`) in a tenant.**<br>See [Authentication & Authorization](auth.md). |
 | DCH namespace | **The namespace where DCH is installed (`opendatahub` by default), and where the installer creates the built-in connection types.**<br>Its connection types, including the built-in ones, are visible to every DCH user, whichever tenant they select. |
-| Global tenant | **A tenant namespace that a platform admin designates as global.**<br>Its connection types are visible to every DCH user, whichever tenant they select, and users ingest from its connections with `X-Tenant-Id: <global-tenant-namespace>` and `X-Data-Connection-Id: <connection-id>`. See [Global Tenant](global-tenant.md). |
+| Global tenant | **A tenant namespace that a platform admin designates as global.**<br>See [Global Tenant](global-tenant.md). |
 | DCH admin | **A user granted the `dch-admin` ClusterRole in a tenant.**<br>Manages connection types and connections there, typically as a member of a DCH admin group. |
 | DCH admin group | **A group granted `dch-admin` in a tenant, so its members manage connection types and connections there.**<br>See [Setting up a DCH admin group](#setting-up-a-dch-admin-group). |
+
+## Cluster-scoped connection types
+
+The DCH namespace holds the cluster-scoped connection types, including the built-in ones. Every DCH user can access them, whichever tenant they select.
+
+dc-controller keeps the DCH namespace in the `[global-connection-types]` setting of both services and never adds a global tenant. To view the setting:
+
+```bash
+oc get configmap dch-flight-service-config -n opendatahub -o jsonpath='{.data.config\.toml}'
+oc get configmap dch-rest-service-config -n opendatahub -o jsonpath='{.data.config\.toml}'
+```
+
+```toml
+[global-connection-types]
+tenant-ids = ["opendatahub"]
+```
+
+Manual edits to `tenant-ids` are overwritten on the next reconcile.
 
 ## Setting up a DCH admin group
 

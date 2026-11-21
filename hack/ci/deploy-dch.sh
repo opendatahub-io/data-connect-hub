@@ -359,17 +359,6 @@ kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESP
 kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl get po -n "$CI_SVC_NAMESPACE"
 
-# The single Kind node has no CPU left for a RollingUpdate surge pod once the
-# connector backends are up, so a config rollout (e.g. the global namespace
-# e2e test changing the label) would leave the new pod Pending. Recreate
-# avoids the surge. dc-controller does not manage the strategy field, so the
-# patch persists. Set it only after the rollout above has finished: switching
-# mid-rollout can leave the Deployment stuck at the surge pod count.
-for deployment in "$CI_FLIGHT_SERVICE_NAME" "$CI_REST_SERVICE_NAME"; do
-    kubectl patch "deployment/${deployment}" -n "$CI_SVC_NAMESPACE" --type=merge \
-        -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
-done
-
 echo "=== Verifying DCH deployment images ==="
 assert_deployment_image \
     "dc-controller-manager" \
