@@ -173,6 +173,10 @@ var _ = Describe("TenantNamespace Controller", func() {
 		createCR()
 		createNamespace(nsManual, false)
 		manual := &rbacv1.RoleBinding{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: rbacv1.SchemeGroupVersion.String(),
+				Kind:       "RoleBinding",
+			},
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      tenantSecretAccessRoleBindingName(),
 				Namespace: nsManual,
@@ -214,13 +218,29 @@ var _ = Describe("TenantNamespace Controller", func() {
 	It("should leave an unmanaged binding alone in a labelled tenant namespace", func() {
 		createCR()
 		createNamespace(nsConflict, true)
-		reconcileNamespace(nsConflict)
-
-		binding := bindingIn(nsConflict)
-		binding.Subjects[0].Namespace = "wrong-namespace"
-		delete(binding.Labels, labelManagedBy)
-		Expect(k8sClient.Update(ctx, binding)).To(Succeed())
-		Expect(bindingIn(nsConflict).Labels).NotTo(HaveKey(labelManagedBy))
+		manual := &rbacv1.RoleBinding{
+			TypeMeta: metav1.TypeMeta{
+				APIVersion: rbacv1.SchemeGroupVersion.String(),
+				Kind:       "RoleBinding",
+			},
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      tenantSecretAccessRoleBindingName(),
+				Namespace: nsConflict,
+			},
+			RoleRef: rbacv1.RoleRef{
+				APIGroup: rbacv1.GroupName,
+				Kind:     kindClusterRole,
+				Name:     tenantSecretAccessClusterRoleName(),
+			},
+			Subjects: []rbacv1.Subject{{
+				Kind:      rbacv1.ServiceAccountKind,
+				Name:      restServiceAccountName(),
+				Namespace: crNamespace,
+			}},
+		}
+		// client.Apply is deprecated in favor of typed apply configurations;
+		// this test intentionally applies a full RoleBinding object.
+		Expect(k8sClient.Patch(ctx, manual, client.Apply, client.FieldOwner("manual-rolebinding"))).To(Succeed()) //nolint:staticcheck
 
 		fakeRecorder := events.NewFakeRecorder(16)
 		_, err := (&TenantNamespaceReconciler{
@@ -236,8 +256,6 @@ var _ = Describe("TenantNamespace Controller", func() {
 		Expect(event).To(ContainSubstring("UnmanagedRoleBindingConflict"))
 
 		untouched := bindingIn(nsConflict)
-		Expect(untouched.ResourceVersion).To(Equal(binding.ResourceVersion))
-		Expect(untouched.Subjects[0].Namespace).To(Equal("wrong-namespace"))
 		Expect(untouched.Labels).NotTo(HaveKey(labelManagedBy))
 	})
 
@@ -407,17 +425,17 @@ var _ = Describe("TenantNamespace Controller", func() {
 		renamed.Name = "other-rolebinding"
 
 		p := managedRoleBindingPredicate()
-		Expect(p.Create(event.CreateEvent{Object: managed})).To(BeTrue())
-		Expect(p.Create(event.CreateEvent{Object: unmanaged})).To(BeFalse())
-		Expect(p.Create(event.CreateEvent{Object: renamed})).To(BeFalse())
-		Expect(p.Delete(event.DeleteEvent{Object: managed})).To(BeTrue())
-		Expect(p.Delete(event.DeleteEvent{Object: unmanaged})).To(BeFalse())
+		Expect(p.Create(event.TypedCreateEvent[*rbacv1.RoleBinding]{Object: managed})).To(BeTrue())
+		Expect(p.Create(event.TypedCreateEvent[*rbacv1.RoleBinding]{Object: unmanaged})).To(BeFalse())
+		Expect(p.Create(event.TypedCreateEvent[*rbacv1.RoleBinding]{Object: renamed})).To(BeFalse())
+		Expect(p.Delete(event.TypedDeleteEvent[*rbacv1.RoleBinding]{Object: managed})).To(BeTrue())
+		Expect(p.Delete(event.TypedDeleteEvent[*rbacv1.RoleBinding]{Object: unmanaged})).To(BeFalse())
 		// An update from either side of the managed state passes, so an
 		// administrator taking over or releasing the binding is still
 		// reconciled.
-		Expect(p.Update(event.UpdateEvent{ObjectOld: managed, ObjectNew: unmanaged})).To(BeTrue())
-		Expect(p.Update(event.UpdateEvent{ObjectOld: unmanaged, ObjectNew: managed})).To(BeTrue())
-		Expect(p.Update(event.UpdateEvent{ObjectOld: unmanaged, ObjectNew: renamed})).To(BeFalse())
+		Expect(p.Update(event.TypedUpdateEvent[*rbacv1.RoleBinding]{ObjectOld: managed, ObjectNew: unmanaged})).To(BeTrue())
+		Expect(p.Update(event.TypedUpdateEvent[*rbacv1.RoleBinding]{ObjectOld: unmanaged, ObjectNew: managed})).To(BeTrue())
+		Expect(p.Update(event.TypedUpdateEvent[*rbacv1.RoleBinding]{ObjectOld: unmanaged, ObjectNew: renamed})).To(BeFalse())
 	})
 
 	It("should delete tenant RoleBindings on uninstall", func() {

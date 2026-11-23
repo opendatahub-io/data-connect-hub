@@ -20,16 +20,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -37,6 +38,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/recorder"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
@@ -56,6 +58,7 @@ const (
 	// ClusterRole granting the REST service access to connection secrets
 	// and by the tenant-local RoleBinding that binds it.
 	nameRestServiceSecretAccess = "rest-service-secret-access"
+	tenantNSFieldOwner          = "dc-controller-tenant-namespace"
 )
 
 // tenantSecretAccessClusterRoleName returns the name of the rendered
@@ -134,14 +137,14 @@ func (r *TenantNamespaceReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 }
 
 // ensureRoleBinding creates or repairs the secret-access RoleBinding in the
-// tenant namespace. A managed binding with a different roleRef is replaced,
-// since roleRef is immutable; while a finalizer keeps the old binding
-// terminating, the replacement requeues instead of reporting success. A
-// binding the controller does not manage is left unchanged and reported as
-// a conflict, because overwriting or deleting an administrator's binding
-// would silently reassign permissions. Every created binding is verified
-// against the API server so one created while the service is being removed
-// is rolled back instead of outliving the service.
+// tenant namespace with server-side apply. A managed binding with a different
+// roleRef is replaced, since roleRef is immutable; while a finalizer keeps
+// the old binding terminating, the replacement requeues instead of reporting
+// success. Existing bindings are checked only for the managed-by label before
+// apply; no existing fields are compared. Apply conflicts are also reported
+// as unmanaged bindings rather than taking ownership. Every applied binding
+// is verified against the API server so a binding applied while the service
+// is being removed is cleaned up instead of outliving the service.
 func (r *TenantNamespaceReconciler) ensureRoleBinding(ctx context.Context, cr *dchv1alpha1.DataConnectService, ns *corev1.Namespace) error {
 	log := logf.FromContext(ctx)
 	namespace := ns.Name
@@ -165,83 +168,83 @@ func (r *TenantNamespaceReconciler) ensureRoleBinding(ctx context.Context, cr *d
 	}
 
 	existing := &rbacv1.RoleBinding{}
-	err := r.Get(ctx, client.ObjectKeyFromObject(desired), existing)
-	if apierrors.IsNotFound(err) {
-		if err := r.Create(ctx, desired); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("tenant RoleBinding %s/%s appeared after the read, requeuing", namespace, desired.Name)
-			}
-			return fmt.Errorf("creating tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
+	if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(desired), existing); err == nil {
+		if existing.Labels[labelManagedBy] != managedByDCHService {
+			return r.reportUnmanagedConflict(ns, existing)
 		}
-		rolledBack, err := r.rollbackIfServiceRemoved(ctx, desired)
-		if err != nil {
-			return err
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("checking tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
+	}
+
+	err := r.applyTenantRoleBinding(ctx, ns, desired)
+	if err != nil {
+		return err
+	}
+
+	if err := r.removeIfServiceRemoved(ctx, desired); err != nil {
+		return err
+	}
+	log.Info("Applied tenant RoleBinding", "name", desired.Name, "namespace", namespace)
+	return nil
+}
+
+// applyTenantRoleBinding applies the desired binding without taking ownership
+// of an administrator's binding. A conflict on a binding already marked as
+// managed is repaired with force ownership, which lets the controller restore
+// drift without adopting an unrelated binding.
+func (r *TenantNamespaceReconciler) applyTenantRoleBinding(ctx context.Context, ns *corev1.Namespace, desired *rbacv1.RoleBinding) error {
+	err := r.Apply(ctx, roleBindingApplyConfig(desired), client.FieldOwner(tenantNSFieldOwner))
+	if apierrors.IsConflict(err) {
+		existing := &rbacv1.RoleBinding{}
+		if getErr := r.APIReader.Get(ctx, client.ObjectKeyFromObject(desired), existing); getErr != nil {
+			return fmt.Errorf("getting tenant RoleBinding %s/%s after apply conflict: %w", desired.Namespace, desired.Name, getErr)
 		}
-		if !rolledBack {
-			log.Info("Created tenant RoleBinding", "name", desired.Name, "namespace", namespace)
+		if existing.Labels[labelManagedBy] != managedByDCHService {
+			return r.reportUnmanagedConflict(ns, existing)
 		}
-		return nil
+		err = r.Apply(ctx, roleBindingApplyConfig(desired), client.FieldOwner(tenantNSFieldOwner), client.ForceOwnership)
+	}
+	if isRoleRefChange(err) {
+		stale := &rbacv1.RoleBinding{ObjectMeta: metav1.ObjectMeta{Namespace: desired.Namespace, Name: desired.Name}}
+		if deleteErr := r.Delete(ctx, stale); deleteErr != nil && !apierrors.IsNotFound(deleteErr) {
+			return fmt.Errorf("deleting drifted tenant RoleBinding %s/%s: %w", desired.Namespace, desired.Name, deleteErr)
+		}
+		err = r.Apply(ctx, roleBindingApplyConfig(desired), client.FieldOwner(tenantNSFieldOwner), client.ForceOwnership)
+		if apierrors.IsAlreadyExists(err) || apierrors.IsInvalid(err) {
+			return fmt.Errorf("tenant RoleBinding %s/%s is still terminating, requeuing replacement", desired.Namespace, desired.Name)
+		}
 	}
 	if err != nil {
-		return fmt.Errorf("getting tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
-	}
-
-	if existing.Labels[labelManagedBy] != managedByDCHService {
-		r.Recorder.Eventf(ns, nil, corev1.EventTypeWarning, "UnmanagedRoleBindingConflict", "TenantOnboarding",
-			"RoleBinding %s/%s was not created by the controller and was left unchanged; label it %s=%s or delete it to let the controller manage tenant access",
-			namespace, existing.Name, labelManagedBy, managedByDCHService)
-		return fmt.Errorf("unmanaged RoleBinding %s/%s conflicts with tenant onboarding", namespace, existing.Name)
-	}
-
-	if existing.RoleRef != desired.RoleRef {
-		if err := r.Delete(ctx, existing); err != nil && !apierrors.IsNotFound(err) {
-			return fmt.Errorf("deleting drifted tenant RoleBinding %s/%s: %w", namespace, existing.Name, err)
-		}
-		if err := r.Create(ctx, desired); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				return fmt.Errorf("tenant RoleBinding %s/%s is still terminating, requeuing replacement", namespace, desired.Name)
-			}
-			return fmt.Errorf("recreating tenant RoleBinding %s/%s: %w", namespace, desired.Name, err)
-		}
-		rolledBack, err := r.rollbackIfServiceRemoved(ctx, desired)
-		if err != nil {
-			return err
-		}
-		if !rolledBack {
-			log.Info("Replaced drifted tenant RoleBinding", "name", desired.Name, "namespace", namespace)
-		}
-		return nil
-	}
-
-	if !reflect.DeepEqual(existing.Subjects, desired.Subjects) {
-		existing.Subjects = desired.Subjects
-		if err := r.Update(ctx, existing); err != nil {
-			return fmt.Errorf("updating tenant RoleBinding %s/%s: %w", namespace, existing.Name, err)
-		}
-		log.Info("Updated tenant RoleBinding", "name", existing.Name, "namespace", namespace)
+		return fmt.Errorf("applying tenant RoleBinding %s/%s: %w", desired.Namespace, desired.Name, err)
 	}
 	return nil
 }
 
-// rollbackIfServiceRemoved deletes a just-created binding when no live
-// DataConnectService remains, reporting whether it did. The decision to
-// create comes from the informer cache, which can lag behind deletion, so
-// the finalizer's uninstall sweep can finish between that read and the
-// create; without this check the late binding would outlive the service it
-// grants for.
-func (r *TenantNamespaceReconciler) rollbackIfServiceRemoved(ctx context.Context, created *rbacv1.RoleBinding) (bool, error) {
+// reportUnmanagedConflict records the event and error for a binding the
+// controller does not manage occupying the tenant binding name.
+func (r *TenantNamespaceReconciler) reportUnmanagedConflict(ns *corev1.Namespace, existing *rbacv1.RoleBinding) error {
+	r.Recorder.Eventf(ns, nil, corev1.EventTypeWarning, "UnmanagedRoleBindingConflict", "TenantOnboarding",
+		"RoleBinding %s/%s was not created by the controller and was left unchanged; label it %s=%s or delete it to let the controller manage tenant access",
+		existing.Namespace, existing.Name, labelManagedBy, managedByDCHService)
+	return fmt.Errorf("unmanaged RoleBinding %s/%s conflicts with tenant onboarding", existing.Namespace, existing.Name)
+}
+
+// removeIfServiceRemoved removes the managed binding when no live
+// DataConnectService remains. The decision to apply comes from the informer
+// cache, which can lag behind deletion; the API reader prevents the applied
+// binding from outliving the service it grants for.
+func (r *TenantNamespaceReconciler) removeIfServiceRemoved(ctx context.Context, applied *rbacv1.RoleBinding) error {
 	_, found, err := firstDataConnectService(ctx, r.APIReader)
 	if err != nil {
-		return false, fmt.Errorf("verifying the DataConnectService after creating tenant RoleBinding %s/%s: %w", created.Namespace, created.Name, err)
+		return fmt.Errorf("verifying the DataConnectService after applying tenant RoleBinding %s/%s: %w", applied.Namespace, applied.Name, err)
 	}
 	if found {
-		return false, nil
+		return nil
 	}
-	if err := r.Delete(ctx, created); err != nil && !apierrors.IsNotFound(err) {
-		return false, fmt.Errorf("deleting tenant RoleBinding %s/%s created while the DataConnectService was being removed: %w", created.Namespace, created.Name, err)
+	if err := r.removeRoleBinding(ctx, applied.Namespace); err != nil {
+		return err
 	}
-	logf.FromContext(ctx).Info("Deleted tenant RoleBinding created while the DataConnectService was being removed", "name", created.Name, "namespace", created.Namespace)
-	return true, nil
+	return nil
 }
 
 // removeRoleBinding deletes the controller-managed binding when a namespace
@@ -360,19 +363,34 @@ func tenantNamespacePredicate() predicate.Predicate {
 	}
 }
 
-// SetupWithManager sets up the controller with the Manager.
+// SetupWithManager sets up the controller with the Manager. RoleBindings
+// are watched through a dedicated cache limited to managed bindings so the
+// manager never caches every RoleBinding in the cluster.
 func (r *TenantNamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	rbCache, err := cache.New(mgr.GetConfig(), cache.Options{
+		Scheme: mgr.GetScheme(),
+		Mapper: mgr.GetRESTMapper(),
+		ByObject: map[client.Object]cache.ByObject{
+			&rbacv1.RoleBinding{}: {Label: labels.SelectorFromSet(labels.Set{labelManagedBy: managedByDCHService})},
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("creating RoleBinding cache: %w", err)
+	}
+	if err := mgr.Add(rbCache); err != nil {
+		return fmt.Errorf("adding RoleBinding cache: %w", err)
+	}
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1.Namespace{}, builder.WithPredicates(tenantNamespacePredicate())).
 		Watches(
 			&dchv1alpha1.DataConnectService{},
 			handler.EnqueueRequestsFromMapFunc(r.tenantNamespacesToRequests),
 		).
-		Watches(
-			&rbacv1.RoleBinding{},
-			handler.EnqueueRequestsFromMapFunc(roleBindingToNamespaceRequest),
-			builder.WithPredicates(managedRoleBindingPredicate()),
-		).
+		WatchesRawSource(source.Kind(rbCache, &rbacv1.RoleBinding{},
+			handler.TypedEnqueueRequestsFromMapFunc(roleBindingToNamespaceRequest),
+			managedRoleBindingPredicate(),
+		)).
 		Named("tenantnamespace").
 		Complete(r)
 }
@@ -380,8 +398,8 @@ func (r *TenantNamespaceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // roleBindingToNamespaceRequest enqueues the Namespace containing a managed
 // RoleBinding, letting reconcile decide from the namespace's current labels
 // whether the binding should still exist.
-func roleBindingToNamespaceRequest(_ context.Context, obj client.Object) []reconcile.Request {
-	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: obj.GetNamespace()}}}
+func roleBindingToNamespaceRequest(_ context.Context, obj *rbacv1.RoleBinding) []reconcile.Request {
+	return []reconcile.Request{{NamespacedName: types.NamespacedName{Name: obj.Namespace}}}
 }
 
 // managedRoleBindingPredicate passes RoleBinding events for bindings this
@@ -389,16 +407,20 @@ func roleBindingToNamespaceRequest(_ context.Context, obj client.Object) []recon
 // Watching its own bindings lets the controller converge states no namespace
 // event reveals — a tenant label removed while the controller was down
 // leaves the binding in place with no event to retry, and a binding deleted
-// or drifted while the label stayed likewise only shows up here.
-func managedRoleBindingPredicate() predicate.Predicate {
-	isManaged := func(obj client.Object) bool {
-		return obj.GetName() == tenantSecretAccessRoleBindingName() &&
-			obj.GetLabels()[labelManagedBy] == managedByDCHService
+// or drifted while the label stayed likewise only shows up here. Events
+// arrive from the label-scoped managed-bindings cache; the name check keeps
+// bindings that merely share the managed-by label from requeuing tenants.
+func managedRoleBindingPredicate() predicate.TypedPredicate[*rbacv1.RoleBinding] {
+	isManaged := func(obj *rbacv1.RoleBinding) bool {
+		return obj.Name == tenantSecretAccessRoleBindingName() &&
+			obj.Labels[labelManagedBy] == managedByDCHService
 	}
-	return predicate.Funcs{
-		CreateFunc:  func(e event.CreateEvent) bool { return isManaged(e.Object) },
-		UpdateFunc:  func(e event.UpdateEvent) bool { return isManaged(e.ObjectNew) || isManaged(e.ObjectOld) },
-		DeleteFunc:  func(e event.DeleteEvent) bool { return isManaged(e.Object) },
-		GenericFunc: func(e event.GenericEvent) bool { return isManaged(e.Object) },
+	return predicate.TypedFuncs[*rbacv1.RoleBinding]{
+		CreateFunc: func(e event.TypedCreateEvent[*rbacv1.RoleBinding]) bool { return isManaged(e.Object) },
+		UpdateFunc: func(e event.TypedUpdateEvent[*rbacv1.RoleBinding]) bool {
+			return isManaged(e.ObjectNew) || isManaged(e.ObjectOld)
+		},
+		DeleteFunc:  func(e event.TypedDeleteEvent[*rbacv1.RoleBinding]) bool { return isManaged(e.Object) },
+		GenericFunc: func(e event.TypedGenericEvent[*rbacv1.RoleBinding]) bool { return isManaged(e.Object) },
 	}
 }
