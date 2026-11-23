@@ -93,12 +93,14 @@ func TestDataModulePlatformVersionHandshake(t *testing.T) {
 }
 
 func TestPlatformConfigOnlyEnqueuesSameNamespace(t *testing.T) {
+	const managedName = "managed"
+	const otherNamespace = "other"
 	ctx := context.Background()
 	scheme := runtime.NewScheme()
 	require.NoError(t, dchv1alpha1.AddToScheme(scheme))
 	cli := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
-		&dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: "managed", Namespace: platformTestNamespace}},
-		&dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: "standalone", Namespace: "other"}},
+		&dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: managedName, Namespace: platformTestNamespace}},
+		&dchv1alpha1.DataConnectService{ObjectMeta: metav1.ObjectMeta{Name: "standalone", Namespace: otherNamespace}},
 	).Build()
 	r := &DataConnectServiceReconciler{Client: cli}
 
@@ -106,7 +108,7 @@ func TestPlatformConfigOnlyEnqueuesSameNamespace(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: platformTestNamespace},
 	})
 	require.Equal(t, []reconcile.Request{{NamespacedName: client.ObjectKey{
-		Name: "managed", Namespace: platformTestNamespace,
+		Name: managedName, Namespace: platformTestNamespace,
 	}}}, requests)
 
 	requests = r.platformConfigToReconcile(ctx, &corev1.ConfigMap{
@@ -120,7 +122,7 @@ func TestPlatformConfigOnlyEnqueuesSameNamespace(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "global-connections"},
 	})
 	require.ElementsMatch(t, []reconcile.Request{
-		{NamespacedName: client.ObjectKey{Name: "managed", Namespace: platformTestNamespace}},
-		{NamespacedName: client.ObjectKey{Name: "standalone", Namespace: "other"}},
+		{NamespacedName: client.ObjectKey{Name: managedName, Namespace: platformTestNamespace}},
+		{NamespacedName: client.ObjectKey{Name: "standalone", Namespace: otherNamespace}},
 	}, requests)
 }
