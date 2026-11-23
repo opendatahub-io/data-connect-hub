@@ -1,7 +1,7 @@
-# This rule is not used by the project dc-controller itself.
+# This rule is not used by the project dch-operator itself.
 # It is provided to allow the cluster admin to help manage permissions for users.
 #
-# Grants full CRUD permissions over dataconnecthub.opendatahub.io.
+# Grants full permissions ('*') over components.platform.opendatahub.io.
 # This role is intended for users authorized to modify roles and bindings within the cluster,
 # enabling them to delegate specific permissions to other users or groups as needed.
 
@@ -9,25 +9,19 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
-    app.kubernetes.io/name: dc-controller
+    app.kubernetes.io/name: dch-operator
     app.kubernetes.io/managed-by: kustomize
   name: dataconnecthub-admin-role
 rules:
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - components.platform.opendatahub.io
   resources:
-  - dataconnectservices
+  - dataconnecthubs
   verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
+  - '*'
 - apiGroups:
-  - dataconnecthub.opendatahub.io
+  - components.platform.opendatahub.io
   resources:
-  - dataconnectservices/status
+  - dataconnecthubs/status
   verbs:
   - get

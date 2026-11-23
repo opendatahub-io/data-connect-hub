@@ -35,20 +35,23 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	componentsplatformv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 )
 
 var _ = Describe("DataConnectService Controller", func() {
 	const (
-		resourceName    = "default-dataconnectservice"
-		targetNamespace = "default"
-		testRestImage   = "quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable"
-		testFlightImage = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
+		resourceName        = "default-dataconnectservice"
+		targetNamespace     = "default"
+		testRestImage       = "quay.io/opendatahub/odh-data-connect-hub-rest:odh-stable"
+		testFlightImage     = "quay.io/opendatahub/odh-data-connect-hub-flight:odh-stable"
+		testPlatformVersion = "2.20.0"
 
 		// Kustomize adds this prefix to all resource names.
 		np                  = "dch-"
@@ -109,6 +112,19 @@ var _ = Describe("DataConnectService Controller", func() {
 			}
 		}
 		return nil
+	}
+
+	platformDCHOwnerReference := func() metav1.OwnerReference {
+		controller := true
+		blockOwnerDeletion := true
+		return metav1.OwnerReference{
+			APIVersion:         componentsplatformv1alpha1.GroupVersion.String(),
+			Kind:               dataConnectHubKind,
+			Name:               "default-dataconnecthub",
+			UID:                types.UID("dch-module-test-uid"),
+			Controller:         &controller,
+			BlockOwnerDeletion: &blockOwnerDeletion,
+		}
 	}
 
 	cleanupOperatorResources := func() {
@@ -267,7 +283,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 
 			Expect(cr.Status.ObservedGeneration).To(Equal(cr.Generation))
-			Expect(cr.Status.Distribution.Name).To(Equal("Standalone"))
+			Expect(cr.Status.Distribution.Name).To(Equal(distributionStandalone))
 			Expect(cr.Status.Distribution.Version).To(Equal(BuildVersion))
 			Expect(cr.Status.Releases).To(HaveLen(2))
 			Expect(cr.Status.Releases[0].Name).To(Equal("rest-service"))
@@ -289,7 +305,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			var ready *metav1.Condition
 			for i := range cr.Status.Conditions {
-				if cr.Status.Conditions[i].Type == "Ready" {
+				if cr.Status.Conditions[i].Type == conditionTypeReady {
 					ready = &cr.Status.Conditions[i]
 					break
 				}
@@ -308,7 +324,7 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			ready = nil
 			for i := range cr.Status.Conditions {
-				if cr.Status.Conditions[i].Type == "Ready" {
+				if cr.Status.Conditions[i].Type == conditionTypeReady {
 					ready = &cr.Status.Conditions[i]
 					break
 				}
@@ -728,16 +744,20 @@ var _ = Describe("DataConnectService Controller", func() {
 					Namespace: targetNamespace,
 				},
 				Data: map[string]string{
-					"distribution.name":    "OpenDataHub",
-					"distribution.version": "2.20.0",
-					"platformVersion":      "2.20.0",
+					distributionNameKey:    distributionOpenDataHub,
+					distributionVersionKey: testPlatformVersion,
+					"platformVersion":      testPlatformVersion,
 				},
 			}
 			Expect(k8sClient.Create(ctx, cm)).To(Succeed())
 
 			cr := &dchv1alpha1.DataConnectService{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
-				Spec:       dchv1alpha1.DataConnectServiceSpec{},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            resourceName,
+					Namespace:       targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{platformDCHOwnerReference()},
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 		})
@@ -763,7 +783,7 @@ var _ = Describe("DataConnectService Controller", func() {
 				}
 			}
 			Expect(platRelease).NotTo(BeNil())
-			Expect(platRelease.Version).To(Equal("2.20.0"))
+			Expect(platRelease.Version).To(Equal(testPlatformVersion))
 		})
 
 		It("should read distribution from ConfigMap", func() {
@@ -772,8 +792,36 @@ var _ = Describe("DataConnectService Controller", func() {
 			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 
-			Expect(cr.Status.Distribution.Name).To(Equal("OpenDataHub"))
-			Expect(cr.Status.Distribution.Version).To(Equal("2.20.0"))
+			Expect(cr.Status.Distribution.Name).To(Equal(distributionOpenDataHub))
+			Expect(cr.Status.Distribution.Version).To(Equal(testPlatformVersion))
+		})
+
+		It("should fall back to the legacy standalone ConfigMap", func() {
+			current := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: targetNamespace}}
+			Expect(k8sClient.Delete(ctx, current)).To(Succeed())
+			legacy := &corev1.ConfigMap{
+				ObjectMeta: metav1.ObjectMeta{Name: legacyPlatformConfigName, Namespace: targetNamespace},
+				Data: map[string]string{
+					distributionNameKey:    distributionStandalone,
+					distributionVersionKey: "0.0.0",
+				},
+			}
+			Expect(k8sClient.Create(ctx, legacy)).To(Succeed())
+			defer func() { Expect(client.IgnoreNotFound(k8sClient.Delete(ctx, legacy))).To(Succeed()) }()
+
+			config := reconciler().readPlatformConfig(ctx, &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Namespace: targetNamespace},
+			})
+			Expect(config.Distribution.Name).To(Equal(distributionStandalone))
+			Expect(config.Distribution.Version).To(Equal("0.0.0"))
+		})
+
+		It("does not apply the module ConfigMap to an independently managed DataConnectService", func() {
+			config := reconciler().readPlatformConfig(ctx, &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{Namespace: targetNamespace},
+			})
+			Expect(config.Distribution.Name).To(Equal(distributionStandalone))
+			Expect(config.Distribution.Version).To(Equal(BuildVersion))
 		})
 
 		It("should not advance platform version while not Ready", func() {
@@ -798,6 +846,35 @@ var _ = Describe("DataConnectService Controller", func() {
 				Expect(platRelease.Version).To(Equal(""))
 			}
 		})
+
+		It("should not advance platform version when a post-reconcile readiness check fails", func() {
+			cr := &dchv1alpha1.DataConnectService{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            resourceName,
+					Namespace:       targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{platformDCHOwnerReference()},
+				},
+			}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+
+			platCfg := platformConfig{
+				Distribution:    dchv1alpha1.DistributionStatus{Name: distributionOpenDataHub, Version: testPlatformVersion},
+				PlatformVersion: testPlatformVersion,
+			}
+			_, err := reconciler().updateStatus(ctx, reconcile.Request{NamespacedName: crKey}, &platCfg, conditionTypeReady, func(current *dchv1alpha1.DataConnectService) {
+				current.Status.Phase = "Not Ready"
+				reconciler().setCondition(current, conditionTypeReady, metav1.ConditionFalse, "GatewayHTTP2Disabled", "Gateway does not support HTTP/2")
+				reconciler().setCondition(current, conditionTypeDegraded, metav1.ConditionTrue, "GatewayHTTP2Disabled", "Gateway does not support HTTP/2")
+			})
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			for _, release := range cr.Status.Releases {
+				if release.Name == releasePlatform {
+					Expect(release.Version).To(BeEmpty())
+				}
+			}
+		})
 	})
 
 	Context("Platform config gateway merge", func() {
@@ -809,8 +886,8 @@ var _ = Describe("DataConnectService Controller", func() {
 					Namespace: targetNamespace,
 				},
 				Data: map[string]string{
-					"distribution.name":    "Standalone",
-					"distribution.version": "0.0.0",
+					distributionNameKey:    distributionStandalone,
+					distributionVersionKey: "0.0.0",
 					"gateway.name":         "custom-gateway",
 					"gateway.namespace":    rhoaiGatewayNS,
 				},
@@ -825,8 +902,12 @@ var _ = Describe("DataConnectService Controller", func() {
 
 		It("should use gateway config from ConfigMap when spec.gateway is not set", func() {
 			cr := &dchv1alpha1.DataConnectService{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
-				Spec:       dchv1alpha1.DataConnectServiceSpec{},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            resourceName,
+					Namespace:       targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{platformDCHOwnerReference()},
+				},
+				Spec: dchv1alpha1.DataConnectServiceSpec{},
 			}
 			Expect(k8sClient.Create(ctx, cr)).To(Succeed())
 
@@ -850,7 +931,11 @@ var _ = Describe("DataConnectService Controller", func() {
 
 		It("should prefer spec.gateway over ConfigMap gateway", func() {
 			cr := &dchv1alpha1.DataConnectService{
-				ObjectMeta: metav1.ObjectMeta{Name: resourceName, Namespace: targetNamespace},
+				ObjectMeta: metav1.ObjectMeta{
+					Name:            resourceName,
+					Namespace:       targetNamespace,
+					OwnerReferences: []metav1.OwnerReference{platformDCHOwnerReference()},
+				},
 				Spec: dchv1alpha1.DataConnectServiceSpec{
 					Gateway: &dchv1alpha1.Gateway{
 						Name:      "spec-gateway",

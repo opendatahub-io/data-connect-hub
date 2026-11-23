@@ -26,3 +26,10 @@ resources:
 - dataconnecthub_editor_role.yaml
 - dataconnecthub_viewer_role.yaml
 
+# For each CRD, "Admin", "Editor" and "Viewer" roles are scaffolded by
+# default, aiding admins in cluster management. Those roles are
+# not used by the dch-operator itself. You can comment the following lines
+# if you do not want those helpers be installed with your Project.
+- components.platform_dataconnecthub_admin_role.yaml
+- components.platform_dataconnecthub_editor_role.yaml
+- components.platform_dataconnecthub_viewer_role.yaml

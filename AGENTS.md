@@ -194,10 +194,16 @@ make check-dco   # run DCO check locally
   The ODH team is actively migrating modules to **Helm v2 charts** (FeastOperator, OGX, Kserve, odh-observability
   all use Helm). We should plan to convert our `dc-controller/config/` overlays to a Helm chart in a future release.
   Reference PRs: opendatahub-operator#3813 (OGX/Helm), #3654 (MLflow/Kustomize migration).
-- The DataConnectService CRD uses API group `dataconnecthub.opendatahub.io`.
-- The CR is cluster-scoped and singleton (`default-dataconnectservice`).
-- Status follows the PlatformObject contract: `observedGeneration`, `distribution`, `releases`,
-  and conditions `Ready`, `ProvisioningSucceeded`, `Degraded`.
+- `DataConnectService` is a namespaced application CRD in API group
+  `dataconnecthub.opendatahub.io`; the DCH platform module API is a separate
+  cluster-scoped singleton `DataConnectHub` in
+  `components.platform.opendatahub.io`.
+- The platform module controller manages the namespaced
+  `default-dataconnectservice` in its configured applications namespace and
+  reports its status through `DataConnectHub`.
+- Both APIs expose PlatformObject status fields: `observedGeneration`,
+  `distribution`, `releases`, and conditions `Ready`,
+  `ProvisioningSucceeded`, and `Degraded`.
 - Application images are resolved from env vars for disconnected/air-gapped support:
   `RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE` (rest-service) and
   `RELATED_IMAGE_ODH_DATA_CONNECT_HUB_FLIGHT_IMAGE` (flight-service).

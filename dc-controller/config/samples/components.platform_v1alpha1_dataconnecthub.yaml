@@ -1,0 +1,12 @@
+apiVersion: components.platform.opendatahub.io/v1alpha1
+kind: DataConnectHub
+metadata:
+  labels:
+    app.kubernetes.io/name: dch-operator
+    app.kubernetes.io/managed-by: kustomize
+  name: default-dataconnecthub
+spec:
+  applicationsNamespace: opendatahub
+  distribution:
+    name: OpenDataHub
+    version: 0.0.0

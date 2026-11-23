@@ -11,6 +11,7 @@ repo: github.com/opendatahub-io/data-connect-hub/dc-controller
 resources:
 - api:
     crdVersion: v1
+    namespaced: true
   controller: true
   domain: opendatahub.io
   group: components.platform

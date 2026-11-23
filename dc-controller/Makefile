@@ -46,6 +46,7 @@ help: ## Display this help.
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	cp config/crd/bases/components.platform.opendatahub.io_dataconnecthubs.yaml charts/crds/
 	cp config/crd/bases/dataconnecthub.opendatahub.io_dataconnectservices.yaml charts/crds/
 	cp config/crd/bases/dataconnecthub.opendatahub.io_initdataconnectiontypes.yaml charts/crds/initdataconnectiontypes.yaml
 	cp config/crd/bases/dataconnecthub.opendatahub.io_initdataconnections.yaml charts/crds/initdataconnections.yaml

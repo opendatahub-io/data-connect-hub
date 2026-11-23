@@ -44,6 +44,30 @@ rules:
   verbs:
   - create
 - apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dataconnecthubs
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dataconnecthubs/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - components.platform.opendatahub.io
+  resources:
+  - dataconnecthubs/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - config.openshift.io
   resources:
   - apiservers
@@ -91,12 +115,12 @@ rules:
   - dataconnecthub.opendatahub.io
   resources:
   - dataconnectservices/status
-  - initdataconnections/status
-  - initdataconnectiontypes/status
   verbs:
   - get
+  - list
   - patch
   - update
+  - watch
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
@@ -106,6 +130,15 @@ rules:
   - get
   - list
   - watch
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - initdataconnections/status
+  - initdataconnectiontypes/status
+  verbs:
+  - get
+  - patch
+  - update
 - apiGroups:
   - gateway.networking.k8s.io
   resources:

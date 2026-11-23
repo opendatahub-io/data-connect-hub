@@ -1,4 +1,8 @@
 ## Append samples of your project ##
+# The standalone application sample is intentionally excluded here: the
+# DataConnectHub sample creates the reserved default-dataconnectservice child.
+# Apply dataconnecthub.opendatahub.io_v1alpha1_dataconnectservice.yaml directly
+# when testing standalone mode.
 resources:
-- dataconnecthub.opendatahub.io_v1alpha1_dataconnectservice.yaml
+- components.platform_v1alpha1_dataconnecthub.yaml
 # +kubebuilder:scaffold:manifestskustomizesamples

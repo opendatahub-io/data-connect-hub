@@ -48,6 +48,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	componentsplatformv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 	platformtls "github.com/opendatahub-io/odh-platform-utilities/framework/tls"
 )
 
@@ -98,9 +99,15 @@ const (
 	valueTrue  = "true"
 	valueFalse = "false"
 
+	distributionNameKey     = "distribution.name"
+	distributionVersionKey  = "distribution.version"
+	distributionOpenDataHub = "OpenDataHub"
+	distributionStandalone  = "Standalone"
+
 	repoURL = "https://github.com/opendatahub-io/data-connect-hub"
 
-	platformConfigName = "opendatahub-dataconnecthub-config"
+	platformConfigName       = "odh-dataconnecthub-config"
+	legacyPlatformConfigName = "opendatahub-dataconnecthub-config"
 
 	finalizerName = "dataconnecthub.opendatahub.io/finalizer"
 
@@ -136,14 +143,14 @@ type platformConfig struct {
 	TokenReviewAudiences []string
 }
 
-// readPlatformConfig reads cluster-level defaults from the platform ConfigMap.
-// TODO(DSC): When DCH is onboarded to DSC, the platform operator will create
-// and manage this ConfigMap (including auth.tokenReviewAudiences) in the operand
-// namespace. Until then, standalone users create it manually or use CR overrides.
-func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, namespace string) platformConfig {
+// readPlatformConfig reads the platform module ConfigMap only for the
+// DataConnectService owned by DataConnectHub. Independently managed application
+// CRs continue to read the legacy standalone ConfigMap and are not affected by
+// platform-module configuration in the same namespace.
+func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, cr *dchv1alpha1.DataConnectService) platformConfig {
 	cfg := platformConfig{
 		Distribution: dchv1alpha1.DistributionStatus{
-			Name:    "Standalone",
+			Name:    distributionStandalone,
 			Version: BuildVersion,
 		},
 		GatewayName:      defaultGatewayName,
@@ -151,17 +158,26 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	}
 
 	cm := &corev1.ConfigMap{}
-	if err := r.Get(ctx, types.NamespacedName{Name: platformConfigName, Namespace: namespace}, cm); err != nil {
+	key := types.NamespacedName{Name: legacyPlatformConfigName, Namespace: cr.Namespace}
+	if isPlatformManagedDataConnectService(cr) {
+		key.Name = platformConfigName
+	}
+	err := r.Get(ctx, key, cm)
+	if apierrors.IsNotFound(err) && key.Name == platformConfigName {
+		key.Name = legacyPlatformConfigName
+		err = r.Get(ctx, key, cm)
+	}
+	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			logf.FromContext(ctx).Error(err, "failed to read platform ConfigMap, using defaults")
 		}
 		return cfg
 	}
 
-	if v := cm.Data["distribution.name"]; v != "" {
+	if v := cm.Data[distributionNameKey]; v != "" {
 		cfg.Distribution.Name = v
 	}
-	if v := cm.Data["distribution.version"]; v != "" {
+	if v := cm.Data[distributionVersionKey]; v != "" {
 		cfg.Distribution.Version = v
 	}
 	cfg.PlatformVersion = cm.Data["platformVersion"]
@@ -182,6 +198,12 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	}
 
 	return cfg
+}
+
+func isPlatformManagedDataConnectService(cr *dchv1alpha1.DataConnectService) bool {
+	owner := metav1.GetControllerOf(cr)
+	return owner != nil && owner.Kind == dataConnectHubKind &&
+		owner.APIVersion == componentsplatformv1alpha1.GroupVersion.String()
 }
 
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
@@ -240,7 +262,7 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	log.Info("reconciling DataConnectService", "name", cr.Name, "namespace", cr.Namespace)
 
 	// Read platform configuration from ConfigMap in the CR's namespace
-	platCfg := r.readPlatformConfig(ctx, cr.Namespace)
+	platCfg := r.readPlatformConfig(ctx, &cr)
 
 	// Phase 1: Validate database secret exists
 	if err := r.validateDatabaseSecret(ctx, cr.Namespace); err != nil {
@@ -303,9 +325,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	}
 
 	// All ready
-	return r.updateStatus(ctx, req, &platCfg, "Ready", func(cr *dchv1alpha1.DataConnectService) {
+	return r.updateStatus(ctx, req, &platCfg, conditionTypeReady, func(cr *dchv1alpha1.DataConnectService) {
 		r.gatewayStatus(ctx, cr, &platCfg)
-		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, "Ready", "All resources reconciled and ready")
+		r.setCondition(cr, conditionTypeReady, metav1.ConditionTrue, conditionTypeReady, "All resources reconciled and ready")
 		r.setCondition(cr, conditionTypeProvisioningSucceeded, metav1.ConditionTrue, "ProvisioningComplete", "Manifests applied successfully")
 		r.setCondition(cr, conditionTypeDegraded, metav1.ConditionFalse, "Reconciled", "No errors")
 		r.checkGRPCGatewaySupport(ctx, cr)
@@ -327,8 +349,9 @@ func (r *DataConnectServiceReconciler) updateStatus(
 	cr.Status.Phase = phase
 	cr.Status.ObservedGeneration = cr.Generation
 	cr.Status.Distribution = platCfg.Distribution
-	cr.Status.Releases = r.buildReleases(&cr, platCfg, phase == conditionTypeReady)
+	cr.Status.Releases = r.buildReleases(&cr, platCfg, false)
 	mutate(&cr)
+	cr.Status.Releases = r.buildReleases(&cr, platCfg, isConditionTrue(cr.Status.Conditions, conditionTypeReady))
 
 	if err := r.Status().Update(ctx, &cr); err != nil {
 		if apierrors.IsConflict(err) {
@@ -902,7 +925,7 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 	ownsPredicate := predicate.Or(predicate.GenerationChangedPredicate{}, predicate.LabelChangedPredicate{})
 
 	isPlatformConfig := predicate.NewPredicateFuncs(func(obj client.Object) bool {
-		return obj.GetName() == platformConfigName
+		return obj.GetName() == platformConfigName || obj.GetName() == legacyPlatformConfigName
 	})
 
 	// Watches:

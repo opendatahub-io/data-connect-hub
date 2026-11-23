@@ -42,6 +42,7 @@ import (
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
+	componentsplatformv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/v1alpha1"
 	"github.com/opendatahub-io/data-connect-hub/dc-controller/internal/controller"
 	controllertls "github.com/opendatahub-io/data-connect-hub/dc-controller/internal/tls"
 	// +kubebuilder:scaffold:imports
@@ -67,6 +68,7 @@ func init() {
 	utilruntime.Must(dchv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(configv1.Install(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
+	utilruntime.Must(componentsplatformv1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -258,6 +260,13 @@ func main() {
 		RestClient: controller.NewHTTPMigrationClient(restURLResolver),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
+		os.Exit(1)
+	}
+	if err := (&controller.DataConnectHubReconciler{
+		Client: mgr.GetClient(),
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "dataconnecthub")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

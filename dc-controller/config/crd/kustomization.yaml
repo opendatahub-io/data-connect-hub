@@ -5,6 +5,7 @@ resources:
 - bases/dataconnecthub.opendatahub.io_dataconnectservices.yaml
 - bases/dataconnecthub.opendatahub.io_initdataconnections.yaml
 - bases/dataconnecthub.opendatahub.io_initdataconnectiontypes.yaml
+- bases/components.platform.opendatahub.io_dataconnecthubs.yaml
 # +kubebuilder:scaffold:crdkustomizeresource
 
 patches:
