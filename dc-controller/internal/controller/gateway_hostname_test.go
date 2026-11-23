@@ -400,8 +400,8 @@ func TestUpdateStatusUsesFinalGatewayPhaseForRelease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.RequeueAfter != requeueWhenReady {
-		t.Errorf("requeue = %s, want %s", result.RequeueAfter, requeueWhenReady)
+	if result.RequeueAfter != requeueWaitingForReady {
+		t.Errorf("requeue = %s, want %s while the final gateway check is not ready", result.RequeueAfter, requeueWaitingForReady)
 	}
 	got := &dchv1alpha1.DataConnectService{}
 	if err := k8sClient.Get(context.Background(), request, got); err != nil {
