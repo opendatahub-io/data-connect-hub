@@ -261,6 +261,12 @@ def persona_types_only_auth_token() -> str:
 
 
 @pytest.fixture(scope="session")
+def persona_group_member_auth_token() -> str:
+    """Token for an SA whose access in the tenant comes only from group RoleBindings."""
+    return os.environ.get("DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN", "")
+
+
+@pytest.fixture(scope="session")
 def no_access_namespace() -> str:
     return os.environ.get("DCH_NO_ACCESS_NAMESPACE", "")
 

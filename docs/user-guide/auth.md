@@ -115,7 +115,9 @@ Minimum role by operation:
 
 The predefined ClusterRoles cover most cases. To grant finer-grained access, see [5.1 Custom Roles](#51-custom-roles).
 
-Create one RoleBinding per user and tenant. Example: grant Alice read access in `team-alpha`:
+Bind roles to users or groups with a RoleBinding in each tenant namespace. Every DCH check honors group membership, including the export check on the source Secret. On OpenShift, binding to a group is usually easier to manage than one binding per user.
+
+Example: grant Alice read access in `team-alpha`:
 
 ```bash
 TENANT_NAMESPACE=team-alpha
@@ -129,6 +131,22 @@ kubectl create rolebinding alice-data-access \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
+Example: grant every member of the `team-alpha-analysts` group read access in `team-alpha`:
+
+```bash
+TENANT_NAMESPACE=team-alpha
+DCH_GROUP=team-alpha-analysts
+DCH_ROLE=dch-read
+
+kubectl create rolebinding team-alpha-analysts-data-access \
+  -n "$TENANT_NAMESPACE" \
+  --clusterrole="$DCH_ROLE" \
+  --group="$DCH_GROUP" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+To grant every ServiceAccount in a namespace, such as workbenches or pipelines running in `team-alpha`, use the group `system:serviceaccounts:team-alpha`.
+
 The export endpoint (`PUT /connections/{id}/exports/secrets/{secret_name}`) requires the caller to have `create` access to Secrets in the tenant namespace. Bind the predefined `dch-secret-export` ClusterRole:
 
 ```bash
@@ -141,6 +159,29 @@ kubectl create rolebinding alice-secret-export \
   --user="$DCH_USER" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+The caller also needs `get` on the connection's credentials Secret. Example: let the `team-alpha-analysts` group read the `pg-creds` Secret only:
+
+```bash
+TENANT_NAMESPACE=team-alpha
+DCH_GROUP=team-alpha-analysts
+SECRET_NAME=pg-creds
+
+kubectl create role "${SECRET_NAME}-read" \
+  -n "$TENANT_NAMESPACE" \
+  --verb=get \
+  --resource=secrets \
+  --resource-name="$SECRET_NAME" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create rolebinding "team-alpha-analysts-${SECRET_NAME}-read" \
+  -n "$TENANT_NAMESPACE" \
+  --role="${SECRET_NAME}-read" \
+  --group="$DCH_GROUP" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Group names must not contain `|`. kube-rbac-proxy forwards the caller's groups to DCH joined with `|`, so DCH reads a group named `a|b` as the two groups `a` and `b` when it checks access to the source Secret. A caller who can name a group `x|system:masters` passes that check for any Secret, so binding Secret access to users only does not help. If your identity provider lets users create and name their own groups, disallow `|` in group names there. If you cannot, do not grant `dch-secret-export` until DCH receives an unambiguous group encoding.
 
 ## 3. Authentication flow
 

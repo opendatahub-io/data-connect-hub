@@ -62,18 +62,21 @@ DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
 DCH_NEIGHBOR_TENANT_ID="${DCH_NEIGHBOR_TENANT_ID:-dch-e2e-neighbor}"
 DCH_GLOBAL_NAMESPACE="${DCH_GLOBAL_NAMESPACE:-dch-e2e-global}"
+DCH_GROUP_MEMBER_NAMESPACE="${DCH_GROUP_MEMBER_NAMESPACE:-dch-e2e-group-member}"
 
 # Tenancy tests need three distinct namespaces: the runner grants the e2e user
 # access to the tenant and the neighbor tenant, and none in the no-access one.
 # Global namespace tests label and unlabel their own namespace, so it must not
-# be any of those either.
-if [[ "$DCH_TENANT_ID" == "$DCH_NEIGHBOR_TENANT_ID" ||
-      "$DCH_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ||
-      "$DCH_NEIGHBOR_TENANT_ID" == "$DCH_NO_ACCESS_NAMESPACE" ||
-      "$DCH_GLOBAL_NAMESPACE" == "$DCH_TENANT_ID" ||
-      "$DCH_GLOBAL_NAMESPACE" == "$DCH_NEIGHBOR_TENANT_ID" ||
-      "$DCH_GLOBAL_NAMESPACE" == "$DCH_NO_ACCESS_NAMESPACE" ]]; then
-    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, DCH_NO_ACCESS_NAMESPACE, and DCH_GLOBAL_NAMESPACE must be distinct" >&2
+# be any of those either. The group namespace holds the group-member persona,
+# whose access is granted to every ServiceAccount in it, so sharing it with
+# another namespace would hand that access to other personas.
+if [[ "$(printf '%s\n' "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID" "$DCH_NO_ACCESS_NAMESPACE" \
+        "$DCH_GLOBAL_NAMESPACE" "$DCH_GROUP_MEMBER_NAMESPACE" | sort | uniq -d)" != "" ]]; then
+    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, DCH_NO_ACCESS_NAMESPACE, DCH_GLOBAL_NAMESPACE, and DCH_GROUP_MEMBER_NAMESPACE must be distinct" >&2
+    exit 1
+fi
+if [[ "$DCH_GROUP_MEMBER_NAMESPACE" == "$DCH_SERVICE_NAMESPACE" ]]; then
+    echo "ERROR: DCH_GROUP_MEMBER_NAMESPACE must differ from DCH_SERVICE_NAMESPACE: every ServiceAccount in it receives the group grants" >&2
     exit 1
 fi
 
@@ -106,6 +109,10 @@ PERSONA_METADATA_ONLY_SA_NAME="dch-e2e-persona-metadata-only"
 PERSONA_DATA_STORE_ONLY_SA_NAME="dch-e2e-persona-data-store-only"
 PERSONA_CONNECTIONS_ONLY_SA_NAME="dch-e2e-persona-connections-only"
 PERSONA_TYPES_ONLY_SA_NAME="dch-e2e-persona-types-only"
+# The group-member persona lives in DCH_GROUP_MEMBER_NAMESPACE and holds no direct
+# binding: all its access comes from RoleBindings to the group
+# system:serviceaccounts:<DCH_GROUP_MEMBER_NAMESPACE>.
+PERSONA_GROUP_MEMBER_SA_NAME="dch-e2e-persona-group-member"
 PG_SECRET="dch-e2e-pg-creds"
 S3_SECRET="dch-e2e-s3-creds"
 MILVUS_SECRET="dch-e2e-milvus-creds"
@@ -132,6 +139,9 @@ setup_namespaces() {
     for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
         kubectl label namespace "$ns" --overwrite dataconnecthub.opendatahub.io/tenant=true >/dev/null
     done
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        kubectl create namespace "$DCH_GROUP_MEMBER_NAMESPACE" 2>/dev/null || true
+    fi
 }
 
 setup_user_accounts() {
@@ -165,6 +175,10 @@ setup_user_accounts() {
 
     if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
         kubectl create sa "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_GROUP_MEMBER_SA_NAME" -n "$DCH_GROUP_MEMBER_NAMESPACE" 2>/dev/null || true
     fi
 }
 
@@ -269,6 +283,34 @@ setup_persona_rbac() {
     if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
         apply_dch_role "$PERSONA_TYPES_ONLY_SA_NAME" types-read-create \
             "data-connection-types" "get, create"
+    fi
+
+    # Group-member persona: the secret-reader grants, bound to the group
+    # system:serviceaccounts:$DCH_GROUP_MEMBER_NAMESPACE instead of the SA, so the
+    # tests prove kube-rbac-proxy, Flight, and the REST service-side secret
+    # check all honor group membership.
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        local group="system:serviceaccounts:${DCH_GROUP_MEMBER_NAMESPACE}"
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-read-write -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-read-write \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read-write \
+            --group="$group" >/dev/null
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-export -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-export \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-secret-export \
+            --group="$group" >/dev/null
+        kubectl create role ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --verb=get --resource=secrets \
+            --resource-name="$PG_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --role=${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            --group="$group" >/dev/null
     fi
 }
 
@@ -681,6 +723,9 @@ generate_tokens() {
     if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
         DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN=$(kubectl create token "$PERSONA_GROUP_MEMBER_SA_NAME" -n "$DCH_GROUP_MEMBER_NAMESPACE" "${token_args[@]}")
+    fi
 }
 
 # -------------------------------------------------------------------
@@ -702,6 +747,7 @@ DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN=${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN}
 DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN=${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN}
 DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN=${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN}
 DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN}
+DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN=${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
 DCH_AUDIT_ENABLED=${DCH_AUDIT_ENABLED:-false}
