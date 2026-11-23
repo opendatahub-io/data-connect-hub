@@ -3,6 +3,18 @@
 Kubernetes operator for deploying and managing Data Connect Hub services
 (rest-service, flight-service) on OpenShift / RHOAI clusters.
 
+## Database prerequisite
+
+An administrator must provision PostgreSQL and a `dch-database-config` Secret
+in the `DataConnectService` namespace. The Secret must contain a
+`secret-config.toml` key with the application's database configuration.
+The controller does not provision PostgreSQL or generate database credentials.
+This remains a prerequisite for the planned DSC integration as well.
+
+If the Secret or required key is missing, the application reports
+`Ready=False` and `ProvisioningSucceeded=False` with reason
+`DatabaseSecretMissing`; it retries after the prerequisite is supplied.
+
 ## Custom Resource Status
 
 The CR follows the ODH PlatformObject contract:
@@ -28,9 +40,22 @@ status:
 
 ### Platform integration
 
-When running under the ODH operator, platform configuration is delivered
-via the `opendatahub-dataconnecthub-config` ConfigMap. The controller
-watches this ConfigMap and reconciles on changes.
+The planned DSC integration uses the existing Data module
+(`feast-module-operator`), not a separate DCH platform module. The platform
+projects `spec.components.data.dataConnectHub` into the Data module CR;
+the module installs `dc-controller` and creates its namespaced
+`DataConnectService` application CR. The application reports its own status;
+the Data module aggregates it for the platform. DCH does not write DSC status.
+
+The application controller already supports runtime metadata via the
+`opendatahub-dataconnecthub-config` ConfigMap. It watches this ConfigMap and
+reconciles applications in the same namespace on changes. Standalone users
+can continue to supply this ConfigMap themselves. Gateway and authentication
+settings can be supplied directly in the application CR spec.
+
+See the [onboarding plan](../docs/dev-guide/dsc-data-onboarding-plan.md) for
+the proposed ownership contract, cross-repository work, and downstream image
+onboarding. The shared-module integration is not yet implemented end to end.
 
 ## Development
 
