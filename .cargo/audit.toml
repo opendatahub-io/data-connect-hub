@@ -17,6 +17,12 @@ ignore = [
     # actix-http has not released a version using h2 0.4 yet.
     # Also ignored in deny.toml.
     "RUSTSEC-2026-0258",
+    # cookie 0.16.2 private-cookie nonce reuse across fork(). Fix landed in
+    # cookie 0.18.3, but actix-web (latest 4.20.0) still requires cookie
+    # ^0.16; its upgrade PR actix/actix-web#3336 is open. Not exploitable
+    # here: actix-web does not fork worker processes and nothing in the
+    # workspace seals private cookies. Also ignored in deny.toml.
+    "RUSTSEC-2026-0594",
     # Unmaintained transitive dependencies; not under our control.
     # Also ignored in deny.toml.
     # backoff 0.4.0 (via neo4rs)

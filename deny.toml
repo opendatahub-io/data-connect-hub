@@ -19,6 +19,13 @@ ignore = [
     # actix-http has not released a version using h2 0.4 yet.
     # Also ignored in .cargo/audit.toml.
     { id = "RUSTSEC-2026-0258", reason = "h2 0.3.x pinned by actix-http; no actix-http release uses h2 0.4 yet" },
+    # cookie 0.16.2 private-cookie nonce reuse across fork(). Fixed in cookie
+    # 0.18.3, but actix-web (latest 4.20.0) requires cookie ^0.16; its
+    # upgrade PR actix/actix-web#3336 is open. Not exploitable here:
+    # actix-web does not fork worker processes and nothing in the workspace
+    # seals private cookies.
+    # Also ignored in .cargo/audit.toml.
+    { id = "RUSTSEC-2026-0594", reason = "actix-web pins cookie ^0.16; the fix requires actix-web to adopt cookie 0.18 (actix/actix-web#3336 open), and fork-based private-cookie use does not occur here" },
     # Unmaintained transitive dependencies; not under our control.
     # backoff 0.4.0 (via neo4rs)
     { id = "RUSTSEC-2025-0012", reason = "neo4rs requires backoff; no neo4rs release drops it" },
