@@ -1,8 +1,10 @@
 # RHOAI dc-controller image handoff
 
-This is the downstream build/release work required after the upstream shared
-Data-module integration. A PipelineRun draft has been prepared and validated
-locally; no downstream component, registry repository, or release was created.
+This downstream build/release preparation can run in parallel with the upstream
+shared Data-module integration; it does not need the new validation cluster.
+Controller PR and push PipelineRun drafts have been prepared and structurally
+validated locally. No downstream component, registry repository, or release was
+created. Registry-access checks still require build-team credentials.
 
 ## Request to build/release engineering
 
@@ -37,8 +39,11 @@ release configuration. The local YAML is not a substitute for provisioning.
 
 ## Publication sequence
 
-1. Synchronize the required DCH controller source changes into the confirmed
-   downstream release branch.
+1. Confirm the release target and provision the controller Component against the
+   existing downstream controller source/Containerfile. An initial build can
+   validate packaging while the upstream PRs are reviewed. Synchronize the tested
+   DCH controller changes before the final feature/release build; upstream merge
+   and cluster validation do not block preparing the build configuration.
 2. Add controller PR/push PipelineRuns in
    `red-hat-data-services/konflux-central`, under
    `pipelineruns/data-connect-hub/.tekton/`. Release branches are independent of
