@@ -696,7 +696,11 @@ seed_es_data() {
 
 generate_tokens() {
     local -a token_args=(--duration=4h)
-    [[ -n "${DCH_TOKEN_AUDIENCE:-}" ]] && token_args+=(--audience="$DCH_TOKEN_AUDIENCE")
+    # DCH_TOKEN_AUDIENCE is a comma-separated list; each entry becomes one --audience.
+    local audiences="${DCH_TOKEN_AUDIENCE:-}" audience
+    for audience in ${audiences//,/ }; do
+        token_args+=(--audience="$audience")
+    done
 
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
