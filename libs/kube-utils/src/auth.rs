@@ -29,7 +29,7 @@ pub enum AuthError {
     Internal(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AuthInfo {
     pub username: String,
     pub groups: Vec<String>,
@@ -381,6 +381,23 @@ mod tests {
 
         assert_ne!(first, second);
         assert_ne!(first, other_tenant);
+    }
+
+    #[test]
+    fn secret_cache_key_scopes_by_groups() {
+        // A cached decision for one group set must not answer for another:
+        // the same user may gain or lose access through group membership.
+        let with_group = super::secret_cache_key(&auth_info(), "tenant-a", "db-secret");
+        let without_group = super::secret_cache_key(
+            &AuthInfo {
+                groups: Vec::new(),
+                ..auth_info()
+            },
+            "tenant-a",
+            "db-secret",
+        );
+
+        assert_ne!(with_group, without_group);
     }
 
     #[test]

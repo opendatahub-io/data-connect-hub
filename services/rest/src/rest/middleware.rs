@@ -9,7 +9,7 @@ use super::access_log::{AuditError, AuditQuery, RequestId, log_request, resource
 use super::endpoints::ApiContext;
 use super::errors::EndpointError;
 use super::errors::RestErrorResponse;
-use commons::api::{X_REMOTE_USER, X_TENANT_ID};
+use commons::api::{X_REMOTE_GROUPS, X_REMOTE_USER, X_TENANT_ID};
 use commons::utils::audit::AuditConfig;
 use opentelemetry::propagation::Extractor;
 use tracing::Instrument;
@@ -37,6 +37,13 @@ impl Extractor for HeaderExtractor<'_> {
     }
 }
 
+/// utf8_header returns a header value decoded as UTF-8. kube-rbac-proxy
+/// writes identity names as raw UTF-8, which `HeaderValue::to_str` rejects as
+/// non-ASCII, so identity headers are decoded from their bytes instead.
+fn utf8_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
+    std::str::from_utf8(headers.get(name)?.as_bytes()).ok()
+}
+
 /// trace_request records a server span for every request entering the scope it
 /// wraps. When the caller sends a valid `traceparent` header the span joins
 /// that trace as a child; otherwise it starts a new trace. Spans are only
@@ -60,8 +67,9 @@ pub async fn trace_request(
         .get(X_TENANT_ID)
         .unwrap_or_default()
         .to_string();
-    let actor = HeaderExtractor(req.headers())
-        .get(X_REMOTE_USER)
+    // Decode the audit actor the same way validate_headers decodes the
+    // identity, so an authorized non-ASCII user is not logged as anonymous.
+    let actor = utf8_header(req.headers(), X_REMOTE_USER)
         .filter(|actor| !actor.is_empty())
         .unwrap_or("anonymous")
         .to_string();
@@ -198,13 +206,19 @@ pub async fn validate_headers(
 
     // kube-rbac-proxy authenticates the caller and strips the Authorization
     // header before forwarding, so no bearer token ever reaches the service:
-    // identity arrives solely as the proxy-injected x-remote-user. Group
-    // membership is deliberately not taken from x-remote-groups: the proxy
-    // renders that header by joining group names with a delimiter, so a name
-    // containing the separator could not be told apart from two names, and
-    // the identity is reviewed by username alone.
-    let identity =
-        crate::auth::resolve_identity(req.headers().get(X_REMOTE_USER).and_then(|value| value.to_str().ok()));
+    // identity arrives solely as the proxy-injected x-remote-user and
+    // x-remote-groups. See crate::auth::resolve_identity for why the groups
+    // header is trusted despite its delimiter-joined encoding. Decode with
+    // utf8_header: otherwise one non-ASCII group name would drop the whole
+    // groups list.
+    let header = |name: &str| {
+        let decoded = utf8_header(req.headers(), name);
+        if decoded.is_none() && req.headers().contains_key(name) {
+            tracing::warn!(header = name, "ignoring identity header that is not valid UTF-8");
+        }
+        decoded
+    };
+    let identity = crate::auth::resolve_identity(header(X_REMOTE_USER), header(X_REMOTE_GROUPS));
 
     let request_id = req
         .extensions()
@@ -372,6 +386,44 @@ mod tests {
                 .get("request_id")
                 .is_some_and(|value| Uuid::parse_str(value).is_ok())
         );
+    }
+
+    #[actix_web::test]
+    async fn test_audit_records_non_ascii_actor() {
+        let capture = AuditCapture::default();
+        let subscriber = Registry::default().with(capture.clone());
+
+        async {
+            let app = awtest::init_service(
+                App::new()
+                    .app_data(web::Data::new(AuditConfig {
+                        enabled: true,
+                        log_queries: false,
+                    }))
+                    .service(
+                        web::scope("/api/v1alpha1/data")
+                            .wrap(actix_web::middleware::from_fn(validate_headers))
+                            .wrap(actix_web::middleware::from_fn(trace_request))
+                            .route("/connections", web::get().to(|| async { HttpResponse::Ok().finish() })),
+                    ),
+            )
+            .await;
+            let user = actix_web::http::header::HeaderValue::from_bytes("张三".as_bytes()).unwrap();
+            let request = awtest::TestRequest::get()
+                .uri("/api/v1alpha1/data/connections")
+                .insert_header((X_TENANT_ID, "tenant"))
+                .insert_header((X_REMOTE_USER, user))
+                .to_request();
+
+            let response = awtest::call_service(&app, request).await;
+            assert_eq!(response.status(), 200);
+        }
+        .with_subscriber(subscriber)
+        .await;
+
+        let events = capture.0.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].get("audit.actor").map(String::as_str), Some("张三"));
     }
 
     #[actix_web::test]
