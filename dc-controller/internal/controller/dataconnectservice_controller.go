@@ -205,6 +205,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create
 // DCH data plane resources are checked by SubjectAccessReview only. The
 // controller needs the union of (1) the verbs kube-rbac-proxy checks for its
 // own REST calls (create/list connection types, create connections, register
