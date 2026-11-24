@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import http.client
 import os
 import ssl
 import tempfile
+import urllib.request
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit
 
 import grpc
 import pytest
 from grpc_health.v1 import health_pb2, health_pb2_grpc
+
+from data_connect_hub._flight import _bypasses_proxy, _grpc_proxy_options
+
+_CERT_FETCH_TIMEOUT = 10.0
 
 
 def _parse_target(endpoint: str) -> tuple[str, int]:
@@ -38,15 +44,48 @@ def _authority_from_server_cert(cert_pem: str) -> str | None:
     return None
 
 
+def _fetch_server_cert(host: str, port: int) -> str:
+    """Return the server's PEM certificate, honoring the proxy environment.
+
+    ``ssl.get_server_certificate`` always dials directly, which hangs where
+    egress to the Gateway is only allowed through an HTTP proxy. Tunnel
+    through the proxy with CONNECT using the same proxy resolution as the SDK.
+    """
+    proxies = urllib.request.getproxies_environment()
+    proxy = proxies.get("https") or proxies.get("http")
+    if not proxy or _bypasses_proxy(host, port, proxies.get("no", "")):
+        return ssl.get_server_certificate((host, port), timeout=_CERT_FETCH_TIMEOUT)
+
+    parsed = urlsplit(proxy if "://" in proxy else f"http://{proxy}")
+    if not parsed.hostname:
+        raise ValueError(f"Invalid proxy URL: {proxy!r}")
+    conn = http.client.HTTPSConnection(
+        parsed.hostname,
+        parsed.port or 80,
+        timeout=_CERT_FETCH_TIMEOUT,
+        context=ssl._create_unverified_context(),
+    )
+    try:
+        conn.set_tunnel(host, port)
+        conn.connect()
+        der = conn.sock.getpeercert(binary_form=True)
+    finally:
+        conn.close()
+    if not der:
+        raise RuntimeError(f"No certificate presented by {host}:{port}")
+    return ssl.DER_cert_to_PEM_cert(der)
+
+
 def _build_channel(gateway_endpoint: str, insecure: bool, ca_cert: str | None) -> grpc.Channel:
     host, port = _parse_target(gateway_endpoint)
     target = f"{host}:{port}"
-    options: list[tuple[str, str]] = []
+    # Same proxy resolution as the SDK, so the health check takes the SDK's network path.
+    options: list[tuple[str, str | int]] = list(_grpc_proxy_options(f"grpc+tls://{target}"))
 
     if ca_cert:
         root_certs = Path(ca_cert).read_bytes()
     elif insecure:
-        cert_pem = ssl.get_server_certificate((host, port))
+        cert_pem = _fetch_server_cert(host, port)
         root_certs = cert_pem.encode("utf-8")
 
         override = os.environ.get("DCH_GRPC_HEALTH_AUTHORITY")

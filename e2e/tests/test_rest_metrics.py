@@ -9,12 +9,18 @@ import pytest
 
 
 @pytest.fixture(scope="module")
-def rest_metrics_body(http_client: httpx.Client, rest_metrics_url: str | None) -> str:
+def rest_metrics_body(
+    http_client: httpx.Client,
+    rest_metrics_url: str | None,
+    gateway_auth_required: bool,
+    auth_token: str,
+) -> str:
     if not rest_metrics_url:
         pytest.skip("DCH_REST_METRICS_URL not set")
 
-    response = http_client.get("/health")
-    assert response.status_code == 200
+    headers = {"Authorization": f"Bearer {auth_token}"} if gateway_auth_required else None
+    response = http_client.get("/health", headers=headers)
+    assert response.status_code == 200, f"GET /health returned {response.status_code}"
 
     response = httpx.get(f"{rest_metrics_url}/metrics", timeout=10.0)
     assert response.status_code == 200, f"metrics endpoint returned {response.status_code}"
