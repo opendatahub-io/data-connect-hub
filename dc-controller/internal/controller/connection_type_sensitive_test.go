@@ -17,13 +17,10 @@ limitations under the License.
 package controller
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/yaml"
 )
 
 // Credential field names used by the test fixtures and expectations.
@@ -42,47 +39,32 @@ const (
 
 // builtinSensitiveFields lists credential field names that must be marked
 // sensitive in every built-in connection type that defines them. URI is
-// included because connection URIs may embed passwords.
+// included because connection URIs may embed passwords; .dockerconfigjson
+// embeds registry credentials.
 var builtinSensitiveFields = map[string]bool{
-	testFieldURI:      true,
-	testFieldPassword: true,
-	testFieldToken:    true,
-	testFieldAPIKey:   true,
+	testFieldURI:                true,
+	testFieldPassword:           true,
+	testFieldToken:              true,
+	testFieldAPIKey:             true,
+	testFieldAWSSecretAccessKey: true,
+	testFieldDockerConfigJSON:   true,
 }
 
 func TestBuiltinConnectionTypesSensitiveFields(t *testing.T) {
-	typesDir := filepath.Join("..", "..", "..", "config", "connection-types")
-	entries, err := os.ReadDir(typesDir)
-	if err != nil {
-		t.Fatalf("read %s: %v", typesDir, err)
-	}
-
 	checked := 0
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".yaml" {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(typesDir, entry.Name()))
-		if err != nil {
-			t.Fatalf("read %s: %v", entry.Name(), err)
-		}
-		var file connectionTypeFile
-		if err := yaml.Unmarshal(data, &file); err != nil {
-			t.Fatalf("parse %s: %v", entry.Name(), err)
-		}
-
+	for name, file := range loadBuiltinConnectionTypeFiles(t) {
 		spec := file.toIDCTSpec()
 		ct := specToConnectionType(&spec)
 		for _, f := range ct.CredentialsFields {
 			want := builtinSensitiveFields[f.Name]
 			if f.Sensitive != want {
-				t.Errorf("%s: field %s sensitive=%v, want %v", entry.Name(), f.Name, f.Sensitive, want)
+				t.Errorf("%s: field %s sensitive=%v, want %v", name, f.Name, f.Sensitive, want)
 			}
 			checked++
 		}
 	}
 	if checked == 0 {
-		t.Fatalf("no credential fields found under %s", typesDir)
+		t.Fatal("no credential fields found in built-in connection types")
 	}
 }
 

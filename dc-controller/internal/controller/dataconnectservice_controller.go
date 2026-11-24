@@ -675,24 +675,28 @@ type connectionTypeFile struct {
 }
 
 type connectionTypeFieldDef struct {
-	Name         string `json:"name"`
-	Label        string `json:"label"`
-	Description  string `json:"description"`
-	Required     bool   `json:"required"`
-	Type         string `json:"type"`
-	DefaultValue string `json:"default_value"`
-	Sensitive    bool   `json:"sensitive"`
+	Name         string                  `json:"name"`
+	Label        string                  `json:"label"`
+	Description  string                  `json:"description"`
+	Required     bool                    `json:"required"`
+	Type         string                  `json:"type"`
+	DefaultValue string                  `json:"default_value"`
+	Sensitive    bool                    `json:"sensitive"`
+	EnumValues   []dchv1alpha1.EnumValue `json:"enum_values"`
+	Multiple     bool                    `json:"multiple"`
 }
 
 func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec {
 	fields := make([]dchv1alpha1.CredentialsField, len(f.CredentialsFields))
 	for i, cf := range f.CredentialsFields {
 		fields[i] = dchv1alpha1.CredentialsField{
-			Name:      cf.Name,
-			Label:     cf.Label,
-			Required:  cf.Required,
-			Type:      cf.Type,
-			Sensitive: cf.Sensitive,
+			Name:       cf.Name,
+			Label:      cf.Label,
+			Required:   cf.Required,
+			Type:       cf.Type,
+			Sensitive:  cf.Sensitive,
+			EnumValues: cf.EnumValues,
+			Multiple:   cf.Multiple,
 		}
 		if cf.Description != "" {
 			fields[i].Description = &cf.Description

@@ -16,6 +16,8 @@ EXPECTED_OOB_CONNECTION_TYPES = {
     "HuggingFace": "huggingface",
     "Milvus": "milvus",
     "Neo4j": "neo4j",
+    "OCI": "oci",
+    "S3": "s3",
     "URI": "uri",
 }
 
@@ -26,6 +28,8 @@ EXPECTED_SUPPORTED_FORMATS = {
     "HuggingFace": [],
     "Milvus": ["tabular"],
     "Neo4j": ["tabular"],
+    "OCI": [],
+    "S3": ["tabular", "binary"],
     "URI": ["tabular", "binary"],
 }
 
@@ -34,11 +38,21 @@ EXPECTED_CREDENTIAL_FIELDS = {
     "HuggingFace": {"URI", "TOKEN"},
     "Milvus": {"URI", "TOKEN", "DATABASE", "CA_CERT"},
     "Neo4j": {"URI", "USERNAME", "PASSWORD", "DATABASE", "CA_CERT"},
+    "OCI": {"ACCESS_TYPE", ".dockerconfigjson", "OCI_HOST"},
+    "S3": {
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_S3_BUCKET",
+        "AWS_S3_ENDPOINT",
+        "AWS_DEFAULT_REGION",
+        "AWS_S3_CA_CERT",
+    },
 }
 
 # Credential fields that must be marked sensitive in every OOB type that has them.
-# URI is included because connection URIs may embed passwords.
-SENSITIVE_CREDENTIAL_FIELDS = {"URI", "PASSWORD", "TOKEN", "API_KEY"}
+# URI is included because connection URIs may embed passwords; .dockerconfigjson
+# embeds registry credentials.
+SENSITIVE_CREDENTIAL_FIELDS = {"URI", "PASSWORD", "TOKEN", "API_KEY", "AWS_SECRET_ACCESS_KEY", ".dockerconfigjson"}
 
 
 class TestRestConnectionType:
@@ -64,6 +78,14 @@ class TestRestConnectionType:
         for name, expected_fields in EXPECTED_CREDENTIAL_FIELDS.items():
             actual_fields = {field.name for field in by_name[name].credentials_fields}
             assert actual_fields == expected_fields
+
+        access_type = next(f for f in by_name["OCI"].credentials_fields if f.name == "ACCESS_TYPE")
+        assert access_type.type == "enum"
+        assert access_type.multiple is True
+        assert [(e.value, e.label) for e in access_type.enum_values or []] == [
+            ("Push", "Push secret"),
+            ("Pull", "Pull secret"),
+        ]
 
         postgres_schema = {(f.name, f.required, f.type) for f in by_name["Postgres"].credentials_fields}
         pgvector_schema = {(f.name, f.required, f.type) for f in by_name["PGVector"].credentials_fields}

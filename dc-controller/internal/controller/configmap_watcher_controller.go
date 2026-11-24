@@ -41,6 +41,9 @@ const (
 
 	requeueOnMigrationServiceUnavailable = 30 * time.Second
 
+	// Names of the connection-type ConfigMaps shipped by ODH Dashboard.
+	cmNameS3    = "s3"
+	cmNameOCIv1 = "oci-v1"
 	cmNameURIv1 = "uri-v1"
 )
 
@@ -179,11 +182,13 @@ type odhDropdownItem struct {
 	Value string `json:"value"`
 }
 
-// builtinProviderAliases maps legacy ConfigMap names (key) to the
-// built-in connection type provider (value). The ConfigMap watcher
-// skips importing these and the Secret watcher resolves them to the
-// built-in type by matching on provider.
+// builtinProviderAliases maps the ODH Dashboard connection-type ConfigMap
+// names (key) to the provider of the DCH built-in connection type that
+// replaces them (value). The ConfigMap watcher skips importing these and the
+// Secret watcher resolves them to the built-in type by matching on provider.
 var builtinProviderAliases = map[string]string{
+	cmNameS3:    "s3",
+	cmNameOCIv1: "oci",
 	cmNameURIv1: "uri",
 }
 
