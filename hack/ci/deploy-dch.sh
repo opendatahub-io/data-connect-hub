@@ -443,7 +443,8 @@ EOF
 echo "=== Creating legacy connection import fixtures ==="
 kubectl create namespace "$CI_TENANT_NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-# s3 connection type (mirrors odh-dashboard/manifests/base/connection-types/s3.yaml)
+# s3 connection type (mirrors odh-dashboard/manifests/base/connection-types/s3.yaml;
+# should be skipped — covered by built-in S3 type)
 kubectl apply -n "$CI_TENANT_NAMESPACE" -f - <<'EOF'
 apiVersion: v1
 kind: ConfigMap
@@ -466,7 +467,8 @@ data:
     ]
 EOF
 
-# oci-v1 connection type (mirrors odh-dashboard/manifests/base/connection-types/oci-v1.yaml)
+# oci-v1 connection type (mirrors odh-dashboard/manifests/base/connection-types/oci-v1.yaml;
+# should be skipped — covered by built-in OCI type)
 kubectl apply -n "$CI_TENANT_NAMESPACE" -f - <<'EOF'
 apiVersion: v1
 kind: ConfigMap
@@ -504,7 +506,7 @@ data:
     [{"type":"uri","name":"URI","envVar":"URI","required":true,"properties":{}}]
 EOF
 
-# Legacy S3 connection Secret
+# Legacy S3 connection Secret (should resolve to built-in S3 via alias)
 kubectl create secret generic e2e-legacy-s3-conn \
     -n "$CI_TENANT_NAMESPACE" \
     --from-literal=AWS_ACCESS_KEY_ID=e2e-test-key \
@@ -521,7 +523,7 @@ kubectl annotate secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
     opendatahub.io/connection-type-ref=s3 \
     --overwrite >/dev/null
 
-# Legacy OCI connection Secret
+# Legacy OCI connection Secret (should resolve to built-in OCI via alias)
 kubectl create secret generic e2e-legacy-oci-conn \
     -n "$CI_TENANT_NAMESPACE" \
     --from-literal=ACCESS_TYPE='["Pull"]' \

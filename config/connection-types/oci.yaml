@@ -1,0 +1,26 @@
+name: OCI
+provider: oci
+description: OCI-compliant container registry
+credentials_fields:
+  - name: ACCESS_TYPE
+    label: Access Type
+    description: Use push for uploading artifacts, pull for accessing them, or both
+    required: false
+    type: enum
+    multiple: true
+    enum_values:
+      - value: Push
+        label: Push secret
+      - value: Pull
+        label: Pull secret
+  - name: .dockerconfigjson
+    label: Secret Details
+    description: Docker config JSON used to authenticate with the registry
+    required: false
+    type: string
+    sensitive: true
+  - name: OCI_HOST
+    label: Registry Host
+    description: Registry endpoint URL
+    required: false
+    type: string

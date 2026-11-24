@@ -287,33 +287,46 @@ var _ = Describe("Secret Watcher Controller", func() {
 		Expect(mock.createCalls).To(Equal(1))
 	})
 
-	It("should resolve builtin provider alias for connection type", func() {
-		secret := newSecret()
-		secret.Annotations[annotationConnectionTypeRef] = cmNameURIv1
-		Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+	DescribeTable("should resolve builtin provider alias for connection type",
+		func(typeRef, wantID string) {
+			secret := newSecret()
+			secret.Annotations[annotationConnectionTypeRef] = typeRef
+			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
-		var captured Connection
-		mock := &mockMigrationClient{
-			listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
-				return []ConnectionTypeResource{
-					{
-						Metadata: ResourceMetadata{ID: "uri-uuid-456"},
-						Resource: ConnectionType{Name: "URI", Provider: "uri"},
-					},
-				}, nil
-			},
-			createFn: func(_ context.Context, _ string, conn Connection) error {
-				captured = conn
-				return nil
-			},
-		}
-		r := reconciler(mock)
+			var captured Connection
+			mock := &mockMigrationClient{
+				listFn: func(_ context.Context, _ string) ([]ConnectionTypeResource, error) {
+					return []ConnectionTypeResource{
+						{
+							Metadata: ResourceMetadata{ID: "s3-uuid"},
+							Resource: ConnectionType{Name: "S3", Provider: "s3"},
+						},
+						{
+							Metadata: ResourceMetadata{ID: "oci-uuid"},
+							Resource: ConnectionType{Name: "OCI", Provider: "oci"},
+						},
+						{
+							Metadata: ResourceMetadata{ID: "uri-uuid"},
+							Resource: ConnectionType{Name: "URI", Provider: "uri"},
+						},
+					}, nil
+				},
+				createFn: func(_ context.Context, _ string, conn Connection) error {
+					captured = conn
+					return nil
+				},
+			}
+			r := reconciler(mock)
 
-		_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: secretKey})
-		Expect(err).NotTo(HaveOccurred())
-		Expect(mock.createCalls).To(Equal(1))
-		Expect(captured.DataConnectionTypeID).To(Equal("uri-uuid-456"))
-	})
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: secretKey})
+			Expect(err).NotTo(HaveOccurred())
+			Expect(mock.createCalls).To(Equal(1))
+			Expect(captured.DataConnectionTypeID).To(Equal(wantID))
+		},
+		Entry("s3", cmNameS3, "s3-uuid"),
+		Entry("oci-v1", cmNameOCIv1, "oci-uuid"),
+		Entry("uri-v1", cmNameURIv1, "uri-uuid"),
+	)
 
 	It("should not set synced on unexpected REST failure", func() {
 		secret := newSecret()
