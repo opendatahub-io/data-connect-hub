@@ -20,6 +20,8 @@ A connection type defines the credentials and configuration required to connect 
 
 > **Note**: In the table below, **Provider** identifies the Data Connect Hub connector used by each connection type. See the Connector table above for supported connectors.
 
+> **Note**: The upstream manifests for the ODH Dashboard connection types are in [manifests/base/connection-types](https://github.com/opendatahub-io/odh-dashboard/tree/main/manifests/base/connection-types).
+
 | Connection Type | Source | Provider | Credentials Fields | Notes |
 | --- | --- | --- | --- | --- |
 | [ElasticSearch](https://github.com/opendatahub-io/data-connect-hub/blob/main/config/connection-types/elasticsearch.yaml) | Built-in | `elasticsearch` | • `URI`<br>• `USERNAME`<br>• `PASSWORD`<br>• `CA_CERT`<br>• `API_KEY` | — |

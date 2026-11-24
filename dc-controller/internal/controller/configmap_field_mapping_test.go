@@ -57,8 +57,8 @@ func TestConfigMapToConnectionTypeOCIv1(t *testing.T) {
 			Description: strPtr("Use the push access type for uploading data, pull for accessing resources, or both."),
 			Type:        fieldTypeEnum,
 			EnumValues: []EnumValue{
-				{Value: testAccessTypePush, Label: "Push secret"},
-				{Value: testAccessTypePull, Label: "Pull secret"},
+				{Value: testAccessTypePush, Label: testAccessTypePushLabel},
+				{Value: testAccessTypePull, Label: testAccessTypePullLabel},
 			},
 			Multiple: true,
 		},
@@ -170,7 +170,7 @@ func TestSpecToConnectionTypeMultiple(t *testing.T) {
 			Name:       testFieldAccessType,
 			Label:      "Access type",
 			Type:       fieldTypeEnum,
-			EnumValues: []dchv1alpha1.EnumValue{{Value: testAccessTypePush, Label: "Push secret"}},
+			EnumValues: []dchv1alpha1.EnumValue{{Value: testAccessTypePush, Label: testAccessTypePushLabel}},
 			Multiple:   true,
 		}},
 	}

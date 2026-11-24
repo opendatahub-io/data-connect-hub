@@ -27,10 +27,13 @@ import (
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
 
-// OCI access type enum values used by the test fixtures and expectations.
+// OCI access type enum values and labels used by the test fixtures and
+// expectations.
 const (
-	testAccessTypePush = "Push"
-	testAccessTypePull = "Pull"
+	testAccessTypePush      = "Push"
+	testAccessTypePull      = "Pull"
+	testAccessTypePushLabel = "Push secret"
+	testAccessTypePullLabel = "Pull secret"
 )
 
 // loadBuiltinConnectionTypeFiles parses every built-in connection type file
@@ -109,8 +112,8 @@ credentials_fields:
 		t.Errorf("type=%q multiple=%v, want enum and multiple", got.Type, got.Multiple)
 	}
 	wantValues := []dchv1alpha1.EnumValue{
-		{Value: testAccessTypePush, Label: "Push secret"},
-		{Value: testAccessTypePull, Label: "Pull secret"},
+		{Value: testAccessTypePush, Label: testAccessTypePushLabel},
+		{Value: testAccessTypePull, Label: testAccessTypePullLabel},
 	}
 	if !reflect.DeepEqual(got.EnumValues, wantValues) {
 		t.Errorf("enum values = %+v, want %+v", got.EnumValues, wantValues)
@@ -118,8 +121,8 @@ credentials_fields:
 
 	ct := specToConnectionType(&spec)
 	wantField := []EnumValue{
-		{Value: testAccessTypePush, Label: "Push secret"},
-		{Value: testAccessTypePull, Label: "Pull secret"},
+		{Value: testAccessTypePush, Label: testAccessTypePushLabel},
+		{Value: testAccessTypePull, Label: testAccessTypePullLabel},
 	}
 	if f := ct.CredentialsFields[0]; !f.Multiple || !reflect.DeepEqual(f.EnumValues, wantField) {
 		t.Errorf("REST field multiple=%v enum values=%+v, want true and %+v", f.Multiple, f.EnumValues, wantField)
