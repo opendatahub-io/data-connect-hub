@@ -6,6 +6,21 @@
 //! empty-provider check -- moved upstream; see the `[patch.crates-io]`
 //! section of the workspace Cargo.toml.
 
+use anyhow::Result;
+
+#[allow(unsafe_code)]
+pub fn load_default_openssl_config() -> Result<()> {
+    use ossl::bindings::{OPENSSL_INIT_LOAD_CONFIG, OPENSSL_init_crypto};
+    use std::ptr::null;
+
+    let options = OPENSSL_INIT_LOAD_CONFIG as u64;
+    if unsafe { OPENSSL_init_crypto(options, null()) } != 1 {
+        anyhow::bail!("failed to load the OpenSSL configuration");
+    }
+
+    Ok(())
+}
+
 /// Preference order for the approved curves. rustls speculates a key share
 /// for the first group only, so this decides what every ClientHello carries:
 /// P-256 is the one every peer supports and the cheapest to generate, and

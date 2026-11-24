@@ -52,6 +52,11 @@ RUN microdnf install -y shadow-utils ca-certificates curl-minimal \
     && groupadd -g 1001 -r dch \
     && useradd -u 1001 -r -g dch -d /nonexistent -s /sbin/nologin dch
 
+COPY --chown=root:root --chmod=0444 \
+    services/rest/openssl-fips.cnf /etc/pki/tls/openssl-fips.cnf
+
+ENV OPENSSL_CONF=/etc/pki/tls/openssl-fips.cnf
+
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /usr/local/bin/rest-service
 

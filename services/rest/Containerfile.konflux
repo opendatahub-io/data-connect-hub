@@ -34,6 +34,11 @@ WORKDIR /
 RUN microdnf install -y ca-certificates \
     && microdnf clean all
 
+COPY --chown=root:root --chmod=0444 \
+    services/rest/openssl-fips.cnf /etc/pki/tls/openssl-fips.cnf
+
+ENV OPENSSL_CONF=/etc/pki/tls/openssl-fips.cnf
+
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /app/rest-service
 

@@ -8,6 +8,7 @@ use commons::api::storage::{FlightDiscoveryStore, MetaStore, MetaStoreReader};
 use serde::Deserialize;
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
+use sqlx_fips as sqlx;
 use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;

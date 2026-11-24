@@ -77,6 +77,9 @@ clap = { version = "4.6", features = ["derive"] }
 # ClientConfig::builder_with_provider(ring) and so ignores the process-default
 # provider. native-tls is OpenSSL on Linux.
 sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "sqlite", "chrono", "uuid", "json", "bigdecimal", "tls-native-tls"] }
+# The metadata store uses a fork with PostgreSQL password authentication
+# omitted. Connector crates retain the workspace SQLx dependency above.
+sqlx-fips = { package = "sqlx", git = "https://github.com/praxis-proxy/sqlx", rev = "18f9f82a33a935a8aaa3502aa6d01890c294ec99", default-features = false, features = ["runtime-tokio", "postgres", "chrono", "uuid", "json", "tls-native-tls"] }
 bigdecimal = "0.4"
 async-trait = "0.1"
 async-stream = "0.3"

@@ -236,6 +236,8 @@ impl CryptoStatus {
 fn install_crypto_provider() -> Result<CryptoStatus> {
     use rustls::crypto::CryptoProvider;
 
+    fips::load_default_openssl_config()?;
+
     // try_default_provider, not default_provider: the component lists are
     // discovered by probing the OpenSSL context, and an empty one is reported
     // here rather than surfacing later as a handshake the peer rejects.
