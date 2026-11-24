@@ -75,7 +75,9 @@ type GlobalNamespaceReconciler struct {
 // +kubebuilder:rbac:groups=services.platform.opendatahub.io,resources=auths,verbs=get;list;watch
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,verbs=get;list;watch;create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=rolebindings,resourceNames=dch-global-read;dch-global-read-write;dch-global-rest-service-secret-access;dch-global-flight-service-secret-access,verbs=update;patch;delete
-// +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterroles,resourceNames=dch-read;dch-read-write;dch-rest-service-secret-access;dch-flight-service-secret-access,verbs=bind
+// No `bind` on the referenced ClusterRoles: the controller already holds
+// every rule they grant (see the RBAC markers on DataConnectServiceReconciler),
+// which satisfies RBAC escalation prevention for these RoleBindings.
 
 func (r *GlobalNamespaceReconciler) Reconcile(ctx context.Context, _ ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
