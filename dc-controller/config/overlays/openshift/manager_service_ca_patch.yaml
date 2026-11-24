@@ -3,7 +3,7 @@
   value:
     name: service-ca
     configMap:
-      name: openshift-service-ca.crt
+      name: dc-controller-service-ca
       items:
       - key: service-ca.crt
         path: service-ca.crt

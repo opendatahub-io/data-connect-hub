@@ -3,4 +3,6 @@ kind: ConfigMap
 metadata:
   annotations:
     service.beta.openshift.io/inject-cabundle: "true"
-  name: openshift-service-ca.crt
+  # Use a controller-specific bundle: the applications namespace can already
+  # contain a shared openshift-service-ca.crt owned by another operator.
+  name: dc-controller-service-ca

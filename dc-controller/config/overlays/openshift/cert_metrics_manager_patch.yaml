@@ -18,8 +18,8 @@
       secretName: dc-controller-metrics-tls
       optional: false
       items:
-      - key: ca.crt
-        path: ca.crt
+      # OpenShift serving-cert Secrets contain only the TLS key pair. The
+      # service CA is injected into the separate service-ca ConfigMap volume.
       - key: tls.crt
         path: tls.crt
       - key: tls.key
