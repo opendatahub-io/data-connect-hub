@@ -40,6 +40,22 @@ status:
 
 ### Platform integration
 
+The platform places DCH services in `odh-data-connect-hub-infra` (ODH) or
+`rhoai-data-connect-hub-infra` (RHOAI), overridable through
+`spec.components.data.dataConnectHub.namespace` on the DSC. The controller
+remains in the platform application namespace. PostgreSQL and
+`dch-database-config` must be provisioned in the DCH infrastructure namespace.
+
+`spec.gateway.routeNamespace` places the HTTPRoute in the allowed application
+namespace. The controller sets explicit backend namespaces, creates one named
+Service ReferenceGrant per backend, and cleans up cross-namespace routes through
+its finalizer. Omission retains same-namespace routing for standalone installs.
+The platform ConfigMap key `gateway.routeNamespace` supplies the same default.
+
+Legacy ODH connection Secrets stay in their tenant namespaces. Migration discovers
+REST through the namespaced DCH CR and stores references to the original Secrets,
+not credential copies in the infrastructure namespace.
+
 The planned DSC integration uses the existing Data module
 (`feast-module-operator`), not a separate DCH platform module. The platform
 projects `spec.components.data.dataConnectHub` into the Data module CR;

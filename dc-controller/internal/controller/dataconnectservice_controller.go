@@ -158,6 +158,7 @@ type platformConfig struct {
 	PlatformVersion      string
 	GatewayName          string
 	GatewayNamespace     string
+	RouteNamespace       string
 	TokenReviewAudiences []string
 }
 
@@ -196,6 +197,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	if v := cm.Data["gateway.namespace"]; v != "" {
 		cfg.GatewayNamespace = v
 	}
+	cfg.RouteNamespace = cm.Data["gateway.routeNamespace"]
 	if v := cm.Data["auth.tokenReviewAudiences"]; v != "" {
 		var audiences []string
 		for a := range strings.SplitSeq(v, ",") {
@@ -228,6 +230,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
@@ -253,6 +256,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !cr.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&cr, finalizerName) {
 			log.Info("running finalizer for DataConnectService")
+			if err := r.deleteGatewayRoutes(ctx, &cr, ""); err != nil {
+				return ctrl.Result{}, err
+			}
 			r.clearSyncedAnnotations(ctx)
 			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
 			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
@@ -550,7 +556,31 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("annotating deployments with content hash: %w", err)
 	}
 
-	return r.applyResources(ctx, cr, cr.Namespace, resources)
+	// Deploy operands before Gateway resources so missing Gateway API CRDs
+	// cannot prevent an otherwise usable in-cluster installation.
+	var routes, operands []*unstructured.Unstructured
+	for _, obj := range resources {
+		if obj.GetKind() == kindHTTPRoute {
+			routes = append(routes, obj)
+		} else {
+			operands = append(operands, obj)
+		}
+	}
+	if err := r.applyResources(ctx, cr, cr.Namespace, operands); err != nil {
+		return err
+	}
+	routes, err = r.reconcileGatewayRouting(ctx, cr, gw, routes)
+	if err != nil {
+		return err
+	}
+	if err := r.applyResources(ctx, cr, cr.Namespace, routes); err != nil {
+		return err
+	}
+	routeNamespace := gw.RouteNamespace
+	if routeNamespace == "" {
+		routeNamespace = cr.Namespace
+	}
+	return r.deleteGatewayRoutes(ctx, cr, routeNamespace)
 }
 
 func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {
@@ -817,12 +847,16 @@ func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.
 func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) dchv1alpha1.Gateway {
 	gw := dchv1alpha1.Gateway{
-		Name:      platCfg.GatewayName,
-		Namespace: platCfg.GatewayNamespace,
+		Name:           platCfg.GatewayName,
+		Namespace:      platCfg.GatewayNamespace,
+		RouteNamespace: platCfg.RouteNamespace,
 	}
 	if cr.Spec.Gateway != nil {
 		gw.Name = cr.Spec.Gateway.Name
 		gw.Namespace = cr.Spec.Gateway.Namespace
+		if cr.Spec.Gateway.RouteNamespace != "" {
+			gw.RouteNamespace = cr.Spec.Gateway.RouteNamespace
+		}
 	}
 	return gw
 }
@@ -844,8 +878,9 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 	gw := r.resolveGateway(cr, platCfg)
 	cr.Status.HttpRoute = httpRouteResourceName(cr.Name)
 	cr.Status.Gateway = &dchv1alpha1.Gateway{
-		Name:      gw.Name,
-		Namespace: gw.Namespace,
+		Name:           gw.Name,
+		Namespace:      gw.Namespace,
+		RouteNamespace: gw.RouteNamespace,
 	}
 	hostname, err := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
 	if err != nil {
@@ -1160,6 +1195,19 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			}),
 			labelKeyPredicate[*corev1.Namespace](r.GlobalNamespaceConfig.LabelKey),
 		))
+	}
+	for _, gvk := range []schema.GroupVersionKind{httpRouteGVK, referenceGrantGVK} {
+		if !r.kindServed(context.Background(), gvk.Group, gvk.Version, gvk.Kind) {
+			continue
+		}
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(gvk)
+		b = b.Watches(obj, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+			// Gateway routes can live outside the CR namespace.
+			return r.platformConfigToReconcile(ctx, &corev1.Namespace{})
+		}), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return obj.GetLabels()[labelManagedBy] == managedByDCHService
+		})))
 	}
 	return b.Named(managedByDCHService).Complete(r)
 }

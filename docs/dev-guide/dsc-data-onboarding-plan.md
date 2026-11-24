@@ -147,10 +147,12 @@ already published Feast API.
 | Concern | Contract |
 | --- | --- |
 | Module owner | Existing cluster-scoped `FeastOperator` singleton |
-| Application | `DataConnectService/default-dataconnectservice` in the applications namespace |
+| Application | `DataConnectService/default-dataconnectservice` in `odh-data-connect-hub-infra` (ODH) or `rhoai-data-connect-hub-infra` (RHOAI), overridable through the DSC |
 | Owner reference | Application CR controlled by `FeastOperator`; DCH operands remain owned by the application CR |
 | User/platform configuration | Gateway and TokenReview audiences projected into the application CR spec |
-| Runtime metadata | Feast owns `opendatahub-dataconnecthub-config` in the applications namespace, containing distribution metadata and the forwarded `platformVersion` from `odh-data-config` |
+| Runtime metadata | Feast owns `opendatahub-dataconnecthub-config` in the DCH infrastructure namespace, containing distribution metadata and the forwarded `platformVersion` from `odh-data-config` |
+| Gateway routing | HTTPRoute stays in the applications namespace via `spec.gateway.routeNamespace`; named-Service ReferenceGrants live with the DCH backends |
+| Legacy connection migration | Original tenant Secrets remain in place; migration discovers REST from the DCH CR's infrastructure namespace and stores Secret references, not credential copies |
 | Existing config conflict | Refuse unowned/conflicting application CRs and ConfigMaps; define explicit adoption separately if required |
 | Standalone compatibility | Existing ConfigMap name and application API continue to work without Feast |
 | Application overrides | Patch only platform-owned spec fields; preserve REST/Flight sizing, tracing, connectors, and other application overrides |
