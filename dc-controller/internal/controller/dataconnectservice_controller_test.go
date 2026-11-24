@@ -78,6 +78,7 @@ var _ = Describe("DataConnectService Controller", func() {
 			KubeRbacProxyImage:    "quay.io/opendatahub/odh-kube-rbac-proxy:odh-stable",
 			ControllerNamespace:   controllerNamespace,
 			GlobalNamespaceConfig: globalNamespaceConfig,
+			APIReader:             k8sClient,
 		}
 	}
 

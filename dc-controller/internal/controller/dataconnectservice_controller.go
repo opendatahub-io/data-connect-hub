@@ -144,6 +144,13 @@ type DataConnectServiceReconciler struct {
 	ControllerNamespace   string
 	FlightServiceClient   FlightServiceClient
 	GlobalNamespaceConfig GlobalNamespaceConfig
+
+	// APIReader reads directly from the API server. The uninstall sweep
+	// for tenant RoleBindings uses it: those bindings carry no owner
+	// reference (the CR is namespaced and cannot own them), so a sweep
+	// from the informer cache could miss one committed moments ago and
+	// nothing else would delete it.
+	APIReader client.Reader
 }
 
 type platformConfig struct {
@@ -248,6 +255,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 			r.clearSyncedAnnotations(ctx)
 			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
 			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.deleteTenantRoleBindings(ctx); err != nil {
 				return ctrl.Result{}, err
 			}
 			controllerutil.RemoveFinalizer(&cr, finalizerName)

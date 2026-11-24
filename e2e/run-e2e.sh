@@ -128,6 +128,14 @@ setup_namespaces() {
     kubectl create namespace "$DCH_TENANT_ID" 2>/dev/null || true
     kubectl create namespace "$DCH_NO_ACCESS_NAMESPACE" 2>/dev/null || true
     kubectl create namespace "$DCH_NEIGHBOR_TENANT_ID" 2>/dev/null || true
+
+    # Mark the tenant namespaces as DCH tenants. The dc-controller watches
+    # this label and reconciles the REST service's secret-access RoleBinding
+    # into each labelled namespace; see wait_for_tenant_bindings.
+    local ns
+    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        kubectl label namespace "$ns" --overwrite dataconnecthub.opendatahub.io/tenant=true >/dev/null
+    done
     if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
         kubectl create namespace "$DCH_GROUP_MEMBER_NAMESPACE" 2>/dev/null || true
     fi
@@ -326,10 +334,41 @@ setup_user_rbac() {
     fi
 }
 
+# wait_for_tenant_bindings waits until the dc-controller has reconciled the
+# dch-rest-service-secret-access RoleBinding into each labelled tenant
+# namespace (setup_namespaces applies the tenant label the controller
+# watches). REST tenant secret access for inline credentials, rollback,
+# readiness, and export comes from this binding; the runner never creates it.
+wait_for_tenant_bindings() {
+    local ns subject subject_ns deadline
+    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        # kubectl wait fails fast while the RoleBinding does not exist yet,
+        # so retry until the overall deadline instead of waiting once.
+        deadline=$((SECONDS + 120))
+        until kubectl wait --for=jsonpath='{.roleRef.name}'=dch-rest-service-secret-access \
+                rolebinding/dch-rest-service-secret-access \
+                -n "$ns" --timeout=10s >/dev/null 2>&1; do
+            if (( SECONDS >= deadline )); then
+                echo "ERROR: dc-controller did not reconcile dch-rest-service-secret-access into namespace '$ns' within 120s." >&2
+                echo "       Check the namespace carries the dataconnecthub.opendatahub.io/tenant=true label" >&2
+                echo "       and the deployed dc-controller includes the tenant-namespace controller." >&2
+                exit 1
+            fi
+            sleep 2
+        done
+        subject=$(kubectl get rolebinding dch-rest-service-secret-access -n "$ns" -o jsonpath='{.subjects[0].name}')
+        subject_ns=$(kubectl get rolebinding dch-rest-service-secret-access -n "$ns" -o jsonpath='{.subjects[0].namespace}')
+        if [[ "$subject" != "$DCH_REST_SA" || "$subject_ns" != "$DCH_SERVICE_NAMESPACE" ]]; then
+            echo "ERROR: tenant RoleBinding in '$ns' has unexpected subject ${subject_ns}/${subject}" >&2
+            exit 1
+        fi
+    done
+    echo "    REST secret access reconciled by dc-controller in tenant namespaces"
+}
+
 # setup_service_rbac grants the DCH service accounts access to tenant secrets.
-# Those SAs live in DCH_SERVICE_NAMESPACE and are not created by the runner, so
-# their RoleBindings are named dch-e2e-<service>-<purpose>, keeping the e2e
-# prefix on resources the runner owns.
+# Flight read access is granted by the runner; REST secret access is granted
+# by the dc-controller from the tenant label (see wait_for_tenant_bindings).
 setup_service_rbac() {
     # Allow flight service SA to read K8s secret for datasource in tenant namespace
     local -a secret_names=()
@@ -355,17 +394,11 @@ setup_service_rbac() {
             --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" >/dev/null
     fi
 
-    # Grant REST tenant secret access for inline credentials, rollback, readiness, and export.
-    # The neighbor tenant needs it too, so tenancy tests can create inline
+    # REST tenant secret access (inline credentials, rollback, readiness,
+    # export) is reconciled by the dc-controller from the tenant label. The
+    # neighbor tenant needs it too, so tenancy tests can create inline
     # credentials there and check the secret lands in the neighbor namespace.
-    local ns
-    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
-        kubectl delete rolebinding dch-e2e-rest-service-secret-access -n "$ns" --ignore-not-found >/dev/null
-        kubectl create rolebinding dch-e2e-rest-service-secret-access \
-            -n "$ns" \
-            --clusterrole=dch-rest-service-secret-access \
-            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" >/dev/null
-    done
+    wait_for_tenant_bindings
 }
 
 # setup_global_namespace prepares the namespace that global namespace tests
@@ -845,7 +878,7 @@ SECRETS_MSG=""
 [[ "$E2E_ES_BASIC_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
 [[ "$E2E_NEO4J_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Neo4j"
 [[ "$E2E_URI_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }URI"
-echo "[5/11] ${SECRETS_MSG:-none} secrets + Flight RBAC ready"
+echo "[5/11] ${SECRETS_MSG:-none} secrets + service RBAC ready"
 
 # 5. Seed test data
 seed_pg_data
