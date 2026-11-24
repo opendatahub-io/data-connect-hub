@@ -434,13 +434,15 @@ var _ = Describe("DataConnectService Controller", func() {
 			deleteCR()
 		})
 
-		It("should record the global namespaces rendered into the service config", func() {
+		It("should record the global namespaces without making them global connection type tenants", func() {
 			reconcileUntilReady()
 
 			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
 			Expect(cr.Status.GlobalTenants).To(Equal([]string{globalNS}))
-			Expect(restTenantIDs()).To(Equal([]any{targetNamespace, globalNS}))
+			// Connection types in a global namespace stay scoped to it, so
+			// connections in other tenants never reference them.
+			Expect(restTenantIDs()).To(Equal([]any{targetNamespace}))
 
 			setLabel(false)
 			reconcileUntilReady()

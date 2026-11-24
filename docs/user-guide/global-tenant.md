@@ -1,24 +1,21 @@
 # Global Tenant
 
-By default, DCH connection types and connections in a tenant namespace are accessible only to DCH users authorized in that namespace. In a global tenant, connection types are visible to every DCH user, whichever tenant they select, and members of the `Auth` CR `allowedGroups` and `adminGroups` can read its connections and ingest data from them by selecting the global tenant with `X-Tenant-Id`.
+DCH connection types and connections are scoped by tenant:
+
+- Connection types:
+  - Tenant-scoped connection types: `tenant_id` is set to the tenant namespace. They are accessible only to DCH users authorized in that namespace.
+  - Cluster-scoped connection types: `tenant_id` is omitted in API responses. They are accessible by every DCH user, whichever tenant they select. These are the connection types in the DCH namespace, including the built-in ones. To share a connection type with all DCH users, create it in the DCH namespace.
+  - Global-tenant connection types: `tenant_id` is set to the global tenant namespace. They are accessible only to DCH users authorized in the global tenant, by selecting it with `X-Tenant-Id`: the `Auth` CR `allowedGroups` and `adminGroups`, or a group granted a DCH role there. If a user creates a connection with a global-tenant connection type and the namespace later stops being a global tenant, fetching data through that connection fails. In this case, cluster-scoped connection types should be considered.
+- Connections:
+  - Tenant-scoped connections: `tenant_id` is set to the tenant namespace. They are accessible only to DCH users authorized in that namespace.
+  - Global-tenant connections: `tenant_id` is set to the global tenant namespace. They are accessible only to DCH users authorized in the global tenant, by selecting it with `X-Tenant-Id`.
 
 See [Concepts and Terminologies](concepts-terminologies.md) for the terms used in this guide.
 
 ## Workflow
 
 1. **Platform admin installs DCH.**
-   The DCH installer installs the built-in connection types in the DCH namespace (`opendatahub` in this guide) and adds it to `[global-connection-types]`, so every DCH user can see them.
-
-   To view the setting:
-   ```bash
-   oc get configmap dch-flight-service-config -n opendatahub -o jsonpath='{.data.config\.toml}'
-   oc get configmap dch-rest-service-config -n opendatahub -o jsonpath='{.data.config\.toml}'
-   ```
-   ```toml
-   [global-connection-types]
-   tenant-ids = ["opendatahub"]
-   ```
-   dc-controller manages `tenant-ids`, so manual edits are overwritten on the next reconcile.
+   The DCH installer installs the built-in connection types in the DCH namespace (`opendatahub` in this guide) as cluster-scoped connection types, so every DCH user can see them. See [Cluster-scoped connection types](concepts-terminologies.md#cluster-scoped-connection-types).
 
 2. **Platform admin configures the `Auth` CR.**
    The `Auth` CRD is shipped with the RHOAI platform, and the platform operator creates the `auth` CR with the defaults below if it does not exist. Edit it only to change the groups. See the [API reference](https://github.com/opendatahub-io/opendatahub-operator/blob/main/docs/api-overview.md#authspec) and the [CRD type definitions](https://github.com/opendatahub-io/opendatahub-operator/blob/main/api/services/v1alpha1/auth_types.go).
@@ -46,14 +43,6 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
 
    This step is automatic. dc-controller:
 
-   - Adds the namespace to `[global-connection-types]` after the DCH namespace,<br>so every DCH user can see all connection types in both namespaces, including the built-in types in `opendatahub`:
-
-     ```toml
-     # config.toml in dch-rest-service-config and dch-flight-service-config
-     [global-connection-types]
-     tenant-ids = ["opendatahub", "global-assets"]
-     ```
-
    - Creates RoleBindings in the namespace,<br>so users access connections in `global-assets` with `X-Tenant-Id: global-assets`:
 
      | Subject | ClusterRole | Grants |
@@ -77,7 +66,7 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
          - global-assets
      ```
 
-   Removing the label reverts all three. RoleBindings that administrators create under other names are not touched.
+   Removing the label reverts both. RoleBindings that administrators create under other names are not touched. Neither step changes the service ConfigMaps, so designating or removing a global tenant does not restart the REST or Flight service. The services cache authorization decisions for `[auth] cache_ttl_secs` (60 seconds by default), so access granted through the removed RoleBindings can last that long.
 
 5. **Members of the `Auth` CR `adminGroups` or a DCH admin group manage connection types and connections** using the REST API with `X-Tenant-Id: global-assets`.
 
@@ -87,7 +76,7 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
    from data_connect_hub import CredentialsRef, DataConnectClient
 
    with DataConnectClient(endpoint="<gateway-host>", token="<token>", tenant_id="global-assets") as client:
-       # Create a connection type visible to every tenant.
+       # Create a connection type in the global tenant; it is not visible from other tenants.
        client.create_connection_type(name="my-type", provider="postgres")
        # Create a shared connection; its Secret must exist in the global tenant.
        client.create_connection(name="shared-orders", connection_type_id="<type-id>", data_format="tabular", credentials_ref=CredentialsRef(secret="shared-orders"))
@@ -101,3 +90,14 @@ See [Concepts and Terminologies](concepts-terminologies.md) for the terms used i
    with DataConnectClient(endpoint="<gateway-host>", token="<token>", tenant_id="global-assets") as client:
        table = client.read("SELECT * FROM my_table", connection_id="<shared-connection-id>")
    ```
+
+## What users see
+
+Assume the DCH namespace is `opendatahub` and the global tenant is `global-assets`.
+
+| Request | Header | Returns |
+|---|---|---|
+| `GET /api/v1alpha1/data/connection-types` | `X-Tenant-Id: <tenant-namespace>` | *Assume the user has `get` on `data-connection-types` in `<tenant-namespace>`.*<br>• Connection types in `opendatahub`, including the built-in ones (no permission in `opendatahub` required)<br>• Connection types in `<tenant-namespace>` |
+| `GET /api/v1alpha1/data/connection-types` | `X-Tenant-Id: global-assets` | *Assume the user is a member of the `Auth` CR `allowedGroups` or `adminGroups`.*<br>• Connection types in `opendatahub`, including the built-in ones (no permission in `opendatahub` required)<br>• Connection types in `global-assets` |
+| `GET /api/v1alpha1/data/connections` | `X-Tenant-Id: <tenant-namespace>` | *Assume the user has `get` on `data-connections` in `<tenant-namespace>`.*<br>• Connections in `<tenant-namespace>` |
+| `GET /api/v1alpha1/data/connections` | `X-Tenant-Id: global-assets` | *Assume the user is a member of the `Auth` CR `allowedGroups` or `adminGroups`.*<br>• Connections in `global-assets` |
