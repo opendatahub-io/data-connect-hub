@@ -52,7 +52,7 @@ serde_json = "1.0"
 tempfile = "3.27"
 json-patch = "4"
 actix-web = "4.18.1"
-actix-cors = "0.6"
+actix-cors = "0.7"
 thiserror = "2.0"
 anyhow = "1.0"
 tracing = "0.1"
@@ -77,10 +77,10 @@ opendal = { version = "0.58", features = ["services-s3"] }
 opendal-http-transport-reqwest = { version = "0.58", default-features = false, features = ["rustls"] }
 # OpenDAL 0.58's reqwest transport uses reqwest 0.13.
 reqwest-opendal = { package = "reqwest", version = "0.13", default-features = false, features = ["rustls", "stream"] }
-parquet = { version = "60.2.0", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
-arrow-csv = "60.2.0"
-arrow-json = "60.2.0"
-arrow-cast = "60.2.0"
+parquet = { version = "60.2", default-features = false, features = ["arrow", "async", "snap", "zstd", "lz4"] }
+arrow-csv = "60.2"
+arrow-json = "60.2"
+arrow-cast = "60.2"
 base64 = "0.22"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
 mime = "0.3"

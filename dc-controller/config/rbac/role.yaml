@@ -128,6 +128,13 @@ rules:
   - list
   - watch
 - apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - gateways
@@ -219,6 +226,16 @@ rules:
   - dch-global-read
   - dch-global-read-write
   - dch-global-rest-service-secret-access
+  resources:
+  - rolebindings
+  verbs:
+  - delete
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-rest-service-secret-access
   resources:
   - rolebindings
   verbs:

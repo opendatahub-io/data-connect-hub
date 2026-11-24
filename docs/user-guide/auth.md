@@ -6,15 +6,18 @@ The standard DCH deployment requires a bearer token for API access. Include `Aut
 
 ## 2. Configure tenant access
 
-DCH uses separate permissions for its services and for the people or applications calling its APIs. Configure service access to connection secrets for each tenant, then grant callers the DCH API access they need.
+DCH uses separate permissions for its services and for the people or applications calling its APIs. Label each tenant namespace so the dc-controller can grant the REST service access to connection secrets (2.3), grant Flight read access to the connection Secrets it needs (2.2), and grant callers the DCH API access they need (2.4).
 
 ### 2.1 Create a tenant namespace
 
-Each tenant maps to a Kubernetes namespace. Clients pass this namespace in the `X-Tenant-Id` header. Create it if it does not already exist:
+Each tenant maps to a Kubernetes namespace. Clients pass this namespace in the `X-Tenant-Id` header. Create it if it does not already exist, then label it as a DCH tenant:
 
 ```bash
 kubectl create namespace team-alpha
+kubectl label namespace team-alpha dataconnecthub.opendatahub.io/tenant=true
 ```
+
+The dc-controller watches namespaces carrying this label and reconciles the REST service's secret permissions into them automatically (see 2.3).
 
 ### 2.2 Grant Flight Service permission to read connection secrets
 
@@ -43,7 +46,18 @@ kubectl create rolebinding dch-flight-secret-read-rb \
 
 ### 2.3 Grant REST Service permission to manage connection secrets
 
-DCH installs the `dch-rest-service-secret-access` ClusterRole. Bind it in each tenant namespace:
+DCH installs the `dch-rest-service-secret-access` ClusterRole. The dc-controller binds it to the REST ServiceAccount in every namespace labelled `dataconnecthub.opendatahub.io/tenant=true` (see 2.1), so no manual RBAC step is required. Verify the binding exists after labelling the namespace:
+
+```bash
+kubectl get rolebinding dch-rest-service-secret-access -n team-alpha
+```
+
+The binding is created shortly after the label is applied.
+
+<details>
+<summary>Standalone installs without the dc-controller</summary>
+
+Bind the ClusterRole manually in each tenant namespace:
 
 ```bash
 TENANT_NAMESPACE=team-alpha
@@ -56,6 +70,20 @@ kubectl create rolebinding dch-rest-service-secret-access \
   --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+When migrating a standalone install to the dc-controller, the controller
+does not take the manual binding over: a pre-existing binding without the
+managed-by label is left unchanged, and the controller reports a warning
+event on the tenant namespace (`kubectl describe namespace
+"$TENANT_NAMESPACE"`). Resolve the conflict either by deleting the manual
+binding — the controller recreates and manages it — or by opting in:
+
+```bash
+kubectl label rolebinding dch-rest-service-secret-access \
+  -n "$TENANT_NAMESPACE" \
+  dataconnecthub.opendatahub.io/managed-by=dataconnectservice
+```
+</details>
 
 ### 2.4 Grant users access to Flight and REST APIs
 
@@ -225,7 +253,14 @@ for verb in get create patch delete; do
 done
 ```
 
-For the full inline-credential, readiness, and export workflow, each permission check should return `yes`. If the ClusterRole is missing, upgrade the controller to a version that installs it. If a required permission returns `no`, apply the tenant-local RoleBinding from [REST service secret permissions](#23-grant-rest-service-permission-to-manage-connection-secrets), then retry. Check the ServiceAccount named in the log error: REST, Flight, and the controller use different identities.
+For the full inline-credential, readiness, and export workflow, each permission check should return `yes`. If the ClusterRole is missing, upgrade the controller to a version that installs it. If a required permission returns `no`, first check the tenant namespace is labelled and the controller reconciled the binding:
+
+```bash
+kubectl get namespace "$TENANT_NAMESPACE" --show-labels
+kubectl get rolebinding dch-rest-service-secret-access -n "$TENANT_NAMESPACE"
+```
+
+Apply the label from 2.1 if it is missing. On standalone installs without the dc-controller, apply the tenant-local RoleBinding from [REST service secret permissions](#23-grant-rest-service-permission-to-manage-connection-secrets), then retry. Check the ServiceAccount named in the log error: REST, Flight, and the controller use different identities.
 
 An HTTP 403 from kube-rbac-proxy instead points to caller authorization. Check the caller's tenant permissions separately; changing the REST ServiceAccount's RoleBinding does not authorize the caller.
 
