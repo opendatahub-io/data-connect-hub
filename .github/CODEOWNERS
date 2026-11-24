@@ -4,3 +4,10 @@
 
 # Default owners for everything in the repo
 * @mariusdanciu @shuynh2017 @loicmarchal @yizhaodev
+
+# API contract checks (RHOAIENG-103170): the descriptor, the workflow, and its
+# pinned baseline decide what the compatibility checks protect, so changes need
+# an owner's review. Keep this rule itself under the same review.
+/.github/CODEOWNERS                 @mariusdanciu @shuynh2017 @loicmarchal @yizhaodev
+/.github/workflows/api-contract.yml @mariusdanciu @shuynh2017 @loicmarchal @yizhaodev
+/.rhoai/                            @mariusdanciu @shuynh2017 @loicmarchal @yizhaodev

@@ -121,7 +121,7 @@ address = "127.0.0.1"
 port = 8080
 
 [global-connection-types]
-tenant-id = "default"
+tenant-ids = ["default"]
 
 # Optional: Prometheus metrics on http://<address>:<port>/metrics
 [metrics]
@@ -150,7 +150,7 @@ batch_size = 512
 max_rows = 1000000
 
 [global-connection-types]
-tenant-id = "default"
+tenant-ids = ["default"]
 
 [tls]
 # cert_file = "/etc/tls/private/tls.crt"
@@ -273,6 +273,7 @@ Run `make help` for the full list. Key targets:
 | `setup-hooks`         | Install git pre-commit hooks                       |
 | `sdk-install`         | Install SDK in editable mode with dev deps         |
 | `sdk-test`            | Run SDK unit tests with coverage                   |
+| `sdk-test-min`        | Run SDK unit tests on minimum dependency versions  |
 | `sdk-lint`            | Lint and format-check SDK                          |
 | `sdk-fmt`             | Format SDK code                                    |
 | `sdk-typecheck`       | Run mypy on SDK                                    |

@@ -53,6 +53,8 @@ import (
 
 const (
 	resourceNameField = "name"
+	imageField        = "image"
+	envValueField     = "value"
 
 	// RelatedImageRestService is the env var and params.env key for the REST image.
 	RelatedImageRestService = "RELATED_IMAGE_ODH_DATA_CONNECT_HUB_REST_IMAGE"
@@ -232,6 +234,12 @@ func buildServicePatches(deploymentName, containerName string, overrides *dchv1a
 		patchParts = append(patchParts, fmt.Sprintf("spec:\n  replicas: %d", *overrides.Replicas))
 	}
 
+	if overrides.ImagePullPolicy != nil {
+		patchParts = append(patchParts, fmt.Sprintf(
+			"spec:\n  template:\n    spec:\n      containers:\n        - name: %s\n          imagePullPolicy: %s",
+			containerName, *overrides.ImagePullPolicy))
+	}
+
 	if overrides.Resources != nil {
 		resBytes, err := json.Marshal(overrides.Resources)
 		if err == nil {
@@ -357,6 +365,13 @@ func replaceStringValue(value any, old, new string) any {
 		return strings.ReplaceAll(value, old, new)
 	case map[string]any:
 		for key, child := range value {
+			if key == imageField {
+				// Container image references must not be rewritten by the
+				// service rename: an image whose repository contains the
+				// service name (e.g. example.com/dch-flight-service) would
+				// otherwise be corrupted into a nonexistent reference.
+				continue
+			}
 			value[key] = replaceStringValue(child, old, new)
 		}
 	case []any:
@@ -465,7 +480,9 @@ func setConfigMapFlightConnectorSettings(resources []*unstructured.Unstructured,
 	return nil
 }
 
-func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespace string) error {
+// setConfigMapGlobalTenants renders the global connection type tenants into
+// every service ConfigMap that declares tenant-ids, replacing the base value.
+func setConfigMapGlobalTenants(resources []*unstructured.Unstructured, tenants []string) error {
 	for _, obj := range resources {
 		if obj.GetKind() != kindConfigMap {
 			continue
@@ -478,10 +495,13 @@ func setConfigMapGlobalNamespace(resources []*unstructured.Unstructured, namespa
 			continue
 		}
 		globalConnectionTypes, ok := config["global-connection-types"].(map[string]any)
-		if !ok || globalConnectionTypes["tenant-id"] != "opendatahub" {
+		if !ok {
 			continue
 		}
-		globalConnectionTypes["tenant-id"] = namespace
+		if _, ok := globalConnectionTypes["tenant-ids"]; !ok {
+			continue
+		}
+		globalConnectionTypes["tenant-ids"] = tenants
 		if err := setConfigMapTOML(obj, config, data); err != nil {
 			return fmt.Errorf("updating ConfigMap %q: %w", obj.GetName(), err)
 		}
@@ -642,6 +662,89 @@ func traceEnv(trace *dchv1alpha1.Trace) []corev1.EnvVar {
 		vars = append(vars, corev1.EnvVar{Name: envOTLPCertificate, Value: trace.Certificate})
 	}
 	return vars
+}
+
+// auditEnv maps spec.audit onto the audit logging environment variables,
+// returning none when audit logging is disabled (the default).
+func auditEnv(audit *dchv1alpha1.Audit) []corev1.EnvVar {
+	if audit == nil || audit.Enabled == nil || !*audit.Enabled {
+		return nil
+	}
+	vars := []corev1.EnvVar{{Name: envAuditEnabled, Value: valueTrue}}
+	if audit.LogQueries != nil && *audit.LogQueries {
+		vars = append(vars, corev1.EnvVar{Name: envAuditLogQueries, Value: valueTrue})
+	}
+	return vars
+}
+
+// reconcileAuditEnv reconciles the audit logging environment variables in
+// deployments, removing stale variables when audit logging (or query
+// logging) is disabled so that clearing spec.audit actually turns it off
+// in the running containers.
+func reconcileAuditEnv(resources []*unstructured.Unstructured, audit *dchv1alpha1.Audit, containerNames ...string) bool {
+	wanted := make(map[string]bool, len(containerNames))
+	for _, name := range containerNames {
+		wanted[name] = true
+	}
+
+	auditEnvNames := map[string]bool{
+		envAuditEnabled:    true,
+		envAuditLogQueries: true,
+	}
+
+	desiredVars := auditEnv(audit)
+
+	updated := false
+	for _, obj := range resources {
+		if obj.GetKind() != kindDeployment {
+			continue
+		}
+		containers, found, _ := unstructured.NestedSlice(obj.Object, "spec", "template", "spec", "containers")
+		if !found {
+			continue
+		}
+		changed := false
+		for i, c := range containers {
+			container, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			if name, _ := container["name"].(string); !wanted[name] {
+				continue
+			}
+
+			env, _ := container["env"].([]any)
+			var newEnv []any
+
+			// Remove the audit env vars, preserve others
+			for _, e := range env {
+				existing, ok := e.(map[string]any)
+				if !ok {
+					newEnv = append(newEnv, e)
+					continue
+				}
+				if n, _ := existing["name"].(string); !auditEnvNames[n] {
+					newEnv = append(newEnv, e)
+				}
+			}
+
+			// Add back the desired audit env var
+			for _, v := range desiredVars {
+				newEnv = append(newEnv, map[string]any{resourceNameField: v.Name, envValueField: v.Value})
+			}
+
+			if len(newEnv) != len(env) || len(desiredVars) > 0 {
+				container["env"] = newEnv
+				containers[i] = container
+				changed = true
+			}
+		}
+		if changed {
+			_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
+			updated = true
+		}
+	}
+	return updated
 }
 
 func setConfigMapDiscoveryServiceAccount(resources []*unstructured.Unstructured, namespace, flightName string) error {
@@ -915,7 +1018,13 @@ func setKubeRbacProxyAudiences(resources []*unstructured.Unstructured, audiences
 			}
 			var args []any
 			if existing, ok := container["args"].([]any); ok {
-				args = existing
+				for _, value := range existing {
+					arg, ok := value.(string)
+					if ok && strings.HasPrefix(arg, "--auth-token-audiences=") {
+						continue
+					}
+					args = append(args, value)
+				}
 			}
 			args = append(args, arg)
 			container["args"] = args
@@ -929,11 +1038,18 @@ func setKubeRbacProxyTLSOpts(
 	ctx context.Context,
 	resources []*unstructured.Unstructured,
 	spec configv1.TLSProfileSpec,
-) {
+) error {
 	minVersion := platformtls.MinVersionFromSpec(ctx, &spec, platformtls.FormatGo)
 	cipherSuites := ""
 	if spec.MinTLSVersion != configv1.VersionTLS13 {
 		cipherSuites = platformtls.CipherSuitesFromSpec(ctx, &spec)
+	}
+	if minVersion != "VersionTLS13" && cipherSuites != "" {
+		cipherNames := strings.Split(cipherSuites, ",")
+		if !slices.Contains(cipherNames, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") &&
+			!slices.Contains(cipherNames, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
+			return fmt.Errorf("cluster TLS profile: kube-rbac-proxy cannot serve HTTP/2 with cipher list %q", cipherSuites)
+		}
 	}
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -971,6 +1087,7 @@ func setKubeRbacProxyTLSOpts(
 		}
 		_ = unstructured.SetNestedSlice(obj.Object, containers, "spec", "template", "spec", "containers")
 	}
+	return nil
 }
 
 // setConfigMapFlightTLSProfile projects the resolved cluster TLS profile into

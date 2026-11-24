@@ -7,7 +7,9 @@ Skips automatically if neither is configured.
 from __future__ import annotations
 
 import pytest
-from data_connect_hub import DCHConfigError, DCHHTTPError, DataConnectClient
+
+from data_connect_hub import DataConnectClient, DCHConfigError, DCHHTTPError
+
 
 class TestRestS3Binary:
     def test_binary_download(
@@ -19,7 +21,9 @@ class TestRestS3Binary:
         if not s3_binary_path:
             pytest.skip("DCH_S3_BINARY_PATH not set")
 
-        assert b"".join(rest_client.download_binary(s3_flight_connection, s3_binary_path)) == b"binary-test-data-for-e2e\n"
+        assert (
+            b"".join(rest_client.download_binary(s3_flight_connection, s3_binary_path)) == b"binary-test-data-for-e2e\n"
+        )
 
     def test_binary_download_not_found(
         self,
@@ -53,7 +57,10 @@ class TestRestUriBinary:
         rest_client: DataConnectClient,
         uri_flight_connection: str,
     ) -> None:
-        assert b"".join(rest_client.download_binary(uri_flight_connection, "api/binary.dat")) == b"binary-test-data-for-e2e\n"
+        assert (
+            b"".join(rest_client.download_binary(uri_flight_connection, "api/binary.dat"))
+            == b"binary-test-data-for-e2e\n"
+        )
 
     def test_binary_download_not_found(
         self,

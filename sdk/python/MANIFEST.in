@@ -5,3 +5,4 @@
 # examples/ (including quickstart.ipynb) into the sdist, which was never shipped
 # before the setuptools-scm migration. They are documentation, not runtime code.
 prune examples
+exclude constraints-min.txt

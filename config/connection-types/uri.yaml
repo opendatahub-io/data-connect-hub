@@ -7,11 +7,13 @@ credentials_fields:
     description: Base URL for the HTTP endpoint
     required: true
     type: string
+    sensitive: true
   - name: TOKEN
     label: Token
     description: Bearer token for authentication (takes precedence over username/password)
     required: false
     type: string
+    sensitive: true
   - name: USERNAME
     label: Username
     description: Username for HTTP Basic authentication
@@ -22,6 +24,7 @@ credentials_fields:
     description: Password for HTTP Basic authentication
     required: false
     type: string
+    sensitive: true
   - name: CA_CERT
     label: CA Certificate
     description: CA certificate for custom TLS verification

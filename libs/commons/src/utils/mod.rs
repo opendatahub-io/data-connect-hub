@@ -1,17 +1,241 @@
+pub mod audit;
 pub mod config;
 
 use anyhow::{Context, Result};
+use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry_otlp::{SpanExporter, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::Resource;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::SdkTracerProvider;
+use serde::Serialize;
+use serde::ser::SerializeMap;
 use tonic::transport::{Certificate, ClientTlsConfig};
 use tracing::info;
+use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::Registry;
+use tracing_subscriber::fmt::FmtContext;
+use tracing_subscriber::fmt::FormattedFields;
+use tracing_subscriber::fmt::format::{FormatEvent, FormatFields, JsonFields, Writer};
+use tracing_subscriber::fmt::time::FormatTime;
 use tracing_subscriber::layer::{Layer, SubscriberExt};
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, fmt};
+
+/// RESERVED_LOG_FIELDS names the fixed top-level keys `RestJsonFormat` sets on
+/// every log record. Event fields sharing one of these names are dropped
+/// rather than merged, so a field on the log call can never overwrite the
+/// severity, trace identity, or other fixed schema values.
+const RESERVED_LOG_FIELDS: &[&str] = &[
+    "ts",
+    "level",
+    "logger",
+    "service.name",
+    "trace_id",
+    "span_id",
+    "request_id",
+    "request_path",
+    "msg",
+];
+
+const AUDIT_LOG_FIELD_ORDER: &[&str] = &[
+    "ts",
+    "logger",
+    "service.name",
+    "request_id",
+    "parent_request_id",
+    "trace_id",
+    "span_id",
+    "audit.actor",
+    "caller_principal",
+    "request_path",
+    "audit.tenant_id",
+    "audit.resource",
+    "audit.action",
+    "audit.query",
+    "resource_id",
+    "status_code",
+    "grpc_status",
+    "error_code",
+    "error_message",
+    "duration_ms",
+];
+
+struct OrderedAuditLog<'a>(&'a serde_json::Map<String, serde_json::Value>);
+
+impl Serialize for OrderedAuditLog<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let field_count = self.0.len() - usize::from(self.0.contains_key("msg"));
+        let mut map = serializer.serialize_map(Some(field_count))?;
+        for key in AUDIT_LOG_FIELD_ORDER {
+            if let Some(value) = self.0.get(*key) {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        for (key, value) in self.0 {
+            if key != "msg" && !AUDIT_LOG_FIELD_ORDER.contains(&key.as_str()) {
+                map.serialize_entry(key, value)?;
+            }
+        }
+        map.end()
+    }
+}
+
+fn serialize_log(log: &serde_json::Map<String, serde_json::Value>, audit: bool) -> serde_json::Result<String> {
+    if audit {
+        serde_json::to_string(&OrderedAuditLog(log))
+    } else {
+        serde_json::to_string(log)
+    }
+}
+
+struct RestJsonFormat;
+
+#[derive(Default)]
+struct RestJsonVisitor(serde_json::Map<String, serde_json::Value>);
+
+impl tracing::field::Visit for RestJsonVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .insert(field.name().to_owned(), serde_json::Value::String(format!("{value:?}")));
+    }
+
+    fn record_i64(&mut self, field: &tracing::field::Field, value: i64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_bool(&mut self, field: &tracing::field::Field, value: bool) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_f64(&mut self, field: &tracing::field::Field, value: f64) {
+        self.0.insert(field.name().to_owned(), serde_json::Value::from(value));
+    }
+
+    fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+        self.0
+            .insert(field.name().to_owned(), serde_json::Value::String(value.to_owned()));
+    }
+}
+
+impl<S, N> FormatEvent<S, N> for RestJsonFormat
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    N: for<'a> FormatFields<'a> + 'static,
+{
+    fn format_event(
+        &self,
+        ctx: &FmtContext<'_, S, N>,
+        mut writer: Writer<'_>,
+        event: &tracing::Event<'_>,
+    ) -> std::fmt::Result {
+        let audit = event.metadata().target() == "audit";
+        let mut visitor = RestJsonVisitor::default();
+        event.record(&mut visitor);
+        let fields = visitor.0;
+        let mut log = serde_json::Map::new();
+
+        let mut timestamp = String::new();
+        tracing_subscriber::fmt::time::SystemTime.format_time(&mut Writer::new(&mut timestamp))?;
+        log.insert("ts".to_owned(), serde_json::Value::String(timestamp));
+        if !audit {
+            log.insert(
+                "level".to_owned(),
+                serde_json::Value::String(event.metadata().level().to_string()),
+            );
+        }
+        log.insert(
+            "logger".to_owned(),
+            serde_json::Value::String(event.metadata().target().to_owned()),
+        );
+        log.insert(
+            "service.name".to_owned(),
+            serde_json::Value::String("data-connect-hub".to_owned()),
+        );
+
+        let span_context = tracing::Span::current().context().span().span_context().clone();
+        if span_context.is_valid() {
+            log.insert(
+                "trace_id".to_owned(),
+                serde_json::Value::String(span_context.trace_id().to_string()),
+            );
+            log.insert(
+                "span_id".to_owned(),
+                serde_json::Value::String(span_context.span_id().to_string()),
+            );
+        }
+
+        let span_fields = ctx.event_scope().map(|scope| {
+            let mut request_path = None;
+            let mut request_id = None;
+            for span in scope {
+                let extensions = span.extensions();
+                let Some(fields) = extensions.get::<FormattedFields<N>>() else {
+                    continue;
+                };
+                let Ok(serde_json::Value::Object(fields)) = serde_json::from_str(&fields.fields) else {
+                    continue;
+                };
+                request_path = request_path.or_else(|| {
+                    fields
+                        .get("request.path")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                });
+                request_id = request_id.or_else(|| {
+                    fields
+                        .get("request_id")
+                        .and_then(serde_json::Value::as_str)
+                        .map(ToOwned::to_owned)
+                });
+                if request_path.is_some() && request_id.is_some() {
+                    break;
+                }
+            }
+            (request_path, request_id)
+        });
+        if let Some((Some(request_path), _)) = &span_fields {
+            log.insert(
+                "request_path".to_owned(),
+                serde_json::Value::String(request_path.clone()),
+            );
+        }
+        if let Some((_, Some(request_id))) = span_fields {
+            log.insert("request_id".to_owned(), serde_json::Value::String(request_id));
+        }
+
+        if !fields.is_empty() {
+            let mut fields = fields;
+            if audit
+                && !log.contains_key("request_id")
+                && let Some(id) = fields.get("request_id").cloned()
+            {
+                log.insert("request_id".to_owned(), id);
+            }
+            let message = fields.remove("message").unwrap_or(serde_json::Value::Null);
+            if !audit {
+                log.insert("msg".to_owned(), message);
+            }
+            log.extend(
+                fields
+                    .into_iter()
+                    .filter(|(key, _)| !RESERVED_LOG_FIELDS.contains(&key.as_str())),
+            );
+        } else if !audit {
+            log.insert("msg".to_owned(), serde_json::Value::Null);
+        }
+
+        writer.write_str(&serialize_log(&log, audit).map_err(|_| std::fmt::Error)?)?;
+        writer.write_char('\n')
+    }
+}
 
 /// ENV_OTLP_ENDPOINT names the environment variable holding the OTLP/gRPC
 /// collector URL. It is set from `spec.trace.exporter` on the DataConnectService.
@@ -91,16 +315,38 @@ pub fn init_tracing(
     json_logs: bool,
     trace: &TraceConfig,
 ) -> Result<Option<SdkTracerProvider>> {
+    init_tracing_inner(service_name, json_logs, trace, false)
+}
+
+/// init_tracing_json installs tracing using the standard structured JSON field names.
+pub fn init_tracing_json(
+    service_name: &'static str,
+    json_logs: bool,
+    trace: &TraceConfig,
+) -> Result<Option<SdkTracerProvider>> {
+    init_tracing_inner(service_name, json_logs, trace, true)
+}
+
+fn init_tracing_inner(
+    service_name: &'static str,
+    json_logs: bool,
+    trace: &TraceConfig,
+    rest_json: bool,
+) -> Result<Option<SdkTracerProvider>> {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     let fmt_layer: Box<dyn Layer<Registry> + Send + Sync> = if json_logs {
-        Box::new(
-            fmt::layer()
-                .json()
-                .with_file(true)
-                .with_line_number(true)
-                .with_target(true),
-        )
+        if rest_json {
+            Box::new(fmt::layer().event_format(RestJsonFormat).fmt_fields(JsonFields::new()))
+        } else {
+            Box::new(
+                fmt::layer()
+                    .json()
+                    .with_file(true)
+                    .with_line_number(true)
+                    .with_target(true),
+            )
+        }
     } else {
         Box::new(fmt::layer().with_file(true).with_line_number(true).with_target(true))
     };
@@ -187,5 +433,86 @@ mod tests {
         assert_eq!(resolve_endpoint("https://otel:4317", true), "http://otel:4317");
         assert_eq!(resolve_endpoint("https://otel:4317", false), "https://otel:4317");
         assert_eq!(resolve_endpoint("http://otel:4317", true), "http://otel:4317");
+    }
+
+    #[test]
+    fn test_audit_log_uses_documented_field_order() {
+        let mut log = serde_json::Map::new();
+        for key in AUDIT_LOG_FIELD_ORDER.iter().rev() {
+            log.insert((*key).to_string(), serde_json::Value::String((*key).to_string()));
+        }
+        log.insert("msg".to_string(), serde_json::Value::String("access".to_string()));
+
+        let serialized = serialize_log(&log, true).unwrap();
+        let positions: Vec<_> = AUDIT_LOG_FIELD_ORDER
+            .iter()
+            .map(|key| serialized.find(&format!("\"{key}\":")).unwrap())
+            .collect();
+
+        assert!(positions.windows(2).all(|pair| pair[0] < pair[1]));
+        assert!(!serialized.contains("\"msg\":"));
+    }
+
+    #[derive(Clone, Default)]
+    struct SharedBuf(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for SharedBuf {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for SharedBuf {
+        type Writer = SharedBuf;
+
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn format_with_rest_json_logger(emit: impl FnOnce()) -> Vec<serde_json::Value> {
+        let buf = SharedBuf::default();
+        let subscriber = Registry::default().with(
+            fmt::layer()
+                .event_format(RestJsonFormat)
+                .fmt_fields(JsonFields::new())
+                .with_writer(buf.clone()),
+        );
+        let _guard = tracing::subscriber::set_default(subscriber);
+        emit();
+        let written = String::from_utf8(buf.0.lock().unwrap().clone()).unwrap();
+        written
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn test_audit_event_keeps_event_request_id_without_span() {
+        let records = format_with_rest_json_logger(|| {
+            tracing::info!(target: "audit", request_id = "evt-1", audit.resource = "connection");
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["request_id"], "evt-1");
+        assert_eq!(records[0]["audit.resource"], "connection");
+    }
+
+    #[test]
+    fn test_audit_event_prefers_span_request_id_over_event_field() {
+        let records = format_with_rest_json_logger(|| {
+            let span = tracing::info_span!("http_request", request_id = "span-1", request.path = "/api");
+            let _guard = span.enter();
+            tracing::info!(target: "audit", request_id = "evt-1");
+        });
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0]["request_id"], "span-1");
+        assert_eq!(records[0]["request_path"], "/api");
     }
 }

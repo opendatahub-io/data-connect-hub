@@ -1,0 +1,33 @@
+# API contract set for opendatahub-io/data-connect-hub (RHOAIENG-103170).
+# Runner, schemas, and reusable workflows:
+# https://github.com/red-hat-data-services/api-contract-tests
+# Read by .github/workflows/api-contract.yml, which carries the baseline.
+apiVersion: contracts.rhoai.io/v1alpha1
+kind: ContractSet
+metadata:
+  name: data-connect-hub
+spec:
+  exclusions:
+    - path: docs/api/openapi.json
+      reason: JSON copy of docs/api/openapi.yaml, bundled from the same source by `make generate-openapi-docs`
+    - path: docs/api/openapi-internal.yaml
+      reason: Internal superset of docs/api/openapi.yaml that adds the /flights routes used only between flight-service and rest-service; not a provider contract
+    - path: docs/api/openapi-internal.json
+      reason: JSON copy of docs/api/openapi-internal.yaml, bundled from the same source by `make generate-openapi-docs`
+    - path: docs/api/src/openapi.yaml
+      reason: Redocly source of the bundled documents; the bundled docs/api/openapi.yaml is the contract and CI (build-and-test.yml) fails when it is stale
+  contracts:
+    - id: data-connect-hub-v1alpha1
+      type: openapi
+      declaredArtifact: docs/api/openapi.yaml
+      matchPath: "^/api/v1alpha1/data(/|$)"
+      policy:
+        oasdiffVersion: "1.33.0"
+        yqVersion: "4.45.1"
+        flattenAllOf: true
+      # The document is bundled by redocly (`make generate-openapi-docs`), which
+      # has no adapter in api-contract-tests, so the committed bundle is checked
+      # as is; build-and-test.yml keeps it in sync with docs/api/src.
+      generator:
+        adapter: openapi.static
+        source: docs/api/openapi.yaml

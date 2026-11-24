@@ -113,6 +113,7 @@ If `VIRTUAL_ENV` is already set (e.g. a manually activated venv), the Makefile u
 ```bash
 make sdk-install     # install in editable mode with dev deps
 make sdk-test        # run tests with coverage
+make sdk-test-min    # run tests on minimum dependency versions (needs python3.11, or set SDK_MIN_PYTHON)
 make sdk-lint        # ruff check + format check
 make sdk-fmt         # auto-format
 make sdk-typecheck   # run mypy strict type checking

@@ -24,14 +24,14 @@ async fn main() -> Result<()> {
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
 
     let trace = TraceConfig::from_env();
-    let tracer_provider = commons::utils::init_tracing("custom-connector", args.json_logs, &trace)?;
+    let tracer_provider = commons::utils::init_tracing_json("custom-connector", args.json_logs, &trace)?;
     log_trace_exporter(&trace);
 
     tracing::info!("Starting custom connector Flight service");
 
     let addr: std::net::SocketAddr = format!("{}:{}", config.server.address, config.server.port).parse()?;
     let builder = tonic::transport::Server::builder();
-    let builder = configure_tls(builder, &config.tls).await?;
+    let (builder, tls_acceptor) = configure_tls(builder, &config.tls).await?;
     configure_metrics(&config)?;
 
     let connectors_registry = Arc::new(build_connectors_registry());
@@ -40,13 +40,13 @@ async fn main() -> Result<()> {
         batch_size: config.query.batch_size,
     };
 
-    let tenant_id = config.global_connection_types.tenant_id;
+    let global_tenant_ids = config.global_connection_types.tenant_ids;
     let auth = config.auth;
-    let meta_store = Arc::new(PgMetaStore::new(config.database, tenant_id).await?);
+    let meta_store = Arc::new(PgMetaStore::new(config.database, global_tenant_ids).await?);
 
     let service = DataIngestionService::new(connectors_registry, meta_store, secret_store, query_options);
 
-    let server_result = start_server(builder, &auth, service, addr).await;
+    let server_result = start_server(builder, tls_acceptor, &auth, service, addr).await;
     tracing::info!("Custom connector Flight service stopped");
 
     if let Some(provider) = tracer_provider

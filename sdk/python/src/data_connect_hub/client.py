@@ -215,12 +215,14 @@ class DataConnectClient:
         credentials_ref: CredentialsRef | None = None,
         credentials: InlineCredentials | None = None,
         properties: dict[str, str] | None = None,
+        description: str | None = None,
     ) -> DataConnection:
         if (credentials_ref is None) == (credentials is None):
             raise DCHConfigError("exactly one of credentials_ref or credentials must be provided")
         try:
             req = CreateConnectionRequest(
                 name=name,
+                description=description,
                 data_connection_type_id=connection_type_id,
                 format=data_format,
                 credentials_ref=credentials_ref,
@@ -240,16 +242,27 @@ class DataConnectClient:
         data_format: DataFormat | None = None,
         credentials_ref: CredentialsRef | None = None,
         properties: dict[str, str] | None = None,
+        description: str | _UnsetType | None = _UNSET,
     ) -> DataConnection:
-        if all(v is None for v in (name, connection_type_id, data_format, credentials_ref, properties)):
+        """Update a connection; pass ``description=None`` to clear it."""
+        if description is _UNSET and all(
+            v is None for v in (name, connection_type_id, data_format, credentials_ref, properties)
+        ):
             raise DCHConfigError("at least one field must be provided for update")
-        req = UpdateConnectionRequest(
-            name=name,
-            data_connection_type_id=connection_type_id,
-            format=data_format,
-            credentials_ref=credentials_ref,
-            properties=properties,
-        )
+        updates: dict[str, object] = {}
+        if name is not None:
+            updates["name"] = name
+        if description is not _UNSET:
+            updates["description"] = description
+        if connection_type_id is not None:
+            updates["data_connection_type_id"] = connection_type_id
+        if data_format is not None:
+            updates["format"] = data_format
+        if credentials_ref is not None:
+            updates["credentials_ref"] = credentials_ref
+        if properties is not None:
+            updates["properties"] = properties
+        req = UpdateConnectionRequest.model_validate(updates)
         return self._rest.update_connection(connection_id, req)
 
     def delete_connection(self, connection_id: str) -> None:

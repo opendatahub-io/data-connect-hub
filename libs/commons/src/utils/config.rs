@@ -1,17 +1,30 @@
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
+/// GlobalConnectionTypes lists the tenants whose connection types are visible
+/// to every tenant: the DCH service namespace, which holds the built-in
+/// connection types, and the designated global namespaces.
 #[derive(Debug, Deserialize, Clone)]
 pub struct GlobalConnectionTypes {
-    #[serde(rename = "tenant-id")]
-    pub tenant_id: String,
+    #[serde(rename = "tenant-ids", deserialize_with = "non_empty_tenant_ids")]
+    pub tenant_ids: Vec<String>,
 }
 
 impl GlobalConnectionTypes {
-    pub fn new(tenant_id: String) -> Self {
-        Self { tenant_id }
+    pub fn new(tenant_ids: Vec<String>) -> Self {
+        Self { tenant_ids }
     }
+}
+
+fn non_empty_tenant_ids<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    let tenant_ids = Vec::<String>::deserialize(deserializer)?;
+    if tenant_ids.is_empty() || tenant_ids.iter().any(|id| id.is_empty() || id.trim() != id) {
+        return Err(serde::de::Error::custom(
+            "tenant-ids must list at least one tenant, without empty entries or surrounding whitespace",
+        ));
+    }
+    Ok(tenant_ids)
 }
 
 fn default_connection_timeout_secs() -> u64 {
@@ -93,4 +106,30 @@ pub struct ConnectorConfigOverride {
     pub request_timeout_secs: Option<u64>,
     pub read_timeout_secs: Option<u64>,
     pub chunk_size: Option<usize>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::GlobalConnectionTypes;
+
+    #[test]
+    fn test_global_connection_types_lists_tenants() {
+        let config: GlobalConnectionTypes = serde_json::from_str(r#"{"tenant-ids": ["dch", "global-a"]}"#).unwrap();
+        assert_eq!(config.tenant_ids, vec!["dch", "global-a"]);
+    }
+
+    #[test]
+    fn test_global_connection_types_rejects_empty_tenants() {
+        for json in [
+            r#"{"tenant-ids": []}"#,
+            r#"{"tenant-ids": [""]}"#,
+            r#"{"tenant-ids": [" "]}"#,
+            r#"{"tenant-ids": [" opendatahub"]}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<GlobalConnectionTypes>(json).is_err(),
+                "{json} should be rejected"
+            );
+        }
+    }
 }

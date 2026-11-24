@@ -105,6 +105,9 @@ func (r *SecretWatcherReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		CredentialsRef:       &CredentialsRef{Secret: secret.Name},
 		Properties:           map[string]string{},
 	}
+	if desc := secret.Annotations[annotationDescription]; desc != "" {
+		conn.Description = &desc
+	}
 
 	log.Info("migrating ODH connection", "name", conn.Name, "secretRef", secret.Name, "namespace", secret.Namespace)
 

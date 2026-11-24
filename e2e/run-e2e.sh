@@ -60,6 +60,25 @@ set +a
 DCH_INSECURE="${DCH_INSECURE:-true}"
 DCH_GATEWAY_AUTH_REQUIRED="${DCH_GATEWAY_AUTH_REQUIRED:-false}"
 DCH_NO_ACCESS_NAMESPACE="${DCH_NO_ACCESS_NAMESPACE:-dch-e2e-no-access}"
+DCH_NEIGHBOR_TENANT_ID="${DCH_NEIGHBOR_TENANT_ID:-dch-e2e-neighbor}"
+DCH_GLOBAL_NAMESPACE="${DCH_GLOBAL_NAMESPACE:-dch-e2e-global}"
+DCH_GROUP_MEMBER_NAMESPACE="${DCH_GROUP_MEMBER_NAMESPACE:-dch-e2e-group-member}"
+
+# Tenancy tests need three distinct namespaces: the runner grants the e2e user
+# access to the tenant and the neighbor tenant, and none in the no-access one.
+# Global namespace tests label and unlabel their own namespace, so it must not
+# be any of those either. The group namespace holds the group-member persona,
+# whose access is granted to every ServiceAccount in it, so sharing it with
+# another namespace would hand that access to other personas.
+if [[ "$(printf '%s\n' "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID" "$DCH_NO_ACCESS_NAMESPACE" \
+        "$DCH_GLOBAL_NAMESPACE" "$DCH_GROUP_MEMBER_NAMESPACE" | sort | uniq -d)" != "" ]]; then
+    echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, DCH_NO_ACCESS_NAMESPACE, DCH_GLOBAL_NAMESPACE, and DCH_GROUP_MEMBER_NAMESPACE must be distinct" >&2
+    exit 1
+fi
+if [[ "$DCH_GROUP_MEMBER_NAMESPACE" == "$DCH_SERVICE_NAMESPACE" ]]; then
+    echo "ERROR: DCH_GROUP_MEMBER_NAMESPACE must differ from DCH_SERVICE_NAMESPACE: every ServiceAccount in it receives the group grants" >&2
+    exit 1
+fi
 
 # AWS S3 connector
 DCH_S3_SEED_DATASET="${DCH_S3_SEED_DATASET:-false}"
@@ -75,8 +94,22 @@ DCH_TENANT_NEO4J_PASSWORD="${DCH_TENANT_NEO4J_PASSWORD:-dch_readonly}"
 # URI connector
 DCH_TENANT_URI_DEPLOY_SERVER="${DCH_TENANT_URI_DEPLOY_SERVER:-true}"
 
+# The e2e user runs most tests and holds dch-read-write and dch-secret-export.
 E2E_SA_NAME="dch-e2e-user"
-E2E_DENIED_SA_NAME="dch-e2e-denied-user"
+# Personas: ServiceAccounts holding a fixed slice of permissions, used by the
+# auth, export, and permission tests (tests/test_rbac.py) to check what each
+# grant allows and denies. Their tokens are DCH_PERSONA_<NAME>_AUTH_TOKEN.
+PERSONA_SECRET_READER_SA_NAME="dch-e2e-persona-secret-reader"
+PERSONA_DENIED_SA_NAME="dch-e2e-persona-denied"
+PERSONA_READER_SA_NAME="dch-e2e-persona-reader"
+PERSONA_METADATA_ONLY_SA_NAME="dch-e2e-persona-metadata-only"
+PERSONA_DATA_STORE_ONLY_SA_NAME="dch-e2e-persona-data-store-only"
+PERSONA_CONNECTIONS_ONLY_SA_NAME="dch-e2e-persona-connections-only"
+PERSONA_TYPES_ONLY_SA_NAME="dch-e2e-persona-types-only"
+# The group-member persona lives in DCH_GROUP_MEMBER_NAMESPACE and holds no direct
+# binding: all its access comes from RoleBindings to the group
+# system:serviceaccounts:<DCH_GROUP_MEMBER_NAMESPACE>.
+PERSONA_GROUP_MEMBER_SA_NAME="dch-e2e-persona-group-member"
 PG_SECRET="dch-e2e-pg-creds"
 S3_SECRET="dch-e2e-s3-creds"
 MILVUS_SECRET="dch-e2e-milvus-creds"
@@ -94,6 +127,18 @@ ENV_FILE="$SCRIPT_DIR/.env"
 setup_namespaces() {
     kubectl create namespace "$DCH_TENANT_ID" 2>/dev/null || true
     kubectl create namespace "$DCH_NO_ACCESS_NAMESPACE" 2>/dev/null || true
+    kubectl create namespace "$DCH_NEIGHBOR_TENANT_ID" 2>/dev/null || true
+
+    # Mark the tenant namespaces as DCH tenants. The dc-controller watches
+    # this label and reconciles the REST service's secret-access RoleBinding
+    # into each labelled namespace; see wait_for_tenant_bindings.
+    local ns
+    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        kubectl label namespace "$ns" --overwrite dataconnecthub.opendatahub.io/tenant=true >/dev/null
+    done
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        kubectl create namespace "$DCH_GROUP_MEMBER_NAMESPACE" 2>/dev/null || true
+    fi
 }
 
 setup_user_accounts() {
@@ -101,28 +146,229 @@ setup_user_accounts() {
         kubectl create sa "$E2E_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
     fi
 
-    if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
-        kubectl create sa "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_DENIED_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_DENIED_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_READER_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_CONNECTIONS_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" 2>/dev/null || true
+    fi
+
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        kubectl create sa "$PERSONA_GROUP_MEMBER_SA_NAME" -n "$DCH_GROUP_MEMBER_NAMESPACE" 2>/dev/null || true
+    fi
+}
+
+# RBAC setup deletes each RoleBinding before creating it: roleRef is
+# immutable, so kubectl apply fails when a rerun changes the role a binding
+# references.
+
+# apply_dch_role creates or updates a tenant Role granting <verbs> on DCH
+# data plane <resources> (comma-separated), then binds it to <sa>. The Role and
+# RoleBinding are both named <sa>-<purpose>.
+# kubectl create role cannot be used: it rejects resources that are not served
+# by the API server, and DCH resources exist only for SubjectAccessReview.
+apply_dch_role() {
+    local sa="$1" purpose="$2" resources="$3" verbs="$4"
+    local name="${sa}-${purpose}"
+    kubectl apply -f - >/dev/null <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: ${name}
+  namespace: ${DCH_TENANT_ID}
+rules:
+  - apiGroups: ["dataconnecthub.opendatahub.io"]
+    resources: [${resources}]
+    verbs: [${verbs}]
+EOF
+    kubectl delete rolebinding "$name" -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+    kubectl create rolebinding "$name" \
+        -n "$DCH_TENANT_ID" \
+        --role="$name" \
+        --serviceaccount="${DCH_TENANT_ID}:${sa}" >/dev/null
+}
+
+# setup_persona_rbac grants each DCH_PERSONA_* service account the access its
+# tests need. The denied persona is deliberately left without any binding.
+# RoleBindings are named <persona SA>-<purpose>; a persona's own Role shares
+# the name of the RoleBinding that grants it.
+setup_persona_rbac() {
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        # The secret-reader SA holds the same API access as the e2e user
+        # plus read access to the PG connector secret, so export tests can
+        # cover both outcomes of the service-side SubjectAccessReview. The
+        # plain e2e user deliberately lacks the secret read so the
+        # service-side check denies its exports.
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-read-write -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-read-write \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read-write \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-export -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-export \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-secret-export \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
+        # Export tests export pg_flight_connection, whose credentials_ref is
+        # $PG_SECRET. Granting only that secret makes a successful export
+        # prove the service-side check targets credentials_ref, not another
+        # secret such as the export target. resourceNames need not exist yet.
+        kubectl create role ${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --verb=get --resource=secrets \
+            --resource-name="$PG_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl delete rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --role=${PERSONA_SECRET_READER_SA_NAME}-secret-read \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_SECRET_READER_SA_NAME}" >/dev/null
+    fi
+
+    # Permission matrix personas (tests/test_rbac.py): each holds a fixed slice
+    # of the DCH data plane resources in the tenant namespace.
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        kubectl delete rolebinding ${PERSONA_READER_SA_NAME}-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_READER_SA_NAME}-read \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read \
+            --serviceaccount="${DCH_TENANT_ID}:${PERSONA_READER_SA_NAME}" >/dev/null
+    fi
+
+    # Connection metadata without data-store: Flight and binary download must be denied.
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role "$PERSONA_METADATA_ONLY_SA_NAME" metadata-read \
+            "data-connections, data-connection-types" "get"
+    fi
+
+    # data-store without connection metadata: Flight allowed, REST listing denied.
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role "$PERSONA_DATA_STORE_ONLY_SA_NAME" data-store-read \
+            "data-store" "get"
+    fi
+
+    # data-connections without data-connection-types: connection reads, creates,
+    # readiness, and credential tests allowed; connection type access denied.
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role "$PERSONA_CONNECTIONS_ONLY_SA_NAME" connections-read-create \
+            "data-connections" "get, create"
+    fi
+
+    # data-connection-types without data-connections: connection type reads and
+    # creates allowed; connection access, readiness, and credential tests denied.
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        apply_dch_role "$PERSONA_TYPES_ONLY_SA_NAME" types-read-create \
+            "data-connection-types" "get, create"
+    fi
+
+    # Group-member persona: the secret-reader grants, bound to the group
+    # system:serviceaccounts:$DCH_GROUP_MEMBER_NAMESPACE instead of the SA, so the
+    # tests prove kube-rbac-proxy, Flight, and the REST service-side secret
+    # check all honor group membership.
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        local group="system:serviceaccounts:${DCH_GROUP_MEMBER_NAMESPACE}"
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-read-write -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-read-write \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-read-write \
+            --group="$group" >/dev/null
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-export -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-export \
+            -n "$DCH_TENANT_ID" \
+            --clusterrole=dch-secret-export \
+            --group="$group" >/dev/null
+        kubectl create role ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --verb=get --resource=secrets \
+            --resource-name="$PG_SECRET" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        kubectl delete rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding ${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            -n "$DCH_TENANT_ID" \
+            --role=${PERSONA_GROUP_MEMBER_SA_NAME}-secret-read \
+            --group="$group" >/dev/null
     fi
 }
 
 setup_user_rbac() {
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
-        # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
-        kubectl delete rolebinding dch-e2e-user-access -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
-        kubectl create rolebinding dch-e2e-user-access \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-read-write \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
-        # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
-        kubectl create rolebinding dch-e2e-user-export-secret-rb \
-            -n "$DCH_TENANT_ID" \
-            --clusterrole=dch-secret-export \
-            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+        # The e2e user gets the same API access in the tenant and the neighbor
+        # tenant, so tenancy tests can prove isolation comes from X-Tenant-Id
+        # scoping rather than from a missing RoleBinding.
+        local ns
+        for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+            # Allow the e2e test SA to call DCH REST/Flight APIs (Operations on connections & connection types)
+            kubectl delete rolebinding ${E2E_SA_NAME}-read-write -n "$ns" --ignore-not-found >/dev/null
+            kubectl create rolebinding ${E2E_SA_NAME}-read-write \
+                -n "$ns" \
+                --clusterrole=dch-read-write \
+                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+            # Allow the e2e test SA call DCH REST API /connections/{id}/exports/secrets/{secret_name} (see kube-rbac-proxy)
+            kubectl delete rolebinding ${E2E_SA_NAME}-secret-export -n "$ns" --ignore-not-found >/dev/null
+            kubectl create rolebinding ${E2E_SA_NAME}-secret-export \
+                -n "$ns" \
+                --clusterrole=dch-secret-export \
+                --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" >/dev/null
+        done
     fi
 }
 
+# wait_for_tenant_bindings waits until the dc-controller has reconciled the
+# dch-rest-service-secret-access RoleBinding into each labelled tenant
+# namespace (setup_namespaces applies the tenant label the controller
+# watches). REST tenant secret access for inline credentials, rollback,
+# readiness, and export comes from this binding; the runner never creates it.
+wait_for_tenant_bindings() {
+    local ns subject subject_ns deadline
+    for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+        # kubectl wait fails fast while the RoleBinding does not exist yet,
+        # so retry until the overall deadline instead of waiting once.
+        deadline=$((SECONDS + 120))
+        until kubectl wait --for=jsonpath='{.roleRef.name}'=dch-rest-service-secret-access \
+                rolebinding/dch-rest-service-secret-access \
+                -n "$ns" --timeout=10s >/dev/null 2>&1; do
+            if (( SECONDS >= deadline )); then
+                echo "ERROR: dc-controller did not reconcile dch-rest-service-secret-access into namespace '$ns' within 120s." >&2
+                echo "       Check the namespace carries the dataconnecthub.opendatahub.io/tenant=true label" >&2
+                echo "       and the deployed dc-controller includes the tenant-namespace controller." >&2
+                exit 1
+            fi
+            sleep 2
+        done
+        subject=$(kubectl get rolebinding dch-rest-service-secret-access -n "$ns" -o jsonpath='{.subjects[0].name}')
+        subject_ns=$(kubectl get rolebinding dch-rest-service-secret-access -n "$ns" -o jsonpath='{.subjects[0].namespace}')
+        if [[ "$subject" != "$DCH_REST_SA" || "$subject_ns" != "$DCH_SERVICE_NAMESPACE" ]]; then
+            echo "ERROR: tenant RoleBinding in '$ns' has unexpected subject ${subject_ns}/${subject}" >&2
+            exit 1
+        fi
+    done
+    echo "    REST secret access reconciled by dc-controller in tenant namespaces"
+}
+
+# setup_service_rbac grants the DCH service accounts access to tenant secrets.
+# Flight read access is granted by the runner; REST secret access is granted
+# by the dc-controller from the tenant label (see wait_for_tenant_bindings).
 setup_service_rbac() {
     # Allow flight service SA to read K8s secret for datasource in tenant namespace
     local -a secret_names=()
@@ -135,25 +381,46 @@ setup_service_rbac() {
     [[ "$E2E_URI_ENABLED" == "true" ]] && secret_names+=("--resource-name=$URI_SECRET")
 
     if [[ ${#secret_names[@]} -gt 0 ]]; then
-        kubectl create role dch-e2e-flight-secret-read \
+        kubectl create role dch-e2e-flight-service-secret-read \
             -n "$DCH_TENANT_ID" \
             --verb=get --resource=secrets \
             "${secret_names[@]}" \
             --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-        kubectl create rolebinding dch-e2e-flight-secret-read-rb \
+        kubectl delete rolebinding dch-e2e-flight-service-secret-read -n "$DCH_TENANT_ID" --ignore-not-found >/dev/null
+        kubectl create rolebinding dch-e2e-flight-service-secret-read \
             -n "$DCH_TENANT_ID" \
-            --role=dch-e2e-flight-secret-read \
-            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" \
-            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+            --role=dch-e2e-flight-service-secret-read \
+            --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_FLIGHT_SA}" >/dev/null
     fi
 
-    # Grant REST tenant secret access for inline credentials, rollback, readiness, and export.
-    kubectl create rolebinding dch-e2e-rest-service-secret-access \
-        -n "$DCH_TENANT_ID" \
-        --clusterrole=dch-rest-service-secret-access \
-        --serviceaccount="${DCH_SERVICE_NAMESPACE}:${DCH_REST_SA}" \
-        --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    # REST tenant secret access (inline credentials, rollback, readiness,
+    # export) is reconciled by the dc-controller from the tenant label. The
+    # neighbor tenant needs it too, so tenancy tests can create inline
+    # credentials there and check the secret lands in the neighbor namespace.
+    wait_for_tenant_bindings
+}
+
+# setup_global_namespace prepares the namespace that global namespace tests
+# (tests/test_global_namespace.py) label as global. The tests run only when the
+# platform Auth CR exists, because dc-controller enables global namespaces only
+# when the Auth CRD is installed. The e2e user manages the namespace through
+# its own dch-read-write RoleBinding, as administrators can grant to a group
+# outside the Auth CR adminGroups, so the tests do not depend on adminGroups.
+setup_global_namespace() {
+    E2E_GLOBAL_NAMESPACE_ENABLED="false"
+    if ! kubectl get auths.services.platform.opendatahub.io auth >/dev/null 2>&1; then
+        return 0
+    fi
+    kubectl create namespace "$DCH_GLOBAL_NAMESPACE" 2>/dev/null || true
+    if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
+        kubectl create rolebinding dch-e2e-global-writer \
+            -n "$DCH_GLOBAL_NAMESPACE" \
+            --clusterrole=dch-read-write \
+            --serviceaccount="${DCH_TENANT_ID}:${E2E_SA_NAME}" \
+            --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+    fi
+    E2E_GLOBAL_NAMESPACE_ENABLED="true"
 }
 
 # -------------------------------------------------------------------
@@ -426,13 +693,38 @@ seed_es_data() {
 
 generate_tokens() {
     local -a token_args=(--duration=4h)
-    [[ -n "${DCH_TOKEN_AUDIENCE:-}" ]] && token_args+=(--audience="$DCH_TOKEN_AUDIENCE")
+    # DCH_TOKEN_AUDIENCE is a comma-separated list; each entry becomes one --audience.
+    local audiences="${DCH_TOKEN_AUDIENCE:-}" audience
+    for audience in ${audiences//,/ }; do
+        token_args+=(--audience="$audience")
+    done
 
     if [[ -z "${DCH_AUTH_TOKEN:-}" ]]; then
         DCH_AUTH_TOKEN=$(kubectl create token "$E2E_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
     fi
-    if [[ -z "${DCH_DENIED_AUTH_TOKEN:-}" ]]; then
-        DCH_DENIED_AUTH_TOKEN=$(kubectl create token "$E2E_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    if [[ -z "${DCH_PERSONA_SECRET_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_SECRET_READER_AUTH_TOKEN=$(kubectl create token "$PERSONA_SECRET_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_DENIED_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_DENIED_AUTH_TOKEN=$(kubectl create token "$PERSONA_DENIED_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_READER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_READER_AUTH_TOKEN=$(kubectl create token "$PERSONA_READER_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_METADATA_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_DATA_STORE_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_CONNECTIONS_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=$(kubectl create token "$PERSONA_TYPES_ONLY_SA_NAME" -n "$DCH_TENANT_ID" "${token_args[@]}")
+    fi
+    if [[ -z "${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN:-}" ]]; then
+        DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN=$(kubectl create token "$PERSONA_GROUP_MEMBER_SA_NAME" -n "$DCH_GROUP_MEMBER_NAMESPACE" "${token_args[@]}")
     fi
 }
 
@@ -443,13 +735,29 @@ generate_tokens() {
 write_env_file() {
     cat > "$ENV_FILE" <<EOF
 DCH_GATEWAY_ENDPOINT=${DCH_GATEWAY_ENDPOINT}
+DCH_SERVICE_NAMESPACE=${DCH_SERVICE_NAMESPACE}
 DCH_TENANT_ID=${DCH_TENANT_ID}
 DCH_NO_ACCESS_NAMESPACE=${DCH_NO_ACCESS_NAMESPACE}
+DCH_NEIGHBOR_TENANT_ID=${DCH_NEIGHBOR_TENANT_ID}
 DCH_AUTH_TOKEN=${DCH_AUTH_TOKEN}
-DCH_DENIED_AUTH_TOKEN=${DCH_DENIED_AUTH_TOKEN}
+DCH_PERSONA_SECRET_READER_AUTH_TOKEN=${DCH_PERSONA_SECRET_READER_AUTH_TOKEN}
+DCH_PERSONA_DENIED_AUTH_TOKEN=${DCH_PERSONA_DENIED_AUTH_TOKEN}
+DCH_PERSONA_READER_AUTH_TOKEN=${DCH_PERSONA_READER_AUTH_TOKEN}
+DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN=${DCH_PERSONA_METADATA_ONLY_AUTH_TOKEN}
+DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN=${DCH_PERSONA_DATA_STORE_ONLY_AUTH_TOKEN}
+DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN=${DCH_PERSONA_CONNECTIONS_ONLY_AUTH_TOKEN}
+DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN=${DCH_PERSONA_TYPES_ONLY_AUTH_TOKEN}
+DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN=${DCH_PERSONA_GROUP_MEMBER_AUTH_TOKEN}
 DCH_INSECURE=${DCH_INSECURE}
 DCH_GATEWAY_AUTH_REQUIRED=${DCH_GATEWAY_AUTH_REQUIRED}
+DCH_AUDIT_ENABLED=${DCH_AUDIT_ENABLED:-false}
+DCH_AUDIT_LOG_QUERIES=${DCH_AUDIT_LOG_QUERIES:-false}
+DCH_REST_SA=${DCH_REST_SA}
+DCH_FLIGHT_SA=${DCH_FLIGHT_SA}
 EOF
+
+    [[ "$E2E_GLOBAL_NAMESPACE_ENABLED" == "true" ]] && \
+        echo "DCH_GLOBAL_NAMESPACE=${DCH_GLOBAL_NAMESPACE}" >> "$ENV_FILE"
 
     if [[ "$E2E_PG_ENABLED" == "true" ]]; then
         echo "DCH_PG_SECRET=${PG_SECRET}" >> "$ENV_FILE"
@@ -544,7 +852,14 @@ setup_user_accounts
 echo "[3/11] Service accounts ready"
 
 setup_user_rbac
+setup_persona_rbac
+setup_global_namespace
 echo "[4/11] SA RBAC ready"
+if [[ "$E2E_GLOBAL_NAMESPACE_ENABLED" == "true" ]]; then
+    echo "       Global namespace $DCH_GLOBAL_NAMESPACE ready"
+else
+    echo "       Global namespace tests skipped (no platform Auth CR)"
+fi
 
 # 4. Credential secrets
 setup_pg_secret
@@ -563,7 +878,7 @@ SECRETS_MSG=""
 [[ "$E2E_ES_BASIC_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Elasticsearch"
 [[ "$E2E_NEO4J_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }Neo4j"
 [[ "$E2E_URI_ENABLED" == "true" ]] && SECRETS_MSG="${SECRETS_MSG:+$SECRETS_MSG + }URI"
-echo "[5/11] ${SECRETS_MSG:-none} secrets + Flight RBAC ready"
+echo "[5/11] ${SECRETS_MSG:-none} secrets + service RBAC ready"
 
 # 5. Seed test data
 seed_pg_data

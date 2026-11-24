@@ -11,6 +11,7 @@ import time
 
 import httpx
 import pytest
+
 from data_connect_hub import DataConnectClient
 
 _TRACE_POLL_TIMEOUT = 30

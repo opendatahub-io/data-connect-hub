@@ -8,6 +8,10 @@ properties:
     type: string
     description: Display name for the connection.
     example: my-postgres
+  description:
+    type: string
+    description: Optional free-form description of the connection.
+    example: Sales data warehouse
   data_connection_type_id:
     type: string
     description: References a connection type id

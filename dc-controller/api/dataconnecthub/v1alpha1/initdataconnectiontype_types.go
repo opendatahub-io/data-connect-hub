@@ -62,6 +62,15 @@ type CredentialsField struct {
 	// +kubebuilder:validation:MaxLength=1024
 	// +optional
 	DefaultValue *string `json:"defaultValue,omitempty"`
+
+	// sensitive indicates whether the field value should be masked in the UI
+	// +optional
+	Sensitive bool `json:"sensitive,omitempty"`
+
+	// multiple indicates whether more than one enum value may be selected;
+	// only meaningful when type is "enum"
+	// +optional
+	Multiple bool `json:"multiple,omitempty"`
 }
 
 // InitDataConnectionTypeSpec defines the desired state of InitDataConnectionType.
@@ -115,6 +124,8 @@ type InitDataConnectionTypeStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:categories=opendatahub,shortName=idct
 // +kubebuilder:printcolumn:name="Provider",type=string,JSONPath=`.spec.provider`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Synced",type=string,JSONPath=`.status.conditions[?(@.type=="Synced")].status`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
 
 // InitDataConnectionType is the Schema for the initdataconnectiontypes API

@@ -6,15 +6,18 @@ The standard DCH deployment requires a bearer token for API access. Include `Aut
 
 ## 2. Configure tenant access
 
-DCH uses separate permissions for its services and for the people or applications calling its APIs. Configure service access to connection secrets for each tenant, then grant callers the DCH API access they need.
+DCH uses separate permissions for its services and for the people or applications calling its APIs. Label each tenant namespace so the dc-controller can grant the REST service access to connection secrets (2.3), grant Flight read access to the connection Secrets it needs (2.2), and grant callers the DCH API access they need (2.4).
 
 ### 2.1 Create a tenant namespace
 
-Each tenant maps to a Kubernetes namespace. Clients pass this namespace in the `X-Tenant-Id` header. Create it if it does not already exist:
+Each tenant maps to a Kubernetes namespace. Clients pass this namespace in the `X-Tenant-Id` header. Create it if it does not already exist, then label it as a DCH tenant:
 
 ```bash
 kubectl create namespace team-alpha
+kubectl label namespace team-alpha dataconnecthub.opendatahub.io/tenant=true
 ```
+
+The dc-controller watches namespaces carrying this label and reconciles the REST service's secret permissions into them automatically (see 2.3).
 
 ### 2.2 Grant Flight Service permission to read connection secrets
 
@@ -43,7 +46,18 @@ kubectl create rolebinding dch-flight-secret-read-rb \
 
 ### 2.3 Grant REST Service permission to manage connection secrets
 
-DCH installs the `dch-rest-service-secret-access` ClusterRole. Bind it in each tenant namespace:
+DCH installs the `dch-rest-service-secret-access` ClusterRole. The dc-controller binds it to the REST ServiceAccount in every namespace labelled `dataconnecthub.opendatahub.io/tenant=true` (see 2.1), so no manual RBAC step is required. Verify the binding exists after labelling the namespace:
+
+```bash
+kubectl get rolebinding dch-rest-service-secret-access -n team-alpha
+```
+
+The binding is created shortly after the label is applied.
+
+<details>
+<summary>Standalone installs without the dc-controller</summary>
+
+Bind the ClusterRole manually in each tenant namespace:
 
 ```bash
 TENANT_NAMESPACE=team-alpha
@@ -57,14 +71,36 @@ kubectl create rolebinding dch-rest-service-secret-access \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
+When migrating a standalone install to the dc-controller, the controller
+does not take the manual binding over: a pre-existing binding without the
+managed-by label is left unchanged, and the controller reports a warning
+event on the tenant namespace (`kubectl describe namespace
+"$TENANT_NAMESPACE"`). Resolve the conflict either by deleting the manual
+binding — the controller recreates and manages it — or by opting in:
+
+```bash
+kubectl label rolebinding dch-rest-service-secret-access \
+  -n "$TENANT_NAMESPACE" \
+  dataconnecthub.opendatahub.io/managed-by=dataconnectservice
+```
+</details>
+
 ### 2.4 Grant users access to Flight and REST APIs
+
+DCH authorization falls into three categories, following the resource model in [ODH-ADR-0001](https://github.com/opendatahub-io/architecture-decision-records/blob/main/architecture-decision-records/data-connect-hub/ODH-ADR-0001-data-connect-hub.md#dch-kube-resources-for-data-plane-apis):
+
+- **Metadata**: reading or changing connections and connection types requires the matching verb on `data-connections` or `data-connection-types`. Readiness checks and credential tests count as `create` on `data-connections`.
+- **Data ingestion**: binary download and every tenant-scoped Flight call require `get` on `data-store`. Only health checks and the internal connector discovery call are exempt.
+- **Secrets**: exporting credentials requires `create` on core `secrets`, plus `get` on the connection's credentials Secret.
+
+Ingesting data does not require any access to Secrets; this is by design. DCH resolves a connection's credentials with its own ServiceAccounts (see 2.2 and 2.3) and never returns them to the caller, so a user with `get` on `data-store` can read data without being able to read the credentials behind it. Export is the exception: it copies credentials into a Secret the caller can read, so DCH requires the caller to be able to read the source Secret already.
 
 DCH provides these ClusterRoles:
 
 | Predefined ClusterRole | Access |
 |---|---|
-| `dch-read` | Read connections, connection types, and data-store resources. |
-| `dch-read-write` | Read and modify those DCH resources. |
+| `dch-read` | `get` on connections, connection types, and data-store resources. |
+| `dch-read-write` | `get`, `create`, `patch`, and `delete` on connections and connection types, plus `get` on data-store. |
 | `dch-admin` | Same permissions as `dch-read-write`. Reserved for future administrative operations. |
 | `dch-secret-export` | Create or overwrite Secrets in a tenant namespace (required for the export endpoint). |
 
@@ -74,9 +110,14 @@ Minimum role by operation:
 | List or get connections, connection types, binary data | `dch-read` |
 | Create, update, or delete connections and connection types | `dch-read-write` |
 | Readiness check, credential test | `dch-read-write` |
-| Export connection secret | `dch-read-write` + `dch-secret-export` |
+| Export connection secret | `dch-secret-export` + `get` on the connection's credentials Secret |
+| Flight queries (all Flight calls) | `dch-read` |
 
-Create one RoleBinding per user and tenant. Example: grant Alice read access in `team-alpha`:
+The predefined ClusterRoles cover most cases. To grant finer-grained access, see [5.1 Custom Roles](#51-custom-roles).
+
+Bind roles to users or groups with a RoleBinding in each tenant namespace. Every DCH check honors group membership, including the export check on the source Secret. On OpenShift, binding to a group is usually easier to manage than one binding per user.
+
+Example: grant Alice read access in `team-alpha`:
 
 ```bash
 TENANT_NAMESPACE=team-alpha
@@ -89,6 +130,22 @@ kubectl create rolebinding alice-data-access \
   --user="$DCH_USER" \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
+
+Example: grant every member of the `team-alpha-analysts` group read access in `team-alpha`:
+
+```bash
+TENANT_NAMESPACE=team-alpha
+DCH_GROUP=team-alpha-analysts
+DCH_ROLE=dch-read
+
+kubectl create rolebinding team-alpha-analysts-data-access \
+  -n "$TENANT_NAMESPACE" \
+  --clusterrole="$DCH_ROLE" \
+  --group="$DCH_GROUP" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+To grant every ServiceAccount in a namespace, such as workbenches or pipelines running in `team-alpha`, use the group `system:serviceaccounts:team-alpha`.
 
 The export endpoint (`PUT /connections/{id}/exports/secrets/{secret_name}`) requires the caller to have `create` access to Secrets in the tenant namespace. Bind the predefined `dch-secret-export` ClusterRole:
 
@@ -103,13 +160,36 @@ kubectl create rolebinding alice-secret-export \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
+The caller also needs `get` on the connection's credentials Secret. Example: let the `team-alpha-analysts` group read the `pg-creds` Secret only:
+
+```bash
+TENANT_NAMESPACE=team-alpha
+DCH_GROUP=team-alpha-analysts
+SECRET_NAME=pg-creds
+
+kubectl create role "${SECRET_NAME}-read" \
+  -n "$TENANT_NAMESPACE" \
+  --verb=get \
+  --resource=secrets \
+  --resource-name="$SECRET_NAME" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl create rolebinding "team-alpha-analysts-${SECRET_NAME}-read" \
+  -n "$TENANT_NAMESPACE" \
+  --role="${SECRET_NAME}-read" \
+  --group="$DCH_GROUP" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+Group names must not contain `|`. kube-rbac-proxy forwards the caller's groups to DCH joined with `|`, so DCH reads a group named `a|b` as the two groups `a` and `b` when it checks access to the source Secret. A caller who can name a group `x|system:masters` passes that check for any Secret, so binding Secret access to users only does not help. If your identity provider lets users create and name their own groups, disallow `|` in group names there. If you cannot, do not grant `dch-secret-export` until DCH receives an unambiguous group encoding.
+
 ## 3. Authentication flow
 
 ### 3.1 Flight requests
 
 1. Send `Authorization: Bearer <token>` and `X-Tenant-Id: <namespace>`.
 2. DCH validates the token and identifies the caller.
-3. DCH checks the caller has `get` access to `data-connections` in the tenant namespace. `dch-read` is sufficient for all Flight operations (see 2.4).
+3. DCH checks the caller has `get` access to `data-store` in the tenant namespace. `dch-read` is sufficient for all Flight operations (see 2.4).
 4. For a saved connection, Flight reads its Secret using the service permission from 2.2.
 
 #### Flight errors
@@ -141,7 +221,17 @@ Flight caches authentication and authorization results for 300 seconds (5 minute
 
 ### Connection creation or export fails with `cannot_create_secret`
 
-The REST API returns HTTP 400 with `cannot_create_secret` when the Kubernetes secret write fails. Check the REST logs for the underlying cause, such as Kubernetes `403 Forbidden` or an existing secret name.
+The REST API returns `cannot_create_secret` when the Kubernetes secret write fails. The message names the secret and namespace, followed by the Kubernetes error:
+
+| HTTP status | Kubernetes error | Cause and fix |
+|---|---|---|
+| `500` | `secrets is forbidden: User "system:serviceaccount:..." cannot <verb> resource "secrets"` | The REST ServiceAccount has no Secret access in the tenant namespace. The verb is `create` for connection creation, and `patch` or `create` for export. Bind the ClusterRole as described in [2.3](#23-grant-rest-service-permission-to-manage-connection-secrets). |
+| `500` | `admission webhook "..." denied the request` | A cluster policy rejected the Secret. Check the named webhook or policy. |
+| `409` | `secrets "..." already exists` | Choose a different secret name in the request. |
+| `409` | `Apply failed with ... conflict` | The export target Secret has fields managed by another client. Choose a different secret name, or delete the existing Secret. |
+| `422` | `... is invalid: ...` or `not valid in a request URI` | Fix the secret name, namespace, or keys named in the message. |
+| `422` | `namespaces "..." not found` | The tenant namespace in `X-Tenant-Id` does not exist. Use an existing tenant namespace. |
+| `503` | Throttling (`429`), server error, or connection failure | The Kubernetes API is unavailable. Retry later; if it persists, check the REST logs and the API server. |
 
 Run these checks as an administrator with permission to impersonate the REST ServiceAccount. Replace the deployment and namespace values for your installation:
 
@@ -163,10 +253,41 @@ for verb in get create patch delete; do
 done
 ```
 
-For the full inline-credential, readiness, and export workflow, each permission check should return `yes`. If the ClusterRole is missing, upgrade the controller to a version that installs it. If a required permission returns `no`, apply the tenant-local RoleBinding from [REST service secret permissions](#23-grant-rest-service-permission-to-manage-connection-secrets), then retry. Check the ServiceAccount named in the log error: REST, Flight, and the controller use different identities.
+For the full inline-credential, readiness, and export workflow, each permission check should return `yes`. If the ClusterRole is missing, upgrade the controller to a version that installs it. If a required permission returns `no`, first check the tenant namespace is labelled and the controller reconciled the binding:
+
+```bash
+kubectl get namespace "$TENANT_NAMESPACE" --show-labels
+kubectl get rolebinding dch-rest-service-secret-access -n "$TENANT_NAMESPACE"
+```
+
+Apply the label from 2.1 if it is missing. On standalone installs without the dc-controller, apply the tenant-local RoleBinding from [REST service secret permissions](#23-grant-rest-service-permission-to-manage-connection-secrets), then retry. Check the ServiceAccount named in the log error: REST, Flight, and the controller use different identities.
 
 An HTTP 403 from kube-rbac-proxy instead points to caller authorization. Check the caller's tenant permissions separately; changing the REST ServiceAccount's RoleBinding does not authorize the caller.
 
 ### Connection creation succeeds, but readiness reports `Secret cannot be read`
 
 Creating a connection with `credentials_ref` stores metadata without reading or creating the secret. Readiness requires REST to read it, and Flight needs read access to use the connection. Verify that the secret exists in the tenant namespace and both ServiceAccounts have `get` on that secret. A successful credential test also does not prove secret access: it passes credentials directly without storing them.
+
+## 5. Reference
+
+### 5.1 Custom Roles
+
+To build custom Roles, grant the resource and verb each endpoint requires in the tenant namespace. DCH resources use API group `dataconnecthub.opendatahub.io`; `secrets` is in the core group. REST paths are relative to `/api/v1alpha1/data`.
+
+| Endpoint | Resource | Verb |
+|---|---|---|
+| `POST /connections` | `data-connections` | `create` |
+| `GET /connections` | `data-connections` | `get` |
+| `GET /connections/{id}` | `data-connections` | `get` |
+| `PATCH /connections/{id}` | `data-connections` | `patch` |
+| `DELETE /connections/{id}` | `data-connections` | `delete` |
+| `POST /connections/{id}/readiness` | `data-connections` | `create` |
+| `POST /test/credentials` | `data-connections` | `create` |
+| `PUT /connections/{id}/exports/secrets/{secret_name}` | `secrets` | `create`, plus `get` on the connection's credentials Secret |
+| `POST /connection-types` | `data-connection-types` | `create` |
+| `GET /connection-types` | `data-connection-types` | `get` |
+| `GET /connection-types/{id}` | `data-connection-types` | `get` |
+| `PATCH /connection-types/{id}` | `data-connection-types` | `patch` |
+| `DELETE /connection-types/{id}` | `data-connection-types` | `delete` |
+| `GET /connections/{id}/binary` | `data-store` | `get` |
+| (gRPC) `/arrow.flight.protocol.FlightService` | `data-store` | `get` |

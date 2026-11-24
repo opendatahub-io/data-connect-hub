@@ -36,7 +36,7 @@ var _ = Describe("dc-controller", Ordered, func() {
 
 	BeforeAll(func() {
 		fixture = support.NewE2EFixture()
-		fixture.Setup(managerImage)
+		fixture.Setup(managerImage, restImage, flightImage)
 	})
 
 	AfterAll(func() {
@@ -55,11 +55,19 @@ var _ = Describe("dc-controller", Ordered, func() {
 		It("starts the controller manager", func() {
 			fixture.AssertControllerReady()
 		})
+
+		It("uses JSON logging with the required fields", func() {
+			fixture.AssertControllerJSONLogging()
+		})
 	})
 
 	Context("DataConnectService reconciliation", func() {
 		It("creates a DataConnectService and waits for Ready", func() {
 			fixture.CreateDataConnectService()
+		})
+
+		It("uses JSON logging for REST and Flight", func() {
+			fixture.AssertServiceJSONLogging()
 		})
 
 		It("reconciles REST replica changes", func() {
@@ -77,6 +85,28 @@ var _ = Describe("dc-controller", Ordered, func() {
 
 			It("overrides connector defaults", func() {
 				fixture.OverrideFlightConnectorDefaults("postgres")
+			})
+		})
+
+		Context("audit logging", func() {
+			BeforeAll(func() {
+				DeferCleanup(fixture.ResetAudit)
+			})
+
+			It("is disabled by default when the CR has no audit section", func() {
+				fixture.AssertAuditDisabled()
+			})
+
+			It("sets AUDIT_ENABLED=true on both services when enabled", func() {
+				fixture.EnableAudit()
+			})
+
+			It("sets AUDIT_LOG_QUERIES=true on both services when query logging is enabled", func() {
+				fixture.EnableAuditQueryLogging()
+			})
+
+			It("removes the audit env vars when disabled again", func() {
+				fixture.DisableAudit()
 			})
 		})
 	})

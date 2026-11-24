@@ -8,6 +8,7 @@
 --     updated_at            string    — ISO 8601 last-update timestamp
 --   resource                object    — DataConnection
 --     name                  string    — human-readable connection name
+--     description           string    — optional free-form description (omitted when unset)
 --     data_connection_type_id string  — references data_connection_types metadata.id.
 --                                       Not a database-level foreign key: the
 --                                       reference is enforced in the meta store, which
@@ -55,6 +56,8 @@ CREATE INDEX IF NOT EXISTS idx_data_connections_type_id ON data_connections ((da
 --             value         string          — stored value
 --             label         string          — display label
 --         default_value     string | null   — optional default
+--         sensitive         boolean         — whether the value should be masked in the UI (default false)
+--         multiple          boolean         — whether more than one enum value may be selected (default false)
 --     label                 string | null   — optional display label
 --     tags                  array | null    — optional free-form labels
 CREATE TABLE IF NOT EXISTS data_connection_types (

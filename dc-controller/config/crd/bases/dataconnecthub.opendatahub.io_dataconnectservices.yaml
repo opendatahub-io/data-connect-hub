@@ -22,6 +22,10 @@ spec:
     - jsonPath: .status.phase
       name: Phase
       type: string
+    - jsonPath: .status.globalTenants
+      name: Global Tenants
+      priority: 1
+      type: string
     - jsonPath: .metadata.creationTimestamp
       name: Age
       type: date
@@ -51,6 +55,28 @@ spec:
           spec:
             description: spec defines the desired state of DataConnectService
             properties:
+              audit:
+                description: |-
+                  audit configures audit logging for the services.
+                  Audit logging is disabled by default.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      enabled turns on audit logging (who accessed what, and whether it
+                      succeeded or failed) in the REST and Flight service logs.
+                      Sets AUDIT_ENABLED on the rest-server and flight-server containers.
+                    type: boolean
+                  logQueries:
+                    default: false
+                    description: |-
+                      logQueries includes what was actually read (the SQL statement for
+                      query operations, or the file path for downloads) in the audit.query
+                      field of audit records. Queries can contain sensitive data, so this
+                      is off by default and only takes effect when enabled is true.
+                      Sets AUDIT_LOG_QUERIES on the rest-server and flight-server containers.
+                    type: boolean
+                type: object
               flightService:
                 description: flightService configures the Flight gRPC API deployment
                   or deployments.
@@ -303,6 +329,14 @@ spec:
                           x-kubernetes-map-type: atomic
                       type: object
                     type: array
+                  imagePullPolicy:
+                    description: imagePullPolicy overrides the container's image pull
+                      policy
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    type: string
                   replicas:
                     default: 1
                     description: replicas overrides the number of pods
@@ -2722,6 +2756,14 @@ spec:
                           x-kubernetes-map-type: atomic
                       type: object
                     type: array
+                  imagePullPolicy:
+                    description: imagePullPolicy overrides the container's image pull
+                      policy
+                    enum:
+                    - Always
+                    - IfNotPresent
+                    - Never
+                    type: string
                   replicas:
                     default: 1
                     description: replicas overrides the number of pods
@@ -5018,6 +5060,16 @@ spec:
                 - name
                 - namespace
                 type: object
+              globalTenants:
+                description: |-
+                  globalTenants lists the namespaces labeled
+                  opendatahub.io/global-data-connect-hub-project whose connection types the
+                  services currently share with every tenant. Empty when no namespace is
+                  labeled or the platform Auth API is not installed.
+                items:
+                  type: string
+                type: array
+                x-kubernetes-list-type: set
               httpRoute:
                 description: httpRoute is the name of the HTTPRoute resource created
                   for this service

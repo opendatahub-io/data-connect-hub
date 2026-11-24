@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pyarrow as pa
+import pyarrow.flight as flight
 import pytest
 
-from data_connect_hub._flight import FlightClient, _encode_varint
+from data_connect_hub._flight import FlightClient, _encode_varint, _grpc_proxy_options
+from data_connect_hub.client import _build_urls
 from data_connect_hub.exceptions import DCHConfigError, DCHConnectionError, DCHQueryError
 
 
@@ -383,6 +387,57 @@ class TestHeaders:
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-data-connection-id"] == "my-conn"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.authorization"] == "Bearer tok"
         assert db_kwargs["adbc.flight.sql.rpc.call_header.x-tenant-id"] == "t1"
+
+
+def _mock_get_tables_client(table: pa.Table) -> MagicMock:
+    mock_client = MagicMock()
+    mock_client.get_flight_info.return_value.endpoints = [MagicMock()]
+    mock_client.do_get.return_value.read_all.return_value = table
+    return mock_client
+
+
+class TestGetTables:
+    # Real FlightCallOptions (wrapped only to record its arguments), so the
+    # minimum-dependency CI job catches pyarrow APIs missing from old releases.
+    def test_sends_auth_tenant_and_connection_headers(self, flight_client: FlightClient) -> None:
+        table = pa.table({"table_name": ["cities"]})
+        mock_client = _mock_get_tables_client(table)
+        with (
+            patch("data_connect_hub._flight.flight.connect", return_value=mock_client),
+            patch("data_connect_hub._flight.flight.FlightCallOptions", wraps=flight.FlightCallOptions) as call_options,
+        ):
+            result = flight_client.get_tables("my-conn")
+
+        assert result is table
+        call_options.assert_called_once()
+        assert sorted(call_options.call_args.kwargs["headers"]) == [
+            (b"authorization", b"Bearer tok"),
+            (b"x-data-connection-id", b"my-conn"),
+            (b"x-tenant-id", b"t1"),
+        ]
+        opts = mock_client.get_flight_info.call_args.args[1]
+        assert isinstance(opts, flight.FlightCallOptions)
+        assert mock_client.do_get.call_args.args[1] is opts
+        mock_client.close.assert_called_once()
+
+    @pytest.mark.parametrize("failure_point", ["get_flight_info", "do_get"])
+    def test_auth_error_refreshes_token_and_retries(self, failure_point: str) -> None:
+        tokens = iter(["old-tok", "new-tok"])
+        client = FlightClient(url="grpc://localhost:50051", tenant_id="t1", token_provider=lambda: next(tokens))
+        table = pa.table({"table_name": ["cities"]})
+        rejected = _mock_get_tables_client(table)
+        getattr(rejected, failure_point).side_effect = Exception("Unauthenticated: token expired")
+        accepted = _mock_get_tables_client(table)
+        with (
+            patch("data_connect_hub._flight.flight.connect", side_effect=[rejected, accepted]),
+            patch("data_connect_hub._flight.flight.FlightCallOptions", wraps=flight.FlightCallOptions) as call_options,
+        ):
+            result = client.get_tables("my-conn")
+
+        assert result is table
+        sent_tokens = [dict(c.kwargs["headers"])[b"authorization"] for c in call_options.call_args_list]
+        assert sent_tokens == [b"Bearer old-tok", b"Bearer new-tok"]
+        rejected.close.assert_called_once()
 
 
 class TestTokenProviderGuard:
@@ -763,6 +818,136 @@ def _decode_proto_fields(data: bytes) -> dict[int, bytes | int]:
             fields[field_number] = data[i : i + length]
             i += length
     return fields
+
+
+_GATEWAY_URL = "grpc+tls://dch.apps.example.com:443"
+
+
+class TestGrpcProxyOptions:
+    @pytest.fixture(autouse=True)
+    def _clean_proxy_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for name in list(os.environ):
+            if name.lower().endswith("_proxy") or name == "REQUEST_METHOD":
+                monkeypatch.delenv(name)
+
+    def test_no_proxy_env_returns_no_options(self) -> None:
+        assert _grpc_proxy_options(_GATEWAY_URL) == []
+
+    @pytest.mark.parametrize("name", ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy", "grpc_proxy"])
+    def test_proxy_env_is_passed_explicitly(self, monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+        # gRPC C-core ignores the uppercase forms; the SDK must forward them itself.
+        monkeypatch.setenv(name, "http://proxy.example.com:3128")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.http_proxy", "http://proxy.example.com:3128")]
+
+    def test_precedence_matches_grpc(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("http_proxy", "http://http-proxy:3128")
+        monkeypatch.setenv("https_proxy", "http://https-proxy:3128")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.http_proxy", "http://https-proxy:3128")]
+        monkeypatch.setenv("grpc_proxy", "http://grpc-proxy:3128")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.http_proxy", "http://grpc-proxy:3128")]
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="Windows environment variables are case-insensitive")
+    def test_lowercase_wins_over_uppercase(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://upper:3128")
+        monkeypatch.setenv("https_proxy", "http://lower:3128")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.http_proxy", "http://lower:3128")]
+        monkeypatch.setenv("NO_PROXY", "")
+        monkeypatch.setenv("no_proxy", ".example.com")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.enable_http_proxy", 0)]
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "grpc://127.0.0.1:18443",
+            "grpc://127.1.2.3:18443",
+            "grpc://localhost:18443",
+            "grpc://LocalHost:18443",
+            "grpc://dch.localhost:18443",
+            "grpc://[::1]:18443",
+            "grpc://0.0.0.0:18443",
+        ],
+    )
+    def test_loopback_bypasses_proxy_without_no_proxy(self, monkeypatch: pytest.MonkeyPatch, url: str) -> None:
+        # e.g. oc port-forward; matches grpc-go (ADBC), which never proxies loopback.
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        assert _grpc_proxy_options(url) == [("grpc.enable_http_proxy", 0)]
+
+    def test_scheme_less_proxy_gets_http_scheme(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "proxy.example.com:3128")
+        assert _grpc_proxy_options(_GATEWAY_URL) == [("grpc.http_proxy", "http://proxy.example.com:3128")]
+
+    @pytest.mark.parametrize(
+        ("url", "no_proxy"),
+        [
+            (_GATEWAY_URL, ".example.com"),
+            (_GATEWAY_URL, "localhost,dch.apps.example.com"),
+            (_GATEWAY_URL, "*"),
+            ("grpc://10.1.2.3:50051", "localhost,10.0.0.0/8"),
+            ("grpc://[fd00::1]:50051", "fd00::/8"),
+            (_GATEWAY_URL, "dch.apps.example.com:443"),
+            (_GATEWAY_URL, ".example.com:443"),
+            (_GATEWAY_URL, "*.example.com"),
+            # Portless URL (as built by _build_urls for a bare host): gRPC dials 443.
+            ("grpc+tls://dch.apps.example.com", "dch.apps.example.com:443"),
+            ("grpc://10.1.2.3", "10.1.2.3:443"),
+            ("grpc://10.1.2.3:50051", "10.1.2.3:50051"),
+            ("grpc://[fd00::1]:50051", "[fd00::1]:50051"),
+        ],
+    )
+    def test_no_proxy_match_disables_proxy(self, monkeypatch: pytest.MonkeyPatch, url: str, no_proxy: str) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        monkeypatch.setenv("NO_PROXY", no_proxy)
+        assert _grpc_proxy_options(url) == [("grpc.enable_http_proxy", 0)]
+
+    @pytest.mark.parametrize(
+        ("url", "no_proxy"),
+        [
+            (_GATEWAY_URL, ".svc,.cluster.local,10.0.0.0/8"),
+            ("grpc+tls://dch.notexample.com:443", "example.com"),
+            ("grpc+tls://dch.notexample.com:443", "*.example.com"),
+            ("grpc+tls://dch.apps.example.com", "dch.apps.example.com:8443"),
+            ("grpc://10.1.2.3", "10.1.2.3:80"),
+            ("grpc://192.168.1.1:50051", "10.0.0.0/8,localhost"),
+            (_GATEWAY_URL, "dch.apps.example.com:8443"),
+            ("grpc://10.1.2.3:50051", "10.1.2.3:443"),
+        ],
+    )
+    def test_no_proxy_without_match_keeps_proxy(self, monkeypatch: pytest.MonkeyPatch, url: str, no_proxy: str) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        monkeypatch.setenv("NO_PROXY", no_proxy)
+        assert _grpc_proxy_options(url) == [("grpc.http_proxy", "http://proxy.example.com:3128")]
+
+    def test_build_urls_bare_host_matches_port_qualified_no_proxy(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        monkeypatch.setenv("NO_PROXY", "dch.apps.example.com:443")
+        _, flight_url = _build_urls("dch.apps.example.com")
+        assert flight_url == "grpc+tls://dch.apps.example.com"
+        assert _grpc_proxy_options(flight_url) == [("grpc.enable_http_proxy", 0)]
+
+    def test_unix_socket_url_returns_no_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        assert _grpc_proxy_options("grpc+unix:///tmp/flight.sock") == []
+
+    def test_flight_connect_forwards_proxy_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        client = FlightClient(url=_GATEWAY_URL, token="tok", tenant_id="t1")
+        with patch("data_connect_hub._flight.flight.connect") as connect:
+            client._flight_connect()
+        assert connect.call_args.kwargs["generic_options"] == [("grpc.http_proxy", "http://proxy.example.com:3128")]
+
+    def test_flight_connect_omits_generic_options_without_proxy(self) -> None:
+        client = FlightClient(url=_GATEWAY_URL, token="tok", tenant_id="t1")
+        with patch("data_connect_hub._flight.flight.connect") as connect:
+            client._flight_connect()
+        assert "generic_options" not in connect.call_args.kwargs
+
+    def test_real_pyarrow_accepts_proxy_options(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Unpatched connect (lazy, no network I/O) so the min-deps job catches
+        # pyarrow releases that reject these channel args.
+        monkeypatch.setenv("HTTPS_PROXY", "http://proxy.example.com:3128")
+        FlightClient(url=_GATEWAY_URL, token="tok", tenant_id="t1")._flight_connect().close()
+        monkeypatch.setenv("NO_PROXY", ".example.com")
+        FlightClient(url=_GATEWAY_URL, token="tok", tenant_id="t1")._flight_connect().close()
 
 
 class TestEncodeVarint:

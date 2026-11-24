@@ -29,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
@@ -41,7 +42,14 @@ func (e *E2EFixture) CreateDataConnectService() {
 	dcs := &dchv1alpha1.DataConnectService{
 		ObjectMeta: metav1.ObjectMeta{Name: dcsName, Namespace: applicationNamespace},
 		Spec: dchv1alpha1.DataConnectServiceSpec{
-			RestService:   &dchv1alpha1.ServiceOverrides{Replicas: &initialRestReplicas},
+			RestService: &dchv1alpha1.ServiceOverrides{
+				Replicas: &initialRestReplicas,
+				// The e2e suite builds and kind-loads this image locally under a fake
+				// tag rather than pushing it to a real registry, so Always (the
+				// production default, needed for disconnected-mirror freshness) would
+				// fail to pull it on every attempt.
+				ImagePullPolicy: ptr.To(corev1.PullIfNotPresent),
+			},
 			FlightService: &dchv1alpha1.FlightServiceConfig{},
 		},
 	}
@@ -138,13 +146,16 @@ func (e *E2EFixture) ReconcileFlightConnectorConfig(
 	expected map[string]map[string]any,
 ) {
 	DeferCleanup(e.ResetFlightConnectorConfig)
+	// Set Recreate before the config patch: switching a Deployment to
+	// Recreate mid-rollout can deadlock it at the surge pod count, because
+	// the deployment controller never scales the new ReplicaSet back up.
+	e.useRecreateFlightDeploymentStrategy()
 	By("patching Flight connector configuration")
 	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 		dcs.Spec.FlightService.Connectors = connectors
 	})
 
 	e.waitForDCSObservedGeneration(patched.Generation)
-	e.useRecreateFlightDeploymentStrategy()
 
 	By("waiting for connector configuration to reconcile and become Ready")
 	e.waitForDCSReady(patched.Generation, 2, 2)
@@ -157,14 +168,132 @@ func (e *E2EFixture) ResetFlightConnectorConfig() {
 	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
 	if current.Spec.FlightService != nil && len(current.Spec.FlightService.Connectors) > 0 {
 		By("restoring default Flight connector configuration")
+		e.useRecreateFlightDeploymentStrategy()
 		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
 			dcs.Spec.FlightService.Connectors = nil
 		})
 		e.waitForDCSObservedGeneration(patched.Generation)
-		e.useRecreateFlightDeploymentStrategy()
 		e.waitForDCSReady(patched.Generation, 2, 2)
 	}
 	e.restoreFlightDeploymentStrategy()
+}
+
+// AssertAuditDisabled verifies that the audit environment variables are
+// absent from both service containers.
+func (e *E2EFixture) AssertAuditDisabled() {
+	By("verifying AUDIT_ENABLED is absent from the service containers")
+	e.assertAuditEnvOnContainers(false, false)
+}
+
+// EnableAudit patches spec.audit.enabled=true and verifies reconciliation.
+func (e *E2EFixture) EnableAudit() {
+	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
+	e.useRecreateFlightDeploymentStrategy()
+	By("enabling audit logging")
+	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
+		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(true)}
+	})
+
+	e.waitForDCSObservedGeneration(patched.Generation)
+
+	By("waiting for the audit change to reconcile and become Ready")
+	e.waitForDCSReady(patched.Generation, 2, 2)
+	e.assertAuditEnvOnContainers(true, false)
+}
+
+// EnableAuditQueryLogging patches spec.audit.logQueries=true and verifies
+// reconciliation.
+func (e *E2EFixture) EnableAuditQueryLogging() {
+	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
+	e.useRecreateFlightDeploymentStrategy()
+	By("enabling audit query logging")
+	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
+		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(true), LogQueries: ptr.To(true)}
+	})
+
+	e.waitForDCSObservedGeneration(patched.Generation)
+
+	By("waiting for the audit change to reconcile and become Ready")
+	e.waitForDCSReady(patched.Generation, 2, 2)
+	e.assertAuditEnvOnContainers(true, true)
+}
+
+// DisableAudit patches spec.audit.enabled=false and verifies reconciliation.
+// logQueries stays set to verify it is subordinate to enabled.
+func (e *E2EFixture) DisableAudit() {
+	// See ReconcileFlightConnectorConfig for why Recreate is set before the patch.
+	e.useRecreateFlightDeploymentStrategy()
+	By("disabling audit logging")
+	patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
+		dcs.Spec.Audit = &dchv1alpha1.Audit{Enabled: ptr.To(false), LogQueries: ptr.To(true)}
+	})
+
+	e.waitForDCSObservedGeneration(patched.Generation)
+
+	By("waiting for the audit change to reconcile and become Ready")
+	e.waitForDCSReady(patched.Generation, 2, 2)
+	e.assertAuditEnvOnContainers(false, false)
+}
+
+// ResetAudit restores audit logging to disabled and the Flight deployment strategy.
+func (e *E2EFixture) ResetAudit() {
+	current := &dchv1alpha1.DataConnectService{}
+	Expect(e.k8sClient.Get(e.ctx, e.dcsKey, current)).To(Succeed())
+	if current.Spec.Audit != nil {
+		By("restoring audit logging to disabled")
+		e.useRecreateFlightDeploymentStrategy()
+		patched := e.patchDCS(func(dcs *dchv1alpha1.DataConnectService) {
+			dcs.Spec.Audit = nil
+		})
+		e.waitForDCSObservedGeneration(patched.Generation)
+		e.waitForDCSReady(patched.Generation, 2, 2)
+	}
+	e.restoreFlightDeploymentStrategy()
+}
+
+// assertAuditEnvOnContainers asserts the audit environment variables'
+// presence and value on the rest-server and flight-server containers.
+func (e *E2EFixture) assertAuditEnvOnContainers(wantEnabled, wantLogQueries bool) {
+	deployments := map[string]string{
+		restDeploymentName:  "rest-server",
+		e.flightServiceName: "flight-server",
+	}
+	for deploymentName, containerName := range deployments {
+		deployment := &appsv1.Deployment{}
+		deploymentKey := types.NamespacedName{Name: deploymentName, Namespace: applicationNamespace}
+		Expect(e.k8sClient.Get(e.ctx, deploymentKey, deployment)).To(Succeed())
+		for _, check := range []struct {
+			name string
+			want bool
+		}{
+			{name: "AUDIT_ENABLED", want: wantEnabled},
+			{name: "AUDIT_LOG_QUERIES", want: wantLogQueries},
+		} {
+			value, found := auditEnvOf(deployment, containerName, check.name)
+			if check.want {
+				Expect(found).To(BeTrue(), "expected %s on %s in %s", check.name, containerName, deploymentName)
+				Expect(value).To(Equal("true"), "unexpected %s on %s in %s", check.name, containerName, deploymentName)
+			} else {
+				Expect(found).To(BeFalse(), "expected no %s on %s in %s", check.name, containerName, deploymentName)
+			}
+		}
+	}
+}
+
+// auditEnvOf returns the value of the named environment variable on the
+// named container.
+func auditEnvOf(deployment *appsv1.Deployment, containerName, name string) (string, bool) {
+	for _, container := range deployment.Spec.Template.Spec.Containers {
+		if container.Name != containerName {
+			continue
+		}
+		for _, env := range container.Env {
+			if env.Name == name {
+				return env.Value, true
+			}
+		}
+	}
+	return "", false
 }
 
 func (e *E2EFixture) waitForDCSObservedGeneration(generation int64) {

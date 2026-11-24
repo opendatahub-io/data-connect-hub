@@ -21,6 +21,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -281,41 +282,46 @@ address = "flight-service"
 	}
 }
 
-func TestSetConfigMapGlobalNamespace(t *testing.T) {
-	defaultTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "opendatahub"
+func TestSetConfigMapGlobalTenants(t *testing.T) {
+	placeholder := configMapWithTOML(`[global-connection-types]
+tenant-ids = ["opendatahub"]
 `)
-	customTenant := configMapWithTOML(`[global-connection-types]
-tenant-id = "custom-tenant"
+	custom := configMapWithTOML(`[global-connection-types]
+tenant-ids = ["custom-tenant"]
 `)
 	noTenant := configMapWithTOML(`[server]
 port = 8080
 `)
 
-	if err := setConfigMapGlobalNamespace([]*unstructured.Unstructured{defaultTenant, customTenant, noTenant}, "test-namespace"); err != nil {
+	tenants := []string{"test-namespace", "global-a"}
+	want := make([]any, len(tenants))
+	for i, tenant := range tenants {
+		want[i] = tenant
+	}
+	if err := setConfigMapGlobalTenants([]*unstructured.Unstructured{placeholder, custom, noTenant}, tenants); err != nil {
 		t.Fatal(err)
 	}
 
 	for _, tt := range []struct {
 		name string
 		cm   *unstructured.Unstructured
-		want string
+		want []any
 	}{
-		{name: "default tenant", cm: defaultTenant, want: "test-namespace"},
-		{name: "custom tenant remains unchanged", cm: customTenant, want: "custom-tenant"},
+		{name: "placeholder is replaced", cm: placeholder, want: want},
+		{name: "any base value is replaced", cm: custom, want: want},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			global, ok := parsedConfigMapTOML(t, tt.cm)["global-connection-types"].(map[string]any)
 			if !ok {
 				t.Fatal("expected [global-connection-types] table")
 			}
-			if got := global["tenant-id"]; got != tt.want {
-				t.Errorf("tenant-id = %v, want %q", got, tt.want)
+			if got := global["tenant-ids"]; !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("tenant-ids = %v, want %v", got, tt.want)
 			}
 		})
 	}
 	if got := parsedConfigMapTOML(t, noTenant)["server"].(map[string]any)["port"]; got != int64(8080) {
-		t.Errorf("ConfigMap without tenant-id was changed unexpectedly; server.port = %v", got)
+		t.Errorf("ConfigMap without tenant-ids was changed unexpectedly; server.port = %v", got)
 	}
 }
 
@@ -401,6 +407,19 @@ func TestBuildServicePatchesUseSeparateDeploymentAndContainerNames(t *testing.T)
 	}
 	if !strings.Contains(patches[0].Patch, "- name: "+nameFlightServiceContainer+"\n") {
 		t.Errorf("patch does not target container %q:\n%s", nameFlightServiceContainer, patches[0].Patch)
+	}
+}
+
+func TestBuildServicePatchesImagePullPolicy(t *testing.T) {
+	policy := corev1.PullIfNotPresent
+	patches := buildServicePatches(nameRestService, nameRestServiceContainer, &dchv1alpha1.ServiceOverrides{
+		ImagePullPolicy: &policy,
+	})
+	if len(patches) != 1 {
+		t.Fatalf("patch count = %d, want 1", len(patches))
+	}
+	if !strings.Contains(patches[0].Patch, "- name: "+nameRestServiceContainer+"\n          imagePullPolicy: IfNotPresent") {
+		t.Errorf("patch does not set imagePullPolicy on container %q:\n%s", nameRestServiceContainer, patches[0].Patch)
 	}
 }
 
@@ -516,12 +535,18 @@ func TestRenderKustomizationGatewayNamespace(t *testing.T) {
 	}
 }
 
+// tlsMinVersionTLS12Arg is the kube-rbac-proxy flag value pinned by several
+// table entries; a constant keeps goconst satisfied.
+const tlsMinVersionTLS12Arg = "--tls-min-version=VersionTLS12"
+
 func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 	tests := []struct {
-		name     string
-		profile  configv1.TLSProfileSpec
-		wantMin  string
-		wantSuit string
+		name       string
+		profile    configv1.TLSProfileSpec
+		wantMin    string
+		wantSuit   string
+		wantNoSuit bool
+		wantErr    string
 	}{
 		{
 			name:    "Modern profile only sets TLS 1.3 minimum",
@@ -531,8 +556,41 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 		{
 			name:     "Intermediate profile sets minimum and IANA cipher suites",
 			profile:  *configv1.TLSProfiles[configv1.TLSProfileIntermediateType],
-			wantMin:  "--tls-min-version=VersionTLS12",
+			wantMin:  tlsMinVersionTLS12Arg,
 			wantSuit: "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+		},
+		{
+			name: "TLS 1.2 AES-256-only profile is rejected",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+				Ciphers:       []string{"ECDHE-RSA-AES256-GCM-SHA384"},
+			},
+			wantErr: "cluster TLS profile: kube-rbac-proxy cannot serve HTTP/2 with cipher list",
+		},
+		{
+			name: "TLS 1.2 AES-128-GCM profile is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+				Ciphers:       []string{"ECDHE-RSA-AES128-GCM-SHA256"},
+			},
+			wantMin:  tlsMinVersionTLS12Arg,
+			wantSuit: "--tls-cipher-suites=TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+		},
+		{
+			name: "empty cipher list is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS12,
+			},
+			wantMin: tlsMinVersionTLS12Arg,
+		},
+		{
+			name: "TLS 1.3 profile is accepted",
+			profile: configv1.TLSProfileSpec{
+				MinTLSVersion: configv1.VersionTLS13,
+				Ciphers:       []string{"ECDHE-RSA-AES256-GCM-SHA384"},
+			},
+			wantMin:    "--tls-min-version=VersionTLS13",
+			wantNoSuit: true,
 		},
 	}
 
@@ -542,8 +600,19 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			args := kubeRbacProxyArgs(t, deployment)
 			args = append(args, "--tls-min-version", "old", "--tls-cipher-suites", "old")
 			setKubeRbacProxyArgs(t, deployment, args)
-			setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
-			setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
+			err := setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("setKubeRbacProxyTLSOpts() error = %v, want error containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("setKubeRbacProxyTLSOpts() error = %v", err)
+			}
+			if err := setKubeRbacProxyTLSOpts(context.Background(), resources, tt.profile); err != nil {
+				t.Fatalf("second setKubeRbacProxyTLSOpts() error = %v", err)
+			}
 			args = kubeRbacProxyArgs(t, deployment)
 			if !containsString(args, tt.wantMin) {
 				t.Errorf("args %v do not contain %q", args, tt.wantMin)
@@ -551,7 +620,7 @@ func TestSetKubeRbacProxyTLSOptsProjectsStrictProfiles(t *testing.T) {
 			if tt.wantSuit != "" && !containsString(args, tt.wantSuit) {
 				t.Errorf("args %v do not contain %q", args, tt.wantSuit)
 			}
-			if tt.wantSuit == "" && containsArgPrefix(args, "--tls-cipher-suites=") {
+			if tt.wantNoSuit && containsArgPrefix(args, "--tls-cipher-suites=") {
 				t.Errorf("TLS 1.3 args unexpectedly include cipher suites: %v", args)
 			}
 			if containsString(args, "--tls-min-version") || containsString(args, "--tls-cipher-suites") || containsString(args, "old") {
@@ -587,7 +656,9 @@ func TestSetKubeRbacProxyTLSOptsProjectsLenientProfiles(t *testing.T) {
 				t.Fatalf("LoadWithAdherence() under %s: %v", policy, err)
 			}
 			deployment := kubeRbacProxyDeployment("--secure-listen-address=0.0.0.0:8443", "--tls-min-version=custom", "--tls-cipher-suites=custom")
-			setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec)
+			if err := setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec); err != nil {
+				t.Fatalf("setKubeRbacProxyTLSOpts() under %s: %v", policy, err)
+			}
 			args := kubeRbacProxyArgs(t, deployment)
 			if !containsString(args, "--tls-min-version=VersionTLS13") || containsArgPrefix(args, "--tls-cipher-suites=") || containsString(args, "custom") {
 				t.Fatalf("args = %v, want projected Modern profile without stale TLS flags", args)
@@ -610,10 +681,41 @@ func TestSetKubeRbacProxyTLSOptsFallsBackToIntermediateWhenAPIServerObjectIsAbse
 		t.Fatal("expected the Intermediate fallback when the APIServer object is absent")
 	}
 	deployment := kubeRbacProxyDeployment("--secure-listen-address=0.0.0.0:8443")
-	setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec)
+	if err := setKubeRbacProxyTLSOpts(context.Background(), []*unstructured.Unstructured{deployment}, profile.Spec); err != nil {
+		t.Fatalf("setKubeRbacProxyTLSOpts(): %v", err)
+	}
 	args := kubeRbacProxyArgs(t, deployment)
-	if !containsString(args, "--tls-min-version=VersionTLS12") || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
+	if !containsString(args, tlsMinVersionTLS12Arg) || !containsArgPrefix(args, "--tls-cipher-suites=TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256") {
 		t.Fatalf("args = %v, want projected Intermediate fallback", args)
+	}
+}
+
+func TestSetKubeRbacProxyAudiencesIsIdempotent(t *testing.T) {
+	deployment := kubeRbacProxyDeployment(
+		"--secure-listen-address=0.0.0.0:8443",
+		"--auth-token-audiences=old-audience",
+	)
+	resources := []*unstructured.Unstructured{deployment}
+	audiences := []string{"new-audience", "another-audience"}
+
+	setKubeRbacProxyAudiences(resources, audiences)
+	setKubeRbacProxyAudiences(resources, audiences)
+
+	args := kubeRbacProxyArgs(t, deployment)
+	if len(args) == 0 {
+		t.Fatal("expected kube-rbac-proxy arguments")
+	}
+	count := 0
+	for _, arg := range args {
+		if strings.HasPrefix(arg, "--auth-token-audiences=") {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("audience argument count = %d, want 1; args = %v", count, args)
+	}
+	if !containsString(args, "--auth-token-audiences=new-audience,another-audience") {
+		t.Fatalf("args = %v, want updated audience argument", args)
 	}
 }
 
@@ -643,7 +745,7 @@ func TestReconcileManifestsFailsClosedWhenTLSProfileReadDenied(t *testing.T) {
 	}
 	platCfg := &platformConfig{GatewayName: "test-gateway", GatewayNamespace: testNamespace}
 
-	err := r.reconcileManifests(context.Background(), cr, platCfg)
+	err := r.reconcileManifests(context.Background(), cr, platCfg, nil)
 	if err == nil {
 		t.Fatal("reconcileManifests() = nil error, want fail-closed error on denied APIServer read")
 	}
@@ -1137,6 +1239,51 @@ func TestRenderKustomizationImageParams(t *testing.T) {
 	}
 }
 
+// TestRenderFlightServicePreservesContainerImages verifies that the per-CR
+// flight-service rename rewrites resource names and labels but leaves
+// container image references untouched, even when the repository contains
+// the "flight-service" substring.
+func TestRenderFlightServicePreservesContainerImages(t *testing.T) {
+	manifestsPath := filepath.Join("..", "..", "..", "config")
+	imageParams := map[string]string{
+		RelatedImageRestService:   "example.com/dch-rest-service:e2e",
+		RelatedImageFlightService: "example.com/dch-flight-service:e2e",
+		RelatedImageKubeRbacProxy: "example.com/odh-kube-rbac-proxy:e2e",
+	}
+	resources, err := renderKustomization(manifestsPath, filepath.Join(manifestsPath, testBaseManifest), nil, imageParams)
+	if err != nil {
+		t.Fatalf("rendering base: %v", err)
+	}
+
+	crName := "e2e-dataconnectservice"
+	resources = renderFlightService(resources, crName)
+
+	var flightDeployment *unstructured.Unstructured
+	wantName := "dch-" + crName + "-flight"
+	for _, obj := range resources {
+		if obj.GetKind() == kindDeployment && obj.GetName() == wantName {
+			flightDeployment = obj
+			break
+		}
+	}
+	if flightDeployment == nil {
+		t.Fatalf("flight Deployment %q not found after rename", wantName)
+	}
+
+	labels, found, err := unstructured.NestedString(flightDeployment.Object, "spec", testTemplateKey, testMetadataKey, "labels", labelAppName)
+	if err != nil || !found || labels != crName+"-flight" {
+		t.Errorf("pod label %s = %q (found=%v, err=%v), want %q", labelAppName, labels, found, err, crName+"-flight")
+	}
+
+	gotImage, found := renderedContainerImage(resources, nameFlightServiceContainer)
+	if !found {
+		t.Fatalf("container %q not found in rendered Deployments", nameFlightServiceContainer)
+	}
+	if gotImage != imageParams[RelatedImageFlightService] {
+		t.Errorf("flight container image = %q, want %q (image references must survive the service rename)", gotImage, imageParams[RelatedImageFlightService])
+	}
+}
+
 func renderedContainerImage(resources []*unstructured.Unstructured, containerName string) (string, bool) {
 	for _, obj := range resources {
 		if obj.GetKind() != kindDeployment {
@@ -1151,7 +1298,7 @@ func renderedContainerImage(resources []*unstructured.Unstructured, containerNam
 			if !ok || container[resourceNameField] != containerName {
 				continue
 			}
-			image, _ := container["image"].(string)
+			image, _ := container[imageField].(string)
 			return image, true
 		}
 	}
@@ -1298,7 +1445,7 @@ func TestAnnotateDeploymentsWithContentHash(t *testing.T) {
 					testContainersKey: []any{
 						map[string]any{
 							resourceNameField: nameFlightServiceContainer,
-							"image":           "localhost/dch-flight:test",
+							imageField:        "localhost/dch-flight:test",
 						},
 					},
 					"volumes": []any{
@@ -1386,7 +1533,7 @@ func TestAnnotateDeploymentsWithContentHash_FallsBackToLiveConfigMap(t *testing.
 			testTemplateKey: map[string]any{
 				testSpecKey: map[string]any{
 					testContainersKey: []any{
-						map[string]any{resourceNameField: nameRestServiceContainer, "image": "test:latest"},
+						map[string]any{resourceNameField: nameRestServiceContainer, imageField: "test:latest"},
 					},
 					"volumes": []any{
 						map[string]any{

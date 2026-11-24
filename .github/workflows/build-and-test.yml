@@ -28,12 +28,22 @@ jobs:
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            .
+            samples/custom-connector
 
       - name: Build
         run: make build
 
       - name: Lint
         run: make lint
+
+      - name: Build samples
+        run: make build-samples
+
+      - name: Lint samples
+        run: make lint-samples
 
       - name: Unit tests
         run: make test-unit

@@ -36,4 +36,4 @@ data:
     read_timeout_secs = 30
 
     [global-connection-types]
-    tenant-id = "opendatahub"
+    tenant-ids = ["opendatahub"]

@@ -7,6 +7,7 @@ credentials_fields:
     description: Postgres connection URI
     required: true
     type: string
+    sensitive: true
   - name: CA_CERT
     label: CA Certificate
     description: CA certificate for TLS verification

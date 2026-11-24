@@ -8,6 +8,10 @@ properties:
   name:
     type: string
     description: Display name for the connection.
+  description:
+    type: string
+    nullable: true
+    description: Free-form description of the connection. Set to `null` to remove it.
   data_connection_type_id:
     type: string
     description: References a connection type id.

@@ -20,6 +20,14 @@ rules:
   - update
   - watch
 - apiGroups:
+  - ""
+  resources:
+  - namespaces
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - apps
   resources:
   - deployments
@@ -57,18 +65,17 @@ rules:
   resources:
   - data-connection-types
   - data-connections
-  - data-store
-  - flight-services
   verbs:
   - create
   - delete
   - get
-  - list
   - patch
-  - post
-  - put
-  - update
-  - watch
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
+  - data-store
+  verbs:
+  - get
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
@@ -100,12 +107,25 @@ rules:
 - apiGroups:
   - dataconnecthub.opendatahub.io
   resources:
+  - flight-services
+  verbs:
+  - create
+- apiGroups:
+  - dataconnecthub.opendatahub.io
+  resources:
   - initdataconnections
   - initdataconnectiontypes
   verbs:
   - get
   - list
   - watch
+- apiGroups:
+  - events.k8s.io
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
@@ -170,4 +190,61 @@ rules:
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-flight-service-secret-access
+  - dch-read
+  - dch-read-write
+  - dch-rest-service-secret-access
+  resources:
+  - clusterroles
+  verbs:
+  - bind
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resources:
+  - rolebindings
+  verbs:
+  - create
+  - get
+  - list
+  - watch
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-global-flight-service-secret-access
+  - dch-global-read
+  - dch-global-read-write
+  - dch-global-rest-service-secret-access
+  resources:
+  - rolebindings
+  verbs:
+  - delete
+  - patch
+  - update
+- apiGroups:
+  - rbac.authorization.k8s.io
+  resourceNames:
+  - dch-rest-service-secret-access
+  resources:
+  - rolebindings
+  verbs:
+  - delete
+  - patch
+  - update
+- apiGroups:
+  - route.openshift.io
+  resources:
+  - routes
+  verbs:
+  - get
+- apiGroups:
+  - services.platform.opendatahub.io
+  resources:
+  - auths
+  verbs:
+  - get
+  - list
   - watch

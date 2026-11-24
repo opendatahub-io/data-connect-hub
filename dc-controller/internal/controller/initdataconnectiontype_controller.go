@@ -129,6 +129,8 @@ func specToConnectionType(spec *dchv1alpha1.InitDataConnectionTypeSpec) Connecti
 			Type:         cf.Type,
 			EnumValues:   enumValues,
 			DefaultValue: cf.DefaultValue,
+			Sensitive:    cf.Sensitive,
+			Multiple:     cf.Multiple,
 		}
 	}
 

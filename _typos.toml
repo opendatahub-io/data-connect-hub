@@ -8,3 +8,5 @@ extend-exclude = [
 [default.extend-words]
 # Allow "ba" in hex trace IDs (W3C Trace Context standard uses example ID with "ba")
 ba = "ba"
+# Python package name (CA bundle shipped by the httpx dependency chain)
+certifi = "certifi"

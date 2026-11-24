@@ -331,10 +331,15 @@ class RestClient:
         return _validate(DataConnection, self._parse_json(resp))
 
     def update_connection(self, connection_id: str, request: UpdateConnectionRequest) -> DataConnection:
+        patch = {
+            field: value
+            for field, value in request.model_dump(exclude_unset=True).items()
+            if value is not None or field == "description"
+        }
         resp = self._request(
             "PATCH",
             f"{_CONNECTIONS_ENDPOINT}/{_segment(connection_id, name='connection_id')}",
-            json=request.model_dump(exclude_none=True),
+            json=patch,
         )
         return _validate(DataConnection, self._parse_json(resp))
 

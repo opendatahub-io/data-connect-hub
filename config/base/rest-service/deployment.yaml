@@ -33,6 +33,12 @@ spec:
             - --ignore-paths=/health
             - --tls-cert-file=/etc/tls/private/tls.crt
             - --tls-private-key-file=/etc/tls/private/tls.key
+            # The proxy strips the Authorization header and injects the
+            # caller's identity as x-remote-user and x-remote-groups. The
+            # service splits x-remote-groups on this separator, so it must
+            # match GROUPS_SEPARATOR in services/rest/src/auth.rs.
+            - --auth-header-fields-enabled
+            - --auth-header-groups-field-separator=|
             - --logtostderr=true
           ports:
             - name: https
@@ -93,6 +99,7 @@ spec:
           args:
             - --config
             - /config/config.toml
+            - --json-logs
           ports:
             - name: http
               containerPort: 8080

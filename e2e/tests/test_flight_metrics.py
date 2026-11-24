@@ -67,7 +67,4 @@ class TestFlightMetrics:
     def test_active_requests_metric_present(self, metrics_body: str) -> None:
         # The in-flight gauge is only emitted as a sample while > 0, so check the
         # metric family is registered via its TYPE line.
-        assert any(
-            line.startswith("# TYPE dch_flight_requests_active gauge")
-            for line in metrics_body.splitlines()
-        )
+        assert any(line.startswith("# TYPE dch_flight_requests_active gauge") for line in metrics_body.splitlines())

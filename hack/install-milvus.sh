@@ -226,14 +226,39 @@ bash "$SCRIPT_DIR/install-seaweedfs.sh" \
     -i "$SEAWEEDFS_IMAGE" \
     -m "$MILVUS_S3_CLIENT_IMAGE"
 
-# Detect OpenShift vs vanilla Kubernetes
+# Detect OpenShift vs vanilla Kubernetes. OpenShift assigns each namespace a
+# UID/GID range; use its base so the pods stay within the SCC range on OCP 4
+# and carry an explicit non-root UID plus a group that owns the data volumes
+# under the PodSecurity enforcement on OCP 5. The Milvus image runs as root by
+# default, so every component needs an explicit securityContext there.
 SECURITY_OPTS=()
 if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
-    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
+    echo "Detected OpenShift — using the namespace UID/GID range"
+    RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+        | cut -d/ -f1)
+    RUN_AS_GROUP=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.supplemental-groups}' 2>/dev/null \
+        | cut -d/ -f1)
+    : "${RUN_AS_USER:=1001}"
+    : "${RUN_AS_GROUP:=1001}"
     SECURITY_OPTS=(
-        --set etcd.containerSecurityContext.runAsUser=null
+        --set etcd.containerSecurityContext.runAsUser=$RUN_AS_USER
         --set etcd.containerSecurityContext.runAsNonRoot=true
-        --set etcd.podSecurityContext.fsGroup=null
+        --set etcd.containerSecurityContext.allowPrivilegeEscalation=false
+        --set 'etcd.containerSecurityContext.capabilities.drop[0]=ALL'
+        --set etcd.containerSecurityContext.seccompProfile.type=RuntimeDefault
+        --set etcd.podSecurityContext.fsGroup=$RUN_AS_GROUP
+        --set etcd.podSecurityContext.runAsNonRoot=true
+        --set etcd.podSecurityContext.seccompProfile.type=RuntimeDefault
+        --set securityContext.runAsNonRoot=true
+        --set securityContext.fsGroup=$RUN_AS_GROUP
+        --set securityContext.seccompProfile.type=RuntimeDefault
+        --set containerSecurityContext.runAsNonRoot=true
+        --set containerSecurityContext.runAsUser=$RUN_AS_USER
+        --set containerSecurityContext.allowPrivilegeEscalation=false
+        --set 'containerSecurityContext.capabilities.drop[0]=ALL'
+        --set containerSecurityContext.seccompProfile.type=RuntimeDefault
     )
 fi
 

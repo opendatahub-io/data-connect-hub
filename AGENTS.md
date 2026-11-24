@@ -22,6 +22,8 @@ make lint           # clippy + fmt check
 make doc            # rustdoc with -D warnings
 make audit          # cargo audit + cargo deny check
 make container-all  # build all container images
+make build-samples  # build the custom-connector sample
+make lint-samples   # clippy + fmt check the custom-connector sample
 ```
 
 Run a single test:
@@ -38,6 +40,7 @@ Python SDK:
 
 ```console
 make sdk-test       # run SDK unit tests with coverage
+make sdk-test-min   # run SDK unit tests on minimum dependency versions
 make sdk-lint       # lint and format-check SDK
 make sdk-fmt        # format SDK code
 make sdk-typecheck  # run mypy on SDK
@@ -172,6 +175,7 @@ Workflows under `.github/workflows/`:
   licenses, bans, and sources). Ignored
   advisories that go stale fail via
   `unused-ignored-advisory = "deny"` in `deny.toml`.
+- **`api-contract.yml`** — runs on PRs to `main`. API contract checks from `red-hat-data-services/api-contract-tests` (enforce mode): breaking changes to `docs/api/openapi.yaml`, `dc-controller/charts/crds/*.yaml` or `dc-controller/config/crd/bases/*.yaml` relative to the baseline SHA fail the job, and the coverage job fails on any OpenAPI document or CRD not registered or excluded in `.rhoai/contracts.yaml`. Changing the baseline needs approval from someone other than the author.
 - **`python-sdk.yml`** — runs on PRs touching `sdk/python/`.
   Lint, typecheck, and unit tests for the Python SDK.
 - **`ci-dco-signoff.yml`** — runs on PRs. Verifies all

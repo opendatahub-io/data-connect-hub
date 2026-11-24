@@ -7,6 +7,7 @@ credentials_fields:
     description: Neo4j connection URI (e.g. bolt://host:7687 or neo4j://host:7687)
     required: true
     type: string
+    sensitive: true
   - name: USERNAME
     label: Username
     description: Neo4j username
@@ -18,6 +19,7 @@ credentials_fields:
     description: Neo4j password
     required: true
     type: string
+    sensitive: true
   - name: DATABASE
     label: Database
     description: Neo4j database name

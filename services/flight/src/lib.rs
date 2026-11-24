@@ -267,6 +267,7 @@ pub async fn start_server(
     data_service: DataIngestionService,
     addr: std::net::SocketAddr,
 ) -> Result<()> {
+    let audit = data_service.audit_config();
     let service = FlightServiceServer::new(data_service);
     let (health_reporter, health_service) = tonic_health::server::health_reporter();
     health_reporter
@@ -289,6 +290,7 @@ pub async fn start_server(
         tower::util::Either::Left(AuthLayer::new(
             Arc::new(kube_auth),
             auth.discovery_service_account.clone(),
+            audit,
         ))
     } else {
         tracing::warn!("Auth is DISABLED — all requests are unauthenticated");
@@ -296,7 +298,7 @@ pub async fn start_server(
     };
 
     let router = builder
-        .layer(TraceLayer::new())
+        .layer(TraceLayer::new(audit))
         .layer(auth_layer)
         .add_service(health_service)
         .add_service(service);

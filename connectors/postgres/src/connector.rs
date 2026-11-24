@@ -24,11 +24,13 @@ use std::str::FromStr;
 use std::time::Duration;
 use tracing::info;
 
+use crate::pgvector;
+
 const PG_READ_ONLY_SQL_TRANSACTION: &str = "25006";
 const KEY_URI: &str = "URI";
 const KEY_CA_CERT: &str = "CA_CERT";
 
-fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
+pub(crate) fn map_sqlx_error(e: sqlx::Error) -> ConnectorError {
     if let sqlx::Error::Database(ref db_err) = e
         && db_err.code().as_deref() == Some(PG_READ_ONLY_SQL_TRANSACTION)
     {
@@ -267,8 +269,23 @@ fn rows_to_batch(schema: &Arc<Schema>, rows: &[PgRow]) -> Result<RecordBatch, Co
     RecordBatch::try_new(Arc::clone(schema), arrays).map_err(|e| ConnectorError::SQLError(e.to_string()))
 }
 
+/// Strip the schema qualifier and identifier quotes from a type name.
+///
+/// sqlx names extension types via `oid::regtype::text`, which is
+/// schema-qualified (e.g. `ext.vector`, `"my schema".vector`) when the
+/// type's schema is not on the session `search_path`. Built-in names never
+/// contain a dot, so they pass through unchanged. Only a schema qualifier is
+/// stripped; a quoted identifier that itself contains a dot (e.g. `"a.b"`)
+/// is not supported.
+fn unqualified_type_name(pg_type: &str) -> &str {
+    pg_type
+        .rsplit_once('.')
+        .map_or(pg_type, |(_, name)| name)
+        .trim_matches('"')
+}
+
 fn pg_type_to_arrow(pg_type: &str) -> DataType {
-    match pg_type {
+    match unqualified_type_name(pg_type) {
         "BOOL" => DataType::Boolean,
         "INT2" | "SMALLINT" | "SMALLSERIAL" => DataType::Int16,
         "INT4" | "INT" | "INTEGER" | "SERIAL" => DataType::Int32,
@@ -282,6 +299,10 @@ fn pg_type_to_arrow(pg_type: &str) -> DataType {
         "TIME" => DataType::Time64(TimeUnit::Microsecond),
         "NUMERIC" => DataType::Utf8,
         "UUID" | "JSON" | "JSONB" => DataType::Utf8,
+        // pgvector extension types. Dimension lives in the column typmod,
+        // which sqlx does not expose, so a variable-size list is used.
+        pgvector::VECTOR | pgvector::HALFVEC => pgvector::list_type(),
+        pgvector::SPARSEVEC => DataType::Utf8,
         _ => DataType::Utf8,
     }
 }
@@ -306,7 +327,7 @@ fn time_to_micros(t: chrono::NaiveTime) -> i64 {
 
 fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> Result<ArrayRef, ConnectorError> {
     let err = map_sqlx_error;
-    match pg_type {
+    match unqualified_type_name(pg_type) {
         "BOOL" => {
             let vals: Vec<Option<bool>> = rows
                 .iter()
@@ -427,6 +448,9 @@ fn build_array(pg_type: &str, rows: &[PgRow], col_idx: usize) -> Result<ArrayRef
             let strs: Vec<Option<String>> = vals.into_iter().map(|v| v.map(|d| d.to_string())).collect();
             Ok(Arc::new(StringArray::from(strs)))
         },
+        pgvector::VECTOR => pgvector::build_vector_array(rows, col_idx),
+        pgvector::HALFVEC => pgvector::build_halfvec_array(rows, col_idx),
+        pgvector::SPARSEVEC => pgvector::build_sparsevec_array(rows, col_idx),
         _ => {
             let vals: Vec<Option<String>> = rows
                 .iter()
@@ -510,6 +534,30 @@ mod tests {
     #[test]
     fn test_pg_type_to_arrow_time() {
         assert_eq!(pg_type_to_arrow("TIME"), DataType::Time64(TimeUnit::Microsecond));
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_pgvector() {
+        assert_eq!(pg_type_to_arrow("vector"), pgvector::list_type());
+        assert_eq!(pg_type_to_arrow("halfvec"), pgvector::list_type());
+        assert_eq!(pg_type_to_arrow("sparsevec"), DataType::Utf8);
+    }
+
+    #[test]
+    fn test_pg_type_to_arrow_pgvector_schema_qualified() {
+        assert_eq!(pg_type_to_arrow("public.vector"), pgvector::list_type());
+        assert_eq!(pg_type_to_arrow("ext.halfvec"), pgvector::list_type());
+        assert_eq!(pg_type_to_arrow("\"my schema\".vector"), pgvector::list_type());
+        assert_eq!(pg_type_to_arrow("\"My.Schema\".halfvec"), pgvector::list_type());
+    }
+
+    #[test]
+    fn test_unqualified_type_name() {
+        assert_eq!(unqualified_type_name("INT4"), "INT4");
+        assert_eq!(unqualified_type_name("DOUBLE PRECISION"), "DOUBLE PRECISION");
+        assert_eq!(unqualified_type_name("vector"), "vector");
+        assert_eq!(unqualified_type_name("public.vector"), "vector");
+        assert_eq!(unqualified_type_name("\"my schema\".vector"), "vector");
     }
 
     #[test]

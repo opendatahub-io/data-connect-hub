@@ -6,7 +6,6 @@ Requires run-e2e.sh to have seeded S3 test data and set DCH_S3_SECRET.
 from __future__ import annotations
 
 import pyarrow as pa
-import pytest
 
 from data_connect_hub import DataConnectClient
 
@@ -32,9 +31,7 @@ class TestFlightS3GetTables:
 
     def test_filter_by_name(self, dch_client: DataConnectClient, s3_flight_connection: str) -> None:
         """Filtering by exact file path returns only that file."""
-        table = dch_client.get_tables(
-            s3_flight_connection, table_name_filter="datasets/dch-e2e-prompts.parquet"
-        )
+        table = dch_client.get_tables(s3_flight_connection, table_name_filter="datasets/dch-e2e-prompts.parquet")
         assert isinstance(table, pa.Table)
         assert table.num_rows == 1
         assert table.column("table_name")[0].as_py() == "datasets/dch-e2e-prompts.parquet"

@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 
 import pyarrow as pa
+
 from data_connect_hub import DataConnectClient
 
 CITIES = {"Tokyo", "London", "Paris", "New York", "Berlin"}

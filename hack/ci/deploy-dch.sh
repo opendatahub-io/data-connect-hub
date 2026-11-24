@@ -263,6 +263,28 @@ kubectl rollout status deployment/jaeger -n "$CI_SVC_NAMESPACE" --timeout=120s
 kubectl rollout status deployment/otel-collector -n "$CI_SVC_NAMESPACE" --timeout=120s
 
 # ===================================================================
+# Platform Auth CRD and CR
+# ===================================================================
+
+# On RHOAI the opendatahub-operator installs the Auth CRD and creates the
+# "auth" CR before DCH. dc-controller enables global namespaces only when the
+# CRD exists at startup, so both must be in place before it is installed.
+# adminGroups names a group no e2e identity belongs to; the e2e user manages
+# the global namespace through its own RoleBinding (see e2e/run-e2e.sh).
+echo "=== Installing platform Auth CRD and CR ==="
+kubectl apply -f "$CI_REPO_ROOT/dc-controller/internal/controller/testdata/crd/services.platform.opendatahub.io_auths.yaml"
+kubectl wait --for=condition=Established crd/auths.services.platform.opendatahub.io --timeout=60s
+kubectl apply -f - <<EOF
+apiVersion: services.platform.opendatahub.io/v1alpha1
+kind: Auth
+metadata:
+  name: auth
+spec:
+  adminGroups: ["dch-e2e-global-admins"]
+  allowedGroups: ["system:authenticated"]
+EOF
+
+# ===================================================================
 # dc-controller (Helm)
 # ===================================================================
 
@@ -336,6 +358,17 @@ echo "=== Waiting for DCH rollout ==="
 kubectl rollout status "deployment/${CI_FLIGHT_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl rollout status "deployment/${CI_REST_SERVICE_NAME}" -n "$CI_SVC_NAMESPACE" --timeout=180s
 kubectl get po -n "$CI_SVC_NAMESPACE"
+
+# The single Kind node has no CPU left for a RollingUpdate surge pod once the
+# connector backends are up, so a config rollout (e.g. the global namespace
+# e2e test changing the label) would leave the new pod Pending. Recreate
+# avoids the surge. dc-controller does not manage the strategy field, so the
+# patch persists. Set it only after the rollout above has finished: switching
+# mid-rollout can leave the Deployment stuck at the surge pod count.
+for deployment in "$CI_FLIGHT_SERVICE_NAME" "$CI_REST_SERVICE_NAME"; do
+    kubectl patch "deployment/${deployment}" -n "$CI_SVC_NAMESPACE" --type=merge \
+        -p '{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}'
+done
 
 echo "=== Verifying DCH deployment images ==="
 assert_deployment_image \
@@ -459,8 +492,8 @@ data:
   category: '["Container registry"]'
   fields: |
     [
-      {"type":"dropdown","name":"Access type","envVar":"ACCESS_TYPE","properties":{}},
-      {"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{}},
+      {"type":"dropdown","name":"Access type","description":"Use the push access type for uploading data, pull for accessing resources, or both.","envVar":"ACCESS_TYPE","properties":{"variant":"multi","items":[{"label":"Push secret","value":"Push"},{"label":"Pull secret","value":"Pull"}]}},
+      {"type":"file","name":"Secret details","envVar":".dockerconfigjson","properties":{"deferInput":true,"extensions":[".dockerconfigjson",".json"],"helperText":"Secret details are visible to users with access to the project."}},
       {"type":"short-text","name":"Registry host","envVar":"OCI_HOST","properties":{}}
     ]
 EOF
@@ -495,13 +528,14 @@ kubectl label secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
     opendatahub.io/dashboard=true --overwrite >/dev/null
 kubectl annotate secret e2e-legacy-s3-conn -n "$CI_TENANT_NAMESPACE" \
     openshift.io/display-name="E2E Legacy S3 Connection" \
+    openshift.io/description="E2E legacy S3 description" \
     opendatahub.io/connection-type-ref=s3 \
     --overwrite >/dev/null
 
 # Legacy OCI connection Secret
 kubectl create secret generic e2e-legacy-oci-conn \
     -n "$CI_TENANT_NAMESPACE" \
-    --from-literal=ACCESS_TYPE=Pull \
+    --from-literal=ACCESS_TYPE='["Pull"]' \
     --from-literal=OCI_HOST=registry.example.com \
     --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl label secret e2e-legacy-oci-conn -n "$CI_TENANT_NAMESPACE" \
@@ -529,7 +563,8 @@ kubectl annotate secret e2e-legacy-uri-conn -n "$CI_TENANT_NAMESPACE" \
 
 if has_connector postgres; then
     echo "=== Deploying tenant PostgreSQL ==="
-    tenant_pg_args=(-n "$CI_TENANT_NAMESPACE" -r "$CI_TENANT_PG_HOST" -u "$CI_TENANT_PG_USER" -p "$CI_TENANT_PG_PASSWORD" -d "$CI_TENANT_PG_DATABASE" -t "180s")
+    # --pgvector: e2e/tests/test_flight_pgvector.py needs the extension.
+    tenant_pg_args=(-n "$CI_TENANT_NAMESPACE" -r "$CI_TENANT_PG_HOST" -u "$CI_TENANT_PG_USER" -p "$CI_TENANT_PG_PASSWORD" -d "$CI_TENANT_PG_DATABASE" -t "180s" --pgvector)
     if [[ "$CI_SSL_ENABLED" == "true" ]]; then
         tenant_pg_args+=(--ssl)
     fi

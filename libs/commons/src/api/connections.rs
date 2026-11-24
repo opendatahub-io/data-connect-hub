@@ -89,6 +89,9 @@ impl Default for DataConnectionStatus {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct DataConnection {
     pub name: String,
+    /// Optional free-form description of the connection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub data_connection_type_id: String,
     pub format: DataFormat,
     pub credentials_ref: CredentialsRef,
@@ -117,6 +120,7 @@ mod tests {
             },
             resource: DataConnection {
                 name: "test-conn".to_string(),
+                description: None,
                 data_connection_type_id: "postgres".to_string(),
                 format: DataFormat::Tabular,
                 credentials_ref: CredentialsRef {
@@ -166,6 +170,20 @@ mod tests {
 
         let round_tripped = serde_json::to_value(&res).unwrap();
         assert_eq!(round_tripped, fixture);
+    }
+
+    #[test]
+    fn test_data_connection_description_roundtrip() {
+        let mut res = sample_connection_resource();
+        let json = serde_json::to_value(&res).unwrap();
+        assert!(json["resource"].get("description").is_none());
+
+        res.resource.description = Some("Sales warehouse".to_string());
+        let json = serde_json::to_value(&res).unwrap();
+        assert_eq!(json["resource"]["description"], "Sales warehouse");
+
+        let back: DataConnectionResource = serde_json::from_value(json).unwrap();
+        assert_eq!(back.resource.description.as_deref(), Some("Sales warehouse"));
     }
 
     #[test]

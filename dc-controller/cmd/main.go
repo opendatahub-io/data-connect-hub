@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"os"
 
+	gozap "go.uber.org/zap"
+
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -97,12 +99,15 @@ func main() {
 	flag.StringVar(&manifestsPath, "manifests-path", "/manifests",
 		"Path to the kustomize manifests directory containing base/, db/, and gateway/ subdirectories")
 	opts := zap.Options{
-		Development: true,
+		Development: false,
 	}
 	opts.BindFlags(flag.CommandLine)
 	flag.Parse()
 
-	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
+	ctrl.SetLogger(zap.New(
+		zap.UseFlagOptions(&opts),
+		zap.RawZapOpts(gozap.Fields(gozap.String("service.name", "data-connect-hub"))),
+	).WithName("dc-controller"))
 
 	cfg := ctrl.GetConfigOrDie()
 	tlsResult, err := controllertls.Resolve(context.Background(), cfg)
@@ -213,15 +218,26 @@ func main() {
 	}
 	restURLResolver := controller.NewRestServiceURLResolver(mgr.GetClient())
 
+	globalNamespaceConfig, err := controller.NewGlobalNamespaceConfig(controller.PlatformAuthCRDAvailable(cfg))
+	if err != nil {
+		setupLog.Error(err, "Failed to configure the global namespace")
+		os.Exit(1)
+	}
+	setupLog.Info("Global namespace configuration",
+		"enabled", globalNamespaceConfig.Enabled,
+		"label", globalNamespaceConfig.LabelKey)
+
 	if err := (&controller.DataConnectServiceReconciler{
-		Client:              mgr.GetClient(),
-		Scheme:              mgr.GetScheme(),
-		ManifestsPath:       manifestsPath,
-		RestImage:           requiredEnv(controller.RelatedImageRestService),
-		FlightImage:         requiredEnv(controller.RelatedImageFlightService),
-		KubeRbacProxyImage:  requiredEnv(controller.RelatedImageKubeRbacProxy),
-		ControllerNamespace: controller.ResolveControllerNamespace(),
-		FlightServiceClient: controller.NewHTTPFlightServiceClient(restURLResolver),
+		Client:                mgr.GetClient(),
+		Scheme:                mgr.GetScheme(),
+		ManifestsPath:         manifestsPath,
+		RestImage:             requiredEnv(controller.RelatedImageRestService),
+		FlightImage:           requiredEnv(controller.RelatedImageFlightService),
+		KubeRbacProxyImage:    requiredEnv(controller.RelatedImageKubeRbacProxy),
+		ControllerNamespace:   controller.ResolveControllerNamespace(),
+		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver),
+		GlobalNamespaceConfig: globalNamespaceConfig,
+		APIReader:             mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "dataconnectservice")
 		os.Exit(1)
@@ -259,6 +275,26 @@ func main() {
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)
+	}
+
+	if err := (&controller.TenantNamespaceReconciler{
+		Client:    mgr.GetClient(),
+		Scheme:    mgr.GetScheme(),
+		Recorder:  mgr.GetEventRecorder("dc-controller"),
+		APIReader: mgr.GetAPIReader(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "Failed to create controller", "controller", "tenantnamespace")
+		os.Exit(1)
+	}
+
+	if globalNamespaceConfig.Enabled {
+		if err := (&controller.GlobalNamespaceReconciler{
+			Client: mgr.GetClient(),
+			Config: globalNamespaceConfig,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "Failed to create controller", "controller", "globalnamespace")
+			os.Exit(1)
+		}
 	}
 	// +kubebuilder:scaffold:builder
 

@@ -5,9 +5,13 @@ on:
     branches: [main]
     paths:
       - 'sdk/python/**'
+      - 'Makefile'
+      - '.github/workflows/python-sdk.yml'
   pull_request:
     paths:
       - 'sdk/python/**'
+      - 'Makefile'
+      - '.github/workflows/python-sdk.yml'
 
 concurrency:
   group: python-sdk-${{ github.event.pull_request.number || github.ref }}
@@ -61,6 +65,36 @@ jobs:
           path: sdk/python/htmlcov/
           retention-days: 14
 
+  test-min-deps:
+    name: Test (minimum dependencies)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          # setuptools-scm derives the version from tags, so the editable install
+          # needs the full history and all tags.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Oldest supported Python: the pinned pyarrow/pandas have no wheels for newer ones.
+      - name: Set up Python 3.11
+        id: setup-python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pip
+          key: pip-min-${{ runner.os }}-3.11-${{ hashFiles('sdk/python/pyproject.toml', 'sdk/python/constraints-min.txt') }}
+
+      - name: Test
+        env:
+          SDK_MIN_PYTHON: ${{ steps.setup-python.outputs.python-path }}
+        run: make sdk-test-min
+
   package:
     name: Package (${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -81,7 +115,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install package tools
-        run: python -m pip install --upgrade build twine
+        run: python -m pip install --upgrade -r sdk/python/requirements.txt build twine
 
       - name: Build and validate distribution
         run: make sdk-package-check VIRTUAL_ENV=1

@@ -61,15 +61,34 @@ command -v kubectl >/dev/null || { echo "error: kubectl not found" >&2; exit 1; 
 
 kubectl create ns "$NAMESPACE" 2>/dev/null || true
 
-# Detect OpenShift vs vanilla Kubernetes
-SECURITY_OPTS=()
+# PodSecurity "restricted" requires explicit privilege-escalation, capability,
+# and seccomp settings on every platform. The chart defaults already run as a
+# non-root UID and drop capabilities.
+SECURITY_OPTS=(
+    --set securityContext.allowPrivilegeEscalation=false
+    --set securityContext.seccompProfile.type=RuntimeDefault
+    --set podSecurityContext.seccompProfile.type=RuntimeDefault
+)
+
+# Detect OpenShift vs vanilla Kubernetes. OpenShift assigns each namespace a
+# UID/GID range; use its base so the pod stays within the SCC range on OCP 4
+# and carries an explicit non-root UID plus a group that owns the data volume
+# under the PodSecurity enforcement on OCP 5.
 if kubectl api-resources --api-group=route.openshift.io 2>/dev/null | grep -q routes; then
-    echo "Detected OpenShift — clearing hardcoded UIDs for SCC compatibility"
-    SECURITY_OPTS=(
+    echo "Detected OpenShift — using the namespace UID/GID range"
+    RUN_AS_USER=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.uid-range}' 2>/dev/null \
+        | cut -d/ -f1)
+    RUN_AS_GROUP=$(kubectl get namespace "$NAMESPACE" \
+        -o jsonpath='{.metadata.annotations.openshift\.io/sa\.scc\.supplemental-groups}' 2>/dev/null \
+        | cut -d/ -f1)
+    : "${RUN_AS_USER:=1001}"
+    : "${RUN_AS_GROUP:=1001}"
+    SECURITY_OPTS+=(
         --set sysctlInitContainer.enabled=false
-        --set podSecurityContext.fsGroup=null
-        --set podSecurityContext.runAsUser=null
-        --set securityContext.runAsUser=null
+        --set podSecurityContext.runAsUser=$RUN_AS_USER
+        --set podSecurityContext.fsGroup=$RUN_AS_GROUP
+        --set securityContext.runAsUser=$RUN_AS_USER
         --set securityContext.runAsNonRoot=true
     )
 fi

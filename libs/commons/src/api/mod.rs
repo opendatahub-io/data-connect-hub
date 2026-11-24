@@ -13,6 +13,8 @@ pub const X_TENANT_ID: &str = "x-tenant-id";
 pub const X_REMOTE_USER: &str = "x-remote-user";
 pub const AUTHORIZATION: &str = "authorization";
 pub const X_REMOTE_GROUPS: &str = "x-remote-groups";
+/// X_REQUEST_ID carries the parent REST request ID to internal services.
+pub const X_REQUEST_ID: &str = "x-request-id";
 
 use serde::{Deserialize, Serialize};
 

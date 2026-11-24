@@ -112,6 +112,7 @@ paths:
       description: |
         Creates a connection that binds a connection type to credentials and connector-specific properties. The referenced connection type must already exist. Use `/test/credentials` to validate credentials before creating a connection.
         Returns `400` with `credentials_check_failed` when inline credentials do not satisfy the connection type schema. For inline credentials, a missing connection type returns `404`; for a `credentials_ref`, it returns `422`.
+        When the server cannot create the secret for inline credentials, it returns `cannot_create_secret` with the Kubernetes error in the message: `409` when the secret already exists, `422` when the secret name or keys are invalid or the tenant namespace does not exist, `503` when the Kubernetes API is unavailable, and `500` for other failures, such as missing RBAC for the DCH service account.
         Accepts two payload variants (untagged union): use `credentials_ref` to reference an existing secret, or `credentials` to supply inline credentials (the server creates the secret automatically).
       requestBody:
         required: true
@@ -140,6 +141,8 @@ paths:
           $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
         '503':
           $ref: '#/components/responses/ServiceUnavailable'
   /connections/{id}:
@@ -231,6 +234,7 @@ paths:
       summary: Export a connection to a Kubernetes secret
       description: |
         Flattens the connection metadata, properties, and credentials into a single Kubernetes secret with dot-notation keys (e.g. `data_connection.name`, `data_connection.properties.host`). If the secret already exists it is overwritten.
+        When the server cannot write the secret, it returns `cannot_create_secret` with the Kubernetes error in the message: `409` when fields of the existing secret are managed by another client, `422` when the secret name or keys are invalid or the tenant namespace does not exist, `503` when the Kubernetes API is unavailable, and `500` for other failures, such as missing RBAC for the DCH service account.
       tags:
         - connections
       responses:
@@ -244,6 +248,14 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
   /connections/{id}/readiness:
     parameters:
       - $ref: '#/components/parameters/connectionId'
@@ -559,6 +571,10 @@ components:
           type: string
           description: Display name for the connection.
           example: my-postgres
+        description:
+          type: string
+          description: Optional free-form description of the connection.
+          example: Sales data warehouse
         data_connection_type_id:
           type: string
           description: References a connection type id
@@ -680,6 +696,10 @@ components:
           type: string
           description: Display name for the connection.
           example: my-postgres
+        description:
+          type: string
+          description: Optional free-form description of the connection.
+          example: Sales data warehouse
         data_connection_type_id:
           type: string
           description: References a connection type id
@@ -705,6 +725,10 @@ components:
         name:
           type: string
           description: Display name for the connection.
+        description:
+          type: string
+          nullable: true
+          description: Free-form description of the connection. Set to `null` to remove it.
         data_connection_type_id:
           type: string
           description: References a connection type id.
@@ -781,6 +805,16 @@ components:
         default_value:
           type: string
           nullable: true
+        sensitive:
+          type: boolean
+          default: false
+          description: |
+            Whether the field value is sensitive (e.g. password, token) and should be masked in the UI.
+        multiple:
+          type: boolean
+          default: false
+          description: |
+            Whether more than one value from ``enum_values`` may be selected; only meaningful when ``type`` is ``enum``. The selected values are stored in the credentials as a JSON array string for both single and multiple selection (e.g. ``["Pull"]``, ``["Push","Pull"]``), matching the ODH Dashboard format.
     DataConnectionType:
       type: object
       required:

@@ -27,10 +27,11 @@ coverage.json
 *.profraw
 *.profdata
 
-# Dotdirs (allow .github/, .cargo/, and .hooks/)
+# Dotdirs (allow .github/, .cargo/, .hooks/, and .rhoai/)
 .*/
 !.cargo/
 !.github/
+!.rhoai/
 !.claude/
 !.hooks/
 .claude/*

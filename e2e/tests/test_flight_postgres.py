@@ -8,7 +8,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pytest
 
-from data_connect_hub import DCHQueryError, DataConnectClient
+from data_connect_hub import DataConnectClient, DCHQueryError
 
 
 class TestFlightPostgres:
@@ -23,5 +23,5 @@ class TestFlightPostgres:
         assert df["name"].tolist() == ["Tokyo", "London", "Paris"]
 
     def test_write_is_rejected(self, dch_client: DataConnectClient, pg_flight_connection: str) -> None:
-        with pytest.raises(DCHQueryError, match="(?i)read-only"):
+        with pytest.raises(DCHQueryError, match=r"(?i)read-only"):
             dch_client.read("DELETE FROM dch_e2e.cities", pg_flight_connection)
