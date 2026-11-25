@@ -235,7 +235,7 @@ func main() {
 		FlightImage:           requiredEnv(controller.RelatedImageFlightService),
 		KubeRbacProxyImage:    requiredEnv(controller.RelatedImageKubeRbacProxy),
 		ControllerNamespace:   controller.ResolveControllerNamespace(),
-		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver),
+		FlightServiceClient:   controller.NewHTTPFlightServiceClient(restURLResolver, tlsResult.TLSOpts...),
 		GlobalNamespaceConfig: globalNamespaceConfig,
 		APIReader:             mgr.GetAPIReader(),
 	}).SetupWithManager(mgr); err != nil {
@@ -246,7 +246,7 @@ func main() {
 	if err := (&controller.InitDataConnectionTypeReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "initdataconnectiontype")
 		os.Exit(1)
@@ -262,7 +262,7 @@ func main() {
 	if err := (&controller.ConfigMapWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver),
+		RestClient: controller.NewHTTPConnectionTypeClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "configmapwatcher")
 		os.Exit(1)
@@ -271,7 +271,7 @@ func main() {
 	if err := (&controller.SecretWatcherReconciler{
 		Client:     mgr.GetClient(),
 		Scheme:     mgr.GetScheme(),
-		RestClient: controller.NewHTTPMigrationClient(restURLResolver),
+		RestClient: controller.NewHTTPMigrationClient(restURLResolver, tlsResult.TLSOpts...),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "secretwatcher")
 		os.Exit(1)

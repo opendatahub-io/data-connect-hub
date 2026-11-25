@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -68,6 +69,21 @@ func TestHTTPClientDoesNotDisableVerificationOrALPN(t *testing.T) {
 	}
 	if !transport.ForceAttemptHTTP2 {
 		t.Fatal("ForceAttemptHTTP2 = false, want true")
+	}
+}
+
+func TestHTTPClientAppliesTLSProfile(t *testing.T) {
+	tlsOptions := []TLSOption{func(config *tls.Config) {
+		config.MinVersion = tls.VersionTLS12
+		config.NextProtos = []string{"http/1.1"}
+	}}
+	client := newHTTPClientWithRootCAs(func() (string, error) { return "https://localhost", nil }, x509.NewCertPool(), tlsOptions...)
+	transport := client.httpClient.Transport.(*http.Transport)
+	if transport.TLSClientConfig.MinVersion != tls.VersionTLS12 {
+		t.Fatalf("MinVersion = %d, want TLS 1.2", transport.TLSClientConfig.MinVersion)
+	}
+	if len(transport.TLSClientConfig.NextProtos) != 1 || transport.TLSClientConfig.NextProtos[0] != "http/1.1" {
+		t.Fatalf("NextProtos = %v, want [http/1.1]", transport.TLSClientConfig.NextProtos)
 	}
 }
 
