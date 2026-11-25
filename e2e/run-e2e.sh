@@ -75,6 +75,15 @@ if [[ "$(printf '%s\n' "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID" "$DCH_NO_ACCES
     echo "ERROR: DCH_TENANT_ID, DCH_NEIGHBOR_TENANT_ID, DCH_NO_ACCESS_NAMESPACE, DCH_GLOBAL_NAMESPACE, and DCH_GROUP_MEMBER_NAMESPACE must be distinct" >&2
     exit 1
 fi
+# Out-of-box connection types belong to the DCH service namespace. The tenants
+# must differ from it, or the tests that read those types from other tenants
+# would read them from their own namespace and prove nothing.
+for ns in "$DCH_TENANT_ID" "$DCH_NEIGHBOR_TENANT_ID"; do
+    if [[ "$ns" == "$DCH_SERVICE_NAMESPACE" ]]; then
+        echo "ERROR: DCH_TENANT_ID and DCH_NEIGHBOR_TENANT_ID must differ from DCH_SERVICE_NAMESPACE, which holds the out-of-box connection types" >&2
+        exit 1
+    fi
+done
 if [[ "$DCH_GROUP_MEMBER_NAMESPACE" == "$DCH_SERVICE_NAMESPACE" ]]; then
     echo "ERROR: DCH_GROUP_MEMBER_NAMESPACE must differ from DCH_SERVICE_NAMESPACE: every ServiceAccount in it receives the group grants" >&2
     exit 1

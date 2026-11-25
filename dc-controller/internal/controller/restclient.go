@@ -156,30 +156,38 @@ type httpConnectionTypeClient struct {
 	httpClient *http.Client
 }
 
-func newHTTPClient(resolver URLResolver) *httpConnectionTypeClient {
-	return newHTTPClientWithServiceCAPath(resolver, serviceCABundlePath)
+type TLSOption = func(*tls.Config)
+
+func newTLSConfig(roots *x509.CertPool, tlsOptions []TLSOption) *tls.Config {
+	config := &tls.Config{RootCAs: roots}
+	for _, option := range tlsOptions {
+		option(config)
+	}
+	return config
 }
 
-func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool) *httpConnectionTypeClient {
+func newHTTPClient(resolver URLResolver, tlsOptions ...TLSOption) *httpConnectionTypeClient {
+	return newHTTPClientWithServiceCAPath(resolver, serviceCABundlePath, tlsOptions...)
+}
+
+func newHTTPClientWithRootCAs(resolver URLResolver, roots *x509.CertPool, tlsOptions ...TLSOption) *httpConnectionTypeClient {
 	return &httpConnectionTypeClient{
 		resolveURL: resolver,
 		tokenPath:  saTokenPath,
 		httpClient: &http.Client{
 			Timeout: 10 * time.Second,
 			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{
-					RootCAs: roots,
-				},
+				TLSClientConfig:   newTLSConfig(roots, tlsOptions),
 				ForceAttemptHTTP2: true,
 			},
 		},
 	}
 }
 
-func newHTTPClientWithServiceCAPath(resolver URLResolver, caPath string) *httpConnectionTypeClient {
+func newHTTPClientWithServiceCAPath(resolver URLResolver, caPath string, tlsOptions ...TLSOption) *httpConnectionTypeClient {
 	transport := &reloadableServiceCATransport{
 		base: &http.Transport{
-			TLSClientConfig:   &tls.Config{},
+			TLSClientConfig:   newTLSConfig(nil, tlsOptions),
 			ForceAttemptHTTP2: true,
 		},
 		caPath: caPath,
@@ -238,20 +246,20 @@ func rootCAs(serviceCA []byte) *x509.CertPool {
 // NewHTTPConnectionTypeClient creates a ConnectionTypeClient that calls the
 // rest-service through kube-rbac-proxy over HTTPS. The URL is resolved
 // dynamically via the provided resolver.
-func NewHTTPConnectionTypeClient(resolver URLResolver) ConnectionTypeClient {
-	return newHTTPClient(resolver)
+func NewHTTPConnectionTypeClient(resolver URLResolver, tlsOptions ...TLSOption) ConnectionTypeClient {
+	return newHTTPClient(resolver, tlsOptions...)
 }
 
 // NewHTTPMigrationClient creates a ConnectionMigrationClient for the
 // Secret watcher to list connection types and create connections.
-func NewHTTPMigrationClient(resolver URLResolver) ConnectionMigrationClient {
-	return newHTTPClient(resolver)
+func NewHTTPMigrationClient(resolver URLResolver, tlsOptions ...TLSOption) ConnectionMigrationClient {
+	return newHTTPClient(resolver, tlsOptions...)
 }
 
 // NewHTTPFlightServiceClient creates a FlightServiceClient that registers
 // flight services through the REST service.
-func NewHTTPFlightServiceClient(resolver URLResolver) FlightServiceClient {
-	return newHTTPClient(resolver)
+func NewHTTPFlightServiceClient(resolver URLResolver, tlsOptions ...TLSOption) FlightServiceClient {
+	return newHTTPClient(resolver, tlsOptions...)
 }
 
 func (c *httpConnectionTypeClient) baseURL() (string, error) {

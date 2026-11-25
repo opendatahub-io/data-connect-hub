@@ -36,6 +36,7 @@ from data_connect_hub import (
     DCHValidationError,
     InlineCredentials,
 )
+from tests.test_rest_connection_types import EXPECTED_OOB_CONNECTION_TYPES
 
 CHECK_DATA_CONNECTION = "CheckDataConnection"
 GET_SUPPORTED_CONNECTORS = "GetSupportedConnectors"
@@ -75,14 +76,14 @@ def _secret_exists(namespace: str, name: str) -> bool:
     return bool(result.stdout.strip())
 
 
-def _global_type(client: DataConnectClient) -> ConnectionType:
+def _global_type(client: DataConnectClient, name: str = GLOBAL_TYPE_NAME) -> ConnectionType:
     # Global types come back without a tenant_id, which tells them apart from
     # a tenant-scoped type with the same name.
     ct = next(
-        (ct for ct in client.list_connection_types() if ct.name == GLOBAL_TYPE_NAME and not ct.tenant_id),
+        (ct for ct in client.list_connection_types() if ct.name == name and not ct.tenant_id),
         None,
     )
-    assert ct is not None, f"out-of-box connection type {GLOBAL_TYPE_NAME!r} not found"
+    assert ct is not None, f"out-of-box connection type {name!r} not found"
     return ct
 
 
@@ -327,13 +328,38 @@ class TestConnectionTypeIsolation:
             neighbor_client.update_connection(conn.id, connection_type_id=tenant_type.id)
         assert exc_info.value.status_code == 422
 
+    @pytest.mark.parametrize("type_name", sorted(EXPECTED_OOB_CONNECTION_TYPES))
     def test_global_type_visible_in_every_tenant(
-        self, rest_client: DataConnectClient, neighbor_client: DataConnectClient
+        self,
+        rest_client: DataConnectClient,
+        neighbor_client: DataConnectClient,
+        service_namespace: str,
+        tenant_id: str,
+        neighbor_tenant_id: str,
+        type_name: str,
     ) -> None:
-        ours = _global_type(rest_client)
-        theirs = _global_type(neighbor_client)
+        # Out-of-box types live in the DCH service namespace. Reading them from
+        # that namespace would pass without any cross-tenant sharing.
+        assert service_namespace not in (tenant_id, neighbor_tenant_id), (
+            "tenancy tests need tenants other than the DCH service namespace"
+        )
+        ours = _global_type(rest_client, type_name)
+        theirs = _global_type(neighbor_client, type_name)
         assert ours.id == theirs.id
+        assert rest_client.get_connection_type(ours.id).id == ours.id
         assert neighbor_client.get_connection_type(ours.id).id == ours.id
+
+    def test_flight_resolves_global_type(
+        self, rest_client: DataConnectClient, create_connection, pg_secret: str | None
+    ) -> None:
+        """Flight resolves an out-of-box type for a connection outside the service namespace."""
+        if not pg_secret:
+            pytest.skip("DCH_PG_SECRET not set (run e2e/run-e2e.sh first)")
+        conn = create_connection(
+            connection_type_id=_global_type(rest_client).id, credentials_ref=CredentialsRef(secret=pg_secret)
+        )
+        rest_client.check_connection_readiness(conn.id)
+        _check_data_connection(rest_client, conn.id)
 
     def test_global_type_read_only_outside_global_tenant(
         self, neighbor_client: DataConnectClient, create_neighbor_connection
