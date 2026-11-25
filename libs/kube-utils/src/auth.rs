@@ -280,6 +280,9 @@ fn secret_review_spec(auth_info: &AuthInfo, tenant_id: &str, secret_name: &str) 
 }
 
 fn has_compatible_audience(requested: &[String], returned: Option<&[String]>) -> bool {
+    // An empty request list is not a bypass: TokenReview then validates the
+    // token against the apiserver's own audiences, so there is nothing more
+    // to filter here.
     if requested.is_empty() {
         return true;
     }
@@ -299,6 +302,16 @@ mod tests {
             username: "system:serviceaccount:tenant-a:dch-test-user".to_string(),
             groups: vec!["system:serviceaccounts".to_string()],
         }
+    }
+
+    #[test]
+    fn accepts_any_returned_audience_when_none_requested() {
+        // With no requested audiences the apiserver has already enforced its
+        // default audience, so rejecting here would break valid tokens.
+        let returned = vec!["https://kubernetes.default.svc".to_string()];
+
+        assert!(has_compatible_audience(&[], Some(returned.as_slice())));
+        assert!(has_compatible_audience(&[], None));
     }
 
     #[test]

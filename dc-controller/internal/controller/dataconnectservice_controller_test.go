@@ -143,6 +143,8 @@ var _ = Describe("DataConnectService Controller", func() {
 			_ = k8sClient.Delete(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: name}})
 		}
 		_ = k8sClient.Delete(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: platformConfigName, Namespace: targetNamespace}})
+		// envtest runs no garbage collector, so owned IDCTs outlive the CR.
+		_ = k8sClient.DeleteAllOf(ctx, &dchv1alpha1.InitDataConnectionType{}, client.InNamespace(targetNamespace))
 	}
 
 	deleteCR := func() {
@@ -322,6 +324,24 @@ var _ = Describe("DataConnectService Controller", func() {
 			}
 			Expect(ready).NotTo(BeNil())
 			Expect(ready.Status).To(Equal(metav1.ConditionTrue))
+		})
+
+		It("should set the CR as controller owner of created InitDataConnectionTypes", func() {
+			_, err := reconciler().Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+
+			var list dchv1alpha1.InitDataConnectionTypeList
+			Expect(k8sClient.List(ctx, &list, client.InNamespace(targetNamespace))).To(Succeed())
+			Expect(list.Items).NotTo(BeEmpty())
+			for i := range list.Items {
+				owner := metav1.GetControllerOf(&list.Items[i])
+				Expect(owner).NotTo(BeNil(), "IDCT %s has no controller owner", list.Items[i].Name)
+				Expect(owner.UID).To(Equal(cr.UID))
+				Expect(owner.Kind).To(Equal("DataConnectService"))
+			}
 		})
 
 		It("should add managed-by label to created resources", func() {

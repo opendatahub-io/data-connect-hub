@@ -193,17 +193,6 @@ rules:
   - watch
 - apiGroups:
   - rbac.authorization.k8s.io
-  resourceNames:
-  - dch-flight-service-secret-access
-  - dch-read
-  - dch-read-write
-  - dch-rest-service-secret-access
-  resources:
-  - clusterroles
-  verbs:
-  - bind
-- apiGroups:
-  - rbac.authorization.k8s.io
   resources:
   - rolebindings
   verbs:

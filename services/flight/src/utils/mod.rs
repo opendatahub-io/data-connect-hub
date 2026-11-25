@@ -49,6 +49,7 @@ fn default_cache_ttl_secs() -> u64 {
     300
 }
 
+// Empty means TokenReview validates against the apiserver's own audiences.
 fn default_token_review_audiences() -> Vec<String> {
     vec![]
 }

@@ -218,7 +218,12 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // flight services) and (2) every rule in the ClusterRoles it installs from
 // config/base (dch-read, dch-read-write, dch-admin, rest-service-data-access),
 // because RBAC escalation prevention requires holding a permission to grant it.
-// Keep these in sync with config/base/user-roles/clusterroles.yaml.
+// The same applies to the RoleBindings the tenant and global namespace
+// controllers create: holding every rule of the bound ClusterRoles (including
+// the secrets verbs of the *-secret-access roles, granted by the secrets marker
+// below) is what lets them bind without the `bind` verb.
+// Keep these in sync with config/base/user-roles/clusterroles.yaml and the
+// *-secret-access ClusterRoles under config/base.
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-connections;data-connection-types,verbs=get;create;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=data-store,verbs=get
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=flight-services,verbs=create
@@ -654,6 +659,12 @@ func (r *DataConnectServiceReconciler) ensureInitDataConnectionTypes(ctx context
 				Namespace: cr.Namespace,
 			},
 			Spec: spec.toIDCTSpec(),
+		}
+		// The owner reference lets GC remove the IDCTs with the CR even if
+		// the finalizer's explicit cleanup is skipped.
+		if err := controllerutil.SetControllerReference(cr, idct, r.Scheme); err != nil {
+			log.Error(err, "failed to set owner reference on InitDataConnectionType", "name", name)
+			continue
 		}
 		if err := r.Create(ctx, idct); err != nil {
 			if !apierrors.IsAlreadyExists(err) {
