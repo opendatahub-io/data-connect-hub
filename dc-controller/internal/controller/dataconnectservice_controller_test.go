@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -43,6 +44,17 @@ import (
 
 	dchv1alpha1 "github.com/opendatahub-io/data-connect-hub/dc-controller/api/dataconnecthub/v1alpha1"
 )
+
+type denyInitDataConnectionTypeDeletes struct {
+	client.Client
+}
+
+func (c denyInitDataConnectionTypeDeletes) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if _, ok := obj.(*dchv1alpha1.InitDataConnectionType); ok {
+		return fmt.Errorf("injected InitDataConnectionType delete failure")
+	}
+	return c.Client.Delete(ctx, obj, opts...)
+}
 
 var _ = Describe("DataConnectService Controller", func() {
 	const (
@@ -119,6 +131,12 @@ var _ = Describe("DataConnectService Controller", func() {
 	}
 
 	cleanupOperatorResources := func() {
+		var idcts dchv1alpha1.InitDataConnectionTypeList
+		if err := k8sClient.List(ctx, &idcts, client.InNamespace(targetNamespace)); err == nil {
+			for i := range idcts.Items {
+				_ = k8sClient.Delete(ctx, &idcts.Items[i])
+			}
+		}
 		for _, name := range []string{np + nameRestService, flightResourceName} {
 			_ = k8sClient.Delete(ctx, &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
 			_ = k8sClient.Delete(ctx, &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: targetNamespace}})
@@ -801,6 +819,13 @@ var _ = Describe("DataConnectService Controller", func() {
 
 			cr := &dchv1alpha1.DataConnectService{}
 			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			var idcts dchv1alpha1.InitDataConnectionTypeList
+			Expect(k8sClient.List(ctx, &idcts, client.InNamespace(targetNamespace))).To(Succeed())
+			Expect(idcts.Items).NotTo(BeEmpty())
+			// Simulate a seed created by a pre-owner-reference controller version.
+			legacyIDCT := idcts.Items[0].DeepCopy()
+			legacyIDCT.OwnerReferences = nil
+			Expect(k8sClient.Update(ctx, legacyIDCT)).To(Succeed())
 			Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
 
 			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
@@ -812,6 +837,25 @@ var _ = Describe("DataConnectService Controller", func() {
 			Expect(errors.IsNotFound(err)).To(BeTrue())
 			err = k8sClient.Get(ctx, types.NamespacedName{Name: np + "kube-rbac-proxy-auth-review"}, &rbacv1.ClusterRoleBinding{})
 			Expect(errors.IsNotFound(err)).To(BeTrue())
+			Expect(k8sClient.List(ctx, &idcts, client.InNamespace(targetNamespace))).To(Succeed())
+			Expect(idcts.Items).To(BeEmpty())
+		})
+
+		It("should keep the finalizer when InitDataConnectionType deletion fails", func() {
+			r := reconciler()
+			_, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).NotTo(HaveOccurred())
+
+			cr := &dchv1alpha1.DataConnectService{}
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(k8sClient.Delete(ctx, cr)).To(Succeed())
+
+			r.Client = denyInitDataConnectionTypeDeletes{Client: k8sClient}
+			_, err = r.Reconcile(ctx, reconcile.Request{NamespacedName: crKey})
+			Expect(err).To(HaveOccurred())
+
+			Expect(k8sClient.Get(ctx, crKey, cr)).To(Succeed())
+			Expect(controllerutil.ContainsFinalizer(cr, finalizerName)).To(BeTrue())
 		})
 	})
 

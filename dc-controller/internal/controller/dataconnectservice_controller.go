@@ -214,7 +214,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create;delete
 // DCH data plane resources are checked by SubjectAccessReview only. The
 // controller needs the union of (1) the verbs kube-rbac-proxy checks for its
 // own REST calls (create/list connection types, create connections, register
@@ -265,7 +265,9 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 				return ctrl.Result{}, err
 			}
 			r.clearSyncedAnnotations(ctx)
-			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
+			if err := r.deleteInitDataConnectionTypes(ctx, cr.Namespace); err != nil {
+				return ctrl.Result{}, err
+			}
 			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -766,18 +768,26 @@ func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec
 
 // deleteInitDataConnectionTypes removes IDCT CRs from the DCS namespace so
 // they get re-created on a future install with a fresh database.
-func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context.Context, namespace string) {
-	log := logf.FromContext(ctx)
+func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context.Context, namespace string) error {
 	var list dchv1alpha1.InitDataConnectionTypeList
 	if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-		log.Error(err, "failed to list InitDataConnectionTypes for cleanup")
-		return
+		return fmt.Errorf("listing InitDataConnectionTypes for cleanup in namespace %s: %w", namespace, err)
 	}
 	for i := range list.Items {
-		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			log.Error(err, "failed to delete InitDataConnectionType", "name", list.Items[i].Name)
+		idct := &list.Items[i]
+		if err := r.Delete(ctx, idct); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting InitDataConnectionType %s/%s: %w", idct.Namespace, idct.Name, err)
 		}
 	}
+
+	var remaining dchv1alpha1.InitDataConnectionTypeList
+	if err := r.List(ctx, &remaining, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("verifying InitDataConnectionType cleanup in namespace %s: %w", namespace, err)
+	}
+	if len(remaining.Items) != 0 {
+		return fmt.Errorf("waiting for %d InitDataConnectionType resource(s) to be deleted from namespace %s", len(remaining.Items), namespace)
+	}
+	return nil
 }
 
 // clearSyncedAnnotations removes the dataconnecthub synced annotation from
