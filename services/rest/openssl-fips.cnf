@@ -1,0 +1,51 @@
+# OpenSSL configuration for the FIPS build of rest-service.
+#
+# RHEL's libcrypto enables FIPS for the *default* library context by reading
+# /proc/sys/crypto/fips_enabled. That auto-detection does not reach a library
+# context created with OSSL_LIB_CTX_new(), which is what rustls-ossl does: it
+# builds its own context and loads whatever OPENSSL_CONF points at. The stock
+# /etc/pki/tls/openssl.cnf activates only the `default` provider and leaves
+# [evp_properties] empty, so that context comes up non-FIPS and the TLS stack
+# silently runs on the unvalidated provider.
+#
+# Pointing OPENSSL_CONF here activates `fips` + `base` and sets the default
+# property query, so every library context — default or not — resolves
+# algorithms through the validated FIPS provider. See ODH-ADR-0003.
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers   = provider_sect
+alg_section = evp_properties
+ssl_conf    = ssl_module
+
+[evp_properties]
+default_properties = "fips=yes"
+
+# No `default` provider: its presence would let a fips=no fetch succeed and
+# defeat the point. `base` supplies the encoders and decoders that the FIPS
+# provider deliberately does not carry.
+[provider_sect]
+fips = fips_sect
+base = base_sect
+
+[base_sect]
+activate = 1
+
+# Use the same explicit policy as the rustls provider. In particular, do not
+# inherit OpenSSL 3.5's built-in group defaults: they offer X25519 and the
+# ML-KEM hybrids, while the validated provider is frozen at 3.0.7 and supplies
+# neither. An empty resolved cipher list makes SSL_CTX_new_ex fail with
+# "library has no ciphers".
+[ssl_module]
+system_default = system_default
+
+[system_default]
+MinProtocol = TLSv1.2
+CipherString = ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384
+CipherSuites = TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256
+Groups = P-256:P-384:P-521
+
+# Defines [fips_sect]: activate = 1 and tls1-prf-ems-check = 1. Kept last —
+# the include switches the current section, so nothing may follow it.
+.include /etc/pki/tls/fips_local.cnf

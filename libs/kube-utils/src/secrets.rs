@@ -38,7 +38,7 @@ impl SecretStore for KubeSecretStore {
     async fn get_secret(&self, namespace: &str, name: &str) -> Result<Secret, SecretStoreError> {
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
         let k8s_secret = api.get(name).await.map_err(|e| {
-            error!("failed to get secret {namespace}/{name}: {e}");
+            error!("failed to get secret {namespace}/{name}: {}", error_chain(&e));
             SecretStoreError::SecretNotFound("Failed to obtain credentials".to_string())
         })?;
         let properties = extract_properties(&k8s_secret);
@@ -98,7 +98,7 @@ impl SecretStore for KubeSecretStore {
             api.create(&PostParams::default(), &k8s_secret).await
         }
         .map_err(|e| {
-            error!("failed to create secret {ns}/{}: {e}", secret.name);
+            error!("failed to create secret {ns}/{}: {}", secret.name, error_chain(&e));
             create_secret_error(&secret.name, ns, &e)
         })?;
 
@@ -117,7 +117,7 @@ impl SecretStore for KubeSecretStore {
     async fn delete_secret(&self, namespace: &str, name: &str) -> Result<(), SecretStoreError> {
         let api: Api<K8sSecret> = Api::namespaced(self.client.clone(), namespace);
         api.delete(name, &DeleteParams::default()).await.map_err(|e| {
-            error!("failed to delete secret {namespace}/{name}: {e}");
+            error!("failed to delete secret {namespace}/{name}: {}", error_chain(&e));
             SecretStoreError::SecretNotFound(format!("{namespace}/{name}"))
         })?;
 
@@ -148,7 +148,7 @@ impl SecretStore for KubeSecretStore {
         api.patch(name, &PatchParams::default(), &Patch::Merge(&patch))
             .await
             .map_err(|e| {
-                error!("failed to set labels on secret {namespace}/{name}: {e}");
+                error!("failed to set labels on secret {namespace}/{name}: {}", error_chain(&e));
                 SecretStoreError::SecretNotFound(format!("{namespace}/{name}"))
             })?;
 
@@ -198,6 +198,21 @@ fn create_secret_error(name: &str, namespace: &str, err: &kube::Error) -> Secret
         reason,
         kind,
     }
+}
+
+/// error_chain renders an error followed by every `source()` beneath it.
+/// `kube::Error` only displays its outermost frame, so a failed TLS handshake
+/// reaches the log as nothing but "ServiceError: client error (Connect)" and
+/// is indistinguishable from a refused connection; the causes have to be
+/// walked explicitly to be of any use.
+fn error_chain(err: &dyn std::error::Error) -> String {
+    let mut chain = err.to_string();
+    let mut source = err.source();
+    while let Some(err) = source {
+        chain.push_str(&format!(": {err}"));
+        source = err.source();
+    }
+    chain
 }
 
 fn extract_properties(k8s_secret: &K8sSecret) -> HashMap<String, String> {
@@ -360,6 +375,43 @@ mod tests {
             ),
             ..Default::default()
         }
+    }
+
+    #[derive(Debug, thiserror::Error)]
+    #[error("{message}")]
+    struct NestedError {
+        message: &'static str,
+        #[source]
+        source: Option<Box<NestedError>>,
+    }
+
+    #[test]
+    fn test_error_chain_appends_every_source() {
+        let err = NestedError {
+            message: "client error (Connect)",
+            source: Some(Box::new(NestedError {
+                message: "invalid peer certificate",
+                source: Some(Box::new(NestedError {
+                    message: "UnsupportedSignatureAlgorithm",
+                    source: None,
+                })),
+            })),
+        };
+
+        assert_eq!(
+            error_chain(&err),
+            "client error (Connect): invalid peer certificate: UnsupportedSignatureAlgorithm"
+        );
+    }
+
+    #[test]
+    fn test_error_chain_without_source_is_the_error_itself() {
+        let err = NestedError {
+            message: "secrets \"creds\" is forbidden",
+            source: None,
+        };
+
+        assert_eq!(error_chain(&err), "secrets \"creds\" is forbidden");
     }
 
     #[test]

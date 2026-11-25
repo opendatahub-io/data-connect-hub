@@ -6,7 +6,12 @@
 
 FROM registry.access.redhat.com/ubi9-minimal@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS builder
 
-RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+# openssl-devel: the binary links the system OpenSSL dynamically so that
+# cryptography is performed by the RHEL FIPS provider rather than a statically
+# linked Rust implementation. Installing it also aligns openssl-libs with the
+# runtime image. See ODH-ADR-0003.
+# clang: required by bindgen (used by openssl-sys and other native bindings)
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal openssl-devel clang \
     && microdnf clean all
 
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -46,6 +51,11 @@ RUN microdnf install -y shadow-utils ca-certificates curl-minimal \
     && microdnf clean all \
     && groupadd -g 1001 -r dch \
     && useradd -u 1001 -r -g dch -d /nonexistent -s /sbin/nologin dch
+
+COPY --chown=root:root --chmod=0444 \
+    services/rest/openssl-fips.cnf /etc/pki/tls/openssl-fips.cnf
+
+ENV OPENSSL_CONF=/etc/pki/tls/openssl-fips.cnf
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /usr/local/bin/rest-service

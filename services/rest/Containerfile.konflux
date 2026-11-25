@@ -1,8 +1,12 @@
 ARG RUNTIME_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:5e9a0970f73f4800445c3ce0ca0d6b7ea1a8c620b81e735d16432db09d6787bc
-
 FROM registry.access.redhat.com/ubi9/ubi-minimal:9.9-1795198179@sha256:08d4c70f1baf6537a0728656cf7942d561e74a35916509d205b6519861266352 AS builder
 
-RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal \
+# openssl-devel: the binary links the system OpenSSL dynamically so that
+# cryptography is performed by the RHEL FIPS provider rather than a statically
+# linked Rust implementation. Installing it also aligns openssl-libs with the
+# runtime image. See ODH-ADR-0003.
+# clang: required by bindgen (used by openssl-sys and other native bindings)
+RUN microdnf install -y gcc pkgconf tar gzip findutils ca-certificates curl-minimal openssl-devel clang \
     && microdnf clean all
 
 ENV RUSTUP_HOME=/usr/local/rustup \
@@ -29,6 +33,11 @@ WORKDIR /
 
 RUN microdnf install -y ca-certificates \
     && microdnf clean all
+
+COPY --chown=root:root --chmod=0444 \
+    services/rest/openssl-fips.cnf /etc/pki/tls/openssl-fips.cnf
+
+ENV OPENSSL_CONF=/etc/pki/tls/openssl-fips.cnf
 
 COPY --from=builder --chown=root:root --chmod=0555 \
     /usr/local/bin/rest-service /app/rest-service

@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 async-trait = { workspace = true }
 commons = { workspace = true }
-sqlx = { workspace = true }
+sqlx-fips = { workspace = true }
 tokio = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }

@@ -83,12 +83,12 @@ assert_deployment_image() {
 
 echo "=== Deploying system PostgreSQL ==="
 
-sys_pg_url="postgresql://${CI_SYS_PG_USER}:${CI_SYS_PG_PASSWORD}@${CI_SYS_PG_HOST}:5432/${CI_SYS_PG_DATABASE}"
+sys_pg_url="postgresql://${CI_SYS_PG_USER}@${CI_SYS_PG_HOST}:5432/${CI_SYS_PG_DATABASE}"
 
 sys_pg_args=(-n "$CI_SVC_NAMESPACE" -r "$CI_SYS_PG_HOST" -u "$CI_SYS_PG_USER" -p "$CI_SYS_PG_PASSWORD" -d "$CI_SYS_PG_DATABASE" -t "180s")
 if [[ "$CI_SSL_ENABLED" == "true" ]]; then
-    sys_pg_args+=(--ssl)
-    sys_pg_url="${sys_pg_url}?sslmode=verify-ca"
+    sys_pg_args+=(--ssl --client-cert-auth)
+    sys_pg_url="${sys_pg_url}?sslmode=verify-full&sslrootcert=/secrets/postgresql-ca.crt&sslcert=/secrets/postgresql-client.crt&sslkey=/secrets/postgresql-client.key"
 fi
 bash "$CI_REPO_ROOT/hack/install-postgresql.sh" "${sys_pg_args[@]}"
 
@@ -97,7 +97,15 @@ sys_pg_secret_args=()
 if [[ "$CI_SSL_ENABLED" == "true" ]]; then
     kubectl get secret "${CI_SYS_PG_HOST}-tls" -n "$CI_SVC_NAMESPACE" \
         -o jsonpath='{.data.ca\.crt}' | base64 -d > "${CI_TEMP_DIR}/postgresql-ca.crt"
-    sys_pg_secret_args+=(--from-file=postgresql-ca.crt="${CI_TEMP_DIR}/postgresql-ca.crt")
+    kubectl get secret "${CI_SYS_PG_HOST}-client-tls" -n "$CI_SVC_NAMESPACE" \
+        -o jsonpath='{.data.client\.crt}' | base64 -d > "${CI_TEMP_DIR}/postgresql-client.crt"
+    kubectl get secret "${CI_SYS_PG_HOST}-client-tls" -n "$CI_SVC_NAMESPACE" \
+        -o jsonpath='{.data.client\.key}' | base64 -d > "${CI_TEMP_DIR}/postgresql-client.key"
+    sys_pg_secret_args+=(
+        --from-file=postgresql-ca.crt="${CI_TEMP_DIR}/postgresql-ca.crt"
+        --from-file=postgresql-client.crt="${CI_TEMP_DIR}/postgresql-client.crt"
+        --from-file=postgresql-client.key="${CI_TEMP_DIR}/postgresql-client.key"
+    )
 fi
 
 dch_secret_config_file="${CI_TEMP_DIR}/dch-secret-config.toml"
@@ -347,6 +355,7 @@ if ! kubectl wait \
     -n "$CI_SVC_NAMESPACE" \
     --timeout=180s; then
     kubectl get dataconnectservices.dataconnecthub.opendatahub.io "$CI_DCS_CR_NAME" -n "$CI_SVC_NAMESPACE" -o yaml || true
+    dump_cluster "$CI_CONTROLLER_NAMESPACE" "$CI_SVC_NAMESPACE"
     echo "ERROR: DataConnectService did not become Ready" >&2
     exit 1
 fi
