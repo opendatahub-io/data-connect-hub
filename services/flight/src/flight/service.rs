@@ -352,6 +352,10 @@ impl DataIngestionService {
 
         let schema = pg_state.schema.clone();
 
+        // Echo the request descriptor, as the other GetFlightInfo handlers do.
+        // Arrow C++ clients (pyarrow.flight) reject a FlightInfo without one.
+        let flight_descriptor = request.into_inner();
+
         let ticket_stmt = TicketStatementQuery {
             statement_handle: Bytes::from(query.query),
         };
@@ -365,6 +369,7 @@ impl DataIngestionService {
                 tracing::error!(error = %e, "failed to encode statement schema");
                 Status::internal("failed to encode statement schema")
             })?
+            .with_descriptor(flight_descriptor)
             .with_endpoint(endpoint)
             .with_total_records(-1)
             .with_total_bytes(-1);

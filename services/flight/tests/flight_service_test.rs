@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use arrow::array::{Array, StringArray};
-use arrow_flight::sql::{Any, Command, CommandStatementQuery, server::FlightSqlService};
+use arrow_flight::sql::{Any, Command, CommandStatementQuery, ProstMessageExt, server::FlightSqlService};
 use arrow_flight::{FlightDescriptor, flight_service_server::FlightServiceServer, sql::client::FlightSqlServiceClient};
 use commons::api::ResourceList;
 use commons::api::ResourceMetadata;
@@ -23,6 +23,7 @@ use flight_service::flight::service::DataIngestionService;
 mod common;
 use common::InMemorySecretStore;
 use futures::TryStreamExt;
+use prost::Message;
 use sqlite_connector::SqliteConnector;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -369,6 +370,18 @@ async fn test_flight_sql_select_prompts() {
     client.set_header(X_TENANT_ID, "default");
 
     let flight_info = client.execute("SELECT * FROM prompts".to_string(), None).await.unwrap();
+
+    // GetFlightInfo must echo the request descriptor: Arrow C++ clients
+    // (pyarrow.flight) reject a FlightInfo without one.
+    let expected_descriptor = FlightDescriptor::new_cmd(
+        CommandStatementQuery {
+            query: "SELECT * FROM prompts".to_string(),
+            transaction_id: None,
+        }
+        .as_any()
+        .encode_to_vec(),
+    );
+    assert_eq!(flight_info.flight_descriptor, Some(expected_descriptor));
 
     let endpoint = &flight_info.endpoint[0];
     let ticket = endpoint.ticket.clone().unwrap();
