@@ -49,4 +49,3 @@ pub fn retain_fips_kx_groups(provider: &mut rustls::crypto::CryptoProvider) {
         .kx_groups
         .sort_by_key(|group| fips_kx_group_rank(group.name()).unwrap_or(u8::MAX));
 }
-
