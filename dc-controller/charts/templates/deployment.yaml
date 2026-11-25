@@ -35,8 +35,6 @@ spec:
           - --health-probe-bind-address=:8081
           - --zap-encoder=json
         env:
-        - name: GOLANG_FIPS
-          value: "1"
         - name: CONTROLLER_NAMESPACE
           valueFrom:
             fieldRef:

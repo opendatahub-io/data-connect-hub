@@ -22,8 +22,6 @@ RUN if [ -f /cachi2/cachi2.env ]; then . /cachi2/cachi2.env; fi && \
 FROM ${RUNTIME_BASE_IMAGE}
 WORKDIR /
 
-ENV GOLANG_FIPS=1
-
 COPY --from=builder --chown=root:root --chmod=0555 /workspace/manager .
 COPY config/ /manifests/
 
