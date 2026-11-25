@@ -56,6 +56,7 @@ SSL_ENABLED=false
 SSL_CERT=""
 SSL_KEY=""
 SSL_CA=""
+CLIENT_CERT_AUTH=false
 
 # ---------------------------------------------------------------------------
 # Usage
@@ -80,6 +81,7 @@ Options:
   --ssl-cert FILE     server certificate (PEM)
   --ssl-key FILE      server private key (PEM)
   --ssl-ca FILE       CA certificate (PEM)
+  --client-cert-auth  require client certificates for TCP connections
   -h, --help          show this help
 
 SSL:
@@ -94,6 +96,10 @@ SSL:
 
   --ssl-ca
       Optional CA certificate for client-side server certificate verification.
+
+  --client-cert-auth
+      Require client-certificate authentication for TCP connections. This is
+      only supported when the script generates the CA and server certificate.
 
 Examples:
 
@@ -192,6 +198,10 @@ while [[ $# -gt 0 ]]; do
             SSL_CA="$2"
             shift 2
             ;;
+        --client-cert-auth)
+            CLIENT_CERT_AUTH=true
+            shift
+            ;;
         -h|--help)
             usage
             ;;
@@ -244,6 +254,16 @@ if [[ "$SSL_ENABLED" == "true" ]]; then
         echo "error: --ssl-ca requires --ssl-cert and --ssl-key" >&2
         exit 1
     fi
+fi
+
+if [[ "$CLIENT_CERT_AUTH" == "true" && "$SSL_ENABLED" != "true" ]]; then
+    echo "error: --client-cert-auth requires --ssl" >&2
+    exit 1
+fi
+
+if [[ "$CLIENT_CERT_AUTH" == "true" && -n "$SSL_CERT" ]]; then
+    echo "error: --client-cert-auth requires generated certificates" >&2
+    exit 1
 fi
 
 # ---------------------------------------------------------------------------
@@ -383,6 +403,33 @@ EOF
             -extfile "$SAN_FILE" \
             2>/dev/null
 
+        if [[ "$CLIENT_CERT_AUTH" == "true" ]]; then
+            openssl req \
+                -new \
+                -nodes \
+                -newkey rsa:2048 \
+                -keyout "$CERT_TMPDIR/client.key" \
+                -out "$CERT_TMPDIR/client.csr" \
+                -subj "/CN=${USERNAME}" \
+                2>/dev/null
+
+            CLIENT_EXT_FILE="$CERT_TMPDIR/client.ext"
+            cat > "$CLIENT_EXT_FILE" <<EOF
+extendedKeyUsage=clientAuth
+EOF
+
+            openssl x509 \
+                -req \
+                -in "$CERT_TMPDIR/client.csr" \
+                -CA "$CERT_TMPDIR/ca.crt" \
+                -CAkey "$CERT_TMPDIR/ca.key" \
+                -CAcreateserial \
+                -out "$CERT_TMPDIR/client.crt" \
+                -days 365 \
+                -extfile "$CLIENT_EXT_FILE" \
+                2>/dev/null
+        fi
+
         SSL_CERT="$CERT_TMPDIR/server.crt"
         SSL_KEY="$CERT_TMPDIR/server.key"
         SSL_CA="$CERT_TMPDIR/ca.crt"
@@ -427,6 +474,18 @@ EOF
 
     echo "SSL certificates stored in secret '${RELEASE}-tls'"
 
+    if [[ "$CLIENT_CERT_AUTH" == "true" ]]; then
+        kubectl create secret generic "${RELEASE}-client-tls" \
+            -n "$NAMESPACE" \
+            --from-file=client.crt="$CERT_TMPDIR/client.crt" \
+            --from-file=client.key="$CERT_TMPDIR/client.key" \
+            --dry-run=client \
+            -o yaml |
+            kubectl apply -f - >/dev/null
+
+        echo "Client certificate stored in secret '${RELEASE}-client-tls'"
+    fi
+
     # -----------------------------------------------------------------------
     # PostgreSQL pg_hba.conf
     #
@@ -440,14 +499,20 @@ EOF
     # initialization using the local Unix socket.
     # -----------------------------------------------------------------------
 
+    if [[ "$CLIENT_CERT_AUTH" == "true" ]]; then
+        PG_HBA_AUTH="cert"
+    else
+        PG_HBA_AUTH="scram-sha-256"
+    fi
+
     kubectl create configmap "${RELEASE}-pg-hba" \
         -n "$NAMESPACE" \
         --from-literal=pg_hba.conf="\
 local all all trust
 hostnossl all all 0.0.0.0/0 reject
 hostnossl all all ::/0 reject
-hostssl all all 0.0.0.0/0 scram-sha-256
-hostssl all all ::/0 scram-sha-256
+hostssl all all 0.0.0.0/0 ${PG_HBA_AUTH}
+hostssl all all ::/0 ${PG_HBA_AUTH}
 " \
         --dry-run=client \
         -o yaml |
@@ -459,6 +524,12 @@ fi
 # ---------------------------------------------------------------------------
 # Generate Kubernetes manifests
 # ---------------------------------------------------------------------------
+
+PG_SSL_CA_ARGS=""
+if [[ "$SSL_ENABLED" == "true" && "$HAS_CA" == "true" ]]; then
+    PG_SSL_CA_ARGS="            - -c
+            - ssl_ca_file=/etc/tls/certs/ca.crt"
+fi
 
 generate_manifest() {
 
@@ -598,6 +669,7 @@ EOF
             - ssl_cert_file=/etc/tls/certs/server.crt
             - -c
             - ssl_key_file=/etc/tls/certs/server.key
+${PG_SSL_CA_ARGS}
             - -c
             - hba_file=/etc/postgresql/pg_hba.conf
 EOF
