@@ -50,28 +50,3 @@ pub fn retain_fips_kx_groups(provider: &mut rustls::crypto::CryptoProvider) {
         .sort_by_key(|group| fips_kx_group_rank(group.name()).unwrap_or(u8::MAX));
 }
 
-fn is_fips_cipher_suite(suite: rustls::CipherSuite) -> bool {
-    matches!(
-        suite,
-        rustls::CipherSuite::TLS13_AES_128_GCM_SHA256
-            | rustls::CipherSuite::TLS13_AES_256_GCM_SHA384
-            | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
-            | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
-            | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
-            | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
-    )
-}
-
-/// retain_fips_cipher_suites drops the suites that are not FIPS approved,
-/// ChaCha20-Poly1305 among them. `CryptoProvider::fips()` is an `all()` over
-/// the configured suites, so leaving one non-approved suite in the list makes
-/// the whole provider report non-FIPS.
-///
-/// The selection is by suite identity rather than by `suite.fips()`, which
-/// reports the state of the OpenSSL context: off a FIPS host every suite
-/// answers false there, and filtering on it would leave no suite at all.
-pub fn retain_fips_cipher_suites(provider: &mut rustls::crypto::CryptoProvider) {
-    provider
-        .cipher_suites
-        .retain(|suite| is_fips_cipher_suite(suite.suite()));
-}

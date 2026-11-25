@@ -245,8 +245,6 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
         .map_err(|e| anyhow::anyhow!("the OpenSSL crypto provider is unusable: {e}"))?;
 
     fips::retain_fips_kx_groups(&mut provider);
-    fips::retain_fips_cipher_suites(&mut provider);
-
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
     // try_default_provider above vouches for what the OpenSSL context
     // supplied; this guards what the policy applied here leaves behind. Every
