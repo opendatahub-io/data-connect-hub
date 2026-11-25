@@ -347,6 +347,7 @@ if ! kubectl wait \
     -n "$CI_SVC_NAMESPACE" \
     --timeout=180s; then
     kubectl get dataconnectservices.dataconnecthub.opendatahub.io "$CI_DCS_CR_NAME" -n "$CI_SVC_NAMESPACE" -o yaml || true
+    dump_cluster "$CI_CONTROLLER_NAMESPACE" "$CI_SVC_NAMESPACE"
     echo "ERROR: DataConnectService did not become Ready" >&2
     exit 1
 fi
