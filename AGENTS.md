@@ -199,7 +199,14 @@ make check-dco   # run DCO check locally
   all use Helm). We should plan to convert our `dc-controller/config/` overlays to a Helm chart in a future release.
   Reference PRs: opendatahub-operator#3813 (OGX/Helm), #3654 (MLflow/Kustomize migration).
 - The DataConnectService CRD uses API group `dataconnecthub.opendatahub.io`.
-- The CR is cluster-scoped and singleton (`default-dataconnectservice`).
+- The DataConnectService application CR is namespaced. The planned platform-managed
+  instance is named `default-dataconnectservice` in the applications namespace.
+- DSC onboarding uses `spec.components.data.dataConnectHub` and the existing
+  Feast module operator / `Platform.spec.modules.data` boundary. Do not add an
+  independent DCH module handler, Platform module entry, or DataConnectHub module
+  CR. The Feast module installs dc-controller and manages its application CR;
+  the platform aggregates module status into DSC. See
+  `docs/dev-guide/dsc-data-onboarding-plan.md` for the implementation plan.
 - Status follows the PlatformObject contract: `observedGeneration`, `distribution`, `releases`,
   and conditions `Ready`, `ProvisioningSucceeded`, `Degraded`.
 - Application images are resolved from env vars for disconnected/air-gapped support:

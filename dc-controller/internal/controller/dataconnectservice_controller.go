@@ -161,10 +161,10 @@ type platformConfig struct {
 	TokenReviewAudiences []string
 }
 
-// readPlatformConfig reads cluster-level defaults from the platform ConfigMap.
-// TODO(DSC): When DCH is onboarded to DSC, the platform operator will create
-// and manage this ConfigMap (including auth.tokenReviewAudiences) in the operand
-// namespace. Until then, standalone users create it manually or use CR overrides.
+// readPlatformConfig reads application defaults and runtime metadata from the
+// ConfigMap in the application's namespace. Standalone users supply it directly;
+// the planned Data-module integration delegates its management to the module
+// operator. Explicit gateway and audience fields in the application spec win.
 func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, namespace string) platformConfig {
 	cfg := platformConfig{
 		Distribution: dchv1alpha1.DistributionStatus{
@@ -212,6 +212,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create
 // DCH data plane resources are checked by SubjectAccessReview only. The
 // controller needs the union of (1) the verbs kube-rbac-proxy checks for its
 // own REST calls (create/list connection types, create connections, register
@@ -404,15 +405,17 @@ func (r *DataConnectServiceReconciler) updateStatus(
 	cr.Status.ObservedGeneration = cr.Generation
 	cr.Status.Distribution = platCfg.Distribution
 	mutate(&cr)
-	// The gateway check may change Ready to Not Ready. Base the platform
-	// release handshake on the final status rather than the requested phase.
-	cr.Status.Releases = r.buildReleases(&cr, platCfg, cr.Status.Phase == conditionTypeReady)
+	// Final checks (for example gateway HTTP/2 support) can override Ready.
+	// Acknowledge an upgrade only after those checks, preserving the previous
+	// platform release while the application is not ready.
+	ready := meta.IsStatusConditionTrue(cr.Status.Conditions, conditionTypeReady)
+	cr.Status.Releases = r.buildReleases(&cr, platCfg, ready)
 
 	if err := r.Status().Update(ctx, &cr); err != nil {
 		return ctrl.Result{}, err
 	}
 
-	if phase == conditionTypeReady {
+	if ready {
 		return ctrl.Result{RequeueAfter: requeueWhenReady}, nil
 	}
 	if phase == "Error" {
@@ -1174,7 +1177,7 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 
 func (r *DataConnectServiceReconciler) platformConfigToReconcile(ctx context.Context, obj client.Object) []reconcile.Request {
 	var list dchv1alpha1.DataConnectServiceList
-	if err := r.List(ctx, &list); err != nil {
+	if err := r.List(ctx, &list, client.InNamespace(obj.GetNamespace())); err != nil {
 		logf.FromContext(ctx).Error(err, "failed to list DataConnectService CRs for ConfigMap trigger")
 		return nil
 	}

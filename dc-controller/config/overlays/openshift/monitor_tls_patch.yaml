@@ -3,6 +3,6 @@
   value:
     ca:
       configMap:
-        name: openshift-service-ca.crt
+        name: dc-controller-service-ca
         key: service-ca.crt
     serverName: metrics-service.system.svc
