@@ -31,15 +31,16 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# pyarrow provides the Flight client and its TLS. For FIPS environments, install
+# a pyarrow build that links the system OpenSSL (e.g. from the Red Hat AI index).
 flight = [
-    "adbc-driver-flightsql>=1.0.0",
     "pyarrow>=14.0",
     "pandas>=2.0",
-    "protobuf>=6.33.5",
 ]
 dev = [
     "build>=1.2",
     "numpy<2.5", # NumPy 2.5 stubs require Python 3.12 syntax; the SDK type-checks against Python 3.11.
+    "protobuf>=6.33.5", # Tests only: checks the hand-encoded Flight SQL commands against the official encoder.
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.5",
@@ -96,7 +97,6 @@ module = [
     "pyarrow",
     "pyarrow.*",
     "pandas",
-    "adbc_driver_flightsql.*",
 ]
 ignore_missing_imports = true
 

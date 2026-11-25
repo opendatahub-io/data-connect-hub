@@ -70,3 +70,48 @@ def sample_connection() -> DataConnection:
 @pytest.fixture()
 def sample_connection_json() -> dict[str, object]:
     return dict(SAMPLE_CONNECTION_JSON)
+
+
+# -- protobuf wire-format decoding (independent of the SDK encoder) -----------
+
+
+def read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """Read a protobuf varint from *data* at *offset*, return (value, new_offset)."""
+    result = 0
+    shift = 0
+    while True:
+        b = data[offset]
+        offset += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            break
+        shift += 7
+    return result, offset
+
+
+def decode_proto_fields(data: bytes) -> dict[int, bytes | int]:
+    """Minimal protobuf wire-format decoder returning {field_number: value}."""
+    fields: dict[int, bytes | int] = {}
+    i = 0
+    while i < len(data):
+        tag, i = read_varint(data, i)
+        field_number = tag >> 3
+        wire_type = tag & 0x7
+        if wire_type == 0:
+            value, i = read_varint(data, i)
+            fields[field_number] = value
+        elif wire_type == 2:
+            length, i = read_varint(data, i)
+            fields[field_number] = data[i : i + length]
+            i += length
+    return fields
+
+
+def unpack_any(raw: bytes) -> tuple[str, dict[int, bytes | int]]:
+    """Decode a ``google.protobuf.Any``, return (type_url, inner_fields)."""
+    outer = decode_proto_fields(raw)
+    type_url = outer[1]
+    assert isinstance(type_url, bytes)
+    inner_bytes = outer.get(2, b"")
+    assert isinstance(inner_bytes, bytes)
+    return type_url.decode(), decode_proto_fields(inner_bytes)
