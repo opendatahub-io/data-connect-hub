@@ -168,12 +168,31 @@ func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	Expect(e.k8sClient.Create(e.ctx, flightTLSSecret)).To(Succeed())
 
 	By("creating the database configuration Secret")
-	databaseURL := fmt.Sprintf("postgresql://%s:%s@%s.%s.svc:5432/%s",
-		postgresUser, postgresPassword, postgresName, applicationNamespace, postgresDatabase)
+	postgresServerTLS := &corev1.Secret{}
+	Expect(e.k8sClient.Get(e.ctx, types.NamespacedName{
+		Name: postgresName + "-tls", Namespace: applicationNamespace,
+	}, postgresServerTLS)).To(Succeed())
+	postgresClientTLS := &corev1.Secret{}
+	Expect(e.k8sClient.Get(e.ctx, types.NamespacedName{
+		Name: postgresName + "-client-tls", Namespace: applicationNamespace,
+	}, postgresClientTLS)).To(Succeed())
+	Expect(postgresServerTLS.Data).To(HaveKeyWithValue("ca.crt", Not(BeEmpty())))
+	Expect(postgresClientTLS.Data).To(HaveKeyWithValue("client.crt", Not(BeEmpty())))
+	Expect(postgresClientTLS.Data).To(HaveKeyWithValue("client.key", Not(BeEmpty())))
+	// The REST and Flight deployments mount this Secret at /secrets.
+	databaseURL := fmt.Sprintf("postgresql://%s@%s.%s.svc:5432/%s"+
+		"?sslmode=verify-full"+
+		"&sslrootcert=/secrets/postgresql-ca.crt"+
+		"&sslcert=/secrets/postgresql-client.crt"+
+		"&sslkey=/secrets/postgresql-client.key",
+		postgresUser, postgresName, applicationNamespace, postgresDatabase)
 	Expect(e.k8sClient.Create(e.ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "dch-database-config", Namespace: applicationNamespace},
 		Data: map[string][]byte{
-			"secret-config.toml": []byte(fmt.Sprintf("[database]\nurl = %q\n", databaseURL)),
+			"secret-config.toml":    []byte(fmt.Sprintf("[database]\nurl = %q\n", databaseURL)),
+			"postgresql-ca.crt":     postgresServerTLS.Data["ca.crt"],
+			"postgresql-client.crt": postgresClientTLS.Data["client.crt"],
+			"postgresql-client.key": postgresClientTLS.Data["client.key"],
 		},
 	})).To(Succeed())
 
@@ -286,6 +305,31 @@ func (e *E2EFixture) DumpDiagnostics() {
 		applicationPods, err := utils.Run(cmd)
 		if err == nil {
 			_, _ = fmt.Fprintf(GinkgoWriter, "Application pods:\n%s", applicationPods)
+		}
+
+		By("Fetching REST and Flight container logs")
+		for _, target := range []struct{ deployment, container string }{
+			{restDeploymentName, "rest-server"},
+			{e.flightServiceName, "flight-server"},
+		} {
+			// --previous covers a container in CrashLoopBackOff, whose current
+			// instance may not have produced any output yet.
+			for _, previous := range []bool{false, true} {
+				args := []string{"logs", "deployment/" + target.deployment, "-c", target.container,
+					"-n", applicationNamespace, "--tail=200"}
+				if previous {
+					args = append(args, "--previous")
+				}
+				cmd = exec.Command("kubectl", args...)
+				containerLogs, err := utils.Run(cmd)
+				if err == nil {
+					_, _ = fmt.Fprintf(GinkgoWriter, "%s logs (previous=%t):\n%s",
+						target.container, previous, containerLogs)
+				} else {
+					_, _ = fmt.Fprintf(GinkgoWriter, "Failed to get %s logs (previous=%t): %s\n",
+						target.container, previous, err)
+				}
+			}
 		}
 	}
 }

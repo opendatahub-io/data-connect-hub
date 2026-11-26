@@ -141,6 +141,11 @@ func installTestPostgres(namespace, password string) error {
 		"-p", password,
 		"-d", postgresDatabase,
 		"-t", "180s",
+		// The REST and Flight metadata store is built without PostgreSQL
+		// password authentication, so it must authenticate with a client
+		// certificate over TLS.
+		"--ssl",
+		"--client-cert-auth",
 	)
 	cmd.Dir = filepath.Dir(controllerDir)
 	output, err := cmd.CombinedOutput()
