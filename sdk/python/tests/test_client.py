@@ -373,11 +373,11 @@ class TestLazyFlightClient:
         real_import = builtins.__import__
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
-            if name.split(".")[0] in {"adbc_driver_flightsql", "pyarrow"}:
+            if name.split(".")[0] in {"pyarrow"}:
                 raise ModuleNotFoundError(f"No module named {name!r}")
             return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
-        for mod in [m for m in sys.modules if m.split(".")[0] in {"adbc_driver_flightsql", "pyarrow"}]:
+        for mod in [m for m in sys.modules if m.split(".")[0] in {"pyarrow"}]:
             monkeypatch.delitem(sys.modules, mod)
         monkeypatch.delitem(sys.modules, "data_connect_hub._flight", raising=False)
         monkeypatch.setattr(builtins, "__import__", fake_import)
@@ -391,7 +391,7 @@ class TestLazyFlightClient:
         import importlib
 
         real_import = builtins.__import__
-        blocked = {"adbc_driver_flightsql", "pyarrow"}
+        blocked = {"pyarrow"}
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
             if name.split(".")[0] in blocked:

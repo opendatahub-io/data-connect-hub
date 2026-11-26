@@ -67,6 +67,3 @@ class TokenCache:
         with self._lock:
             self._token = self._call_provider()
             return self._token
-
-
-ADBC_HEADER_PREFIX = "adbc.flight.sql.rpc.call_header."

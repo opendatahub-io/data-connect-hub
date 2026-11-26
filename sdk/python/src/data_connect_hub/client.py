@@ -117,7 +117,8 @@ class DataConnectClient:
     backoff_max : float
         Maximum backoff delay in seconds (default 30.0).
     flight_timeout : float, optional
-        Timeout in seconds for Flight SQL RPC calls.
+        Deadline in seconds for each Flight SQL RPC.  For queries, the deadline
+        covers the whole result stream.
     """
 
     def __init__(
@@ -158,10 +159,9 @@ class DataConnectClient:
             backoff_max=backoff_max,
         )
 
-        # Built on first use: ``_flight`` imports pyarrow and
-        # adbc-driver-flightsql at module scope, which only the ``[flight]``
-        # extra installs.  Deferring the import keeps the package importable
-        # on a REST-only install.
+        # Built on first use: ``_flight`` imports pyarrow at module scope,
+        # which only the ``[flight]`` extra installs.  Deferring the import
+        # keeps the package importable on a REST-only install.
         self._flight: FlightClient | None = None
         self._flight_kwargs: dict[str, Any] = {
             "url": flight_url,

@@ -70,3 +70,60 @@ def sample_connection() -> DataConnection:
 @pytest.fixture()
 def sample_connection_json() -> dict[str, object]:
     return dict(SAMPLE_CONNECTION_JSON)
+
+
+# -- protobuf wire-format decoding (independent of the SDK encoder) -----------
+
+
+def read_varint(data: bytes, offset: int) -> tuple[int, int]:
+    """Read a protobuf varint from *data* at *offset*, return (value, new_offset)."""
+    result = 0
+    shift = 0
+    while True:
+        if offset >= len(data):
+            raise ValueError("truncated varint")
+        b = data[offset]
+        offset += 1
+        result |= (b & 0x7F) << shift
+        if not (b & 0x80):
+            return result, offset
+        shift += 7
+        if shift >= 64:
+            raise ValueError("varint longer than 10 bytes")
+
+
+def decode_proto_fields(data: bytes) -> dict[int, bytes | int]:
+    """Strict minimal protobuf decoder returning {field_number: value}.
+
+    Supports varint and length-delimited fields, which are all the SDK sends.
+    Raises ``ValueError`` for truncated data or any other wire type, so a
+    malformed command fails the test instead of decoding to a plausible value.
+    """
+    fields: dict[int, bytes | int] = {}
+    i = 0
+    while i < len(data):
+        tag, i = read_varint(data, i)
+        field_number = tag >> 3
+        wire_type = tag & 0x7
+        if wire_type == 0:
+            value, i = read_varint(data, i)
+            fields[field_number] = value
+        elif wire_type == 2:
+            length, i = read_varint(data, i)
+            if length > len(data) - i:
+                raise ValueError(f"field {field_number} declares {length} bytes, {len(data) - i} remain")
+            fields[field_number] = data[i : i + length]
+            i += length
+        else:
+            raise ValueError(f"unsupported wire type {wire_type} for field {field_number}")
+    return fields
+
+
+def unpack_any(raw: bytes) -> tuple[str, dict[int, bytes | int]]:
+    """Decode a ``google.protobuf.Any``, return (type_url, inner_fields)."""
+    outer = decode_proto_fields(raw)
+    type_url = outer[1]
+    assert isinstance(type_url, bytes)
+    inner_bytes = outer.get(2, b"")
+    assert isinstance(inner_bytes, bytes)
+    return type_url.decode(), decode_proto_fields(inner_bytes)
