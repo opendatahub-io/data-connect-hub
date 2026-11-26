@@ -1,5 +1,14 @@
-# Gitleaks ignore file
-# Add false positive fingerprints below (one per line)
-# Format: commit:file:rule-id:line or file:rule-id:line
+# Gitleaks baseline: fingerprints of accepted false positives.
+# gitleaks loads this file automatically when scanning the repo.
 #
-# For path-based exclusions, use .gitleaks.toml allowlist instead.
+#   673e075f...  e2e/run-e2e.sh — MILVUS_SECRET / DCH_MILVUS_SECRET hold the
+#                 name of the Kubernetes Secret created by the e2e script from
+#                 externally supplied env vars, not a credential value.
+#   e173755e...  semgrep.yaml — remediation example inside the semgrep rule
+#                 documentation, not a real manifest.
+#
+# Entries below must never be real credentials; remove an entry if the
+# finding at that location changes.
+673e075f10a26c7f8b2f21d98ab26c63f5c36813:e2e/run-e2e.sh:generic-api-key:82
+673e075f10a26c7f8b2f21d98ab26c63f5c36813:e2e/run-e2e.sh:generic-api-key:479
+e173755e4f2467e3e83e1eff0c04800f9bfe2587:semgrep.yaml:kubernetes-secret-yaml:515

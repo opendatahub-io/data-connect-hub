@@ -17,7 +17,7 @@ endif
 
 .PHONY: all build release check clean \
 	test test-unit test-integration \
-	lint fmt doc audit check-dco \
+	lint fmt doc audit check-dco check-leaks check-sast \
 	require-container-engine \
 	container-flight container-rest container-all \
 	container-run-flight container-run-rest \
@@ -141,6 +141,58 @@ audit:
 
 check-dco:
 	@bash hack/check-dco.sh
+
+# Pinned gitleaks for check-leaks, downloaded on demand into the gitignored
+# .local/bin. Keep the version in sync with
+# .github/workflows/ci-secret-scanning.yml.
+GITLEAKS_VERSION ?= 8.28.0
+GITLEAKS_DIR     := .local/bin
+GITLEAKS_OS      := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+GITLEAKS_ARCH    := $(shell uname -m | sed -e 's/^x86_64$$/x64/' -e 's/^aarch64$$/arm64/')
+GITLEAKS_ASSET   := gitleaks_$(GITLEAKS_VERSION)_$(GITLEAKS_OS)_$(GITLEAKS_ARCH).tar.gz
+GITLEAKS_LOCAL   := $(GITLEAKS_DIR)/gitleaks-$(GITLEAKS_VERSION)
+
+$(GITLEAKS_DIR):
+	mkdir -p $@
+
+# Downloaded from the official release and verified against its checksums
+# file so check-leaks always runs the exact version CI uses.
+$(GITLEAKS_LOCAL): | $(GITLEAKS_DIR)
+	tmp=$$(mktemp -d) && \
+	curl -sSLfo "$$tmp/$(GITLEAKS_ASSET)" \
+		"https://github.com/gitleaks/gitleaks/releases/download/v$(GITLEAKS_VERSION)/$(GITLEAKS_ASSET)" && \
+	curl -sSLfo "$$tmp/checksums.txt" \
+		"https://github.com/gitleaks/gitleaks/releases/download/v$(GITLEAKS_VERSION)/gitleaks_$(GITLEAKS_VERSION)_checksums.txt" && \
+	grep -F "$(GITLEAKS_ASSET)" "$$tmp/checksums.txt" | (cd "$$tmp" && { sha256sum --check - || shasum -a 256 --check -; }) && \
+	tar -xzf "$$tmp/$(GITLEAKS_ASSET)" -C "$(GITLEAKS_DIR)" gitleaks && \
+	mv "$(GITLEAKS_DIR)/gitleaks" "$@" && \
+	rm -rf "$$tmp"
+
+check-leaks: $(GITLEAKS_LOCAL)
+	"$(GITLEAKS_LOCAL)" git --verbose --redact --no-banner .
+
+# Pinned semgrep for check-sast, installed on demand into the gitignored
+# .local/semgrep-venv. Keep the version in sync with
+# .github/workflows/ci-semgrep.yml.
+SEMGREP_VERSION ?= 1.187.0
+SEMGREP_VENV    := .local/semgrep-venv
+# Findings already on the baseline commit do not fail the scan; only new
+# ones do. Set SEMGREP_BASELINE= (empty) to report every finding.
+SEMGREP_BASELINE ?= origin/main
+
+ifeq ($(strip $(SEMGREP_BASELINE)),)
+  SEMGREP_BASELINE_ARGS :=
+else
+  SEMGREP_BASELINE_ARGS := --baseline-commit "$(SEMGREP_BASELINE)"
+endif
+
+$(SEMGREP_VENV)/bin/python3:
+	python3 -m venv $(SEMGREP_VENV)
+
+check-sast: | $(SEMGREP_VENV)/bin/python3
+	$(SEMGREP_VENV)/bin/pip install --quiet "semgrep==$(SEMGREP_VERSION)"
+	$(SEMGREP_VENV)/bin/semgrep scan --config semgrep.yaml $(SEMGREP_BASELINE_ARGS) \
+		--severity ERROR --severity WARNING --error --metrics=off .
 
 # -------------------------------------------------------------------
 # Samples
@@ -314,6 +366,7 @@ setup-hooks:
 help:
 	@echo "Variables:"
 	@echo "  V=1                  show test output (--nocapture)"
+	@echo "  SEMGREP_BASELINE     base commit for check-sast (default origin/main; empty = scan all)"
 	@echo ""
 	@echo "Top-level:"
 	@echo "  all                  build + fmt + lint + test + audit"
@@ -334,6 +387,9 @@ help:
 	@echo "  fmt                  format all crates"
 	@echo "  doc                  rustdoc with warnings"
 	@echo "  audit                cargo audit + cargo deny check"
+	@echo "  check-dco            verify Signed-off-by trailers"
+	@echo "  check-leaks          scan git history for leaked secrets (pinned gitleaks, auto-downloaded)"
+	@echo "  check-sast           semgrep static analysis (new findings vs origin/main)"
 	@echo ""
 	@echo "Container:"
 	@echo "  container-flight     build flight-service image"
