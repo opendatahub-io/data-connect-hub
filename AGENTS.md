@@ -200,8 +200,8 @@ make check-dco   # run DCO check locally
   Reference PRs: opendatahub-operator#3813 (OGX/Helm), #3654 (MLflow/Kustomize migration).
 - The DataConnectService CRD uses API group `dataconnecthub.opendatahub.io`.
 - The DataConnectService application CR is namespaced. The platform-managed instance
-  is `default-dataconnectservice` in `odh-data-connect-hub-infra` (ODH) or
-  `rhoai-data-connect-hub-infra` (RHOAI), with a DSC namespace override. The
+  is `default-dataconnectservice` in `odh-dch-infra` (ODH) or
+  `redhat-dch-infra` (RHOAI), with a DSC namespace override. The
   controller and Gateway HTTPRoute remain in the applications namespace.
 - DSC onboarding uses `spec.components.data.dataConnectHub` and the existing
   Feast module operator / `Platform.spec.modules.data` boundary. Do not add an

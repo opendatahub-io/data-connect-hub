@@ -147,7 +147,7 @@ already published Feast API.
 | Concern | Contract |
 | --- | --- |
 | Module owner | Existing cluster-scoped `FeastOperator` singleton |
-| Application | `DataConnectService/default-dataconnectservice` in `odh-data-connect-hub-infra` (ODH) or `rhoai-data-connect-hub-infra` (RHOAI), overridable through the DSC |
+| Application | `DataConnectService/default-dataconnectservice` in `odh-dch-infra` (ODH) or `redhat-dch-infra` (RHOAI), overridable through the DSC |
 | Owner reference | Application CR controlled by `FeastOperator`; DCH operands remain owned by the application CR |
 | User/platform configuration | Gateway and TokenReview audiences projected into the application CR spec |
 | Runtime metadata | Feast owns `opendatahub-dataconnecthub-config` in the DCH infrastructure namespace, containing distribution metadata and the forwarded `platformVersion` from `odh-data-config` |

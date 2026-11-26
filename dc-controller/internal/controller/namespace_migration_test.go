@@ -59,7 +59,7 @@ func (t namespaceMigrationTransport) RoundTrip(req *http.Request) (*http.Respons
 // A legacy Secret predates DCH and stays in its tenant namespace. Only the DCH
 // metadata is created through REST discovered in the new infrastructure namespace.
 func TestLegacyConnectionMigrationWithDedicatedInfrastructureNamespace(t *testing.T) {
-	for _, infrastructure := range []string{"odh-data-connect-hub-infra", "rhoai-data-connect-hub-infra"} {
+	for _, infrastructure := range []string{"odh-dch-infra", "redhat-dch-infra"} {
 		t.Run(infrastructure, func(t *testing.T) {
 			const tenant = "legacy-team"
 			const legacySecretName = "legacy-uri-connection"

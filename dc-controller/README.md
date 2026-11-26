@@ -40,8 +40,8 @@ status:
 
 ### Platform integration
 
-The platform places DCH services in `odh-data-connect-hub-infra` (ODH) or
-`rhoai-data-connect-hub-infra` (RHOAI), overridable through
+The platform places DCH services in `odh-dch-infra` (ODH) or
+`redhat-dch-infra` (RHOAI), overridable through
 `spec.components.data.dataConnectHub.namespace` on the DSC. The controller
 remains in the platform application namespace. PostgreSQL and
 `dch-database-config` must be provisioned in the DCH infrastructure namespace.
