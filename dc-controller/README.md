@@ -5,9 +5,10 @@ Kubernetes operator for deploying and managing Data Connect Hub services
 
 ## Database prerequisite
 
-An administrator must provision PostgreSQL and a `dch-database-config` Secret
-in the `DataConnectService` namespace. The Secret must contain a
+An administrator must provision PostgreSQL and a `dch-database-config` Secret.
+The Secret must be in the `DataConnectService` namespace and contain a
 `secret-config.toml` key with the application's database configuration.
+PostgreSQL may run elsewhere, provided it is reachable from the DCH services.
 The controller does not provision PostgreSQL or generate database credentials.
 This remains a prerequisite for the planned DSC integration as well.
 
@@ -43,8 +44,9 @@ status:
 The platform places DCH services in `odh-dch-infra` (ODH) or
 `redhat-dch-infra` (RHOAI), overridable through
 `spec.components.data.dataConnectHub.namespace` on the DSC. The controller
-remains in the platform application namespace. PostgreSQL and
-`dch-database-config` must be provisioned in the DCH infrastructure namespace.
+remains in the platform application namespace. The `dch-database-config` Secret
+must be provisioned in the DCH infrastructure namespace; PostgreSQL may run
+elsewhere if reachable from the DCH services.
 
 `spec.gateway.routeNamespace` places the HTTPRoute in the allowed application
 namespace. The controller sets explicit backend namespaces, creates one named
