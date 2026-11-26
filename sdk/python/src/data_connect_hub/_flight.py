@@ -36,8 +36,6 @@ from .exceptions import DCHConfigError, DCHConnectionError, DCHError, DCHQueryEr
 
 _T = TypeVar("_T")
 
-_GRPC_UNAUTHENTICATED = "unauthenticated"
-
 # Flight SQL SqlInfo ids (FlightSql.proto) and the server_info() keys they map to.
 _SQL_INFO_KEYS: dict[int, str] = {
     0: "vendor_name",  # FLIGHT_SQL_SERVER_NAME
@@ -69,11 +67,10 @@ _CONNECTION_ERRORS: tuple[type[Exception], ...] = (
 
 
 def _is_auth_error(exc: BaseException) -> bool:
-    if isinstance(exc, flight.FlightUnauthenticatedError) or isinstance(
+    """True only for the gRPC ``UNAUTHENTICATED`` status, never for message text."""
+    return isinstance(exc, flight.FlightUnauthenticatedError) or isinstance(
         exc.__cause__, flight.FlightUnauthenticatedError
-    ):
-        return True
-    return _GRPC_UNAUTHENTICATED in str(exc).lower()
+    )
 
 
 def _map_error(exc: Exception, default: type[DCHError]) -> DCHError:
@@ -184,9 +181,15 @@ def _check_endpoint(endpoint: Any) -> None:
             )
 
 
-def _read_all(client: Any, command: bytes, opts: Any) -> pa.Table:
-    """Run ``GetFlightInfo`` for *command* and ``DoGet`` every endpoint into one table."""
+def _read_all(client: Any, command: bytes, opts: Any, *, allow_empty: bool = True) -> pa.Table:
+    """Run ``GetFlightInfo`` for *command* and ``DoGet`` every endpoint into one table.
+
+    With *allow_empty* false, a ``FlightInfo`` without endpoints is an error
+    instead of an empty result.
+    """
     info = client.get_flight_info(flight.FlightDescriptor.for_command(command), opts)
+    if not info.endpoints and not allow_empty:
+        raise DCHConnectionError("server returned no Flight endpoints")
     tables = []
     for endpoint in info.endpoints:
         _check_endpoint(endpoint)
@@ -350,10 +353,12 @@ class FlightClient:
                 return operation()
             raise
 
-    def _fetch(self, command: bytes, connection_id: str, default: type[DCHError]) -> pa.Table:
+    def _fetch(
+        self, command: bytes, connection_id: str, default: type[DCHError], *, allow_empty: bool = True
+    ) -> pa.Table:
         opts = self._call_options(connection_id)
         with self._session(default) as client:
-            return _read_all(client, command, opts)
+            return _read_all(client, command, opts, allow_empty=allow_empty)
 
     # -- queries --
 
@@ -459,7 +464,8 @@ class FlightClient:
             table_name_filter_pattern=table_name_filter,
             include_schema=include_schema,
         )
-        return self._with_auth_retry(lambda: self._fetch(command, connection_id, DCHConnectionError))
+        # The DCH server always answers CommandGetTables with one endpoint, so none is a server error.
+        return self._with_auth_retry(lambda: self._fetch(command, connection_id, DCHConnectionError, allow_empty=False))
 
     def close(self) -> None:
         """No-op — connections are opened and closed per call."""

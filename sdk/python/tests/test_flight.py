@@ -511,6 +511,19 @@ class TestGetTables:
         assert fields == {3: b"cit%", 5: 1}
         client.close.assert_called_once()
 
+    def test_no_endpoints_is_an_error(self, flight_client: FlightClient) -> None:
+        client = _fake_client()
+        with _patched(client), pytest.raises(DCHConnectionError, match="no Flight endpoints"):
+            flight_client.get_tables("my-conn")
+        client.do_get.assert_not_called()
+
+    def test_read_without_endpoints_returns_empty_table(self, flight_client: FlightClient) -> None:
+        schema = pa.schema([("col", pa.int64())])
+        with _patched(_fake_client(schema=schema)):
+            result = flight_client.read("SELECT 1", "my-conn")
+        assert result.num_rows == 0
+        assert result.schema == schema
+
     @pytest.mark.parametrize("failure_point", ["get_flight_info", "do_get"])
     def test_auth_error_refreshes_token_and_retries(self, failure_point: str) -> None:
         tokens = iter(["old-tok", "new-tok"])
@@ -568,15 +581,17 @@ class TestTokenProvider:
         assert calls() == 2
         assert result is table
 
-    def test_auth_error_detected_from_message(self) -> None:
-        # Fallback for errors whose type does not carry the gRPC status.
+    def test_auth_word_in_other_status_not_retried(self) -> None:
+        # Only the UNAUTHENTICATED status triggers a refresh, not the word in another error's message.
         provider, calls = _counting_provider()
         client = FlightClient(url=_URL, tenant_id="t1", token_provider=provider)
         rejected = _fake_client(pa.table({"col": [1]}))
-        rejected.get_flight_info.side_effect = flight.FlightUnavailableError("UNAUTHENTICATED: token expired")
-        with _patched(rejected, _fake_client(pa.table({"col": [1]}))):
+        rejected.get_flight_info.side_effect = flight.FlightUnavailableError("upstream: unauthenticated proxy")
+        with _patched(rejected) as (connect, _), pytest.raises(DCHConnectionError, match="unauthenticated proxy"):
             client.read("SELECT 1", "conn-1")
-        assert calls() == 2
+        assert calls() == 1
+        connect.assert_called_once()
+        rejected.get_flight_info.assert_called_once()
 
     def test_auth_error_after_refresh_raises(self) -> None:
         client = FlightClient(url=_URL, tenant_id="t1", token_provider=lambda: "bad-token")
@@ -616,22 +631,48 @@ class TestTokenProvider:
 
 class TestTimeouts:
     @pytest.mark.parametrize(
-        ("operation", "make_client"),
+        ("operation", "make_client", "rpcs"),
         [
-            (lambda c: c.read("SELECT 1", "conn-1"), lambda: _fake_client(pa.table({"col": [1]}))),
-            (lambda c: list(c.read_batches("SELECT 1", "conn-1")), lambda: _fake_client(pa.table({"col": [1]}))),
-            (lambda c: c.get_tables("conn-1"), lambda: _fake_client(pa.table({"col": [1]}))),
-            (lambda c: c.server_info(), _server_info_client),
+            (
+                lambda c: c.read("SELECT 1", "conn-1"),
+                lambda: _fake_client(pa.table({"col": [1]})),
+                ["get_flight_info", "do_get"],
+            ),
+            (
+                lambda c: list(c.read_batches("SELECT 1", "conn-1")),
+                lambda: _fake_client(pa.table({"col": [1]})),
+                ["get_flight_info", "do_get"],
+            ),
+            (
+                lambda c: c.get_tables("conn-1"),
+                lambda: _fake_client(pa.table({"col": [1]})),
+                ["get_flight_info", "do_get"],
+            ),
+            (lambda c: c.server_info(), _server_info_client, ["get_flight_info", "do_get", "do_action"]),
         ],
         ids=["read", "read_batches", "get_tables", "server_info"],
     )
     def test_timeout_applied_to_every_call(
-        self, operation: Callable[[FlightClient], Any], make_client: Callable[[], MagicMock]
+        self, operation: Callable[[FlightClient], Any], make_client: Callable[[], MagicMock], rpcs: list[str]
     ) -> None:
         client = FlightClient(url=_URL, token="tok", tenant_id="t1", timeout=10.0)
-        with _patched(make_client()) as (_, call_options):
+        fake = make_client()
+        timeouts: dict[int, float | None] = {}
+        real_options = flight.FlightCallOptions  # the patch below replaces the module attribute
+
+        def make_options(**kwargs: Any) -> flight.FlightCallOptions:
+            opts = real_options(**kwargs)
+            timeouts[id(opts)] = kwargs.get("timeout")
+            return opts
+
+        with _patched(fake), patch("data_connect_hub._flight.flight.FlightCallOptions", side_effect=make_options):
             operation(client)
-        assert call_options.call_args.kwargs["timeout"] == 10.0
+        # Every RPC must receive options built with the timeout (mock call records keep them alive).
+        for rpc in rpcs:
+            calls = getattr(fake, rpc).call_args_list
+            assert calls, f"{rpc} was not called"
+            for call in calls:
+                assert timeouts[id(call.args[1])] == 10.0, rpc
 
     def test_no_timeout_by_default(self, flight_client: FlightClient) -> None:
         with _patched(_fake_client(pa.table({"col": [1]}))) as (_, call_options):

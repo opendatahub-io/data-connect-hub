@@ -26,7 +26,7 @@ from data_connect_hub._flight_sql_proto import (
     pack_any,
 )
 
-from .conftest import unpack_any
+from .conftest import decode_proto_fields, unpack_any
 
 _STATEMENT_TYPE_URL = "type.googleapis.com/arrow.flight.protocol.sql.CommandStatementQuery"
 _SQL_INFO_TYPE_URL = "type.googleapis.com/arrow.flight.protocol.sql.CommandGetSqlInfo"
@@ -188,3 +188,21 @@ class TestGoldenProtobufEncoding:
         decoded = messages["CommandStatementQuery"]()
         assert wrapper.Unpack(decoded)
         assert decoded.query == "x"
+
+
+class TestStrictTestDecoder:
+    """The test decoder must reject malformed input rather than return plausible values."""
+
+    def test_truncated_length_delimited_field(self) -> None:
+        # Field 1 declares 9 bytes but only "SELECT 1" (8 bytes) follows.
+        with pytest.raises(ValueError, match="declares 9 bytes, 8 remain"):
+            decode_proto_fields(b"\x0a\x09SELECT 1")
+
+    def test_truncated_varint(self) -> None:
+        with pytest.raises(ValueError, match="truncated varint"):
+            decode_proto_fields(b"\x28\x80")
+
+    def test_unsupported_wire_type(self) -> None:
+        # Field 1 with wire type 5 (fixed32).
+        with pytest.raises(ValueError, match="unsupported wire type 5"):
+            decode_proto_fields(b"\x0d\x00\x00\x00\x00")

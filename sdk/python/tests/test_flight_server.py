@@ -10,6 +10,7 @@ mocks: this exercises the real gRPC client, headers, deadlines and errors.
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import time
 from collections.abc import Iterator
@@ -22,38 +23,15 @@ import pytest
 from data_connect_hub._flight import FlightClient
 from data_connect_hub.exceptions import DCHConnectionError, DCHQueryError, DCHTimeoutError
 
+from .conftest import unpack_any
+
 _TENANT = "tenant-a"
 _TYPE_PREFIX = "type.googleapis.com/arrow.flight.protocol.sql."
 
 
-def _read_varint(data: bytes, offset: int) -> tuple[int, int]:
-    result = shift = 0
-    while True:
-        b = data[offset]
-        offset += 1
-        result |= (b & 0x7F) << shift
-        if not b & 0x80:
-            return result, offset
-        shift += 7
-
-
-def _fields(data: bytes) -> dict[int, Any]:
-    out: dict[int, Any] = {}
-    i = 0
-    while i < len(data):
-        tag, i = _read_varint(data, i)
-        if tag & 7 == 0:
-            out[tag >> 3], i = _read_varint(data, i)
-        else:
-            length, i = _read_varint(data, i)
-            out[tag >> 3] = data[i : i + length]
-            i += length
-    return out
-
-
 def _decode_command(raw: bytes) -> tuple[str, dict[int, Any]]:
-    outer = _fields(raw)
-    return outer[1].decode().removeprefix(_TYPE_PREFIX), _fields(outer.get(2, b""))
+    type_url, fields = unpack_any(raw)
+    return type_url.removeprefix(_TYPE_PREFIX), fields
 
 
 def _sql_info_table(requested: list[int]) -> pa.Table:
@@ -101,6 +79,10 @@ class _DCHLikeServer(flight.FlightServerBase):  # type: ignore[misc]
         self.stream_cancelled = threading.Event()
         self.stream_completed = threading.Event()
         self.stream_finished = threading.Event()
+        # Open by default. While cleared, "SELECT slow" holds after its first batch
+        # until the client cancels, so the outcome doesn't depend on timing.
+        self.stream_gate = threading.Event()
+        self.stream_gate.set()
 
     # The DCH server answers GetFlightInfo with endpoints whose ticket the client
     # sends back in DoGet; here the ticket is "<kind>:<payload>[:<part>]".
@@ -148,15 +130,21 @@ class _DCHLikeServer(flight.FlightServerBase):  # type: ignore[misc]
 
     def _slow_batches(self, context: Any, table: pa.Table) -> Iterator[pa.RecordBatch]:
         try:
-            for batch in table.to_batches(max_chunksize=1):
-                if context.is_cancelled():
+            for i, batch in enumerate(table.to_batches(max_chunksize=1)):
+                if (i > 0 and not self._wait_for_gate(context)) or context.is_cancelled():
                     self.stream_cancelled.set()
                     return
                 yield batch
-                time.sleep(0.05)
             self.stream_completed.set()
         finally:
             self.stream_finished.set()
+
+    def _wait_for_gate(self, context: Any) -> bool:
+        """Wait until the gate opens (True) or the client cancels the call (False)."""
+        while not self.stream_gate.wait(0.01):
+            if context.is_cancelled():
+                return False
+        return True
 
     def do_action(self, context: Any, action: Any) -> Iterator[flight.Result]:
         if action.type != "GetSupportedConnectors":
@@ -178,6 +166,7 @@ def server() -> Iterator[_DCHLikeServer]:
     try:
         yield srv
     finally:
+        srv.stream_gate.set()  # never leave a gated stream blocking shutdown
         srv.shutdown()
 
 
@@ -209,14 +198,13 @@ class TestQueries:
         assert sum(b.num_rows for b in batches) == 50
 
     def test_read_batches_early_close_stops_server_stream(self, server: _DCHLikeServer) -> None:
+        server.stream_gate.clear()  # the server sends one batch, then waits for cancellation
         stream = _client(server).read_batches("SELECT slow", "conn-1")
         next(stream)
-        started = time.monotonic()
         stream.close()
-        # 50 rows at 50 ms each would take 2.5 s if the stream ran to completion.
-        assert server.stream_finished.wait(5)
-        assert not server.stream_completed.is_set(), "server streamed every row; the call was not cancelled"
-        assert time.monotonic() - started < 2.0
+        assert server.stream_finished.wait(5), "server stream did not end after the client closed it"
+        assert server.stream_cancelled.is_set(), "server did not see the cancellation"
+        assert not server.stream_completed.is_set()
 
 
 class TestMetadata:
@@ -260,6 +248,10 @@ class TestAuthAndErrors:
             _client(server, timeout=0.2).read("SELECT * FROM cities", "conn-1")
 
     def test_unreachable_server(self) -> None:
-        client = FlightClient(url="grpc://127.0.0.1:1", token="good", tenant_id=_TENANT, timeout=2)
-        with pytest.raises((DCHConnectionError, DCHTimeoutError)):
-            client.read("SELECT 1", "conn-1")
+        # Hold a bound but non-listening loopback port, so nothing can answer on it during the test.
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as reserved:
+            reserved.bind(("127.0.0.1", 0))
+            port = reserved.getsockname()[1]
+            client = FlightClient(url=f"grpc://127.0.0.1:{port}", token="good", tenant_id=_TENANT, timeout=2)
+            with pytest.raises((DCHConnectionError, DCHTimeoutError)):
+                client.read("SELECT 1", "conn-1")
