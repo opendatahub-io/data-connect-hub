@@ -151,10 +151,11 @@ tracing-opentelemetry = "0.33"
 # excluded from FIPS, an error instead of a provider that cannot complete
 # a handshake, TLS key shares expanded to the uncompressed point form, and
 # signature verification reporting the context's FIPS state.
-# Pinned to a commit so builds stay reproducible.
+# Tracked on the dch-fips branch so builds stay reproducible while fixes are
+# updated together.
 #
 # Drop this section, and the allow-git entry in deny.toml, once the fixes are
 # released upstream: https://github.com/latchset/kryoptic
 [patch.crates-io]
-ossl = { git = "https://github.com/loicmarchal/kryoptic-dch", rev = "96da7fb357072e7f1f88c33eca67434f3066cb54" }
-rustls-ossl = { git = "https://github.com/loicmarchal/kryoptic-dch", rev = "96da7fb357072e7f1f88c33eca67434f3066cb54" }
+ossl = { git = "https://github.com/loicmarchal/kryoptic", branch = "dch-fips" }
+rustls-ossl = { git = "https://github.com/loicmarchal/kryoptic", branch = "dch-fips" }

@@ -3666,7 +3666,7 @@ dependencies = [
 [[package]]
 name = "ossl"
 version = "1.5.4"
-source = "git+https://github.com/loicmarchal/kryoptic-dch?rev=96da7fb357072e7f1f88c33eca67434f3066cb54#96da7fb357072e7f1f88c33eca67434f3066cb54"
+source = "git+https://github.com/loicmarchal/kryoptic?branch=dch-fips#96da7fb357072e7f1f88c33eca67434f3066cb54"
 dependencies = [
  "bindgen",
  "cfg-if",
@@ -3680,7 +3680,7 @@ dependencies = [
 [[package]]
 name = "ossl-sys"
 version = "1.5.4"
-source = "git+https://github.com/loicmarchal/kryoptic-dch?rev=96da7fb357072e7f1f88c33eca67434f3066cb54#96da7fb357072e7f1f88c33eca67434f3066cb54"
+source = "git+https://github.com/loicmarchal/kryoptic?branch=dch-fips#96da7fb357072e7f1f88c33eca67434f3066cb54"
 dependencies = [
  "bindgen",
  "cfg-if",
@@ -4693,7 +4693,7 @@ dependencies = [
 [[package]]
 name = "rustls-ossl"
 version = "0.0.1"
-source = "git+https://github.com/loicmarchal/kryoptic-dch?rev=96da7fb357072e7f1f88c33eca67434f3066cb54#96da7fb357072e7f1f88c33eca67434f3066cb54"
+source = "git+https://github.com/loicmarchal/kryoptic?branch=dch-fips#96da7fb357072e7f1f88c33eca67434f3066cb54"
 dependencies = [
  "ossl",
  "rustls",
