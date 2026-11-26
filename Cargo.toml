@@ -95,7 +95,7 @@ config = "0.15"
 # list does not apply and OpenSSL 3.5 falls back to offering X25519 and
 # ML-KEM — none of which the frozen 3.0.7 FIPS provider can supply.
 kube = { version = "4.2.0", default-features = false, features = ["client", "runtime", "rustls-tls"] }
-k8s-openapi = { version = "0.28.0", features = ["latest"] }
+k8s-openapi = { version = "0.29.0", features = ["latest"] }
 moka = "0.12"
 tower = "0.5"
 http = "1"
