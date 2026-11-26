@@ -6,23 +6,22 @@ In this step-by-step guide, you'll install DCH on an OpenShift cluster, set up a
 Before you begin, make sure you have the following:
 
 * An OpenShift cluster (version 4.20 or later)  
-* Either the oc command  
+* The `oc` command
 * Cluster admin permissions  
-* [Helm](https://helm.sh/docs/intro/install/), jq,  curl, grpcurl, python3.11+ installed. Install grpcurl with go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest  
+* [Helm](https://helm.sh/docs/intro/install/), jq, curl, grpcurl, openssl, python3.11+ installed. Install grpcurl with go install github.com/fullstorydev/grpcurl/cmd/grpcurl@latest
 * RHOAI installed and DataScienceClusterInitialization is ready:
 
   ```sh
-    oc get dsci -A
+  oc get dsci -A
   ```
 
 	You should see:
 
   ```
   NAME           AGE   PHASE   CREATED AT
-    default-dsci   83d   Ready   2026-05-08T12:41:52Z
+  default-dsci   83d   Ready   2026-05-08T12:41:52Z
   ```
-
-* DCH uses a Postgres database to store its meta data. As a cluster admin, you can create a Postgres database as follows:  
+* DCH uses a Postgres database to store its metadata. As a cluster admin, you can create a Postgres database with the CloudNativePG operator as follows:
   * Install the Postgres operator:
 
 
@@ -54,7 +53,7 @@ Before you begin, make sure you have the following:
 
     ```
     NAME                     DISPLAY         VERSION   REPLACES                 PHASE
-        cloudnative-pg.v1.30.0   CloudNativePG   1.30.0    cloudnative-pg.v1.29.2   Succeeded
+    cloudnative-pg.v1.30.0   CloudNativePG   1.30.0    cloudnative-pg.v1.29.2   Succeeded
     ```
 
 * HTTP/2 enabled on the ingress
@@ -130,24 +129,19 @@ As a cluster admin, you can install the DCH operator as follows:
   ```
 
   You should see:  
-   
-
-    ```
-    NAME                                                READY   STATUS    RESTARTS   AGE
-        dc-controller-controller-manager-849cc9b557-5zjdx   1/1     Running   0          100s
-    ```
+  ```
+  NAME                                                READY   STATUS    RESTARTS   AGE
+  dc-controller-controller-manager-849cc9b557-5zjdx   1/1     Running   0          100s
+  ```
 
 ## Install DCH database
 
-DCH uses a Postgres database to store its meta data. 
+DCH uses a Postgres database to store its metadata. For FIPS compliance, PostgreSQL password authentication is disabled, so the metadata database uses only client-certificate authentication.
 
-* Install a database in dch-services namespace, create it first if it does not exist:
-
+* Create the CloudNativePG cluster. CloudNativePG generates the PostgreSQL server certificate and CA automatically:
   ```sh
   oc new-project dch-services
-  ```
 
-  ```sh
   oc apply -n dch-services -f - <<'EOF'
   apiVersion: postgresql.cnpg.io/v1
   kind: Cluster
@@ -161,52 +155,59 @@ DCH uses a Postgres database to store its meta data.
       initdb:
         database: dataconnecthub
         owner: dch
+    postgresql:
+      pg_hba:
+        - hostssl dataconnecthub dch all cert
   EOF
   ```
-
-
-* Check the database as follows:
-
+* Wait for the cluster to become healthy:
   ```sh
-  oc get cluster dch-postgres -n dch-services -o jsonpath='{.status.phase}'
+  oc wait --for=condition=Ready cluster/dch-postgres \
+    -n dch-services --timeout=180s
   ```
-
-    Eventually, you should see:
-
-  ```
-  Cluster in healthy state
-  ```
-
-* Extract the database URI which is then used to create a secret for DCH to access this database instance by running:
-
+* Extract the CloudNativePG CA certificate and key:
   ```sh
-  URI=$(oc get secret dch-postgres-app -n dch-services -o jsonpath='{.data.uri}' 2>/dev/null | base64 -d)
+  oc get secret dch-postgres-ca -n dch-services \
+    -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/cnpg-ca.crt
 
-  oc apply -n dch-services -f - <<EOF
-  apiVersion: v1
-  kind: Secret
-  metadata:
-    name: dch-database-config
-  stringData:
-    DATABASE_URL: "$URI"
-    url: "$URI"
-    secret-config.toml: |
-      [database]
-      url = "$URI"
-  EOF
+  oc get secret dch-postgres-ca -n dch-services \
+    -o jsonpath='{.data.ca\.key}' | base64 -d > /tmp/cnpg-ca.key
   ```
 
-  Check the secret as follows:    
+* Create a client certificate signed by the CloudNativePG CA. The client certificate’s common name must be exactly `dch`, because PostgreSQL uses that value as the database user name:
+  ```sh
+  openssl req -newkey rsa:3072 -nodes \
+    -keyout client.key \
+    -out client.csr \
+    -subj "/CN=dch"
 
+  openssl x509 -req -in client.csr \
+    -CA /tmp/cnpg-ca.crt \
+    -CAkey /tmp/cnpg-ca.key \
+    -CAcreateserial \
+    -out client.crt \
+    -days 365 \
+    -extfile <(printf "basicConstraints=critical,CA:FALSE\nkeyUsage=critical,digitalSignature,keyEncipherment\nextendedKeyUsage=clientAuth")
+  ```
+
+* Create the REST database secret with the CloudNativePG CA, client certificate, and client key. The PostgreSQL URL has no password and names the three mounted certificate files:
+  ```sh
+  oc create secret generic dch-database-config \
+    --from-literal=secret-config.toml='[database]
+  url = "postgresql://dch@dch-postgres-rw.dch-services.svc.cluster.local:5432/dataconnecthub?sslmode=verify-full&sslrootcert=/secrets/postgresql-ca.crt&sslcert=/secrets/postgresql-client.crt&sslkey=/secrets/postgresql-client.key"' \
+    --from-file=postgresql-ca.crt=/tmp/cnpg-ca.crt \
+    --from-file=postgresql-client.crt=client.crt \
+    --from-file=postgresql-client.key=client.key \
+    -n dch-services
+  ```
   ```sh
   oc get secret -n dch-services dch-database-config
   ```
 
   You should see:
-
   ```
   NAME                  TYPE     DATA   AGE
-  dch-database-config   Opaque   3      25h
+  dch-database-config   Opaque   4      25h
   ```
 
 ## Install DCH services
@@ -246,30 +247,22 @@ You can verify the DataConnectService as follows:
 * Verify all pods are up and running:
 
   ```sh
-
-    oc get po -n dch-services -l app.kubernetes.io/part-of=data-connect-hub
+  oc get po -n dch-services -l app.kubernetes.io/part-of=data-connect-hub
+  ```
   
+  You should see:
   ```
-
-  	You should see:
-
+  NAME                                                     READY   STATUS    RESTARTS   AGE
+  dch-default-dataconnectservice-flight-59d7464d65-qlnkw   1/1     Running   0          3m34s
+  dch-rest-service-b48956f6c-8g5cr                         2/2     Running   0          3m34s
   ```
-    NAME                                                     READY   STATUS    RESTARTS   AGE
-    dch-default-dataconnectservice-flight-59d7464d65-qlnkw   1/1     Running   0          3m34s
-    dch-rest-service-b48956f6c-8g5cr                         2/2     Running   0          3m34s
-  ```
-
-
 * Verify HttpRoute has been created:
-
   ```sh
   oc get HttpRoutes -n dch-services
   ```
 
-    You should see:
-
+  You should see:
   ```
-
   NAME                   HOSTNAMES               AGE
   default-dataconnectservice-route               4m54s
   ```
@@ -288,7 +281,6 @@ oc rollout status -n openshift-ingress deploy/router-default
 ```
 
 You should see the following:  
- 
 
 ```
 
