@@ -82,6 +82,25 @@ def _build_urls(endpoint: str) -> tuple[str, str]:
     return f"https://{netloc}", f"grpc+tls://{netloc}"
 
 
+def _flight_import_error(exc: ImportError) -> DCHConfigError:
+    """Explain why ``_flight`` failed to import.
+
+    Only a missing pyarrow package means the ``flight`` extra isn't installed.
+    Any other failure comes from an installed pyarrow that can't load, e.g.
+    Red Hat pyarrow missing system libraries such as ``libthrift`` outside an
+    RHOAI or AIPCC image; pointing at the extra would send users in circles.
+    """
+    if isinstance(exc, ModuleNotFoundError) and exc.name == "pyarrow":
+        return DCHConfigError(
+            "Flight SQL support requires the 'flight' extra: pip install \"data-connect-hub[flight]\""
+        )
+    return DCHConfigError(
+        f"pyarrow is installed but failed to load: {type(exc).__name__}: {exc}. "
+        "Red Hat pyarrow builds need the system libraries shipped in RHOAI workbench "
+        "and AIPCC base images; data_connect_hub.fips_status() reports the installed build."
+    )
+
+
 class DataConnectClient:
     """Single entry point for all DCH interactions.
 
@@ -178,9 +197,7 @@ class DataConnectClient:
             try:
                 from ._flight import FlightClient
             except ImportError as exc:
-                raise DCHConfigError(
-                    "Flight SQL support requires the 'flight' extra: pip install \"data-connect-hub[flight]\""
-                ) from exc
+                raise _flight_import_error(exc) from exc
             self._flight = FlightClient(**self._flight_kwargs)
         return self._flight
 
