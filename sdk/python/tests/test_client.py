@@ -373,11 +373,11 @@ class TestLazyFlightClient:
         real_import = builtins.__import__
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
-            if name.split(".")[0] in {"adbc_driver_flightsql", "pyarrow"}:
-                raise ModuleNotFoundError(f"No module named {name!r}")
+            if name.split(".")[0] in {"pyarrow"}:
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name.split(".")[0])
             return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
-        for mod in [m for m in sys.modules if m.split(".")[0] in {"adbc_driver_flightsql", "pyarrow"}]:
+        for mod in [m for m in sys.modules if m.split(".")[0] in {"pyarrow"}]:
             monkeypatch.delitem(sys.modules, mod)
         monkeypatch.delitem(sys.modules, "data_connect_hub._flight", raising=False)
         monkeypatch.setattr(builtins, "__import__", fake_import)
@@ -386,16 +386,46 @@ class TestLazyFlightClient:
         with pytest.raises(DCHConfigError, match="requires the 'flight' extra"):
             client.server_info()
 
+    def test_broken_pyarrow_explains_load_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # Red Hat pyarrow outside an RHOAI/AIPCC image: installed, but a system
+        # library is missing. The error must not tell users to install the extra.
+        import builtins
+
+        real_import = builtins.__import__
+
+        def fake_import(name: str, *args: object, **kwargs: object) -> object:
+            if name.split(".")[0] == "pyarrow":
+                raise ImportError("libthrift-0.24.0.so: cannot open shared object file")
+            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        for mod in [m for m in sys.modules if m.split(".")[0] == "pyarrow"]:
+            monkeypatch.delitem(sys.modules, mod)
+        monkeypatch.delitem(sys.modules, "data_connect_hub._flight", raising=False)
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        client = DataConnectClient("localhost")
+        with pytest.raises(DCHConfigError, match="pyarrow is installed but failed to load") as exc_info:
+            client.server_info()
+        assert "libthrift-0.24.0.so" in str(exc_info.value)
+        assert "'flight' extra" not in str(exc_info.value)
+
+    def test_missing_pyarrow_submodule_is_not_missing_extra(self) -> None:
+        # pyarrow installed without Flight support: a submodule is missing, not the package.
+        from data_connect_hub.client import _flight_import_error
+
+        err = _flight_import_error(ModuleNotFoundError("No module named 'pyarrow._flight'", name="pyarrow._flight"))
+        assert "failed to load" in str(err)
+
     def test_core_only_package_import_without_flight_extra(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import builtins
         import importlib
 
         real_import = builtins.__import__
-        blocked = {"adbc_driver_flightsql", "pyarrow"}
+        blocked = {"pyarrow"}
 
         def fake_import(name: str, *args: object, **kwargs: object) -> object:
             if name.split(".")[0] in blocked:
-                raise ModuleNotFoundError(f"No module named {name!r}")
+                raise ModuleNotFoundError(f"No module named {name!r}", name=name.split(".")[0])
             return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
 
         for mod in list(sys.modules):
