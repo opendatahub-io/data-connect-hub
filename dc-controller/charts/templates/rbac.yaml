@@ -51,7 +51,7 @@ rules:
   resources: [ingresscontrollers]
   verbs: [get, list, watch]
 - apiGroups: [gateway.networking.k8s.io]
-  resources: [httproutes]
+  resources: [httproutes, referencegrants]
   verbs: [create, delete, get, list, patch, update, watch]
 - apiGroups: [networking.k8s.io]
   resources: [networkpolicies]

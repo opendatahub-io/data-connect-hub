@@ -2501,6 +2501,13 @@ spec:
                   namespace:
                     description: namespace is the namespace of the Gateway resource
                     type: string
+                  routeNamespace:
+                    description: |-
+                      routeNamespace contains the HTTPRoute. Defaults to the DataConnectService
+                      namespace. When different, ReferenceGrants authorize the DCH backends.
+                    maxLength: 63
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
+                    type: string
                 required:
                 - name
                 - namespace
@@ -5055,6 +5062,13 @@ spec:
                     type: string
                   namespace:
                     description: namespace is the namespace of the Gateway resource
+                    type: string
+                  routeNamespace:
+                    description: |-
+                      routeNamespace contains the HTTPRoute. Defaults to the DataConnectService
+                      namespace. When different, ReferenceGrants authorize the DCH backends.
+                    maxLength: 63
+                    pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$
                     type: string
                 required:
                 - name

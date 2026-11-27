@@ -29,6 +29,13 @@ type Gateway struct {
 
 	// namespace is the namespace of the Gateway resource
 	Namespace string `json:"namespace"`
+
+	// routeNamespace contains the HTTPRoute. Defaults to the DataConnectService
+	// namespace. When different, ReferenceGrants authorize the DCH backends.
+	// +kubebuilder:validation:Pattern="^([a-z0-9]([-a-z0-9]*[a-z0-9])?)?$"
+	// +kubebuilder:validation:MaxLength=63
+	// +optional
+	RouteNamespace string `json:"routeNamespace,omitempty"`
 }
 
 // ServiceOverrides allows per-service customisation of scaling and pod spec fields.
