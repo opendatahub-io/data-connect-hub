@@ -1,0 +1,67 @@
+name: Semgrep SAST
+
+# ------------------------------------------------------------------------------
+# Workflow Settings
+# ------------------------------------------------------------------------------
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions: {}
+
+env:
+  # Keep SEMGREP_VERSION in sync with the Makefile (check-sast installs the
+  # same version into .local/semgrep-venv).
+  SEMGREP_VERSION: "1.187.0"
+
+jobs:
+  semgrep:
+    name: Static analysis with centrally synced rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # Full history so --baseline-commit can diff against the PR base.
+          fetch-depth: 0
+
+      - name: Install Python
+        uses: actions/setup-python@0a5c61591373683505ea898e09a3ea4f39ef2b9c # v5.0.0
+        with:
+          python-version: "3.13"
+
+      - name: Install semgrep
+        run: python -m pip install "semgrep==${SEMGREP_VERSION}"
+
+      - name: Scan for new findings
+        # Runs the centrally synced semgrep.yaml rules. Findings already on the
+        # PR base are baselined and do not fail the job; only findings
+        # introduced by the PR do. Suppress false positives inline with
+        # "# nosemgrep: <rule-id>" comments.
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          semgrep scan \
+            --config semgrep.yaml \
+            --baseline-commit "${BASE_SHA}" \
+            --severity ERROR --severity WARNING \
+            --error \
+            --metrics=off \
+            --sarif --output semgrep.sarif \
+            .
+
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@5595ccaf912efad79be6eef63a5619ff05969be3 # v4.37.6
+        with:
+          sarif_file: semgrep.sarif

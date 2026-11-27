@@ -21,6 +21,8 @@ make fmt            # format all crates
 make lint           # clippy + fmt check
 make doc            # rustdoc with -D warnings
 make audit          # cargo audit + cargo deny check
+make check-leaks    # scan git history for leaked secrets (gitleaks)
+make check-sast     # semgrep SAST (new findings vs origin/main)
 make container-all  # build all container images
 make build-samples  # build the custom-connector sample
 make lint-samples   # clippy + fmt check the custom-connector sample
@@ -185,6 +187,24 @@ Workflows under `.github/workflows/`:
   all commits have a valid GPG/SSH signature.
 - **`ci-check-typos.yml`** — runs on PRs. Checks for
   common typos using `crate-ci/typos`.
+- **`ci-secret-scanning.yml`** — runs on every PR and push
+  to `main`. Scans the full git history for leaked secrets
+  (API keys, tokens, passwords) with a pinned `gitleaks`,
+  using the centrally synced `.gitleaks.toml` rules. Known
+  false positives are baselined in `.gitleaksignore`; the
+  workflow fails on any new finding. Run locally with
+  `make check-leaks`.
+- **`ci-semgrep.yml`** — runs on PRs to `main`. Static
+  analysis with the centrally synced `semgrep.yaml` rules
+  (Go, Python, YAML, generic secret patterns). Findings
+  already on the PR base are baselined via
+  `--baseline-commit`, so only findings introduced by the
+  PR fail the job; the ~70 pre-existing findings on `main`
+  (mostly test fixtures and manifest hardening items) are
+  triaged separately. Suppress false positives inline with
+  `# nosemgrep: <rule-id>` comments. Run locally with
+  `make check-sast` (new findings vs `origin/main`, so commit
+  your work first; `SEMGREP_BASELINE=` scans everything).
 - **`ci-stale-reviews.yml`** — dismisses stale PR
   reviews after new pushes.
 
