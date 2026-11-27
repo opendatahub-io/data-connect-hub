@@ -140,7 +140,7 @@ print(fips_status())
 | `pyarrow_version` | Installed pyarrow version, or `None` |
 | `pyarrow_error` | Why `pyarrow.flight` failed to import, for example a missing `libthrift` outside an RHOAI or AIPCC image |
 
-A FIPS-compliant setup reports `host_fips=True`, `rest_tls="fips"` and `flight_system_openssl=True`.
+A FIPS-compliant setup reports `host_fips=True` and `rest_tls="fips"`. If you use Flight SQL, it must also report `flight_system_openssl=True`; a REST-only install without pyarrow reports `None`.
 
 ## Enforce FIPS
 
