@@ -155,8 +155,8 @@ func TestDesiredGlobalRoleBindings(t *testing.T) {
 }
 
 func TestFlightServiceAccountName(t *testing.T) {
-	// renderFlightService rewrites "flight-service" in the base
-	// "dch-flight-service-sa" name to "<cr>-flight".
+	// The chart names the Flight ServiceAccount after the per-CR Flight
+	// instance: "dch-<cr>-flight-sa".
 	if got := flightServiceAccountName("default-dataconnectservice"); got != "dch-default-dataconnectservice-flight-sa" {
 		t.Errorf("flightServiceAccountName() = %q", got)
 	}

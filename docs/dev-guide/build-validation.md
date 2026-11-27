@@ -16,11 +16,11 @@ OpenShift cluster via a `BuildConfig`, which compiles natively on a real
 Each service needs a `BuildConfig` pointing at its Containerfile, with a
 binary source (so it can build from a local, possibly-uncommitted working
 tree — no git push required) and a push secret for the target registry.
-These are tracked under `config/openshift-build/{rest-service,flight-service}/`:
+These are tracked under `manifests/openshift-build/{rest-service,flight-service}/`:
 
 ```console
-oc apply -k config/openshift-build/rest-service -n <your-namespace>
-oc apply -k config/openshift-build/flight-service -n <your-namespace>
+oc apply -k manifests/openshift-build/rest-service -n <your-namespace>
+oc apply -k manifests/openshift-build/flight-service -n <your-namespace>
 ```
 
 These manifests are **not** ready to use as-is: `output.to.name` and
@@ -97,23 +97,28 @@ Two gotchas hit while setting this up, worth knowing about:
 ## End-to-end verification
 
 After a successful build/push, redeploy and check the actual behavior rather
-than just "it compiled":
+than just "it compiled". The operand Deployments are rendered by dc-controller
+from the data-connect-hub chart, so point the controller at the new images and
+let it reconcile:
 
 ```console
-oc apply -k config/base/rest-service -n <your-namespace>
-oc apply -k config/base/flight-service -n <your-namespace>
-oc rollout status deployment/rest-service -n <your-namespace>
-oc rollout status deployment/flight-service -n <your-namespace>
+helm upgrade dc-controller dc-controller/charts/ -n <controller-namespace> --reuse-values \
+    --set relatedImages.restService=<your-rest-image> \
+    --set relatedImages.flightService=<your-flight-image>
+oc rollout status deployment/dch-controller-manager -n <controller-namespace>
+oc rollout status deployment/dch-rest-service -n <your-namespace>
+oc rollout status deployment/dch-<crName>-flight -n <your-namespace>
 
 # rest-service: hit a real route
-oc exec deploy/rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/health
+oc exec deploy/dch-rest-service -n <your-namespace> -- curl -s http://127.0.0.1:8080/health
 
 # flight-service: absence of a crash-loop is the signal for anything that
 # fails fast on startup (e.g. a bad DB connection)
-oc get pods -n <your-namespace> -l app.kubernetes.io/name=flight-service
+oc get pods -n <your-namespace> -l app.kubernetes.io/name=<crName>-flight
 ```
 
-Note: if a Deployment's image tag didn't change (e.g. still `:latest`), a
-plain `oc apply -k` won't restart already-running Pods — follow with
-`oc rollout restart deployment/<name> -n <your-namespace>` to force a fresh
-pull and pick up the new build.
+Note: dc-controller only re-renders when the Deployment's image changes, so a
+refreshed `:latest` tag does not restart already-running Pods by itself.
+Force a fresh pull with
+`oc rollout restart deployment/<name> -n <your-namespace>` after the rollout
+if the image tag did not change.

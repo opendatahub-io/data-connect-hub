@@ -37,7 +37,7 @@ The endpoints use plain HTTP and are not protected by the REST service's kube-rb
 
 ## OpenShift Monitoring
 
-When the OpenShift monitoring APIs are available, the controller deploys the `config/overlays/openshift` overlay. Its `ServiceMonitor` selects DCH-managed Services and scrapes their named `metrics` ports at `/metrics` every 30 seconds. No additional ServiceMonitor is required for the REST or Flight service.
+When the OpenShift monitoring APIs are available, the controller renders the chart with `monitoring.enabled`, which deploys a `ServiceMonitor`. It selects DCH-managed Services and scrapes their named `metrics` ports at `/metrics` every 30 seconds. No additional ServiceMonitor is required for the REST or Flight service.
 
 For clusters that do not provide the Prometheus Operator APIs, create an equivalent scrape configuration or ServiceMonitor in the platform's monitoring stack. The target service must use the named `metrics` port and the `/metrics` path.
 

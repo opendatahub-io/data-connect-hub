@@ -1,0 +1,5 @@
+apiVersion: v2
+name: data-connect-hub
+description: Data Connect Hub operand services (REST API + Flight gRPC)
+version: 0.1.0
+appVersion: 0.1.0

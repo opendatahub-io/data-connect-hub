@@ -1,0 +1,17 @@
+{{- if .Values.monitoring.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "dch.prefix" . }}-servicemonitor
+  labels:
+    monitoring.opendatahub.io/scrape: "true"
+    {{- include "dch.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      dataconnecthub.opendatahub.io/managed-by: dataconnectservice
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: {{ .Values.monitoring.scrapeInterval | default "30s" }}
+{{- end }}

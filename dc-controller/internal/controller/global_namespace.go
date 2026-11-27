@@ -195,8 +195,8 @@ func serviceAccountSubjects(refs []serviceAccountRef) []rbacv1.Subject {
 	return subjects
 }
 
-// flightServiceAccountName mirrors how renderFlightService renames the base
-// "dch-flight-service-sa" ServiceAccount for a DataConnectService.
+// flightServiceAccountName returns the chart-rendered Flight ServiceAccount
+// name for a DataConnectService: "dch-<cr>-flight-sa".
 func flightServiceAccountName(crName string) string {
 	return "dch-" + flightServiceResourceName(crName) + "-sa"
 }

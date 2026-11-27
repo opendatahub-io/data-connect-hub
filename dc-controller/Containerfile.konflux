@@ -23,7 +23,7 @@ FROM ${RUNTIME_BASE_IMAGE}
 WORKDIR /
 
 COPY --from=builder --chown=root:root --chmod=0555 /workspace/manager .
-COPY config/ /manifests/
+COPY manifests/ /manifests/
 
 LABEL name="rhoai/odh-data-connect-hub-controller-rhel9" \
       com.redhat.component="odh-data-connect-hub-controller-rhel9" \

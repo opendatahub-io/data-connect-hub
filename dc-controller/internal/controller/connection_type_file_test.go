@@ -37,10 +37,10 @@ const (
 )
 
 // loadBuiltinConnectionTypeFiles parses every built-in connection type file
-// under config/connection-types, keyed by file name.
+// under manifests/connection-types, keyed by file name.
 func loadBuiltinConnectionTypeFiles(t *testing.T) map[string]connectionTypeFile {
 	t.Helper()
-	typesDir := filepath.Join("..", "..", "..", "config", "connection-types")
+	typesDir := filepath.Join("..", "..", "..", "manifests", "connection-types")
 	entries, err := os.ReadDir(typesDir)
 	if err != nil {
 		t.Fatalf("read %s: %v", typesDir, err)
