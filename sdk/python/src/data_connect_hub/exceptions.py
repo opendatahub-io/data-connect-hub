@@ -76,6 +76,10 @@ class DCHConfigError(DCHError):
     """SDK configuration error."""
 
 
+class DCHFipsWarning(UserWarning):
+    """A ``require_fips`` client runs with a setting that weakens its FIPS posture."""
+
+
 def map_http_error(response: httpx.Response) -> DCHHTTPError:
     """Convert an httpx error response to a typed exception."""
     body = response.text

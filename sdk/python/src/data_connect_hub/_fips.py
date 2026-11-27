@@ -17,10 +17,14 @@ from __future__ import annotations
 import ctypes
 import importlib.metadata
 import importlib.util
+import os
 import sys
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from .exceptions import DCHConfigError, DCHFipsWarning
 
 RestTls = Literal["fips", "not-fips", "unknown"]
 
@@ -29,6 +33,10 @@ _LIBSSL = "libssl.so.3"
 _LIBCRYPTO = "libcrypto.so.3"
 # Any libssl export works; this one exists in every OpenSSL 3 release.
 _PROBE_SYMBOL = "SSL_CTX_new"
+
+REQUIRE_FIPS_ENV = "DCH_REQUIRE_FIPS"
+_TRUE = frozenset({"1", "true", "yes", "on"})
+_FALSE = frozenset({"", "0", "false", "no", "off"})
 
 
 @dataclass(frozen=True)
@@ -196,3 +204,64 @@ def _pyarrow_version() -> str | None:
         module = sys.modules.get("pyarrow")
         version = getattr(module, "__version__", None)
         return version if isinstance(version, str) else None
+
+
+# -- require_fips enforcement ------------------------------------------------------------
+
+
+def resolve_require_fips(value: bool | None) -> bool:
+    """Return *value*, or the ``DCH_REQUIRE_FIPS`` environment variable when it's ``None``."""
+    if value is not None:
+        return value
+    raw = os.environ.get(REQUIRE_FIPS_ENV, "").strip().lower()
+    if raw in _TRUE:
+        return True
+    if raw in _FALSE:
+        return False
+    raise DCHConfigError(f"{REQUIRE_FIPS_ENV} must be one of 1/true/yes/on or 0/false/no/off, got {raw!r}")
+
+
+def enforce_client_fips(*, insecure: bool) -> None:
+    """Check the host and REST TLS for a ``require_fips`` client.
+
+    Doesn't import pyarrow, so REST-only installs are unaffected; Flight is
+    checked on first use by :func:`enforce_flight_fips`.
+    """
+    problems = []
+    if not _host_fips():
+        problems.append(f"the host is not in FIPS mode ({_FIPS_ENABLED_PATH} is not 1)")
+    rest_tls = _rest_tls()
+    if rest_tls != "fips":
+        problems.append(
+            f"REST TLS is {rest_tls!r}: Python's ssl module must use the system OpenSSL 3 "
+            "with the FIPS provider enforced"
+        )
+    if problems:
+        raise DCHConfigError(
+            "require_fips is set but the environment is not FIPS-compliant: "
+            + "; ".join(problems)
+            + ". Run in a FIPS-enabled RHEL-based environment such as an RHOAI workbench on a FIPS cluster."
+        )
+    if insecure:
+        warnings.warn(
+            "require_fips is set with insecure=True: TLS still uses the FIPS provider, but server "
+            "certificates are not verified. Pass ca_cert instead.",
+            DCHFipsWarning,
+            stacklevel=3,
+        )
+
+
+def enforce_flight_fips() -> None:
+    """Check that Flight uses the system OpenSSL; call after ``pyarrow.flight`` imported."""
+    system_openssl = _flight_system_openssl()
+    if system_openssl is True:
+        return
+    version = _pyarrow_version() or "unknown"
+    if system_openssl is False:
+        reason = f"pyarrow {version} carries its own OpenSSL, which never uses the host's FIPS provider"
+    else:
+        reason = f"could not verify that pyarrow {version} uses the system OpenSSL"
+    raise DCHConfigError(
+        f"require_fips is set but {reason}. Install pyarrow from the Red Hat AI Python index "
+        "(the default index in RHOAI workbench images) instead of PyPI."
+    )

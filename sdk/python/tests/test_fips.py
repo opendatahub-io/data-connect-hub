@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import sys
 import types
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +14,7 @@ import pytest
 import data_connect_hub
 from data_connect_hub import _fips
 from data_connect_hub._fips import FipsStatus, fips_status
+from data_connect_hub.exceptions import DCHConfigError, DCHFipsWarning
 
 SYSTEM_SSL_CTX_NEW = 0x7F0000001000
 
@@ -325,3 +327,92 @@ class TestFipsStatus:
         status = FipsStatus(False, "unknown", None, None, None)
         with pytest.raises(AttributeError):
             status.host_fips = True  # type: ignore[misc]
+
+
+class TestResolveRequireFips:
+    @pytest.mark.parametrize("value", [True, False])
+    def test_explicit_value_wins_over_env(self, monkeypatch: pytest.MonkeyPatch, value: bool) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", "0" if value else "1")
+        assert _fips.resolve_require_fips(value) is value
+
+    def test_unset_env_is_off(self) -> None:
+        assert _fips.resolve_require_fips(None) is False
+
+    @pytest.mark.parametrize("raw", ["1", "true", "TRUE", "yes", "on", " 1 "])
+    def test_env_on(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", raw)
+        assert _fips.resolve_require_fips(None) is True
+
+    @pytest.mark.parametrize("raw", ["", "0", "false", "No", "off"])
+    def test_env_off(self, monkeypatch: pytest.MonkeyPatch, raw: str) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", raw)
+        assert _fips.resolve_require_fips(None) is False
+
+    def test_env_invalid(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", "enabled")
+        with pytest.raises(DCHConfigError, match="DCH_REQUIRE_FIPS must be one of"):
+            _fips.resolve_require_fips(None)
+
+
+class TestEnforceClientFips:
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, host: bool, rest: str) -> None:
+        monkeypatch.setattr(_fips, "_host_fips", lambda: host)
+        monkeypatch.setattr(_fips, "_rest_tls", lambda: rest)
+
+    def test_fips_environment_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, True, "fips")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            _fips.enforce_client_fips(insecure=False)
+
+    def test_host_not_fips(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, False, "fips")
+        with pytest.raises(DCHConfigError, match="host is not in FIPS mode") as exc_info:
+            _fips.enforce_client_fips(insecure=False)
+        assert "REST TLS" not in str(exc_info.value)
+
+    @pytest.mark.parametrize("rest", ["not-fips", "unknown"])
+    def test_rest_tls_not_fips(self, monkeypatch: pytest.MonkeyPatch, rest: str) -> None:
+        self._patch(monkeypatch, True, rest)
+        with pytest.raises(DCHConfigError, match=f"REST TLS is '{rest}'"):
+            _fips.enforce_client_fips(insecure=False)
+
+    def test_reports_every_problem(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, False, "not-fips")
+        with pytest.raises(DCHConfigError) as exc_info:
+            _fips.enforce_client_fips(insecure=False)
+        assert "host is not in FIPS mode" in str(exc_info.value)
+        assert "REST TLS is 'not-fips'" in str(exc_info.value)
+
+    def test_insecure_warns(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, True, "fips")
+        with pytest.warns(DCHFipsWarning, match="insecure=True"):
+            _fips.enforce_client_fips(insecure=True)
+
+    def test_insecure_on_non_fips_host_raises_without_warning(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, False, "fips")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            with pytest.raises(DCHConfigError):
+                _fips.enforce_client_fips(insecure=True)
+
+
+class TestEnforceFlightFips:
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, system: bool | None) -> None:
+        monkeypatch.setattr(_fips, "_flight_system_openssl", lambda: system)
+        monkeypatch.setattr(_fips, "_pyarrow_version", lambda: "26.0.1")
+
+    def test_system_openssl_passes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, True)
+        _fips.enforce_flight_fips()
+
+    def test_bundled_openssl(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, False)
+        with pytest.raises(DCHConfigError, match=r"pyarrow 26\.0\.1 carries its own OpenSSL") as exc_info:
+            _fips.enforce_flight_fips()
+        assert "Red Hat AI Python index" in str(exc_info.value)
+
+    def test_unverifiable(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._patch(monkeypatch, None)
+        with pytest.raises(DCHConfigError, match=r"could not verify that pyarrow 26\.0\.1"):
+            _fips.enforce_flight_fips()

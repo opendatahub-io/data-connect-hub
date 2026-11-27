@@ -10,8 +10,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from data_connect_hub import _fips
 from data_connect_hub.client import DataConnectClient, _build_urls
-from data_connect_hub.exceptions import DCHConfigError
+from data_connect_hub.exceptions import DCHConfigError, DCHFipsWarning
 
 from .conftest import SAMPLE_CONNECTION_JSON
 
@@ -443,6 +444,80 @@ class TestLazyFlightClient:
         client = data_connect_hub.DataConnectClient("localhost")
         with pytest.raises(data_connect_hub.DCHConfigError, match="requires the 'flight' extra"):
             list(client.read_batches("SELECT 1", "conn-1"))
+
+
+class TestRequireFips:
+    @pytest.fixture
+    def fips_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_fips, "_host_fips", lambda: True)
+        monkeypatch.setattr(_fips, "_rest_tls", lambda: "fips")
+
+    @pytest.fixture
+    def non_fips_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_fips, "_host_fips", lambda: False)
+        monkeypatch.setattr(_fips, "_rest_tls", lambda: "not-fips")
+
+    @pytest.mark.usefixtures("non_fips_host")
+    def test_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_fips, "_flight_system_openssl", lambda: False)
+        client = DataConnectClient("localhost")
+        assert client._require_fips is False
+        client._require_flight()  # PyPI pyarrow is fine without require_fips
+
+    @pytest.mark.usefixtures("non_fips_host")
+    def test_non_fips_host_fails_at_creation(self) -> None:
+        with pytest.raises(DCHConfigError, match="require_fips is set but the environment is not FIPS-compliant"):
+            DataConnectClient("localhost", require_fips=True)
+
+    @pytest.mark.usefixtures("non_fips_host")
+    def test_env_var_enables(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", "1")
+        with pytest.raises(DCHConfigError, match="not FIPS-compliant"):
+            DataConnectClient("localhost")
+
+    @pytest.mark.usefixtures("non_fips_host")
+    def test_explicit_false_overrides_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", "1")
+        assert DataConnectClient("localhost", require_fips=False)._require_fips is False
+
+    def test_invalid_env_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DCH_REQUIRE_FIPS", "maybe")
+        with pytest.raises(DCHConfigError, match="DCH_REQUIRE_FIPS"):
+            DataConnectClient("localhost")
+
+    def test_creation_does_not_import_pyarrow(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # REST-only installs must keep working: Flight is checked on first use.
+        monkeypatch.setattr(_fips, "_host_fips", lambda: True)
+        monkeypatch.setattr(_fips, "_rest_tls", lambda: "fips")
+
+        def unexpected() -> None:
+            raise AssertionError("Flight must not be checked when the client is created")
+
+        monkeypatch.setattr(_fips, "_flight_system_openssl", unexpected)
+        DataConnectClient("localhost", require_fips=True)
+
+    @pytest.mark.usefixtures("fips_host")
+    def test_insecure_warns_at_caller(self) -> None:
+        with pytest.warns(DCHFipsWarning, match="insecure=True") as record:
+            DataConnectClient("localhost", insecure=True, require_fips=True)
+        assert record[0].filename == __file__
+
+    @pytest.mark.usefixtures("fips_host")
+    def test_bundled_pyarrow_fails_on_first_flight_use(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_fips, "_flight_system_openssl", lambda: False)
+        client = DataConnectClient("localhost", require_fips=True)
+        with pytest.raises(DCHConfigError, match="carries its own OpenSSL"):
+            client.server_info()
+        assert client._flight is None
+        with pytest.raises(DCHConfigError, match="carries its own OpenSSL"):
+            list(client.read_batches("SELECT 1", "conn-1"))
+
+    @pytest.mark.usefixtures("fips_host")
+    def test_system_pyarrow_builds_flight_client(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(_fips, "_flight_system_openssl", lambda: True)
+        client = DataConnectClient("localhost", require_fips=True)
+        assert client._require_flight() is client._flight
+        assert client._flight is not None
 
 
 class TestBuildUrls:
