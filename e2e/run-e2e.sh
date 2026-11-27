@@ -772,6 +772,9 @@ EOF
         echo "DCH_PG_SECRET=${PG_SECRET}" >> "$ENV_FILE"
     fi
 
+    [[ "${DCH_METRICS_FROM_POD:-}" == "true" ]] && \
+        echo "DCH_METRICS_FROM_POD=true" >> "$ENV_FILE"
+
     [[ -n "${DCH_FLIGHT_METRICS_URL:-}" ]] && \
         echo "DCH_FLIGHT_METRICS_URL=${DCH_FLIGHT_METRICS_URL}" >> "$ENV_FILE"
     [[ -n "${DCH_REST_METRICS_URL:-}" ]] && \

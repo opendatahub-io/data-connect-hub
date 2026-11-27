@@ -1,13 +1,14 @@
 """Flight metrics tests: verify Prometheus metrics are exposed and populated.
 
 Self-contained: calls server_info() to generate sql_info counters,
-then verifies the metrics endpoint reflects those calls.
-Skips if DCH_FLIGHT_METRICS_URL is not set.
+then verifies the metrics endpoint reflects those calls. CI scrapes from an
+in-cluster pod; local runs use DCH_FLIGHT_METRICS_URL when configured.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 import httpx
 import pytest
@@ -22,12 +23,16 @@ def metrics_body(
     auth_token: str,
     tenant_id: str,
     insecure: bool,
+    metrics_from_pod: Callable[[str], str] | None,
 ) -> str:
-    if not flight_metrics_url:
+    if not flight_metrics_url and metrics_from_pod is None:
         pytest.skip("DCH_FLIGHT_METRICS_URL not set")
 
     client = DataConnectClient(gateway_endpoint, token=auth_token, tenant_id=tenant_id, insecure=insecure)
     client.server_info()
+
+    if metrics_from_pod is not None:
+        return metrics_from_pod("flight-service")
 
     r = httpx.get(f"{flight_metrics_url}/metrics", timeout=10.0)
     assert r.status_code == 200, f"metrics endpoint returned {r.status_code}"

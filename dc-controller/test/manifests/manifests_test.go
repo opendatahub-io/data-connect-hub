@@ -2,6 +2,7 @@ package manifests_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -174,6 +175,108 @@ func TestRestServiceExposesMetricsPort(t *testing.T) {
 	}
 	if !containerPortFound {
 		t.Error("rendered REST Deployment does not declare metrics container port 9090")
+	}
+}
+
+func TestServiceMetricsPoliciesRestrictScrapers(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate manifest test")
+	}
+	configRoot := filepath.Clean(filepath.Join(filepath.Dir(filename), "..", "..", "..", "config"))
+
+	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := kustomizer.Run(filesys.MakeFsOnDisk(), filepath.Join(configRoot, "base"))
+	if err != nil {
+		t.Fatalf("rendering base manifests: %v", err)
+	}
+	rendered, err := resMap.AsYaml()
+	if err != nil {
+		t.Fatalf("serializing base manifests: %v", err)
+	}
+	nodes, err := (&kio.ByteReader{Reader: strings.NewReader(string(rendered))}).Read()
+	if err != nil {
+		t.Fatalf("parsing base manifests: %v", err)
+	}
+
+	wanted := map[string]bool{
+		"dch-rest-service":   false,
+		"dch-flight-service": false,
+	}
+	for _, node := range nodes {
+		var object struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Ingress []struct {
+					From []struct {
+						NamespaceSelector struct {
+							MatchExpressions []struct {
+								Key      string   `yaml:"key"`
+								Operator string   `yaml:"operator"`
+								Values   []string `yaml:"values"`
+							} `yaml:"matchExpressions"`
+						} `yaml:"namespaceSelector"`
+					} `yaml:"from"`
+					Ports []struct {
+						Port int `yaml:"port"`
+					} `yaml:"ports"`
+				} `yaml:"ingress"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(node.MustString()), &object); err != nil {
+			t.Fatalf("parsing rendered resource: %v", err)
+		}
+		if object.Kind != "NetworkPolicy" {
+			continue
+		}
+		if _, ok := wanted[object.Metadata.Name]; !ok {
+			continue
+		}
+		for _, ingress := range object.Spec.Ingress {
+			metricsPort := len(ingress.Ports) == 0
+			for _, port := range ingress.Ports {
+				if port.Port == 9090 {
+					metricsPort = true
+				}
+			}
+			if !metricsPort {
+				continue
+			}
+
+			restricted := len(ingress.From) > 0
+			for _, source := range ingress.From {
+				if len(source.NamespaceSelector.MatchExpressions) != 1 {
+					restricted = false
+					break
+				}
+				expression := source.NamespaceSelector.MatchExpressions[0]
+				if expression.Key != "kubernetes.io/metadata.name" ||
+					expression.Operator != "In" ||
+					!reflect.DeepEqual(expression.Values, []string{
+						"openshift-monitoring",
+						"openshift-user-workload-monitoring",
+						"redhat-ods-monitoring",
+						"opendatahub-monitoring",
+					}) {
+					restricted = false
+					break
+				}
+			}
+			if !restricted {
+				t.Errorf("%s has an unrestricted ingress rule for port 9090", object.Metadata.Name)
+				continue
+			}
+			wanted[object.Metadata.Name] = true
+		}
+	}
+
+	for name, found := range wanted {
+		if !found {
+			t.Errorf("%s metrics policy does not restrict port 9090 to metrics namespaces", name)
+		}
 	}
 }
 

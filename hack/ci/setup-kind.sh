@@ -49,6 +49,7 @@ echo "=== Creating namespaces ==="
 for ns in "$CI_SVC_NAMESPACE" "$CI_CONTROLLER_NAMESPACE" "$CI_GATEWAY_NAMESPACE" "$CI_TENANT_NAMESPACE" "$CI_NO_ACCESS_NAMESPACE"; do
     kubectl create ns "$ns" 2>/dev/null || true
 done
+kubectl create ns opendatahub-monitoring 2>/dev/null || true
 
 # ---------------------------------------------------------------------------
 # Gateway API CRDs + Istio
