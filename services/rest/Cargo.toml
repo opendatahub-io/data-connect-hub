@@ -22,13 +22,10 @@ arrow-flight = { workspace = true, features = ["flight-sql"] }
 futures = { workspace = true }
 prost = { workspace = true }
 commons = { workspace = true }
+fips-utils = { workspace = true }
 pg-meta-store = { workspace = true }
 tonic = { workspace = true, features = ["tls-native-roots"] }
 rustls = { workspace = true }
-rustls-ossl = { workspace = true }
-# Used to load the FIPS provider for rustls-ossl's library context. The "log"
-# feature also surfaces the OpenSSL error stack behind a failed call.
-ossl = { workspace = true }
 config = { workspace = true }
 anyhow = { workspace = true }
 serde = { workspace = true }

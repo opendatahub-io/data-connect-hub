@@ -103,10 +103,7 @@ fn build_connectors_registry(config: &ServerConfig) -> ConnectorsRegistry {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    rustls::crypto::aws_lc_rs::default_provider()
-        .install_default()
-        .expect("Failed to install rustls CryptoProvider");
-
+    let crypto_status = fips_utils::install_crypto_provider()?;
     let args = CommandLineArgs::parse();
     let config = load_config(args.config, args.secret_config)?;
     config.query.validate().map_err(|e| anyhow::anyhow!(e))?;
@@ -114,6 +111,8 @@ async fn main() -> Result<()> {
     let trace = TraceConfig::from_env();
     let audit = AuditConfig::from_env();
     let tracer_provider = init_tracing_json(SERVICE_NAME, args.json_logs, &trace)?;
+
+    crypto_status.log();
 
     tracing::info!("Starting DataConnectorHub Flight service");
     tracing::info!(

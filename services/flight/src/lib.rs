@@ -125,7 +125,12 @@ async fn build_tls_acceptor(
     let key =
         PrivateKeyDer::from_pem_file(key_file).map_err(|e| anyhow::anyhow!("reading key file {key_file}: {e}"))?;
 
-    let base_provider = rustls::crypto::aws_lc_rs::default_provider();
+    let base_provider = rustls::crypto::CryptoProvider::get_default()
+        .ok_or_else(|| {
+            anyhow::anyhow!("no rustls CryptoProvider installed; flight-service must install the OpenSSL-backed provider before TLS setup")
+        })?
+        .as_ref()
+        .clone();
     let versions: &[&'static rustls::SupportedProtocolVersion] = match min_version {
         "VersionTLS13" => &[&rustls::version::TLS13],
         "VersionTLS12" => &[&rustls::version::TLS12, &rustls::version::TLS13],

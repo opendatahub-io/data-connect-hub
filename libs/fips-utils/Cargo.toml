@@ -1,0 +1,16 @@
+[package]
+name = "fips-utils"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+ossl = { workspace = true }
+rustls = { workspace = true }
+rustls-ossl = { workspace = true }
+tracing = { workspace = true }

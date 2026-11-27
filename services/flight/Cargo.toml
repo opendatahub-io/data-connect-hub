@@ -36,10 +36,11 @@ neo4j-connector = { workspace = true, optional = true }
 uri-connector = { workspace = true, optional = true }
 async-trait = { workspace = true }
 commons = { workspace = true }
+fips-utils = { workspace = true }
 pg-meta-store = { workspace = true }
 arrow = { workspace = true }
 arrow-flight = { workspace = true, features = ["flight-sql"] }
-tonic = { workspace = true, features = ["tls-aws-lc"] }
+tonic = { workspace = true, features = ["tls-native-roots"] }
 tonic-health = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "signal"] }
 futures = { workspace = true }
@@ -58,11 +59,8 @@ thiserror = { workspace = true }
 anyhow = { workspace = true }
 kube-utils = { workspace = true }
 tower = { workspace = true }
-# flight-service still installs the aws-lc-rs provider explicitly. Re-enabled
-# here rather than workspace-wide so rest-service's graph stays clean; removed
-# when flight migrates to rustls-ossl.
-rustls = { workspace = true, features = ["aws_lc_rs"] }
-tokio-rustls = { workspace = true, features = ["aws_lc_rs"] }
+rustls = { workspace = true }
+tokio-rustls = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -72,6 +70,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 
 [dev-dependencies]
+rustls-ossl = { workspace = true }
 sqlx = { workspace = true }
 opendal = { workspace = true }
 parquet = { workspace = true }
