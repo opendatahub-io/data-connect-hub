@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from pydantic import ValidationError
 
+from ._fips import enforce_client_fips, enforce_flight_fips, resolve_require_fips
 from ._rest import RestClient
 from .exceptions import DCHConfigError
 from .models import (
@@ -138,6 +139,16 @@ class DataConnectClient:
     flight_timeout : float, optional
         Deadline in seconds for each Flight SQL RPC.  For queries, the deadline
         covers the whole result stream.
+    require_fips : bool, optional
+        Fail instead of running TLS outside the host's FIPS-validated
+        OpenSSL.  When set, creating the client raises
+        :class:`DCHConfigError` unless the host is in FIPS mode and Python's
+        ``ssl`` uses the system OpenSSL with the FIPS provider enforced, and
+        the first Flight call raises it unless ``pyarrow.flight`` uses the
+        system OpenSSL (e.g. pyarrow from the Red Hat AI Python index).
+        ``insecure=True`` emits a :class:`DCHFipsWarning`.  Defaults to the
+        ``DCH_REQUIRE_FIPS`` environment variable (``1``/``true``/``yes``/
+        ``on``), else False.  See :func:`fips_status`.
     """
 
     def __init__(
@@ -155,6 +166,7 @@ class DataConnectClient:
         backoff_base: float = 0.5,
         backoff_max: float = 30.0,
         flight_timeout: float | None = None,
+        require_fips: bool | None = None,
     ) -> None:
         if token and token_provider:
             raise DCHConfigError(
@@ -163,6 +175,10 @@ class DataConnectClient:
             )
 
         rest_url, flight_url = _build_urls(endpoint)
+
+        self._require_fips = resolve_require_fips(require_fips)
+        if self._require_fips:
+            enforce_client_fips(insecure=insecure)
 
         self._rest = RestClient(
             url=rest_url,
@@ -198,6 +214,8 @@ class DataConnectClient:
                 from ._flight import FlightClient
             except ImportError as exc:
                 raise _flight_import_error(exc) from exc
+            if self._require_fips:
+                enforce_flight_fips()
             self._flight = FlightClient(**self._flight_kwargs)
         return self._flight
 

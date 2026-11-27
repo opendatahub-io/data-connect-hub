@@ -62,6 +62,13 @@ SAMPLE_CONNECTION_TYPE_WRAPPED_JSON = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _no_require_fips_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A DCH_REQUIRE_FIPS set in the developer's or CI's environment would make
+    # every DataConnectClient() in the suite run the FIPS checks.
+    monkeypatch.delenv("DCH_REQUIRE_FIPS", raising=False)
+
+
 @pytest.fixture()
 def sample_connection() -> DataConnection:
     return DataConnection.model_validate(SAMPLE_CONNECTION_JSON)
