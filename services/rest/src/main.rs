@@ -24,7 +24,6 @@ const SERVICE_NAME: &str = "dch-rest-service";
 
 mod auth;
 mod clients;
-mod fips;
 mod rest;
 #[allow(unused)]
 mod state;
@@ -183,139 +182,9 @@ async fn read_ca_cert(config: &ServerConfig) -> Result<Option<Vec<u8>>, anyhow::
     }
 }
 
-/// Installs the OpenSSL-backed rustls provider as the process default, so
-/// that TLS cryptography is performed by the system OpenSSL — and therefore,
-/// on a FIPS-mode host, by the validated FIPS provider — rather than by a
-/// statically linked Rust implementation.
-///
-/// Key exchange groups are restricted to the NIST curves first. `rustls`
-/// computes `CryptoProvider::fips()` as an `all()` across every configured
-/// component, and derives `ClientConfig::require_ems` from that value, so a
-/// single component reporting non-FIPS would silently disable Extended Master
-/// Secret — mandatory for the TLS 1.2 KDF under FIPS 140-3 IG section D.Q.
-///
-/// When `DCH_REQUIRE_FIPS` is set, a configuration that does not report FIPS
-/// is treated as fatal rather than degrading quietly.
-///
-/// The status is returned rather than logged: this has to run before
-/// `init_tracing_json`, which may open an OTLP exporter over TLS, so no
-/// subscriber exists yet and anything logged here would be discarded.
-struct CryptoStatus {
-    context_fips: bool,
-    provider_fips: bool,
-    cipher_suites_fips: bool,
-    kx_groups_fips: bool,
-    signature_verification_fips: bool,
-    secure_random_fips: bool,
-    key_provider_fips: bool,
-    config_fips: bool,
-    kx_groups: Vec<rustls::NamedGroup>,
-    cipher_suites: Vec<rustls::CipherSuite>,
-    signature_schemes: Vec<rustls::SignatureScheme>,
-}
-
-impl CryptoStatus {
-    fn log(&self) {
-        tracing::info!(
-            context_fips = self.context_fips,
-            provider_fips = self.provider_fips,
-            cipher_suites_fips = self.cipher_suites_fips,
-            kx_groups_fips = self.kx_groups_fips,
-            signature_verification_fips = self.signature_verification_fips,
-            secure_random_fips = self.secure_random_fips,
-            key_provider_fips = self.key_provider_fips,
-            config_fips = self.config_fips,
-            kx_groups = ?self.kx_groups,
-            cipher_suites = ?self.cipher_suites,
-            signature_schemes = ?self.signature_schemes,
-            "installed OpenSSL-backed rustls crypto provider"
-        );
-    }
-}
-
-fn install_crypto_provider() -> Result<CryptoStatus> {
-    use rustls::crypto::CryptoProvider;
-
-    fips::load_default_openssl_config()?;
-
-    // try_default_provider, not default_provider: the component lists are
-    // discovered by probing the OpenSSL context, and an empty one is reported
-    // here rather than surfacing later as a handshake the peer rejects.
-    let mut provider = rustls_ossl::try_default_provider()
-        .map_err(|e| anyhow::anyhow!("the OpenSSL crypto provider is unusable: {e}"))?;
-
-    fips::retain_fips_kx_groups(&mut provider);
-    let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
-    // try_default_provider above vouches for what the OpenSSL context
-    // supplied; this guards what the policy applied here leaves behind. Every
-    // FIPS flag below is an `all()`, which is true over an empty list, so a
-    // provider filtered down to nothing would report flawless compliance
-    // while being unable to complete a handshake — an empty
-    // signature_algorithms extension does not even encode to a valid
-    // ClientHello.
-    let cipher_suites: Vec<_> = provider.cipher_suites.iter().map(|suite| suite.suite()).collect();
-    let signature_schemes: Vec<_> = provider
-        .signature_verification_algorithms
-        .mapping
-        .iter()
-        .map(|(scheme, _)| *scheme)
-        .collect();
-
-    if cipher_suites.is_empty() || kx_groups.is_empty() || signature_schemes.is_empty() {
-        return Err(anyhow::anyhow!(
-            "the configured FIPS policy left an incomplete algorithm set \
-             (cipher suites: {}, kx groups: {}, signature algorithms: {}); refusing to start",
-            cipher_suites.len(),
-            kx_groups.len(),
-            signature_schemes.len(),
-        ));
-    }
-
-    let cipher_suites_fips = provider.cipher_suites.iter().all(|suite| suite.fips());
-    let kx_groups_fips = provider.kx_groups.iter().all(|group| group.fips());
-    let signature_verification_fips = provider.signature_verification_algorithms.fips();
-    let secure_random_fips = provider.secure_random.fips();
-    let key_provider_fips = provider.key_provider.fips();
-    let provider_fips = provider.fips();
-    let context_fips = rustls_ossl::osslctx().fips_is_enabled();
-
-    CryptoProvider::install_default(provider)
-        .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
-
-    // Build a throwaway client configuration purely to read the config-level
-    // FIPS status: it folds in `require_ems`, which the provider-level flag
-    // does not cover. tonic builds its own configurations internally, so
-    // there is no live one to inspect here.
-    let probe = rustls::ClientConfig::builder()
-        .with_root_certificates(rustls::RootCertStore::empty())
-        .with_no_client_auth();
-    let config_fips = probe.fips();
-
-    if std::env::var_os("DCH_REQUIRE_FIPS").is_some() && !config_fips {
-        return Err(anyhow::anyhow!(
-            "DCH_REQUIRE_FIPS is set but the TLS configuration does not report FIPS \
-             (provider_fips={provider_fips}, config_fips={config_fips}); refusing to start"
-        ));
-    }
-
-    Ok(CryptoStatus {
-        context_fips,
-        provider_fips,
-        cipher_suites_fips,
-        kx_groups_fips,
-        signature_verification_fips,
-        secure_random_fips,
-        key_provider_fips,
-        config_fips,
-        kx_groups,
-        cipher_suites,
-        signature_schemes,
-    })
-}
-
 #[actix_web::main]
 async fn main() -> Result<()> {
-    let crypto_status = install_crypto_provider()?;
+    let crypto_status = fips_utils::install_crypto_provider()?;
 
     let args = CommandLineArgs::parse();
     let config = Arc::new(load_config(args.config.clone(), args.secret_config.clone())?);

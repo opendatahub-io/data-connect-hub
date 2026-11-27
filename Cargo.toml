@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "libs/commons",
+    "libs/fips-utils",
     "libs/format-readers",
     "libs/kube-utils",
     "libs/pg-meta-store",
@@ -25,6 +26,7 @@ unsafe_code = "deny"
 
 [workspace.dependencies]
 commons = { path = "libs/commons" }
+fips-utils = { path = "libs/fips-utils" }
 postgres-connector = { path = "connectors/postgres" }
 sqlite-connector = { path = "connectors/sqlite" }
 s3-connector = { path = "connectors/s3" }

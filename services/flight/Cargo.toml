@@ -36,6 +36,7 @@ neo4j-connector = { workspace = true, optional = true }
 uri-connector = { workspace = true, optional = true }
 async-trait = { workspace = true }
 commons = { workspace = true }
+fips-utils = { workspace = true }
 pg-meta-store = { workspace = true }
 arrow = { workspace = true }
 arrow-flight = { workspace = true, features = ["flight-sql"] }
@@ -60,8 +61,6 @@ kube-utils = { workspace = true }
 tower = { workspace = true }
 rustls = { workspace = true }
 tokio-rustls = { workspace = true }
-rustls-ossl = { workspace = true }
-ossl = { workspace = true }
 http = { workspace = true }
 http-body = { workspace = true }
 http-body-util = { workspace = true }
@@ -71,6 +70,7 @@ metrics = { workspace = true }
 metrics-exporter-prometheus = { workspace = true }
 
 [dev-dependencies]
+rustls-ossl = { workspace = true }
 sqlx = { workspace = true }
 opendal = { workspace = true }
 parquet = { workspace = true }

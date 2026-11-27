@@ -1625,6 +1625,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1c66915cc5391097de7a2b0b972e8505aa33c0df401fd3a6811dbdb32881ba48"
 
 [[package]]
+name = "fips-utils"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ossl",
+ "rustls",
+ "rustls-ossl",
+ "tracing",
+]
+
+[[package]]
 name = "flatbuffers"
 version = "25.12.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1660,6 +1671,7 @@ dependencies = [
  "commons",
  "config",
  "elasticsearch-connector",
+ "fips-utils",
  "futures",
  "http 1.5.0",
  "http-body",
@@ -1671,7 +1683,6 @@ dependencies = [
  "neo4j-connector",
  "opendal",
  "opentelemetry",
- "ossl",
  "parquet",
  "pg-meta-store",
  "postgres-connector",
@@ -4409,6 +4420,7 @@ dependencies = [
  "clap",
  "commons",
  "config",
+ "fips-utils",
  "futures",
  "json-patch",
  "kube-utils",
@@ -4417,11 +4429,9 @@ dependencies = [
  "opentelemetry",
  "opentelemetry-otlp",
  "opentelemetry_sdk",
- "ossl",
  "pg-meta-store",
  "prost",
  "rustls",
- "rustls-ossl",
  "serde",
  "serde_json",
  "thiserror 2.0.21",
