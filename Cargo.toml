@@ -118,7 +118,7 @@ rustls = { version = "0.23", default-features = false, features = ["std", "loggi
 # rustls CryptoProvider backed by OpenSSL 3's provider layer, reaching the
 # RHEL FIPS provider. Pinned exactly: published at 0.0.1, so semver gives no
 # compatibility guarantee.
-rustls-ossl = "=0.0.1"
+rustls-ossl = "=0.0.2"
 # Transitive dependency of rustls-ossl, declared directly only to turn on
 # its "log" feature: every failed OpenSSL call then emits the OpenSSL error
 # stack through `log::error!`. Without it rustls flattens the cause into
