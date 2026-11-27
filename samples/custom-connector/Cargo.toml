@@ -23,3 +23,10 @@ rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs"] 
 tokio = { version = "1.52", features = ["rt-multi-thread", "macros", "signal"] }
 tonic = "0.14"
 tracing = "0.1"
+
+[patch.crates-io]
+# Keep this sample workspace aligned with the repository workspace. The
+# flight-service dependency reaches fips-utils, whose provider fixes are only
+# available from the dch-fips fork.
+ossl = { git = "https://github.com/loicmarchal/kryoptic", branch = "dch-fips" }
+rustls-ossl = { git = "https://github.com/loicmarchal/kryoptic", branch = "dch-fips" }
