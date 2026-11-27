@@ -149,24 +149,16 @@ impl CryptoStatus {
 }
 
 fn install_crypto_provider() -> Result<CryptoStatus> {
-    use rustls::crypto::{CryptoProvider, SecureRandom};
+    use rustls::crypto::CryptoProvider;
 
-    let mut provider = rustls_ossl::default_provider();
+    fips::load_default_openssl_config()?;
 
-    // rustls-ossl's own secure_random reads OpenSSL's global default library
-    // context, which nothing configures and which holds no providers at all
-    // on a FIPS host. See fips::FipsSecureRandom.
-    provider.secure_random = &fips::FipsSecureRandom;
+    let mut provider = rustls_ossl::try_default_provider()
+        .map_err(|e| anyhow::anyhow!("the OpenSSL crypto provider is unusable: {e}"))?;
 
-    provider.kx_groups.retain(|group| {
-        matches!(
-            group.name(),
-            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1 | rustls::NamedGroup::secp521r1
-        )
-    });
+    fips::retain_fips_kx_groups(&mut provider);
 
     let kx_groups: Vec<_> = provider.kx_groups.iter().map(|g| g.name()).collect();
-    fips::mark_cipher_suites_fips(&mut provider);
     // Capture the resolved algorithm lists before reading the flags. Every
     // FIPS flag here is an `all()`, which is true over an empty list, so a
     // provider that resolved no cipher suites, no key exchange groups or no
@@ -199,15 +191,6 @@ fn install_crypto_provider() -> Result<CryptoStatus> {
     let key_provider_fips = provider.key_provider.fips();
     let provider_fips = provider.fips();
     let context_fips = rustls_ossl::osslctx().fips_is_enabled();
-
-    // Draw once here so that a DRBG which cannot be instantiated is a startup
-    // failure with a clear message, rather than an opaque connect error on the
-    // first TLS handshake. Each worker thread instantiates its own DRBG later,
-    // so this proves the context is usable, not that every instance will be.
-    let mut probe = [0u8; 32];
-    fips::FipsSecureRandom
-        .fill(&mut probe)
-        .map_err(|_| anyhow::anyhow!("the OpenSSL DRBG produced no random bytes; refusing to start"))?;
 
     CryptoProvider::install_default(provider)
         .map_err(|_| anyhow::anyhow!("a rustls CryptoProvider was already installed"))?;
