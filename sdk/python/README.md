@@ -24,7 +24,7 @@ pip install data-connect-hub
 pip install "data-connect-hub[flight]"
 ```
 
-The default installation includes REST support and installs `httpx` and `pydantic`. Install the `[flight]` extra when you need Flight SQL tabular queries (`read`, `read_pandas`, `read_batches`, `get_tables`). REST-only workflows — connection management, credential testing, readiness checks, and binary downloads — work with the default install. The `flight` extra also installs the Flight SQL driver, PyArrow, and pandas.
+The default installation includes REST support and installs `httpx` and `pydantic`. Install the `[flight]` extra when you need Flight SQL tabular queries (`read`, `read_pandas`, `read_batches`, `get_tables`). REST-only workflows — connection management, credential testing, readiness checks, and binary downloads — work with the default install. The `flight` extra also installs PyArrow, whose `pyarrow.flight` module carries the Flight SQL traffic, and pandas. If your TLS must use FIPS-validated cryptography, see [FIPS environments](#fips-environments): Flight SQL then needs pyarrow from the Red Hat AI Python index, not PyPI.
 
 ## Getting Started
 
@@ -63,7 +63,8 @@ The SDK derives HTTPS and gRPC+TLS URLs from `endpoint`. A scheme is not require
 | `max_retries` | `int` | `3` | Retry attempts for transient REST failures; `0` disables retries |
 | `backoff_base` | `float` | `0.5` | Initial retry backoff in seconds |
 | `backoff_max` | `float` | `30.0` | Maximum retry backoff in seconds |
-| `flight_timeout` | `float \| None` | `None` | Timeout for Flight SQL RPC calls |
+| `flight_timeout` | `float \| None` | `None` | Deadline in seconds for each Flight SQL RPC; for queries it covers the whole result stream |
+| `require_fips` | `bool \| None` | `None` | Fail unless TLS uses the host's FIPS-validated OpenSSL; `None` reads `DCH_REQUIRE_FIPS`. See [FIPS environments](#fips-environments) |
 
 ### Authentication and TLS
 
@@ -82,11 +83,14 @@ Use `insecure=True` only for development environments where certificate verifica
 
 ### FIPS environments
 
-The SDK is installed into your Python environment, not shipped in a Data Connect Hub service image. The SDK itself does not implement cryptography, but its TLS connections depend on the cryptographic libraries in that environment. The default, REST-only installation uses `httpx` and Python's TLS stack; it is **not independently FIPS-validated**. If FIPS-validated cryptography is required, use a Python runtime configured to use a validated module in its approved mode and verify that configuration for your environment. `httpx` normally uses the `certifi` CA bundle; use `ca_cert` or an appropriate trust-store configuration if your deployment requires different trusted CAs. The trust store does not determine whether the TLS cryptographic module is FIPS-validated.
+The SDK implements no cryptography. Its REST and Flight SQL TLS connections use the OpenSSL of the Python environment it's installed into, so whether they use FIPS-validated cryptography depends on that environment:
 
-**Do not use the standard PyPI `[flight]` wheels when TLS must use a FIPS-validated module.** The Flight SQL paths use native dependencies: the inspected Linux `adbc-driver-flightsql` wheels (1.12.0) contain Go's `crypto/tls`, and the inspected `pyarrow` wheels (26.0.0) contain statically linked OpenSSL in Arrow Flight. Neither delegates Flight TLS to the host's validated OpenSSL module merely because the host runs in FIPS mode. This finding covers the inspected wheel versions and platforms (CPython 3.11, Linux x86_64 and aarch64), not independently built dependencies.
+- **REST** uses `httpx` and Python's `ssl` module, which on RHEL-based images links the system OpenSSL.
+- **Flight SQL** uses `pyarrow.flight`. Only pyarrow from the Red Hat AI Python index links the system OpenSSL. PyPI's pyarrow carries its own OpenSSL and never uses the host's FIPS provider.
 
-`insecure=True` disables peer certificate verification, **not** TLS encryption or FIPS checks; do not use it to address a FIPS limitation.
+To use FIPS-validated cryptography, run SDK 0.3.0 or later in an RHOAI workbench, or another RHOAI or AIPCC Python 3.12 image, on a FIPS-enabled cluster, with its dependencies installed from the Red Hat AI Python index. `fips_status()` reports whether the current environment meets these conditions, and `require_fips=True` makes the client fail when it doesn't.
+
+See the [FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md) for supported images, installation, verification and enforcement.
 
 ### Configure a Data Source
 
@@ -331,7 +335,7 @@ client.get_tables(connection_id) -> pyarrow.Table         # table metadata
 client.server_info() -> dict                              # server metadata
 ```
 
-`read_batches` returns a generator that streams results instead of buffering the full result set in memory. The underlying cursor and connection are closed automatically when the generator is exhausted or garbage-collected:
+`read_batches` returns a generator that streams results instead of buffering the full result set in memory. The underlying Flight stream and connection are closed automatically when the generator is exhausted, closed or garbage-collected:
 
 ```python
 for batch in client.read_batches("SELECT * FROM prompts", "conn-uuid"):
@@ -340,7 +344,9 @@ for batch in client.read_batches("SELECT * FROM prompts", "conn-uuid"):
 
 A server-side failure surfaced mid-stream raises `DCHQueryError`. Automatic token refresh applies when the stream is opened; an authentication failure that occurs after the stream is open is not retried.
 
-These require the `flight` extra. On a REST-only install the client still imports and all REST calls work; the first Flight call raises `DCHConfigError` telling you to install `data-connect-hub[flight]`.
+`server_info()` returns the server's `vendor_name`, `vendor_version` and `vendor_arrow_version`, the client's `driver_name`, `driver_version` (the SDK version) and `driver_arrow_version` (the pyarrow version), and the `supported_connectors` of the Flight service.
+
+These require the `flight` extra. On a REST-only install the client still imports and all REST calls work; the first Flight call raises `DCHConfigError` telling you to install `data-connect-hub[flight]`. If pyarrow is installed but fails to load, for example Red Hat pyarrow outside an RHOAI or AIPCC image, the error gives the cause instead.
 
 ## Error Handling
 
@@ -359,9 +365,9 @@ except DCHError as exc:  # connection, timeout, auth, schema drift, ...
 
 | Exception | Raised when |
 |---|---|
-| `DCHConfigError` | Invalid client configuration or argument (e.g. a blank id) |
+| `DCHConfigError` | Invalid client configuration or argument (e.g. a blank id), a missing or unloadable pyarrow, or a failed `require_fips` check |
 | `DCHConnectionError` | The server was unreachable or the transport failed |
-| `DCHTimeoutError` | The request exceeded `rest_timeout` |
+| `DCHTimeoutError` | The request exceeded `rest_timeout` or `flight_timeout` |
 | `DCHAuthenticationError` / `DCHForbiddenError` | HTTP 401 / 403 |
 | `DCHNotFoundError` | HTTP 404 |
 | `DCHValidationError` | HTTP 400 / 422 |
@@ -370,6 +376,16 @@ except DCHError as exc:  # connection, timeout, auth, schema drift, ...
 | `DCHQueryError` | A Flight SQL query failed |
 
 Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol errors — are retried automatically with exponential backoff on idempotent methods. Binary response-body failures are not retried after streaming starts, because restarting could duplicate data. See `max_retries`, `backoff_base`, and `backoff_max`.
+
+## Upgrading from 0.2.x
+
+0.3.0 replaces the ADBC Flight SQL driver with `pyarrow.flight`, so Flight TLS can use the host's FIPS-validated OpenSSL:
+
+- The `flight` extra no longer installs `adbc-driver-flightsql`, `adbc-driver-manager` or `protobuf`. Upgrading leaves them installed; remove them with `pip uninstall adbc-driver-flightsql adbc-driver-manager` if nothing else needs them.
+- `server_info()` returns the keys listed in [Tabular Data Queries](#tabular-data-queries-flight-sql). `driver_name` now names this SDK, and `driver_adbc_version` and the other ADBC-specific keys are gone.
+- `flight_timeout` is a deadline for each Flight RPC, and for queries it covers the whole result stream. An exceeded deadline raises `DCHTimeoutError` instead of `DCHQueryError` or `DCHConnectionError`.
+- A pyarrow that's installed but fails to load raises `DCHConfigError` with the cause, instead of asking you to install the `flight` extra.
+- New: `fips_status()`, `require_fips` and `DCHFipsWarning`; see the [FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md).
 
 ## Contributing
 

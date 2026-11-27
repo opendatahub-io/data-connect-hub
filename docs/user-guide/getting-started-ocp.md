@@ -864,6 +864,8 @@ python -m pip install 'data-connect-hub[flight]'
 **Note**: pip is used as an example, but any Python package manager works.  For example uv, poetry, pipx, or conda. Replace ‘pip install’ with the equivalent command for your tool, e.g:  
 uv pip install "data-connect-hub\[flight\]"
 
+**Note**: On a FIPS cluster, install the SDK in an RHOAI workbench, which installs its dependencies from the Red Hat AI Python index. PyPI's `pyarrow` carries its own OpenSSL and doesn't use the cluster's FIPS-validated cryptography. See the [Python SDK FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md).
+
 ## Get Data from the table
 
 You can use the DCH Python SDK’s flight capabilities to retrieve the contents of the Postgres table that was created previously. 
@@ -878,16 +880,8 @@ export DCH_CONNECTION_ID=$(curl -sk -H "Authorization: Bearer $user_token" -H "x
 python - <<'PY'
 import os
 import sys
-import warnings
 
 from data_connect_hub import DataConnectClient, DCHError
-
-warnings.filterwarnings(
-   "ignore",
-   message=r"^Cannot disable autocommit; conn will not be DB-API 2\.0 compliant$",
-   category=Warning,
-   module=r"adbc_driver_manager\.dbapi",
-)
 
 required = ("DCH_HOST", "DCH_TOKEN", "DCH_TENANT_ID", "DCH_CONNECTION_ID")
 missing = [name for name in required if not os.getenv(name)]
@@ -930,16 +924,8 @@ We can use the Python SDK to run SQL queries. In this case, we’ll extract the 
 if prompt_text=$(python - <<'PY'
 import os
 import sys
-import warnings
 
 from data_connect_hub import DataConnectClient, DCHError
-
-warnings.filterwarnings(
-   "ignore",
-   message=r"^Cannot disable autocommit; conn will not be DB-API 2\.0 compliant$",
-   category=Warning,
-   module=r"adbc_driver_manager\.dbapi",
-)
 
 required = ("DCH_HOST", "DCH_TOKEN", "DCH_TENANT_ID", "DCH_CONNECTION_ID")
 missing = [name for name in required if not os.getenv(name)]
