@@ -2,6 +2,7 @@ package manifests_test
 
 import (
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -212,7 +213,11 @@ func TestServiceMetricsPoliciesRestrictScrapers(t *testing.T) {
 				Ingress []struct {
 					From []struct {
 						NamespaceSelector struct {
-							MatchLabels map[string]string `yaml:"matchLabels"`
+							MatchExpressions []struct {
+								Key      string   `yaml:"key"`
+								Operator string   `yaml:"operator"`
+								Values   []string `yaml:"values"`
+							} `yaml:"matchExpressions"`
 						} `yaml:"namespaceSelector"`
 					} `yaml:"from"`
 					Ports []struct {
@@ -243,7 +248,19 @@ func TestServiceMetricsPoliciesRestrictScrapers(t *testing.T) {
 
 			restricted := len(ingress.From) > 0
 			for _, source := range ingress.From {
-				if source.NamespaceSelector.MatchLabels["metrics"] != "enabled" {
+				if len(source.NamespaceSelector.MatchExpressions) != 1 {
+					restricted = false
+					break
+				}
+				expression := source.NamespaceSelector.MatchExpressions[0]
+				if expression.Key != "kubernetes.io/metadata.name" ||
+					expression.Operator != "In" ||
+					!reflect.DeepEqual(expression.Values, []string{
+						"openshift-monitoring",
+						"openshift-user-workload-monitoring",
+						"redhat-ods-monitoring",
+						"opendatahub-monitoring",
+					}) {
 					restricted = false
 					break
 				}

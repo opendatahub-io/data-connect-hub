@@ -36,12 +36,18 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
-    # Only namespaces explicitly designated for metrics collection may scrape
-    # the unauthenticated plaintext endpoint.
+    # Only the platform monitoring namespaces may scrape the unauthenticated
+    # plaintext endpoint.
     - from:
         - namespaceSelector:
-            matchLabels:
-              metrics: enabled
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values:
+                  - openshift-monitoring
+                  - openshift-user-workload-monitoring
+                  - redhat-ods-monitoring
+                  - opendatahub-monitoring
       ports:
         - protocol: TCP
           port: 9090

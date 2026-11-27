@@ -86,10 +86,9 @@ func (e *E2EFixture) Setup(managerImage, restImage, flightImage string) {
 	_, err := utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to create namespace")
 
-	By("labeling the namespace for restricted policy and metrics access")
+	By("labeling the namespace for restricted pod security")
 	cmd = exec.Command("kubectl", "label", "--overwrite", "ns", namespace,
 		"pod-security.kubernetes.io/enforce=restricted",
-		"metrics=enabled",
 	)
 	_, err = utils.Run(cmd)
 	Expect(err).NotTo(HaveOccurred(), "Failed to label namespace")
