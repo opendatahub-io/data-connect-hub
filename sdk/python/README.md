@@ -88,9 +88,12 @@ The SDK implements no cryptography. Its REST and Flight SQL TLS connections use 
 - **REST** uses `httpx` and Python's `ssl` module, which on RHEL-based images links the system OpenSSL.
 - **Flight SQL** uses `pyarrow.flight`. Only pyarrow from the Red Hat AI Python index links the system OpenSSL. PyPI's pyarrow carries its own OpenSSL and never uses the host's FIPS provider.
 
-To use FIPS-validated cryptography, run SDK 0.3.0 or later in an RHOAI workbench, or another RHOAI or AIPCC Python 3.12 image, on a FIPS-enabled cluster, with its dependencies installed from the Red Hat AI Python index. `fips_status()` reports whether the current environment meets these conditions, and `require_fips=True` makes the client fail when it doesn't.
+With SDK 0.3.0 or later on a FIPS-enabled cluster:
 
-See the [FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md) for supported images, installation, verification and enforcement.
+- **REST only** works in any environment with a RHEL-based Python 3.11 or later, such as a UBI Python pod, installed from PyPI.
+- **REST and Flight SQL** need **Python 3.12** in an RHOAI workbench or AIPCC image, with the dependencies installed from the Red Hat AI Python index, which publishes pyarrow only for Python 3.12.
+
+`fips_status()` reports whether the current environment meets these conditions, and `require_fips=True` makes the client fail when it doesn't. See the [FIPS dev guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/dev-guide/fips.md) for details, and the user guides for [REST](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/user-guide/fips-rest.md) and [REST and Flight SQL](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/user-guide/fips-rest-flight.md) for step-by-step examples.
 
 ### Configure a Data Source
 
@@ -385,7 +388,7 @@ Transient failures — HTTP 429/502/503/504, timeouts, and network or protocol e
 - `server_info()` returns the keys listed in [Tabular Data Queries](#tabular-data-queries-flight-sql). `driver_name` now names this SDK, and `driver_adbc_version` and the other ADBC-specific keys are gone.
 - `flight_timeout` is a deadline for each Flight RPC, and for queries it covers the whole result stream. An exceeded deadline raises `DCHTimeoutError` instead of `DCHQueryError` or `DCHConnectionError`.
 - A pyarrow that's installed but fails to load raises `DCHConfigError` with the cause, instead of asking you to install the `flight` extra.
-- New: `fips_status()`, `require_fips` and `DCHFipsWarning`; see the [FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md).
+- New: `fips_status()`, `require_fips` and `DCHFipsWarning`; see the [FIPS dev guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/dev-guide/fips.md).
 
 ## Contributing
 

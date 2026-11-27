@@ -864,7 +864,7 @@ python -m pip install 'data-connect-hub[flight]'
 **Note**: pip is used as an example, but any Python package manager works.  For example uv, poetry, pipx, or conda. Replace ‘pip install’ with the equivalent command for your tool, e.g:  
 uv pip install "data-connect-hub\[flight\]"
 
-**Note**: On a FIPS cluster, install the SDK in an RHOAI workbench, which installs its dependencies from the Red Hat AI Python index. PyPI's `pyarrow` carries its own OpenSSL and doesn't use the cluster's FIPS-validated cryptography. See the [Python SDK FIPS usage guide](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/fips.md).
+**Note**: On a FIPS cluster, Flight SQL needs the SDK installed in a Python 3.12 RHOAI workbench image, which installs pyarrow from the Red Hat AI Python index; PyPI's `pyarrow` carries its own OpenSSL and doesn't use the cluster's FIPS-validated cryptography. See [REST and Flight SQL on FIPS-enabled OpenShift AI clusters](https://github.com/opendatahub-io/data-connect-hub/blob/main/sdk/docs/user-guide/fips-rest-flight.md) for how to set up a workbench pod and install the SDK.
 
 ## Get Data from the table
 
