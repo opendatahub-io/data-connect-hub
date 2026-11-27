@@ -32,6 +32,12 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
-    - ports:
+    # Only namespaces explicitly designated for metrics collection may scrape
+    # the unauthenticated plaintext endpoint.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              metrics: enabled
+      ports:
         - protocol: TCP
           port: 9090

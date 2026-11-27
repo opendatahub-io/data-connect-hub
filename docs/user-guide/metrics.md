@@ -33,11 +33,17 @@ curl http://127.0.0.1:19091/metrics
 curl http://127.0.0.1:19090/metrics
 ```
 
-The endpoints use plain HTTP and are not protected by the REST service's kube-rbac-proxy. Limit network access to the metrics ports according to the cluster's monitoring and network policy requirements.
+The endpoints use plain HTTP and are not protected by the REST service's kube-rbac-proxy. The supplied NetworkPolicies allow port `9090` only from namespaces labelled `metrics: enabled`; apply that label to the namespace containing the authorized Prometheus scraper. Other in-cluster pods cannot access the endpoints.
 
 ## OpenShift Monitoring
 
-When the OpenShift monitoring APIs are available, the controller deploys the `config/overlays/openshift` overlay. Its `ServiceMonitor` selects DCH-managed Services and scrapes their named `metrics` ports at `/metrics` every 30 seconds. No additional ServiceMonitor is required for the REST or Flight service.
+When the OpenShift monitoring APIs are available, the controller deploys the `config/overlays/openshift` overlay. Its `ServiceMonitor` selects DCH-managed Services and scrapes their named `metrics` ports at `/metrics` every 30 seconds. Label the Prometheus namespace so it can pass the metrics NetworkPolicies:
+
+```console
+kubectl label namespace <prometheus-namespace> metrics=enabled
+```
+
+No additional ServiceMonitor is required for the REST or Flight service.
 
 For clusters that do not provide the Prometheus Operator APIs, create an equivalent scrape configuration or ServiceMonitor in the platform's monitoring stack. The target service must use the named `metrics` port and the `/metrics` path.
 
