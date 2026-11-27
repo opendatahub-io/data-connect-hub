@@ -111,33 +111,90 @@ def service_namespace() -> str:
 
 @pytest.fixture(scope="session")
 def metrics_from_pod(service_namespace: str) -> Callable[[str], str] | None:
-    """Return a function that scrapes a service from an in-cluster REST pod."""
+    """Return a function that scrapes a service from an allowed monitoring namespace."""
 
     if os.environ.get("DCH_METRICS_FROM_POD", "").lower() not in ("1", "true", "yes"):
         return None
     if not service_namespace:
         pytest.fail("DCH_SERVICE_NAMESPACE is required for in-cluster metrics scraping")
 
-    pod_result = subprocess.run(
+    scraper_namespace = os.environ.get("DCH_METRICS_SCRAPER_NAMESPACE", "opendatahub-monitoring")
+    scraper_pod = "dch-metrics-scraper"
+
+    subprocess.run(
         [
             "kubectl",
-            "get",
-            "pods",
-            "--namespace",
-            service_namespace,
-            "--selector=app.kubernetes.io/name=rest-service",
-            "--output=jsonpath={.items[0].metadata.name}",
+            "create",
+            "namespace",
+            scraper_namespace,
         ],
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
         timeout=10,
     )
-    pod = pod_result.stdout.strip()
-    if not pod:
-        pytest.fail(f"no REST pod found in {service_namespace!r} for metrics scraping")
+    subprocess.run(
+        [
+            "kubectl",
+            "run",
+            scraper_pod,
+            "--namespace",
+            scraper_namespace,
+            "--image=curlimages/curl:latest",
+            "--restart=Never",
+            "--command",
+            "--",
+            "sh",
+            "-c",
+            "sleep 3600",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    subprocess.run(
+        [
+            "kubectl",
+            "wait",
+            "--namespace",
+            scraper_namespace,
+            f"pod/{scraper_pod}",
+            "--for=condition=Ready",
+            "--timeout=120s",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=130,
+    )
 
-    def _scrape(service: str) -> str:
+    def _service_name(service: str) -> str:
+        if service == "flight-service":
+            configured_name = os.environ.get("DCH_FLIGHT_SERVICE_NAME")
+            if configured_name:
+                return configured_name
+
+            services_result = subprocess.run(
+                [
+                    "kubectl",
+                    "get",
+                    "service",
+                    "--namespace",
+                    service_namespace,
+                    '--output=jsonpath={range .items[*]}{.metadata.name}{"\\n"}{end}',
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            flight_services = [name for name in services_result.stdout.splitlines() if name.endswith("-flight")]
+            if len(flight_services) == 1:
+                return flight_services[0]
+
+            pytest.fail(f"could not uniquely identify the Flight service in {service_namespace!r}")
+
         service_result = subprocess.run(
             [
                 "kubectl",
@@ -156,15 +213,18 @@ def metrics_from_pod(service_namespace: str) -> Callable[[str], str] | None:
         service_name = service_result.stdout.strip()
         if not service_name:
             pytest.fail(f"no {service} service found in {service_namespace!r} for metrics scraping")
+        return service_name
+
+    def _scrape(service: str) -> str:
+        service_name = _service_name(service)
 
         result = subprocess.run(
             [
                 "kubectl",
                 "exec",
-                pod,
                 "--namespace",
-                service_namespace,
-                "--container=rest-server",
+                scraper_namespace,
+                scraper_pod,
                 "--",
                 "curl",
                 "--fail",
@@ -174,7 +234,7 @@ def metrics_from_pod(service_namespace: str) -> Callable[[str], str] | None:
                 "5",
                 "--max-time",
                 "15",
-                f"http://{service_name}:9090/metrics",
+                f"http://{service_name}.{service_namespace}.svc:9090/metrics",
             ],
             check=True,
             capture_output=True,
