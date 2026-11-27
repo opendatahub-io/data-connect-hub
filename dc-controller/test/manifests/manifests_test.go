@@ -231,22 +231,28 @@ func TestServiceMetricsPoliciesRestrictScrapers(t *testing.T) {
 			continue
 		}
 		for _, ingress := range object.Spec.Ingress {
+			metricsPort := len(ingress.Ports) == 0
 			for _, port := range ingress.Ports {
-				if port.Port != 9090 {
-					continue
+				if port.Port == 9090 {
+					metricsPort = true
 				}
-				restricted := false
-				for _, source := range ingress.From {
-					if source.NamespaceSelector.MatchLabels["metrics"] == "enabled" {
-						restricted = true
-					}
-				}
-				if !restricted {
-					t.Errorf("%s has an unrestricted ingress rule for port 9090", object.Metadata.Name)
-					continue
-				}
-				wanted[object.Metadata.Name] = true
 			}
+			if !metricsPort {
+				continue
+			}
+
+			restricted := len(ingress.From) > 0
+			for _, source := range ingress.From {
+				if source.NamespaceSelector.MatchLabels["metrics"] != "enabled" {
+					restricted = false
+					break
+				}
+			}
+			if !restricted {
+				t.Errorf("%s has an unrestricted ingress rule for port 9090", object.Metadata.Name)
+				continue
+			}
+			wanted[object.Metadata.Name] = true
 		}
 	}
 

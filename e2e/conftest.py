@@ -110,6 +110,83 @@ def service_namespace() -> str:
 
 
 @pytest.fixture(scope="session")
+def metrics_from_pod(service_namespace: str) -> Callable[[str], str] | None:
+    """Return a function that scrapes a service from an in-cluster REST pod."""
+
+    if os.environ.get("DCH_METRICS_FROM_POD", "").lower() not in ("1", "true", "yes"):
+        return None
+    if not service_namespace:
+        pytest.fail("DCH_SERVICE_NAMESPACE is required for in-cluster metrics scraping")
+
+    pod_result = subprocess.run(
+        [
+            "kubectl",
+            "get",
+            "pods",
+            "--namespace",
+            service_namespace,
+            "--selector=app.kubernetes.io/name=rest-service",
+            "--output=jsonpath={.items[0].metadata.name}",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    pod = pod_result.stdout.strip()
+    if not pod:
+        pytest.fail(f"no REST pod found in {service_namespace!r} for metrics scraping")
+
+    def _scrape(service: str) -> str:
+        service_result = subprocess.run(
+            [
+                "kubectl",
+                "get",
+                "service",
+                "--namespace",
+                service_namespace,
+                f"--selector=app.kubernetes.io/name={service}",
+                "--output=jsonpath={.items[0].metadata.name}",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        service_name = service_result.stdout.strip()
+        if not service_name:
+            pytest.fail(f"no {service} service found in {service_namespace!r} for metrics scraping")
+
+        result = subprocess.run(
+            [
+                "kubectl",
+                "exec",
+                pod,
+                "--namespace",
+                service_namespace,
+                "--container=rest-server",
+                "--",
+                "curl",
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--connect-timeout",
+                "5",
+                "--max-time",
+                "15",
+                f"http://{service_name}:9090/metrics",
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        return result.stdout
+
+    return _scrape
+
+
+@pytest.fixture(scope="session")
 def pod_logs_since(service_namespace: str):
     """Return parsed JSON logs for a service emitted after a UTC timestamp."""
 
