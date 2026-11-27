@@ -9,7 +9,7 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func TestControllerCanCreateInitialConnectionTypes(t *testing.T) {
+func TestControllerCanManageInitialConnectionTypes(t *testing.T) {
 	data, err := os.ReadFile(filepath.Join("..", "..", "config", "rbac", "role.yaml"))
 	if err != nil {
 		t.Fatal(err)
@@ -18,6 +18,7 @@ func TestControllerCanCreateInitialConnectionTypes(t *testing.T) {
 	if err := yaml.Unmarshal(data, &role); err != nil {
 		t.Fatal(err)
 	}
+	requiredVerbs := map[string]bool{"create": false, "delete": false}
 	for _, rule := range role.Rules {
 		if len(rule.ResourceNames) != 0 {
 			continue
@@ -25,12 +26,18 @@ func TestControllerCanCreateInitialConnectionTypes(t *testing.T) {
 		for _, group := range rule.APIGroups {
 			for _, resource := range rule.Resources {
 				for _, verb := range rule.Verbs {
-					if group == "dataconnecthub.opendatahub.io" && resource == "initdataconnectiontypes" && verb == "create" {
-						return
+					if group == "dataconnecthub.opendatahub.io" && resource == "initdataconnectiontypes" {
+						if _, ok := requiredVerbs[verb]; ok {
+							requiredVerbs[verb] = true
+						}
 					}
 				}
 			}
 		}
 	}
-	t.Fatal("controller RBAC must allow ensureInitDataConnectionTypes to create its initialization resources")
+	for verb, granted := range requiredVerbs {
+		if !granted {
+			t.Errorf("controller RBAC must allow %s on initdataconnectiontypes", verb)
+		}
+	}
 }

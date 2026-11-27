@@ -158,6 +158,7 @@ type platformConfig struct {
 	PlatformVersion      string
 	GatewayName          string
 	GatewayNamespace     string
+	RouteNamespace       string
 	TokenReviewAudiences []string
 }
 
@@ -196,6 +197,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 	if v := cm.Data["gateway.namespace"]; v != "" {
 		cfg.GatewayNamespace = v
 	}
+	cfg.RouteNamespace = cm.Data["gateway.routeNamespace"]
 	if v := cm.Data["auth.tokenReviewAudiences"]; v != "" {
 		var audiences []string
 		for a := range strings.SplitSeq(v, ",") {
@@ -212,7 +214,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=dataconnectservices/finalizers,verbs=update
-// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create
+// +kubebuilder:rbac:groups=dataconnecthub.opendatahub.io,resources=initdataconnectiontypes,verbs=create;delete
 // DCH data plane resources are checked by SubjectAccessReview only. The
 // controller needs the union of (1) the verbs kube-rbac-proxy checks for its
 // own REST calls (create/list connection types, create connections, register
@@ -233,6 +235,7 @@ func (r *DataConnectServiceReconciler) readPlatformConfig(ctx context.Context, n
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=httproutes,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 // +kubebuilder:rbac:groups=route.openshift.io,resources=routes,verbs=get
 // +kubebuilder:rbac:groups=monitoring.coreos.com,resources=servicemonitors,verbs=get;list;watch;create;update;patch;delete
@@ -258,8 +261,13 @@ func (r *DataConnectServiceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	if !cr.DeletionTimestamp.IsZero() {
 		if controllerutil.ContainsFinalizer(&cr, finalizerName) {
 			log.Info("running finalizer for DataConnectService")
+			if err := r.deleteGatewayRoutes(ctx, &cr, ""); err != nil {
+				return ctrl.Result{}, err
+			}
 			r.clearSyncedAnnotations(ctx)
-			r.deleteInitDataConnectionTypes(ctx, cr.Namespace)
+			if err := r.deleteInitDataConnectionTypes(ctx, cr.Namespace); err != nil {
+				return ctrl.Result{}, err
+			}
 			if err := r.deleteClusterScopedResources(ctx, cr.UID); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -555,7 +563,31 @@ func (r *DataConnectServiceReconciler) reconcileManifests(
 		return fmt.Errorf("annotating deployments with content hash: %w", err)
 	}
 
-	return r.applyResources(ctx, cr, cr.Namespace, resources)
+	// Deploy operands before Gateway resources so missing Gateway API CRDs
+	// cannot prevent an otherwise usable in-cluster installation.
+	var routes, operands []*unstructured.Unstructured
+	for _, obj := range resources {
+		if obj.GetKind() == kindHTTPRoute {
+			routes = append(routes, obj)
+		} else {
+			operands = append(operands, obj)
+		}
+	}
+	if err := r.applyResources(ctx, cr, cr.Namespace, operands); err != nil {
+		return err
+	}
+	routes, err = r.reconcileGatewayRouting(ctx, cr, gw, routes)
+	if err != nil {
+		return err
+	}
+	if err := r.applyResources(ctx, cr, cr.Namespace, routes); err != nil {
+		return err
+	}
+	routeNamespace := gw.RouteNamespace
+	if routeNamespace == "" {
+		routeNamespace = cr.Namespace
+	}
+	return r.deleteGatewayRoutes(ctx, cr, routeNamespace)
 }
 
 func (r *DataConnectServiceReconciler) registerFlightService(ctx context.Context, cr *dchv1alpha1.DataConnectService) error {
@@ -736,18 +768,26 @@ func (f *connectionTypeFile) toIDCTSpec() dchv1alpha1.InitDataConnectionTypeSpec
 
 // deleteInitDataConnectionTypes removes IDCT CRs from the DCS namespace so
 // they get re-created on a future install with a fresh database.
-func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context.Context, namespace string) {
-	log := logf.FromContext(ctx)
+func (r *DataConnectServiceReconciler) deleteInitDataConnectionTypes(ctx context.Context, namespace string) error {
 	var list dchv1alpha1.InitDataConnectionTypeList
 	if err := r.List(ctx, &list, client.InNamespace(namespace)); err != nil {
-		log.Error(err, "failed to list InitDataConnectionTypes for cleanup")
-		return
+		return fmt.Errorf("listing InitDataConnectionTypes for cleanup in namespace %s: %w", namespace, err)
 	}
 	for i := range list.Items {
-		if err := r.Delete(ctx, &list.Items[i]); err != nil && !apierrors.IsNotFound(err) {
-			log.Error(err, "failed to delete InitDataConnectionType", "name", list.Items[i].Name)
+		idct := &list.Items[i]
+		if err := r.Delete(ctx, idct); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting InitDataConnectionType %s/%s: %w", idct.Namespace, idct.Name, err)
 		}
 	}
+
+	var remaining dchv1alpha1.InitDataConnectionTypeList
+	if err := r.List(ctx, &remaining, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("verifying InitDataConnectionType cleanup in namespace %s: %w", namespace, err)
+	}
+	if len(remaining.Items) != 0 {
+		return fmt.Errorf("waiting for %d InitDataConnectionType resource(s) to be deleted from namespace %s", len(remaining.Items), namespace)
+	}
+	return nil
 }
 
 // clearSyncedAnnotations removes the dataconnecthub synced annotation from
@@ -828,12 +868,16 @@ func (r *DataConnectServiceReconciler) deleteClusterScopedResources(ctx context.
 // resolveGateway merges gateway config: CR spec overrides ConfigMap, which overrides hardcoded defaults.
 func (r *DataConnectServiceReconciler) resolveGateway(cr *dchv1alpha1.DataConnectService, platCfg *platformConfig) dchv1alpha1.Gateway {
 	gw := dchv1alpha1.Gateway{
-		Name:      platCfg.GatewayName,
-		Namespace: platCfg.GatewayNamespace,
+		Name:           platCfg.GatewayName,
+		Namespace:      platCfg.GatewayNamespace,
+		RouteNamespace: platCfg.RouteNamespace,
 	}
 	if cr.Spec.Gateway != nil {
 		gw.Name = cr.Spec.Gateway.Name
 		gw.Namespace = cr.Spec.Gateway.Namespace
+		if cr.Spec.Gateway.RouteNamespace != "" {
+			gw.RouteNamespace = cr.Spec.Gateway.RouteNamespace
+		}
 	}
 	return gw
 }
@@ -855,8 +899,9 @@ func (r *DataConnectServiceReconciler) gatewayStatus(ctx context.Context, cr *dc
 	gw := r.resolveGateway(cr, platCfg)
 	cr.Status.HttpRoute = httpRouteResourceName(cr.Name)
 	cr.Status.Gateway = &dchv1alpha1.Gateway{
-		Name:      gw.Name,
-		Namespace: gw.Namespace,
+		Name:           gw.Name,
+		Namespace:      gw.Namespace,
+		RouteNamespace: gw.RouteNamespace,
 	}
 	hostname, err := r.resolveGatewayHostname(ctx, gw.Namespace, gw.Name)
 	if err != nil {
@@ -1171,6 +1216,19 @@ func (r *DataConnectServiceReconciler) SetupWithManager(mgr ctrl.Manager) error 
 			}),
 			labelKeyPredicate[*corev1.Namespace](r.GlobalNamespaceConfig.LabelKey),
 		))
+	}
+	for _, gvk := range []schema.GroupVersionKind{httpRouteGVK, referenceGrantGVK} {
+		if !r.kindServed(context.Background(), gvk.Group, gvk.Version, gvk.Kind) {
+			continue
+		}
+		obj := &unstructured.Unstructured{}
+		obj.SetGroupVersionKind(gvk)
+		b = b.Watches(obj, handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, _ client.Object) []reconcile.Request {
+			// Gateway routes can live outside the CR namespace.
+			return r.platformConfigToReconcile(ctx, &corev1.Namespace{})
+		}), builder.WithPredicates(predicate.NewPredicateFuncs(func(obj client.Object) bool {
+			return obj.GetLabels()[labelManagedBy] == managedByDCHService
+		})))
 	}
 	return b.Named(managedByDCHService).Complete(r)
 }
