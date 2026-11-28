@@ -558,6 +558,51 @@ mod tests {
         assert!(result.unwrap_err().to_string().contains(KEY_CA_CERT));
     }
 
+    /// Regression guard: an operator built without `ca_cert` must still send
+    /// HTTP requests. OpenDAL only installs its process-wide default transport
+    /// behind the `http-transport-reqwest` feature; if a dependency change drops
+    /// it, every request fails with "default HTTP transport is not installed".
+    ///
+    /// This also pins the contract: `build_operator` must return an operator
+    /// that can send requests without any process-level setup, so installing
+    /// the transport in a binary's `main` only is not enough.
+    #[tokio::test]
+    async fn test_operator_without_ca_cert_sends_http_request() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            let mut buf = vec![0u8; 8192];
+            let n = sock.read(&mut buf).await.unwrap();
+            sock.write_all(b"HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n")
+                .await
+                .unwrap();
+            String::from_utf8_lossy(&buf[..n]).into_owned()
+        });
+
+        let mut creds: HashMap<String, String> = (*make_credentials()).clone();
+        creds.insert(KEY_ENDPOINT.to_string(), format!("http://{addr}"));
+        let op = build_operator(&creds, Duration::from_secs(5), Duration::from_secs(5)).unwrap();
+
+        let err = op.stat("missing.csv").await.unwrap_err();
+        assert_eq!(
+            err.kind(),
+            opendal::ErrorKind::NotFound,
+            "request did not reach the server: {err}"
+        );
+
+        let request = tokio::time::timeout(Duration::from_secs(5), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(
+            request.starts_with("HEAD /test-bucket/missing.csv "),
+            "unexpected request: {request}"
+        );
+    }
+
     #[test]
     fn test_s3_reader_detect_format() {
         let reader = S3Reader {
