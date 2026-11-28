@@ -23,6 +23,7 @@ data:
     [auth]
     enabled = true
     cache_ttl_secs = 60
+    token_review_audiences = ["https://kubernetes.default.svc"]
 
     [metrics]
     enabled = true
