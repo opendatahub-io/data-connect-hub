@@ -49,7 +49,7 @@ tokio-stream = "0.1"
 # so rustls dispatches to the system OpenSSL rather than a statically linked
 # Rust implementation. See ODH-ADR-0003.
 tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12"] }
-rcgen = "0.13"
+rcgen = "0.14"
 futures = "0.3"
 prost = "0.14"
 serde = { version = "1.0", features = ["derive", "rc"] }
