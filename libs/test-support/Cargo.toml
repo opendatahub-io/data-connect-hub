@@ -1,0 +1,18 @@
+[package]
+name = "test-support"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+description = "Test-only helpers shared by DCH crates. Use as a dev-dependency only."
+
+[lints]
+workspace = true
+
+[dependencies]
+rcgen = { workspace = true }
+# The test server picks its provider explicitly, so it does not depend on
+# whichever provider the code under test installs as the process default.
+rustls = { workspace = true, features = ["ring"] }
+tokio = { workspace = true }
+tokio-rustls = { workspace = true }

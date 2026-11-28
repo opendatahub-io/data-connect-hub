@@ -4,6 +4,7 @@ members = [
     "libs/format-readers",
     "libs/kube-utils",
     "libs/pg-meta-store",
+    "libs/test-support",
     "connectors/postgres",
     "connectors/sqlite",
     "connectors/s3",
@@ -36,6 +37,7 @@ neo4rs = "0.8"
 format-readers = { path = "libs/format-readers" }
 kube-utils = { path = "libs/kube-utils" }
 pg-meta-store = { path = "libs/pg-meta-store" }
+test-support = { path = "libs/test-support" }
 flight-service = { path = "services/flight", default-features = false }
 arrow = "60.2.0"
 arrow-flight = { version = "60.2.0", features = ["flight-sql"] }

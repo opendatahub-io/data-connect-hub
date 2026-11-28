@@ -20,3 +20,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 reqwest = { workspace = true }
+
+[dev-dependencies]
+test-support = { workspace = true }

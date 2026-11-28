@@ -416,6 +416,27 @@ mod tests {
         assert_eq!(connector.provider(), "uri");
     }
 
+    /// `CA_CERT` may be a PEM bundle (intermediate plus root, or service CA plus
+    /// ingress CA). The client must trust every certificate in it, not only the
+    /// first one.
+    #[tokio::test]
+    async fn test_build_client_trusts_every_ca_in_bundle() {
+        let server = test_support::spawn_https_server_issued_by_second_ca().await;
+        let creds = HashMap::from([
+            (KEY_URI.to_string(), server.url.clone()),
+            (KEY_CA_CERT.to_string(), server.ca_bundle_pem),
+        ]);
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
+
+        let response = client
+            .request(reqwest::Method::GET, "")
+            .unwrap()
+            .send()
+            .await
+            .expect("server issued by the second CA in CA_CERT must be trusted");
+        assert!(response.status().is_success(), "status: {}", response.status());
+    }
+
     #[test]
     fn test_build_client_no_auth() {
         let creds = HashMap::from([(KEY_URI.to_string(), "http://example.com".to_string())]);
