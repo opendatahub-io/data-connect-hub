@@ -1541,6 +1541,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "test-support",
  "tokio",
  "tracing",
 ]
@@ -3132,6 +3133,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "test-support",
  "tokio",
  "tracing",
 ]
@@ -5665,6 +5667,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-support"
+version = "0.1.0"
+dependencies = [
+ "rcgen",
+ "rustls",
+ "tokio",
+ "tokio-rustls",
+]
+
+[[package]]
 name = "thiserror"
 version = "1.0.69"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6198,6 +6210,7 @@ dependencies = [
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "test-support",
  "tokio",
  "tracing",
  "url",

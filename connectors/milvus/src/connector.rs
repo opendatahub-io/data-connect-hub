@@ -91,6 +91,40 @@ impl MilvusConnector {
     }
 }
 
+fn build_client(
+    credentials: &HashMap<String, String>,
+    config: ConnectorConfig,
+) -> Result<MilvusClient, ConnectorError> {
+    let base_url = credentials
+        .get(KEY_URI)
+        .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?
+        .clone();
+    let token = credentials.get(KEY_TOKEN).cloned();
+    let database = credentials.get(KEY_DATABASE).cloned();
+
+    let mut builder = reqwest::Client::builder()
+        .connect_timeout(config.connection_timeout())
+        .read_timeout(config.read_timeout())
+        .timeout(config.request_timeout());
+
+    if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
+        let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
+            .map_err(|e| ConnectorError::ConnectionError(format!("Invalid CA certificate: {e}")))?;
+        builder = builder.add_root_certificate(cert);
+    }
+
+    let http = builder
+        .build()
+        .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build HTTP client: {e}")))?;
+
+    Ok(MilvusClient {
+        http,
+        base_url,
+        token,
+        database,
+    })
+}
+
 const PROVIDER: &str = "milvus";
 
 #[async_trait::async_trait]
@@ -121,35 +155,7 @@ impl FlightConnector for MilvusConnector {
             .clients
             .try_get_with(cache_key, async {
                 let credentials = credentials_resolver.resolve(data_connection).await?;
-
-                let base_url = credentials
-                    .get(KEY_URI)
-                    .ok_or_else(|| ConnectorError::ConnectionError(format!("'{KEY_URI}' credential is required")))?
-                    .clone();
-                let token = credentials.get(KEY_TOKEN).cloned();
-                let database = credentials.get(KEY_DATABASE).cloned();
-
-                let mut builder = reqwest::Client::builder()
-                    .connect_timeout(self.config.connection_timeout())
-                    .read_timeout(self.config.read_timeout())
-                    .timeout(self.config.request_timeout());
-
-                if let Some(ca_pem) = credentials.get(KEY_CA_CERT) {
-                    let cert = reqwest::tls::Certificate::from_pem(ca_pem.as_bytes())
-                        .map_err(|e| ConnectorError::ConnectionError(format!("Invalid CA certificate: {e}")))?;
-                    builder = builder.add_root_certificate(cert);
-                }
-
-                let http = builder
-                    .build()
-                    .map_err(|e| ConnectorError::ConnectionError(format!("Failed to build HTTP client: {e}")))?;
-
-                Ok::<_, ConnectorError>(MilvusClient {
-                    http,
-                    base_url,
-                    token,
-                    database,
-                })
+                build_client(&credentials, self.config)
             })
             .await
             .map_err(|e| Arc::try_unwrap(e).unwrap_or_else(|arc| (*arc).clone()))?;
@@ -397,6 +403,24 @@ mod tests {
             ConnectorConfig::default(),
         );
         assert_eq!(connector.provider(), "milvus");
+    }
+
+    /// `CA_CERT` may be a PEM bundle (intermediate plus root, or service CA plus
+    /// ingress CA). The client must trust every certificate in it, not only the
+    /// first one.
+    #[tokio::test]
+    async fn test_build_client_trusts_every_ca_in_bundle() {
+        let server = test_support::spawn_https_server_issued_by_second_ca().await;
+        let creds = HashMap::from([
+            (KEY_URI.to_string(), server.url.clone()),
+            (KEY_CA_CERT.to_string(), server.ca_bundle_pem),
+        ]);
+        let client = build_client(&creds, ConnectorConfig::default()).unwrap();
+
+        client
+            .execute("/v2/vectordb/collections/list", serde_json::json!({}))
+            .await
+            .expect("server issued by the second CA in CA_CERT must be trusted");
     }
 
     #[test]
